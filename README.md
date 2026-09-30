@@ -15,4 +15,4 @@ npx skills add dlebech/skills --all -g
 
 | Skill | What it does |
 | --- | --- |
-| [`pr-humanize`](skills/pr-humanize/SKILL.md) | Rewrites a PR description into a short "For humans" section and a detailed "For AI" section. Invoke manually with `/pr-humanize [PR number]`. |
+| [`pr-humanize`](skills/pr-humanize/SKILL.md) | Rewrites a PR description into a short "For humans" section and a detailed "For AI" section. Works with GitHub (`gh`), GitLab (`glab`), or plain git (prints the text to paste). Invoke manually with `/pr-humanize [PR number]`. |
