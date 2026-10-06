@@ -53,6 +53,7 @@ Write `storyboard.json` (layout below). Rules for good pacing:
 - Say what the viewer is looking at as it happens. Name buttons and fields exactly as they appear on screen ("click Archive"), so viewers can follow along.
 - No filler ("So, now we're going to…"). Write numbers and abbreviations the way they should be said out loud.
 - Put the cursor on whatever is being talked about: `hover` an element before talking about it, and `click` instead of pressing keys where possible.
+- Make sure the whole thing being shown fits on screen at the storyboard's `viewport`. Check the pages at that size before writing the scene; dialogs and long forms are often taller than 720px. If it doesn't fit, `scroll` to the part being talked about (a selector also scrolls inside a dialog), or scroll through it in step with the narration. Only make `viewport` taller as a last resort, since every scene changes with it.
 - Write `say` text in the chosen language. Card text can stay in English where it names code, such as branch names.
 - Give each app scene a `caption`: a short label of what's on screen, in the chosen language, shown in a slim bar below the app for the whole scene. It helps someone watching without sound, so it names the point, not the sentence: 2–6 words, no full stop, at most ~60 characters ("Who gets notified, per partner", "Subscribe to SMS alerts"). Never repeat the narration. Leave it out on cards and on scenes where the screen speaks for itself.
 
@@ -96,7 +97,7 @@ The script prints the video path, a contact sheet with one frame from the end of
 
 ## 5. Check it, then fix and record again
 
-- Look at the contact sheet. Is each scene showing what its narration says, with the cursor visible and the caption fitting on one line? Are there error pages, empty lists, or a login screen?
+- Look at the contact sheet. Is each scene showing what its narration says, with the cursor visible and the caption fitting on one line? Is anything the narration mentions cut off at an edge of the screen? Are there error pages, empty lists, or a login screen?
 - Fix every scene that is flagged as silent: cut or speed up actions, split the scene, or add a sentence.
 - If a selector fails, the script stops and names the scene and action. Fix the selector and run it again.
 - Stop when the video is good enough; it doesn't have to be polished.
