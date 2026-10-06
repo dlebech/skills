@@ -20,11 +20,11 @@ Make a short (30–90 s) MP4 that shows a feature working in the browser while a
   | Engine | Sound | Languages | Cost |
   |---|---|---|---|
   | `kokoro` (auto default where supported) | natural | en, en-GB, es, fr, it, pt, hi | ~340 MB, fast on CPU |
-  | `chatterbox` (auto if there's an NVIDIA GPU) | most natural, can clone a voice | 23, incl. da, de, sv, no, nl, fi | ~3 GB + PyTorch; on CPU ~2.5 s per second of speech |
+  | `supertonic` (auto otherwise, where supported) | natural | 31, incl. da, de, sv, nl, fi (not no) | ~390 MB, very fast on CPU |
   | `piper` | clear but synthetic | most | ~60 MB per voice |
   | `say` (macOS), `espeak-ng` | robotic, last resort | many | none |
 
-  Kokoro and Chatterbox need `uv`. Chatterbox occasionally mispronounces or skips a word; recording again gives a fresh take.
+  Kokoro and Supertonic need `uv`.
 - **What to show**: if it isn't named, use the current branch's changes (`git log` and `git diff` against the default branch).
 
 ## 2. Get the app running
@@ -69,7 +69,7 @@ Write `storyboard.json` (layout below). Rules for good pacing:
 }
 ```
 
-- Top level: `lang`, `engine` (`auto|kokoro|chatterbox|piper|say|espeak-ng`), `voice` (optional: a Kokoro voice such as `af_heart` or `am_michael`, a short `.wav` of someone speaking for Chatterbox to clone, a Piper voice name such as `en_GB-alan-medium` or an `.onnx` path, a `say` voice name, or an espeak voice), `rate` (1.0 = normal speed), `base_url`, `viewport`, `color_scheme`, `setup`, `scenes`. `context` passes extra Playwright context options, such as `{"storage_state": "auth.json"}`.
+- Top level: `lang`, `engine` (`auto|kokoro|supertonic|piper|say|espeak-ng`), `voice` (optional: a Kokoro voice such as `af_heart` or `am_michael`, a Supertonic voice `F1`–`F5` or `M1`–`M5` (default `F1`), a Piper voice name such as `en_GB-alan-medium` or an `.onnx` path, a `say` voice name, or an espeak voice), `rate` (1.0 = normal speed), `base_url`, `viewport`, `color_scheme`, `setup`, `scenes`. `context` passes extra Playwright context options, such as `{"storage_state": "auth.json"}`.
 - Scene: `say`, `actions`, optional `hold` (extra seconds), and either `card` (a title card: `title`, optional `kicker` and `subtitle`) or `html` (any HTML on a white full-screen panel). Card and html scenes hide the app and the cursor. Put the next `goto` in the following scene.
 - Actions, one key each: `goto` (path or URL), `click`, `hover`, `type` (`[selector, text]`, typed visibly), `fill` (`[selector, text]`, instant), `select` (`[selector, value]`), `press` (key), `scroll` (pixels, or a selector to scroll to), `move` (`[x, y]`), `wait` (seconds), `wait_for` (selector), `eval` (JS).
 

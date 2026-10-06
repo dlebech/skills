@@ -55,11 +55,11 @@ KOKORO_VOICES = {  # language -> (Kokoro language code, voice)
     "pt": ("pt-br", "pf_dora"),
     "hi": ("hi", "hf_alpha"),
 }
-CHATTERBOX_LANGS = {"ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no",
-                    "pl", "pt", "ru", "sv", "sw", "tr", "zh"}
+SUPERTONIC_LANGS = {"ar", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hi", "hr", "hu", "id", "it", "ja",
+                    "ko", "lt", "lv", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "vi"}
 NEURAL_ENVS = {
     "kokoro": ["--with", "kokoro-onnx", "--with", "soundfile"],
-    "chatterbox": ["--python", "3.11", "--with", "chatterbox-tts", "--with", "setuptools<81"],
+    "supertonic": ["--with", "supertonic"],
 }
 SAY_PREFERRED = {"en": "Samantha", "en-us": "Samantha", "en-gb": "Daniel", "da": "Sara"}
 
@@ -84,23 +84,17 @@ def norm_lang(lang):
     return (lang or "en").strip().lower().replace("_", "-")
 
 
-def has_cuda():
-    if os.environ.get("CUDA_VISIBLE_DEVICES") in ("", "-1"):
-        return False
-    return bool(shutil.which("nvidia-smi")) and subprocess.run(["nvidia-smi", "-L"], capture_output=True).returncode == 0
-
-
 def kokoro_lang(lang):
     return KOKORO_VOICES.get(lang) or KOKORO_VOICES.get(lang.split("-")[0])
 
 
-def chatterbox_lang(lang):
-    base = {"nb": "no", "nn": "no"}.get(lang.split("-")[0], lang.split("-")[0])
-    return base if base in CHATTERBOX_LANGS else None
+def supertonic_lang(lang):
+    base = lang.split("-")[0]
+    return base if base in SUPERTONIC_LANGS else None
 
 
 def engine_available(name):
-    if name in ("kokoro", "chatterbox"):
+    if name in NEURAL_ENVS:
         return bool(shutil.which("uv"))
     if name == "say":
         return platform.system() == "Darwin" and bool(shutil.which("say"))
@@ -108,7 +102,7 @@ def engine_available(name):
 
 
 def engine_speaks(name, lang):
-    return {"kokoro": kokoro_lang, "chatterbox": chatterbox_lang}.get(name, lambda _: True)(lang)
+    return {"kokoro": kokoro_lang, "supertonic": supertonic_lang}.get(name, lambda _: True)(lang)
 
 
 def pick_engine(requested, lang):
@@ -117,22 +111,19 @@ def pick_engine(requested, lang):
         requested = os.environ.get("DEMO_VIDEO_TTS") or "auto"
     if requested != "auto":
         if not engine_available(requested):
-            die(f"TTS engine '{requested}' is not available" + (" (it needs uv)" if requested in ("kokoro", "chatterbox") else ""))
+            die(f"TTS engine '{requested}' is not available" + (" (it needs uv)" if requested in NEURAL_ENVS else ""))
         if not engine_speaks(requested, lang):
             die(f"TTS engine '{requested}' doesn't support language '{lang}'")
         return requested
     candidates = [
         ("kokoro", kokoro_lang(lang)),
-        ("chatterbox", chatterbox_lang(lang) and has_cuda()),
+        ("supertonic", supertonic_lang(lang)),
         ("piper", True), ("say", True), ("espeak-ng", True),
     ]
     for name, ok in candidates:
         if ok and engine_available(name):
-            if name in ("piper", "say", "espeak-ng") and chatterbox_lang(lang) and engine_available("chatterbox"):
-                log(f"note: Chatterbox sounds much better for '{lang}'. It runs on CPU at about 2.5x real time "
-                    "and downloads ~3 GB plus PyTorch on first use. Set \"engine\": \"chatterbox\" to use it.")
             return name
-    die("no TTS engine found; install uv (for Kokoro/Chatterbox) or piper (`uv tool install piper-tts`), "
+    die("no TTS engine found; install uv (for Kokoro/Supertonic) or piper (`uv tool install piper-tts`), "
         "or use macOS `say` or espeak-ng")
 
 
@@ -241,8 +232,8 @@ class TTS:
             self.voice = say_voice(self.lang, voice)
         elif self.engine == "kokoro":
             self.voice = voice or kokoro_lang(self.lang)[1]
-        elif self.engine == "chatterbox":
-            self.voice = str(Path(voice).expanduser()) if voice else None
+        elif self.engine == "supertonic":
+            self.voice = str(Path(voice).expanduser()) if voice and voice.endswith(".json") else voice or "F1"
         else:
             self.voice = voice or self.lang
         log(f"TTS: {self.engine}, voice {self.voice or 'default'}, rate {rate}")
@@ -257,12 +248,9 @@ class TTS:
         else:
             for text, out_wav in items:
                 self.synth_cli(text, self.raw_path(out_wav), workdir)
-        # Chatterbox has no speed setting, so stretch its output instead.
-        tempo = f"atempo={self.rate}" if self.engine == "chatterbox" and self.rate != 1 else ""
         durations = []
         for _, out_wav in items:
-            run(["ffmpeg", "-y", "-i", str(self.raw_path(out_wav)), *(["-af", tempo] if tempo else []),
-                 "-ar", str(SAMPLE_RATE), "-ac", "1", "-sample_fmt", "s16", str(out_wav)])
+            run(["ffmpeg", "-y", "-i", str(self.raw_path(out_wav)), "-ar", str(SAMPLE_RATE), "-ac", "1", "-sample_fmt", "s16", str(out_wav)])
             durations.append(trim_silence(out_wav))
         return durations
 
@@ -283,12 +271,10 @@ class TTS:
             job["lang"] = kokoro_lang(self.lang)[0]
             job["model_dir"] = str(kokoro_models())
         else:
-            job["lang"] = chatterbox_lang(self.lang)
-            hub = Path(os.environ.get("HF_HOME", "~/.cache/huggingface")).expanduser() / "hub"
-            if not (hub / "models--ResembleAI--chatterbox").exists():
-                log("first Chatterbox run: downloading ~3 GB of model plus PyTorch, this takes a while")
-            if not has_cuda():
-                log("Chatterbox on CPU: expect about 2.5 s of work per second of narration")
+            job["lang"] = supertonic_lang(self.lang)
+            cache = Path(os.environ.get("SUPERTONIC_CACHE_DIR", "~/.cache/supertonic3")).expanduser()
+            if not (cache / "onnx").exists():
+                log(f"downloading the Supertonic model to {cache} (~390 MB, one-time)")
         job_file = workdir / "tts-job.json"
         job_file.write_text(json.dumps(job))
         helper = Path(__file__).with_name("tts_neural.py")
