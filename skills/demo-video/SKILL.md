@@ -2,10 +2,10 @@
 name: demo-video
 description: Record a short narrated demo video of a feature, with a visible mouse cursor, voiceover and subtitles.
 disable-model-invocation: true
-argument-hint: "[what to show, language, audience, TTS engine — all optional]"
+argument-hint: "[what to show, language, audience, detail, TTS engine — all optional]"
 ---
 
-Make a short (30–90 s) MP4 that shows a feature working in the browser while a voice explains it. It should be good, not perfect: no dead air, straight to the point.
+Make an MP4 that shows a feature working in the browser while a voice explains it. Keep it as short as it can be while still showing the feature. It should be good, not perfect: no dead air, straight to the point.
 
 ## 1. Read the request
 
@@ -15,6 +15,11 @@ Make a short (30–90 s) MP4 that shows a feature working in the browser while a
 - **Audience**:
   - `colleague` (default): a teammate or end user. Explain what the feature does and why it matters, using the product's own words. No file names, branches or internals.
   - `dev`: the developer, or an orchestrator agent reporting back (for example from herdr). Use this when the user says "for me" or "dev", or asks for a review or status across branches/worktrees. Keep it terse and technical. Name each branch on a card, and say what is unfinished or what to check. Speak about 10% faster (`"rate": 1.1`).
+- **Detail**:
+  - `brief` (default): only the main path, meaning what's new and how to use it. Skip edge cases and extras.
+  - `full`: use this when the user asks for a detailed, full or thorough walkthrough. Also cover guard rails (limits, confirmations), edge cases and extras.
+
+  Either way, show each thing once and cut anything the viewer doesn't need.
 - **TTS engine**: set `engine` only if the user names one. Otherwise leave it `auto`, which respects the user's `DEMO_VIDEO_TTS` environment variable if set, and otherwise picks:
 
   | Engine | Sound | Languages | Cost |
@@ -42,8 +47,8 @@ Before writing selectors, open the pages yourself (with any browser tool you hav
 Write `storyboard.json` (layout below). Rules for good pacing:
 
 - Each scene has 1–2 short spoken sentences, and its actions take about as long as saying them. The voice and the actions run together, and the scene ends when both are done.
-- 4–10 scenes. Open with a card that says what the video shows, end on the result, not on "thanks".
-- For `colleague`, use this order: what's new → how to do it → what you'll see → guard rails (limits, confirmations) → extras.
+- Use as few scenes as the detail level needs. Open with a card that says what the video shows, end on the result, not on "thanks".
+- For `colleague`, use this order: what's new → how to do it → what you'll see, then for `full` detail: guard rails → edge cases → extras.
 - Say what the viewer is looking at as it happens. Name buttons and fields exactly as they appear on screen ("click Archive"), so viewers can follow along.
 - No filler ("So, now we're going to…"). Write numbers and abbreviations the way they should be said out loud.
 - Put the cursor on whatever is being talked about: `hover` an element before talking about it, and `click` instead of pressing keys where possible.
