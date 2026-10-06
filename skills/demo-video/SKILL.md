@@ -31,10 +31,11 @@ Make an MP4 that shows a feature working in the browser while a voice explains i
 
   Kokoro and Supertonic need `uv`.
 - **What to show**: if it isn't named, use the current branch's changes (`git log` and `git diff` against the default branch).
+- **Anything else** (a phone-sized screen, dark mode, a male voice, "redo yesterday's video"): map it onto the storyboard fields below, or edit and re-record an existing storyboard.
 
 ## 2. Get the app running
 
-Find out how the project starts (README, `package.json`, `Makefile`, etc.). Reuse a server that is already running, or start one in the background and wait for its port. Get it into a state worth showing: seed data, a logged-in user, a populated list. Any logging in or clicking needed to reach that state goes in `setup`, which is cut from the video. Each take must start from the same state, so `setup` also undoes whatever a previous take created: delete the demo's rows, close panels, clear filters (use `eval` or the app's API if that's easier).
+Find out how the project starts (README, `package.json`, `Makefile`, etc.). Reuse a server that is already running, or start one in the background and wait for its port. Get it into a state worth showing: seed data, a logged-in user, a populated list. Use demo data only; no real customer data, secrets or personal accounts on screen. Any logging in or clicking needed to reach that state goes in `setup`, which is cut from the video. Each take must start from the same state, so `setup` also undoes whatever a previous take created: delete the demo's rows, close panels, clear filters (use `eval` or the app's API if that's easier).
 
 **Several branches or worktrees** (orchestrator case): for each one, gather what changed with `git -C <worktree> log --oneline <base>..HEAD`. Start its app on its own port, or reuse one that is running. Make one video covering all of them, with a card per branch (`repo · branch`) followed by that branch's scenes. Only read from and run servers in other agents' worktrees; don't edit them.
 
@@ -48,7 +49,7 @@ Write `storyboard.json` (layout below). Rules for good pacing:
 
 - Each scene has 1–2 short spoken sentences, and its actions take about as long as saying them. The voice and the actions run together, and the scene ends when both are done.
 - Use as few scenes as the detail level needs. Open with a card that says what the video shows, end on the result, not on "thanks".
-- For `colleague`, use this order: what's new → how to do it → what you'll see, then for `full` detail: guard rails → edge cases → extras.
+- For `colleague`, lead with what's new and why it matters, then show how.
 - Say what the viewer is looking at as it happens. Name buttons and fields exactly as they appear on screen ("click Archive"), so viewers can follow along.
 - No filler ("So, now we're going to…"). Write numbers and abbreviations the way they should be said out loud.
 - Put the cursor on whatever is being talked about: `hover` an element before talking about it, and `click` instead of pressing keys where possible.
@@ -95,6 +96,6 @@ The script prints the video path, an `.srt` file next to the video (the subtitle
 - Look at the contact sheet. Is each scene showing what its narration says, with the cursor visible? Are there error pages, empty lists, or a login screen?
 - Fix every scene that is flagged as silent: cut or speed up actions, split the scene, or add a sentence.
 - If a selector fails, the script stops and names the scene and action. Fix the selector and run it again.
-- Two or three rounds is normal. Stop when the video is good enough; it doesn't have to be polished.
+- Stop when the video is good enough; it doesn't have to be polished.
 
 Finally, print the video path, how long it is, and the scene list (one line each).
