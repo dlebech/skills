@@ -44,6 +44,23 @@ PIPER_PREFERRED = {
     "fr": "fr_FR-siwis-medium",
     "es": "es_ES-davefx-medium",
 }
+KOKORO_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+KOKORO_VOICES = {  # language -> (Kokoro language code, voice)
+    "en": ("en-us", "af_heart"),
+    "en-us": ("en-us", "af_heart"),
+    "en-gb": ("en-gb", "bf_emma"),
+    "es": ("es", "ef_dora"),
+    "fr": ("fr-fr", "ff_siwis"),
+    "it": ("it", "if_sara"),
+    "pt": ("pt-br", "pf_dora"),
+    "hi": ("hi", "hf_alpha"),
+}
+CHATTERBOX_LANGS = {"ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no",
+                    "pl", "pt", "ru", "sv", "sw", "tr", "zh"}
+NEURAL_ENVS = {
+    "kokoro": ["--with", "kokoro-onnx", "--with", "soundfile"],
+    "chatterbox": ["--python", "3.11", "--with", "chatterbox-tts", "--with", "setuptools<81"],
+}
 SAY_PREFERRED = {"en": "Samantha", "en-us": "Samantha", "en-gb": "Daniel", "da": "Sara"}
 
 
@@ -63,19 +80,72 @@ def run(cmd, **kw):
 # --------------------------------------------------------------------------- TTS
 
 
-def pick_engine(requested):
-    if requested and requested != "auto":
-        if not shutil.which(requested):
-            die(f"TTS engine '{requested}' is not on PATH")
-        return requested
-    for name in ("piper", "say", "espeak-ng"):
-        if shutil.which(name) and (name != "say" or platform.system() == "Darwin"):
-            return name
-    die("no TTS engine found; install piper (`uv tool install piper-tts`), or use macOS `say`, or espeak-ng")
-
-
 def norm_lang(lang):
     return (lang or "en").strip().lower().replace("_", "-")
+
+
+def has_cuda():
+    if os.environ.get("CUDA_VISIBLE_DEVICES") in ("", "-1"):
+        return False
+    return bool(shutil.which("nvidia-smi")) and subprocess.run(["nvidia-smi", "-L"], capture_output=True).returncode == 0
+
+
+def kokoro_lang(lang):
+    return KOKORO_VOICES.get(lang) or KOKORO_VOICES.get(lang.split("-")[0])
+
+
+def chatterbox_lang(lang):
+    base = {"nb": "no", "nn": "no"}.get(lang.split("-")[0], lang.split("-")[0])
+    return base if base in CHATTERBOX_LANGS else None
+
+
+def engine_available(name):
+    if name in ("kokoro", "chatterbox"):
+        return bool(shutil.which("uv"))
+    if name == "say":
+        return platform.system() == "Darwin" and bool(shutil.which("say"))
+    return bool(shutil.which(name))
+
+
+def engine_speaks(name, lang):
+    return {"kokoro": kokoro_lang, "chatterbox": chatterbox_lang}.get(name, lambda _: True)(lang)
+
+
+def pick_engine(requested, lang):
+    # An engine named in the storyboard wins, then the user's DEMO_VIDEO_TTS, then auto.
+    if requested in (None, "", "auto"):
+        requested = os.environ.get("DEMO_VIDEO_TTS") or "auto"
+    if requested != "auto":
+        if not engine_available(requested):
+            die(f"TTS engine '{requested}' is not available" + (" (it needs uv)" if requested in ("kokoro", "chatterbox") else ""))
+        if not engine_speaks(requested, lang):
+            die(f"TTS engine '{requested}' doesn't support language '{lang}'")
+        return requested
+    candidates = [
+        ("kokoro", kokoro_lang(lang)),
+        ("chatterbox", chatterbox_lang(lang) and has_cuda()),
+        ("piper", True), ("say", True), ("espeak-ng", True),
+    ]
+    for name, ok in candidates:
+        if ok and engine_available(name):
+            if name in ("piper", "say", "espeak-ng") and chatterbox_lang(lang) and engine_available("chatterbox"):
+                log(f"note: Chatterbox sounds much better for '{lang}'. It runs on CPU at about 2.5x real time "
+                    "and downloads ~3 GB plus PyTorch on first use. Set \"engine\": \"chatterbox\" to use it.")
+            return name
+    die("no TTS engine found; install uv (for Kokoro/Chatterbox) or piper (`uv tool install piper-tts`), "
+        "or use macOS `say` or espeak-ng")
+
+
+def kokoro_models():
+    d = Path(os.environ.get("KOKORO_DIR", "~/.cache/kokoro")).expanduser()
+    d.mkdir(parents=True, exist_ok=True)
+    missing = [n for n in ("kokoro-v1.0.onnx", "voices-v1.0.bin") if not (d / n).exists()]
+    if missing:
+        log(f"downloading the Kokoro model to {d} (~340 MB, one-time)")
+    for name in missing:
+        urllib.request.urlretrieve(f"{KOKORO_URL}/{name}", d / (name + ".part"))
+        (d / (name + ".part")).rename(d / name)
+    return d
 
 
 def piper_voice_dirs():
@@ -134,23 +204,71 @@ def say_voice(lang, voice):
     die(f"no macOS `say` voice for language '{lang}'; install one in System Settings > Accessibility > Spoken Content")
 
 
+def trim_silence(path, head=0.1, tail=0.2, head_db=32, tail_db=22):
+    """Cut quiet from both ends, relative to the clip's loudest part. Returns the new length.
+
+    The start keeps soft sounds (a breathy "h"); the end is cut harder, because neural voices
+    often trail off into breaths or murmur well below the speech.
+    """
+    with wave.open(str(path)) as w:
+        rate = w.getframerate()
+        samples = array.array("h", w.readframes(w.getnframes()))
+    win = rate // 50  # 20 ms
+    levels = [sum(x * x for x in samples[i:i + win]) / max(1, len(samples[i:i + win])) for i in range(0, len(samples), win)]
+    if not levels or max(levels) == 0:
+        return len(samples) / rate
+    peak = max(levels)
+    first = next(i for i, lv in enumerate(levels) if lv >= peak * 10 ** (-head_db / 10))
+    last = max(i for i, lv in enumerate(levels) if lv >= peak * 10 ** (-tail_db / 10))
+    start = max(0, first * win - int(head * rate))
+    end = min(len(samples), (last + 1) * win + int(tail * rate))
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(samples[start:end].tobytes())
+    return (end - start) / rate
+
+
 class TTS:
     def __init__(self, engine, lang, voice, rate):
-        self.engine = pick_engine(engine)
         self.lang = norm_lang(lang)
+        self.engine = pick_engine(engine, self.lang)
         self.rate = rate
         if self.engine == "piper":
             self.voice = str(piper_model(self.lang, voice))
         elif self.engine == "say":
             self.voice = say_voice(self.lang, voice)
+        elif self.engine == "kokoro":
+            self.voice = voice or kokoro_lang(self.lang)[1]
+        elif self.engine == "chatterbox":
+            self.voice = str(Path(voice).expanduser()) if voice else None
         else:
             self.voice = voice or self.lang
-        log(f"TTS: {self.engine}, voice {self.voice}, rate {rate}")
+        log(f"TTS: {self.engine}, voice {self.voice or 'default'}, rate {rate}")
 
-    def synth(self, text, out_wav, workdir):
-        txt = workdir / (out_wav.stem + ".txt")
+    def raw_path(self, out_wav):
+        return out_wav.with_name(out_wav.stem + ".raw" + (".aiff" if self.engine == "say" else ".wav"))
+
+    def synth_all(self, items, workdir):
+        """items: [(text, out_wav)]. Returns each clip's duration in seconds."""
+        if self.engine in NEURAL_ENVS:
+            self.synth_neural(items, workdir)
+        else:
+            for text, out_wav in items:
+                self.synth_cli(text, self.raw_path(out_wav), workdir)
+        # Chatterbox has no speed setting, so stretch its output instead.
+        tempo = f"atempo={self.rate}" if self.engine == "chatterbox" and self.rate != 1 else ""
+        durations = []
+        for _, out_wav in items:
+            run(["ffmpeg", "-y", "-i", str(self.raw_path(out_wav)), *(["-af", tempo] if tempo else []),
+                 "-ar", str(SAMPLE_RATE), "-ac", "1", "-sample_fmt", "s16", str(out_wav)])
+            durations.append(trim_silence(out_wav))
+        return durations
+
+    def synth_cli(self, text, raw, workdir):
+        txt = workdir / (raw.stem + ".txt")
         txt.write_text(text)
-        raw = workdir / (out_wav.stem + ".raw" + (".aiff" if self.engine == "say" else ".wav"))
         if self.engine == "piper":
             with open(txt) as f:
                 run(["piper", "--model", self.voice, "--output_file", str(raw), "--length_scale", f"{1 / self.rate:.3f}"], stdin=f)
@@ -158,12 +276,30 @@ class TTS:
             run(["say", "-v", self.voice, "-r", str(int(185 * self.rate)), "-o", str(raw), "-f", str(txt)])
         else:
             run(["espeak-ng", "-v", self.voice, "-s", str(int(170 * self.rate)), "-w", str(raw), "-f", str(txt)])
-        # Normalize format and trim leading/trailing silence so scenes don't drag.
-        trim = "silenceremove=start_periods=1:start_threshold=-45dB"
-        run(["ffmpeg", "-y", "-i", str(raw), "-af", f"{trim},areverse,{trim},areverse,apad=pad_dur=0.05",
-             "-ar", str(SAMPLE_RATE), "-ac", "1", "-sample_fmt", "s16", str(out_wav)])
-        with wave.open(str(out_wav)) as w:
-            return w.getnframes() / w.getframerate()
+
+    def synth_neural(self, items, workdir):
+        job = {"voice": self.voice, "rate": self.rate, "items": [{"text": t, "out": str(self.raw_path(o))} for t, o in items]}
+        if self.engine == "kokoro":
+            job["lang"] = kokoro_lang(self.lang)[0]
+            job["model_dir"] = str(kokoro_models())
+        else:
+            job["lang"] = chatterbox_lang(self.lang)
+            hub = Path(os.environ.get("HF_HOME", "~/.cache/huggingface")).expanduser() / "hub"
+            if not (hub / "models--ResembleAI--chatterbox").exists():
+                log("first Chatterbox run: downloading ~3 GB of model plus PyTorch, this takes a while")
+            if not has_cuda():
+                log("Chatterbox on CPU: expect about 2.5 s of work per second of narration")
+        job_file = workdir / "tts-job.json"
+        job_file.write_text(json.dumps(job))
+        helper = Path(__file__).with_name("tts_neural.py")
+        cmd = ["uv", "run", "-q", *NEURAL_ENVS[self.engine], "python", "-I", str(helper), self.engine, str(job_file)]
+        # Run from the workdir so the project's own pyproject/venv isn't picked up.
+        result = subprocess.run(cmd, cwd=workdir, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            die(f"{self.engine} failed:\n" + "\n".join(result.stderr.strip().splitlines()[-15:]))
+        for line in result.stderr.splitlines():
+            if line.startswith(f"{self.engine}:"):
+                log(line)
 
 
 # ----------------------------------------------------------------------- browser
@@ -415,7 +551,10 @@ def main():
     tts = TTS(sb.get("engine", "auto"), sb.get("lang", "en"), sb.get("voice"), float(sb.get("rate", 1.0)))
     for i, sc in enumerate(scenes, 1):
         sc["_audio"] = workdir / f"scene-{i:02}.wav"
-        sc["_dur"] = tts.synth(sc["say"], sc["_audio"], workdir) if sc.get("say") else 0.0
+        sc["_dur"] = 0.0
+    spoken = [sc for sc in scenes if sc.get("say")]
+    for sc, dur in zip(spoken, tts.synth_all([(sc["say"], sc["_audio"]) for sc in spoken], workdir)):
+        sc["_dur"] = dur
 
     # 2. Record.
     from playwright.sync_api import sync_playwright
