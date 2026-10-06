@@ -8,7 +8,8 @@
 
 Each scene's narration is synthesized first, then the browser performs the
 scene's actions while the narration plays, and holds until it is done. The
-result is an MP4 with a visible mouse cursor, voiceover and soft subtitles.
+result is an MP4 with a visible mouse cursor, voiceover, short captions burned
+into a bar below the app, and the full narration as an optional subtitle track.
 """
 
 import argparse
@@ -30,6 +31,7 @@ SAMPLE_RATE = 48000
 SCENE_GAP = 0.35  # seconds of quiet between scenes
 END_HOLD = 0.8
 ACTION_TIMEOUT_MS = 10_000
+BAR_COLOR = "#0f172a"  # caption bar below the app
 
 PIPER_VOICES_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 PIPER_PREFERRED = {
@@ -372,6 +374,24 @@ def card_html(card):
     return f'<div style="text-align:center;max-width:80%">{kicker}<div style="font-size:52px;font-weight:700;line-height:1.15">{esc(card.get("title"))}</div>{sub}</div>'
 
 
+def caption_html(text, width, height):
+    return (f'<html><body style="margin:0;width:{width}px;height:{height}px;background:{BAR_COLOR};display:flex;'
+            f'align-items:center;justify-content:center;font-family:system-ui,-apple-system,&quot;Segoe UI&quot;,sans-serif">'
+            f'<div style="color:#e2e8f0;font-size:{round(height * 0.4)}px;font-weight:500;letter-spacing:.01em;'
+            f'max-width:92%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{esc(text)}</div></body></html>')
+
+
+def render_captions(browser, scenes, width, height, workdir):
+    """Screenshot each scene's caption as a bar image, so ffmpeg needs no text rendering of its own."""
+    page = browser.new_page(viewport={"width": width, "height": height})
+    for i, sc in enumerate(scenes, 1):
+        if sc.get("caption"):
+            sc["_caption"] = workdir / f"caption-{i:02}.png"
+            page.set_content(caption_html(sc["caption"], width, height))
+            page.screenshot(path=str(sc["_caption"]))
+    page.close()
+
+
 class Director:
     def __init__(self, page, base_url):
         self.page = page
@@ -558,6 +578,9 @@ def main():
             log("installing Playwright Chromium (one-time)")
             subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
             browser = pw.chromium.launch(headless=not args.headed)
+        bar = 2 * round(vp["height"] * 0.035) if any(sc.get("caption") for sc in scenes) else 0
+        if bar:
+            render_captions(browser, scenes, vp["width"], bar, workdir)
         ctx = browser.new_context(viewport=vp, record_video_dir=str(video_dir), record_video_size=vp,
                                   color_scheme=sb.get("color_scheme", "light"), **(sb.get("context") or {}))
         ctx.add_init_script(CURSOR_JS)
@@ -611,21 +634,26 @@ def main():
     total = time.monotonic() - start
     offset = start - t0
 
-    # 3. Mix narration, write subtitles, mux.
+    # 3. Mix narration, burn in captions, mux. The full narration goes in as a soft subtitle track for players
+    # that want it; there is no .srt next to the video, since nobody shares one.
     narration = workdir / "narration.wav"
     mix_narration([(t["start"], sc["_audio"]) for t, sc in zip(timeline, scenes) if sc["_dur"]], total, narration)
     srt = workdir / "subtitles.srt"
     write_srt([(t["start"], t["start"] + sc["_dur"], sc["say"]) for t, sc in zip(timeline, scenes) if sc["_dur"]], srt)
-    run(["ffmpeg", "-y", "-ss", f"{offset:.3f}", "-i", str(video_path), "-i", str(narration), "-i", str(srt),
-         "-map", "0:v", "-map", "1:a", "-map", "2:s", "-t", f"{total:.3f}",
+    captions = [(t, sc["_caption"]) for t, sc in zip(timeline, scenes) if sc.get("_caption")]
+    inputs = ["-ss", f"{offset:.3f}", "-i", str(video_path), "-i", str(narration), "-i", str(srt)]
+    graph = f"[0:v]pad=iw:ih+{bar}:0:0:color={BAR_COLOR}[v0]" if bar else "[0:v]null[v0]"
+    for n, (t, png) in enumerate(captions, 1):
+        inputs += ["-i", str(png)]
+        graph += f";[v{n - 1}][{n + 2}:v]overlay=0:H-{bar}:enable='between(t,{t['start']:.3f},{t['end']:.3f})'[v{n}]"
+    run(["ffmpeg", "-y", *inputs, "-filter_complex", graph,
+         "-map", f"[v{len(captions)}]", "-map", "1:a", "-map", "2:s", "-t", f"{total:.3f}",
          "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "25",
          "-c:a", "aac", "-b:a", "128k", "-c:s", "mov_text", "-movflags", "+faststart", str(out)])
-    shutil.copy(srt, out.with_suffix(".srt"))
     sheet = contact_sheet(out, [t["end"] - SCENE_GAP - 0.15 for t in timeline], workdir)
 
     # 4. Report, flagging dead air.
     print(f"video: {out}  ({total:.1f}s)")
-    print(f"subtitles: {out.with_suffix('.srt')}")
     print(f"contact sheet (one frame per scene, at its end): {sheet}")
     print("scene  start  voice  actions")
     for t in timeline:

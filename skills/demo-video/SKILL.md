@@ -1,6 +1,6 @@
 ---
 name: demo-video
-description: Record a short narrated demo video of a feature, with a visible mouse cursor, voiceover and subtitles.
+description: Record a short narrated demo video of a feature, with a visible mouse cursor, voiceover and short captions.
 disable-model-invocation: true
 argument-hint: "[what to show, language, audience, detail, TTS engine — all optional]"
 ---
@@ -54,6 +54,7 @@ Write `storyboard.json` (layout below). Rules for good pacing:
 - No filler ("So, now we're going to…"). Write numbers and abbreviations the way they should be said out loud.
 - Put the cursor on whatever is being talked about: `hover` an element before talking about it, and `click` instead of pressing keys where possible.
 - Write `say` text in the chosen language. Card text can stay in English where it names code, such as branch names.
+- Give each app scene a `caption`: a short label of what's on screen, in the chosen language, shown in a slim bar below the app for the whole scene. It helps someone watching without sound, so it names the point, not the sentence: 2–6 words, no full stop, at most ~60 characters ("Who gets notified, per partner", "Subscribe to SMS alerts"). Never repeat the narration. Leave it out on cards and on scenes where the screen speaks for itself.
 
 ```json
 {
@@ -66,9 +67,9 @@ Write `storyboard.json` (layout below). Rules for good pacing:
   "scenes": [
     {"card": {"kicker": "Acme · feat/bulk-edit", "title": "Bulk editing", "subtitle": "Change many rows at once"},
      "say": "Here's the new bulk editing in the orders table."},
-    {"say": "Select a few orders, and an action bar appears.",
+    {"caption": "Select orders", "say": "Select a few orders, and an action bar appears.",
      "actions": [{"goto": "/orders"}, {"click": "tr:nth-child(1) input[type=checkbox]"}, {"click": "tr:nth-child(2) input[type=checkbox]"}]},
-    {"say": "Pick a new status, and both orders update together.",
+    {"caption": "Change status in bulk", "say": "Pick a new status, and both orders update together.",
      "actions": [{"select": ["#bulk-status", "shipped"]}, {"click": "role=button[name='Apply']"}, {"hover": "tr:nth-child(1) .status"}]},
     {"html": "<pre style='font-size:20px'>$ npm test\n✓ 128 passed</pre>", "say": "All tests pass."}
   ]
@@ -76,7 +77,7 @@ Write `storyboard.json` (layout below). Rules for good pacing:
 ```
 
 - Top level: `lang`, `engine` (`auto|kokoro|supertonic|piper|say|espeak-ng`), `voice` (optional: a Kokoro voice such as `af_heart` or `am_michael`, a Supertonic voice `F1`–`F5` or `M1`–`M5` (default `F1`), a Piper voice name such as `en_GB-alan-medium` or an `.onnx` path, a `say` voice name, or an espeak voice), `rate` (1.0 = normal speed), `base_url`, `viewport`, `color_scheme`, `setup`, `scenes`. `context` passes extra Playwright context options, such as `{"storage_state": "auth.json"}`.
-- Scene: `say`, `actions`, optional `hold` (extra seconds), and either `card` (a title card: `title`, optional `kicker` and `subtitle`) or `html` (any HTML on a white full-screen panel). Card and html scenes hide the app and the cursor. Put the next `goto` in the following scene.
+- Scene: `say`, `actions`, optional `caption` (short on-screen label), optional `hold` (extra seconds), and either `card` (a title card: `title`, optional `kicker` and `subtitle`) or `html` (any HTML on a white full-screen panel). Card and html scenes hide the app and the cursor. Put the next `goto` in the following scene.
 - Actions, one key each: `goto` (path or URL), `click`, `hover`, `type` (`[selector, text]`, typed visibly), `fill` (`[selector, text]`, instant), `select` (`[selector, value]`), `press` (key), `scroll` (pixels, or a selector to scroll to), `move` (`[x, y]`), `wait` (seconds), `wait_for` (selector), `eval` (JS).
 
 ## 4. Record
@@ -89,11 +90,13 @@ uv run <skill-dir>/scripts/record_demo.py <slug>.storyboard.json --out <dir>/<da
 
 (Without `uv`, run `pip install playwright` and use `python3`.) The first run downloads Playwright's Chromium, and the voice model for the chosen engine. The script prints the size before a large download. The script needs `ffmpeg`.
 
-The script prints the video path, an `.srt` file next to the video (the subtitles are also embedded), a contact sheet with one frame from the end of each scene, and a timing table per scene.
+The captions are burned into the video, in a bar below the app that is only added when some scene has a caption, so they survive sharing and don't depend on the player. The full narration is also embedded as a soft subtitle track; no `.srt` is written next to the video.
+
+The script prints the video path, a contact sheet with one frame from the end of each scene, and a timing table per scene.
 
 ## 5. Check it, then fix and record again
 
-- Look at the contact sheet. Is each scene showing what its narration says, with the cursor visible? Are there error pages, empty lists, or a login screen?
+- Look at the contact sheet. Is each scene showing what its narration says, with the cursor visible and the caption fitting on one line? Are there error pages, empty lists, or a login screen?
 - Fix every scene that is flagged as silent: cut or speed up actions, split the scene, or add a sentence.
 - If a selector fails, the script stops and names the scene and action. Fix the selector and run it again.
 - Stop when the video is good enough; it doesn't have to be polished.
