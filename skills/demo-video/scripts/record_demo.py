@@ -66,7 +66,7 @@ NEURAL_ENVS = {
     "kokoro": ["--with", "kokoro-onnx", "--with", "soundfile"],
     "supertonic": ["--with", "supertonic"],
     # vLLM's Triton kernels need Python headers, which uv-managed Pythons ship and many system ones lack.
-    "plapre": ["--python", "3.12", "--managed-python", "--with", "plapre @ git+https://github.com/syv-ai/plapre.git"],
+    "plapre": ["--python", "3.12", "--managed-python", "--with", "plapre @ git+https://github.com/syv-ai/plapre.git@b111239d3b099cfafcb54b3471a8e9e9ba71ae8b"],
 }
 SAY_PREFERRED = {"en": "Samantha", "en-us": "Samantha", "en-gb": "Daniel", "da": "Sara"}
 
