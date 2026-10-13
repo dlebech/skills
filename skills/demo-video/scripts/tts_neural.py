@@ -1,8 +1,8 @@
-"""Synthesize narration with Kokoro or Supertonic. Called by record_demo.py.
+"""Synthesize narration with Kokoro, Supertonic or Plapre. Called by record_demo.py.
 
-    python tts_neural.py kokoro|supertonic job.json
+    python tts_neural.py kokoro|supertonic|plapre job.json
 
-The job file holds {"lang", "voice", "rate", "model_dir", "items": [{"text", "out"}]}.
+The job file holds {"lang", "voice", "rate", "model_dir", "model", "items": [{"text", "out"}]}.
 The model is loaded once and every item is written to its own WAV file. Runs in
 its own uv environment so these heavy dependencies stay out of the recorder.
 """
@@ -34,8 +34,17 @@ def supertonic(job):
         tts.save_audio(wav, item["out"])
 
 
+def plapre(job):
+    from plapre import Plapre
+
+    tts = Plapre(job["model"])  # Danish only; downloads the gated model from Hugging Face on first use
+    for item in job["items"]:
+        tts.speak(item["text"], output=item["out"], speaker=job["voice"], split_sentences=True)
+
+
+# Plapre's vLLM engine starts worker processes with spawn, which re-imports this module.
 if __name__ == "__main__":
     engine, path = sys.argv[1:3]
     with open(path) as f:
         job = json.load(f)
-    {"kokoro": kokoro, "supertonic": supertonic}[engine](job)
+    {"kokoro": kokoro, "supertonic": supertonic, "plapre": plapre}[engine](job)
