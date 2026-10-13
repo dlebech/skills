@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 import wave
 from pathlib import Path
@@ -59,9 +60,13 @@ KOKORO_VOICES = {  # language -> (Kokoro language code, voice)
 }
 SUPERTONIC_LANGS = {"ar", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hi", "hr", "hu", "id", "it", "ja",
                     "ko", "lt", "lv", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "vi"}
+PLAPRE_MODEL = "syvai/plapre-nano-v2"
+PLAPRE_VOICES = ["ida", "liv", "ask", "tor", "kaj"]
 NEURAL_ENVS = {
     "kokoro": ["--with", "kokoro-onnx", "--with", "soundfile"],
     "supertonic": ["--with", "supertonic"],
+    # vLLM's Triton kernels need Python headers, which uv-managed Pythons ship and many system ones lack.
+    "plapre": ["--python", "3.12", "--managed-python", "--with", "plapre @ git+https://github.com/syv-ai/plapre.git@b111239d3b099cfafcb54b3471a8e9e9ba71ae8b"],
 }
 SAY_PREFERRED = {"en": "Samantha", "en-us": "Samantha", "en-gb": "Daniel", "da": "Sara"}
 
@@ -95,7 +100,34 @@ def supertonic_lang(lang):
     return base if base in SUPERTONIC_LANGS else None
 
 
+def plapre_lang(lang):
+    return lang.split("-")[0] == "da"
+
+
+def plapre_ready():
+    """Plapre needs an NVIDIA GPU and a Hugging Face token that has accepted the gated model's terms."""
+    if not shutil.which("nvidia-smi") or subprocess.run(["nvidia-smi", "-L"], capture_output=True).returncode != 0:
+        return False
+    token = os.environ.get("HF_TOKEN")
+    token_file = Path(os.environ.get("HF_HOME", "~/.cache/huggingface")).expanduser() / "token"
+    if not token and token_file.exists():
+        token = token_file.read_text().strip()
+    if not token:
+        return False
+    req = urllib.request.Request(f"https://huggingface.co/{PLAPRE_MODEL}/resolve/main/config.json", method="HEAD",
+                                 headers={"Authorization": f"Bearer {token}"})
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        return True
+    except urllib.error.HTTPError as e:
+        return 300 <= e.code < 400  # a redirect to the file store means access was granted
+    except OSError:
+        return False
+
+
 def engine_available(name):
+    if name == "plapre":
+        return bool(shutil.which("uv")) and plapre_ready()
     if name in NEURAL_ENVS:
         return bool(shutil.which("uv"))
     if name == "say":
@@ -104,7 +136,7 @@ def engine_available(name):
 
 
 def engine_speaks(name, lang):
-    return {"kokoro": kokoro_lang, "supertonic": supertonic_lang}.get(name, lambda _: True)(lang)
+    return {"kokoro": kokoro_lang, "supertonic": supertonic_lang, "plapre": plapre_lang}.get(name, lambda _: True)(lang)
 
 
 def pick_engine(requested, lang):
@@ -113,11 +145,14 @@ def pick_engine(requested, lang):
         requested = os.environ.get("DEMO_VIDEO_TTS") or "auto"
     if requested != "auto":
         if not engine_available(requested):
-            die(f"TTS engine '{requested}' is not available" + (" (it needs uv)" if requested in NEURAL_ENVS else ""))
+            die(f"TTS engine '{requested}' is not available" + (
+                " (it needs uv, an NVIDIA GPU and Hugging Face access to " + PLAPRE_MODEL + ")" if requested == "plapre"
+                else " (it needs uv)" if requested in NEURAL_ENVS else ""))
         if not engine_speaks(requested, lang):
             die(f"TTS engine '{requested}' doesn't support language '{lang}'")
         return requested
     candidates = [
+        ("plapre", plapre_lang(lang)),
         ("kokoro", kokoro_lang(lang)),
         ("supertonic", supertonic_lang(lang)),
         ("piper", True), ("say", True), ("espeak-ng", True),
@@ -125,7 +160,7 @@ def pick_engine(requested, lang):
     for name, ok in candidates:
         if ok and engine_available(name):
             return name
-    die("no TTS engine found; install uv (for Kokoro/Supertonic) or piper (`uv tool install piper-tts`), "
+    die("no TTS engine found; install uv (for Kokoro/Supertonic/Plapre) or piper (`uv tool install piper-tts`), "
         "or use macOS `say` or espeak-ng")
 
 
@@ -236,6 +271,10 @@ class TTS:
             self.voice = voice or kokoro_lang(self.lang)[1]
         elif self.engine == "supertonic":
             self.voice = str(Path(voice).expanduser()) if voice and voice.endswith(".json") else voice or "F1"
+        elif self.engine == "plapre":
+            self.voice = voice or PLAPRE_VOICES[0]
+            if self.voice not in PLAPRE_VOICES:
+                die(f"unknown Plapre voice '{self.voice}'; use one of {', '.join(PLAPRE_VOICES)}")
         else:
             self.voice = voice or self.lang
         log(f"TTS: {self.engine}, voice {self.voice or 'default'}, rate {rate}")
@@ -251,8 +290,11 @@ class TTS:
             for text, out_wav in items:
                 self.synth_cli(text, self.raw_path(out_wav), workdir)
         durations = []
+        # Plapre has no speed control, so its rate is applied here.
+        tempo = ["-af", f"atempo={self.rate}"] if self.engine == "plapre" and self.rate != 1.0 else []
         for _, out_wav in items:
-            run(["ffmpeg", "-y", "-i", str(self.raw_path(out_wav)), "-ar", str(SAMPLE_RATE), "-ac", "1", "-sample_fmt", "s16", str(out_wav)])
+            run(["ffmpeg", "-y", "-i", str(self.raw_path(out_wav)), *tempo,
+                 "-ar", str(SAMPLE_RATE), "-ac", "1", "-sample_fmt", "s16", str(out_wav)])
             durations.append(trim_silence(out_wav))
         return durations
 
@@ -272,6 +314,9 @@ class TTS:
         if self.engine == "kokoro":
             job["lang"] = kokoro_lang(self.lang)[0]
             job["model_dir"] = str(kokoro_models())
+        elif self.engine == "plapre":
+            job["model"] = PLAPRE_MODEL
+            log("Plapre: the first run installs vLLM (several GB) and downloads the model (~1.4 GB)")
         else:
             job["lang"] = supertonic_lang(self.lang)
             cache = Path(os.environ.get("SUPERTONIC_CACHE_DIR", "~/.cache/supertonic3")).expanduser()
@@ -281,8 +326,10 @@ class TTS:
         job_file.write_text(json.dumps(job))
         helper = Path(__file__).with_name("tts_neural.py")
         cmd = ["uv", "run", "-q", *NEURAL_ENVS[self.engine], "python", "-I", str(helper), self.engine, str(job_file)]
-        # Run from the workdir so the project's own pyproject/venv isn't picked up.
-        result = subprocess.run(cmd, cwd=workdir, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        # Run from the workdir, without this script's VIRTUAL_ENV, so neither the project's venv nor ours is
+        # reused as the base interpreter (it would override the engine's --python choice).
+        env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+        result = subprocess.run(cmd, cwd=workdir, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         if result.returncode != 0:
             die(f"{self.engine} failed:\n" + "\n".join(result.stderr.strip().splitlines()[-15:]))
         for line in result.stderr.splitlines():

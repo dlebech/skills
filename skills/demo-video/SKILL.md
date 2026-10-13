@@ -24,12 +24,13 @@ Make an MP4 that shows a feature working in the browser while a voice explains i
 
   | Engine | Sound | Languages | Cost |
   |---|---|---|---|
+  | `plapre` (auto default for da, when available) | most natural Danish | da only | NVIDIA GPU; vLLM (several GB) + ~1.4 GB model |
   | `kokoro` (auto default where supported) | natural | en, en-GB, es, fr, it, pt, hi | ~340 MB, fast on CPU |
   | `supertonic` (auto otherwise, where supported) | natural | 31, incl. da, de, sv, nl, fi (not no) | ~390 MB, very fast on CPU |
   | `piper` | clear but synthetic | most | ~60 MB per voice |
   | `say` (macOS), `espeak-ng` | robotic, last resort | many | none |
 
-  Kokoro and Supertonic need `uv`.
+  Kokoro, Supertonic and Plapre need `uv`. Plapre (`syvai/plapre-nano-v2`) is much better than Supertonic for Danish, so auto picks it when there is an NVIDIA GPU and Hugging Face access to the gated model (accept its terms on the model page, then `hf auth login`). Otherwise auto falls back to Supertonic.
 - **What to show**: if it isn't named, use the current branch's changes (`git log` and `git diff` against the default branch).
 - **Anything else** (a phone-sized screen, dark mode, a male voice, "redo yesterday's video"): map it onto the storyboard fields below, or edit and re-record an existing storyboard.
 
@@ -77,7 +78,7 @@ Write `storyboard.json` (layout below). Rules for good pacing:
 }
 ```
 
-- Top level: `lang`, `engine` (`auto|kokoro|supertonic|piper|say|espeak-ng`), `voice` (optional: a Kokoro voice such as `af_heart` or `am_michael`, a Supertonic voice `F1`–`F5` or `M1`–`M5` (default `F1`), a Piper voice name such as `en_GB-alan-medium` or an `.onnx` path, a `say` voice name, or an espeak voice), `rate` (1.0 = normal speed), `base_url`, `viewport`, `color_scheme`, `setup`, `scenes`. `context` passes extra Playwright context options, such as `{"storage_state": "auth.json"}`.
+- Top level: `lang`, `engine` (`auto|plapre|kokoro|supertonic|piper|say|espeak-ng`), `voice` (optional: a Kokoro voice such as `af_heart` or `am_michael`, a Supertonic voice `F1`–`F5` or `M1`–`M5` (default `F1`), a Plapre voice (`ida` (default), `liv` or `ask` sound best; `tor` and `kaj` also exist), a Piper voice name such as `en_GB-alan-medium` or an `.onnx` path, a `say` voice name, or an espeak voice), `rate` (1.0 = normal speed; for Plapre it is applied after synthesis, and `ask`/`liv` already speak fast), `base_url`, `viewport`, `color_scheme`, `setup`, `scenes`. `context` passes extra Playwright context options, such as `{"storage_state": "auth.json"}`.
 - Scene: `say`, `actions`, optional `caption` (short on-screen label), optional `hold` (extra seconds), and either `card` (a title card: `title`, optional `kicker` and `subtitle`) or `html` (any HTML on a white full-screen panel). Card and html scenes hide the app and the cursor. Put the next `goto` in the following scene.
 - Actions, one key each: `goto` (path or URL), `click`, `hover`, `type` (`[selector, text]`, typed visibly), `fill` (`[selector, text]`, instant), `select` (`[selector, value]`), `press` (key), `scroll` (pixels, or a selector to scroll to), `move` (`[x, y]`), `wait` (seconds), `wait_for` (selector), `eval` (JS).
 
