@@ -83,9 +83,9 @@ Run independent tasks in parallel only when their likely edit surfaces do not ov
 
 Create another pane in the task worktree's Herdr workspace and start a new agent with the reviewer profile and a distinct reviewer name. Do not reuse the implementer's pane or identity. The implementer and reviewer may use the same kind or model, but they must be separate agent processes.
 
-Give the reviewer a complete plain-language instruction to inspect the task diff against the integration branch and report only actionable correctness, regression, test, security, and requirement findings. Include the base branch, task requirements, expected output format, and a prohibition on editing files. This is the task's one and only review pass.
+If the selected reviewer exposes a code-review skill, command, or equivalent native capability, use it and provide the base branch and task requirements. Do not assume one exists. Otherwise give the reviewer a complete plain-language instruction to inspect the task diff against the integration branch and report only actionable correctness, regression, test, security, and requirement findings. Include the base branch, task requirements, expected output format, and a prohibition on editing files.
 
-Do not invoke or assume a `/code-review` command, code-review skill, plugin, or agent-specific shortcut. The review must work from the general instruction alone. If the selected agent says it cannot inspect the repository or perform the requested review, ask the user to select another reviewer profile; do not count that failed capability check as the task's review.
+Either approach is the task's one and only review pass. If the selected agent cannot inspect the repository or perform the requested review by either route, ask the user to select another reviewer profile; do not count that failed capability check as the task's review.
 
 If there are findings:
 
