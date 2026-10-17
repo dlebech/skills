@@ -13,7 +13,7 @@ Act as the sole coordinator for a larger GitHub issue. The user talks only to yo
 ## Invariants
 
 - Load the `herdr` skill before issuing any Herdr command. If that skill is unavailable, stop and tell the user to install it.
-- Run only inside Herdr: first verify `test "${HERDR_ENV:-}" = 1`. If it fails, stop and tell the user to invoke the skill from a Herdr-managed pane.
+- Follow the `herdr` skill's environment check, command discovery, identifier handling, focus, and safety rules. If not running in a Herdr-managed pane, stop and tell the user to invoke this skill from one.
 - Use Herdr worktrees for every code or documentation change.
 - Create one integration branch from the repository's default branch. All completed task branches merge into it.
 - Give each task its own branch and Herdr worktree, based on the current integration branch.
@@ -33,18 +33,18 @@ Parse `$ARGUMENTS` for the main issue, an explicitly named starting issue, const
 - `specialist=<kind>` and `specialist-model=<model>` define an optional stronger profile for a task the user explicitly assigns to it, or for unusually complex work where the orchestrator can justify escalation.
 - Natural-language equivalents are valid, such as “use Sonnet for implementation, Haiku for review, and Opus for complex tasks.”
 
-Role overrides take precedence over the shorthand defaults. With no configuration, use the orchestrator's Herdr agent kind when `herdr agent get "$HERDR_PANE_ID"` can identify it, and let that agent use its normal default model. If the current kind is unavailable for new agents, ask the user which kind to use. Do not claim to inherit the orchestrator's exact model unless Herdr exposes it. If the user explicitly asks for “the same model” and it cannot be detected, ask them to name it.
+Role overrides take precedence over the shorthand defaults. With no configuration, use the orchestrator's agent kind when Herdr can identify it, and let that agent use its normal default model. If the current kind is unavailable for new agents, ask the user which kind to use. Do not claim to inherit the orchestrator's exact model unless Herdr exposes it. If the user explicitly asks for “the same model” and it cannot be detected, ask them to name it.
 
-Validate configured kinds against the supported kinds reported by `herdr agent`. Model selection is agent-native: pass its documented model argument after Herdr's `--`, for example `-- --model <model>` when that kind supports this syntax. If the requested model or its native argument cannot be verified, ask the user rather than silently using another model. If the main issue is missing or a requested kind is unsupported, ask the user to correct it.
+Validate configured kinds using Herdr's current agent-kind discovery. Model selection is agent-native; use the selected agent's documented startup arguments through Herdr. If the requested model or its native argument cannot be verified, ask the user rather than silently using another model. If the main issue is missing or a requested kind is unsupported, ask the user to correct it.
 
 1. Verify GitHub access with `gh auth status`.
 2. Read the main issue and explicitly named dependencies with `gh issue view <number> --json number,title,body,url,labels,assignees,state`.
 3. Discover the default branch with `gh repo view --json defaultBranchRef`.
 4. Fetch that branch without changing the user's current checkout.
 5. Inspect existing branches and worktrees before creating anything. Reuse an unambiguous existing integration branch/worktree for this issue; never create a duplicate.
-6. Create the integration worktree from `origin/<default-branch>` with `herdr worktree create --cwd "$PWD" --branch <integration-branch> --base origin/<default-branch> --label "Issue #<number> integration" --no-focus`.
+6. Create a labeled integration worktree from `origin/<default-branch>` without taking focus.
 
-Use the repository's branch naming convention if one exists. Otherwise use `issue-<number>`. Read workspace, pane, and path identifiers from Herdr's JSON response; never predict them.
+Use the repository's branch naming convention if one exists. Otherwise use `issue-<number>`. Obtain workspace, pane, and path identifiers as directed by the `herdr` skill; never predict them.
 
 ## 2. Plan autonomously
 
@@ -65,18 +65,8 @@ Prefer sequential work when tasks are likely to edit the same files. Keep planni
 For every ready task:
 
 1. Ensure the integration worktree is clean and contains all prerequisite merges.
-2. Create a task worktree based on the integration branch:
-
-   ```sh
-   herdr worktree create --cwd <integration-path> --branch <task-branch> --base <integration-branch> --label "Issue #<number>: <task>" --no-focus
-   ```
-
-3. Start a uniquely named implementer with the implementation profile in the returned root pane:
-
-   ```sh
-   herdr agent start <implementer-name> --kind <implementation-kind> --pane <root-pane-id> [-- <native-model-args>]
-   ```
-
+2. Create a labeled task worktree based on the integration branch without taking focus.
+3. Start a uniquely named implementer with the implementation profile in that worktree's root pane, using native model arguments when configured.
 4. Prompt it with the issue context, exact task scope, acceptance criteria, repository conventions, and required validation. Tell it to:
    - work only in its assigned worktree;
    - inspect existing code before editing;
@@ -84,7 +74,7 @@ For every ready task:
    - run the smallest relevant validation;
    - commit all task changes to its branch;
    - stop and ask a precise question if blocked.
-5. Use `herdr agent prompt <implementer-name> "<prompt>" --wait --timeout <milliseconds>` and inspect the agent state and output. A timeout does not prove the prompt failed; inspect before sending anything again.
+5. Prompt and monitor it according to the `herdr` skill. A timeout does not prove the prompt failed; inspect before sending anything again.
 6. Independently verify the branch is committed, clean, and satisfies the task's validation before review.
 
 Run independent tasks in parallel only when their likely edit surfaces do not overlap. Do not start more simultaneous agents than can be monitored reliably.
@@ -121,7 +111,7 @@ Never merge the integration branch into a task branch merely to make it current 
 
 ## 6. Handle agent questions
 
-When an agent is `blocked`, inspect its question with `herdr agent get` and `herdr agent read`. Answer it yourself when the issue, repository, or prior user direction determines the answer.
+When Herdr reports an agent as blocked, inspect its question as directed by the `herdr` skill. Answer it yourself when the issue, repository, or prior user direction determines the answer.
 
 If user input is genuinely required, relay one concise question to the user, including the agent's context and the concrete options. After the user answers, send the decision back to the blocked agent and continue orchestration. Do not expose routine agent coordination or ask the user to interact with a task pane.
 
