@@ -65,7 +65,7 @@ For every ready task:
 
 1. Ensure the integration worktree is clean and contains prerequisite merges.
 2. Create a labeled task worktree from the integration branch without taking focus.
-3. Start a uniquely named implementer with the implementation profile in that worktree's root pane, using native model arguments when configured.
+3. Start a uniquely named implementer in that worktree's root pane, using the specialist profile for user-designated or deliberately escalated tasks and the implementation profile otherwise.
 4. Prompt it with the issue context, exact task scope, acceptance criteria, repository conventions, and required validation. Tell it to:
    - work only in its assigned worktree;
    - inspect existing code before editing;
@@ -93,7 +93,7 @@ If there are findings, send them to the original implementer and ask it to fix v
 When a task is implemented, reviewed once, fixed, committed, and validated:
 
 1. Confirm the task branch contains only intended commits.
-2. Merge it with a non-fast-forward message naming the task and issue.
+2. From the integration worktree, merge it with a non-fast-forward message naming the task and issue.
 3. Run the smallest integration-level validation that covers the merge.
 4. Mark the task complete and use the updated integration branch as the base for dependent worktrees.
 
