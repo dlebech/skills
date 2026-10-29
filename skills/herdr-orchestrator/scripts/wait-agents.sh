@@ -4,7 +4,8 @@
 # Usage: wait-agents.sh --status-dir DIR [--label TEXT] [--max SECONDS] <agent>...
 #
 # <agent> is a Herdr agent name or pane ID. Returns when:
-#   - an agent wrote a marker in DIR: <agent>.done, <agent>.question or <agent>.failed;
+#   - an agent wrote a marker in DIR: <agent>.done, <agent>.question or <agent>.failed,
+#     or herdr-captain relayed a user message as <name>.message;
 #   - a listed agent is blocked on an approval or question dialog;
 #   - a listed agent is gone (exited or released);
 #   - --max seconds passed (default 540, under Claude Code's 10-minute tool limit).
@@ -58,7 +59,7 @@ status_of() { # status_of <agent-list-json> <agent>; empty when gone
 start=$SECONDS
 while :; do
   events=()
-  for f in "$status_dir"/*.done "$status_dir"/*.question "$status_dir"/*.failed; do
+  for f in "$status_dir"/*.done "$status_dir"/*.question "$status_dir"/*.failed "$status_dir"/*.message; do
     [ -e "$f" ] && events+=("marker $f")
   done
   if [ ${#agents[@]} -gt 0 ]; then

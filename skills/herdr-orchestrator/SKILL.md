@@ -59,7 +59,8 @@ Then:
    - **Calling skill:** use the spec it provides.
 2. Choose the integration branch name.
 3. Ask the start-of-run questions in one message: the `draft-pr` and `final-review` questions when they are `ask`, any calling skill's questions, and, when you drafted the spec from a session or a short description, a brief summary of it (goal, acceptance criteria, open questions, out of scope) and the branch name to confirm. Skip the spec confirmation for a plan file or a calling skill's spec unless something is ambiguous.
-4. Create the run directory at `${XDG_CACHE_HOME:-$HOME/.cache}/herdr-orchestrator/<repo>/<integration-branch>/`, so a fresh session can find it after a crash. If it already exists with a `plan.md`, this is a resumed run: go to section 7. Write `spec.md`, an empty `plan.md`, and `decisions.md` (the decisions log) there. Briefs, review findings, and generated output also go here.
+4. Create the run directory at `${XDG_CACHE_HOME:-$HOME/.cache}/herdr-orchestrator/<repo>/<integration-branch>/`, so a fresh session can find it after a crash. If it already exists with a `plan.md`, this is a resumed run: go to section 7. Write `spec.md`, `plan.md`, and `decisions.md` (the decisions log) there. Briefs, review findings, and generated output also go here, and `status/` holds the markers (section 3).
+   Make the run findable by `herdr-captain`: rename your own tab to `orc: <integration-branch>` (`herdr tab rename "$HERDR_TAB_ID" ...`), and write `orchestrator.json` there: `{"pane_id", "tab_id", "workspace_id", "repo", "branch", "agent"}` (your pane, tab, and workspace IDs, the repository path, the integration branch, and your agent kind). Rewrite it whenever you move or resume in another pane.
 5. When the spec came from a long session, offer to continue in a fresh session to save context for the run: the user starts `/herdr-orchestrator <run-directory>/spec.md` in a new Herdr pane, and this session stops. Recommend it when the conversation is long; otherwise continue here.
 6. Discover the default branch (`gh repo view --json defaultBranchRef`, or `git symbolic-ref refs/remotes/origin/HEAD` without GitHub) and fetch it without changing the user's checkout. If there is uncommitted work in the user's checkout that the spec depends on, ask whether to commit it to the integration branch first.
 7. Inspect existing branches and worktrees. Reuse an unambiguous integration branch/worktree; otherwise create a labeled one from `origin/<default-branch>` without taking focus.
@@ -70,7 +71,7 @@ Obtain workspace, pane, and path identifiers as directed by the `herdr` skill; n
 
 Turn the spec into the smallest independently implementable and reviewable tasks. Honor any ordering in the spec, such as “start with the schema change.” A task can be non-code (a measurement run, a recording, docs). It gets a worktree when it produces files, and a review only when it changes code or docs.
 
-Keep the plan in `plan.md`. For each task, record:
+Keep the plan in `plan.md`. Its first line is `Status: <one line>`, kept current: `running`, `waiting for user: <question>`, `blocked: <reason>`, or `finished`. For each task, record:
 
 - the acceptance criteria it satisfies;
 - dependencies on other tasks;
@@ -118,9 +119,9 @@ Wait for agents in the foreground, never in a background shell or monitor. A Cla
   --label "waiting: task 3/7 in review" <agent-name>...
 ```
 
-Pass every running agent's name, and a short label with the plan position. It labels your pane until it returns, and returns after at most 9 minutes with one line per event:
+Pass every running agent's name, and a short label with the plan position. Also check `status/` for `.message` markers whenever you start a new step, since messages can arrive while you are not waiting. It labels your pane until it returns, and returns after at most 9 minutes with one line per event:
 
-- `marker <file>`: read it and act on it, then rename it to `<file>.handled`. A `.question` marker goes to section 6.
+- `marker <file>`: read it and act on it, then rename it to `<file>.handled`. A `.question` marker goes to section 6. A `.message` marker is an instruction from the user relayed by `herdr-captain`; treat it as the user's own words, then record it in `decisions.md` if it decides something.
 - `blocked <agent>`: an approval or question dialog. Inspect it as in section 6.
 - `gone <agent>`: the agent exited. Check its worktree and decide whether to restart it.
 - `timeout`, with each agent's state: nothing needs you yet. An agent that has been `idle` or `done` without a marker through several timeouts may have stalled or forgotten its marker; read its last output before prompting it. Then run the wait again.
@@ -173,4 +174,4 @@ Continue until the spec is complete or a real blocker needs input. Keep the inte
 
 1. If `final-review` is on, review the whole integration branch once, after every planned task is merged. Start a fresh agent with the reviewer profile (or the specialist profile for a large branch) in the integration worktree. It reviews `<default>...<integration>` against `spec.md` for what per-task reviews miss: bugs across task boundaries, unmet acceptance criteria, duplication across tasks, dead code, inconsistencies, modules grown too large. Same rules as section 4: read-only, findings to a file, at most about 15. Triage them; fix must-fix findings as one more task with no further review, and let the user pick among the nice-to-haves, or record them as follow-ups. This is the only review of the review fixes; do not loop.
 2. Push the integration branch. Create or update its PR when requested or all planned work is complete. Include: a short statement of the goal from `spec.md`, a table of the merged tasks, validation and measurements, decisions to check (yours and the user's), a pre-launch or deploy checklist (migrations, new env vars, schedules, manual steps), follow-ups, and anything the calling skill adds (such as linked issues). Without a GitHub remote or `gh`, print the description for the user to paste.
-3. Report the integration branch/worktree, completed tasks, validation status, and remaining work. Notify the user when the branch is green and ready, if they asked to be pinged. Do not present task branches for review.
+3. Set `plan.md`'s status to `finished`, then report the integration branch/worktree, completed tasks, validation status, and remaining work. Notify the user when the branch is green and ready, if they asked to be pinged. Do not present task branches for review.
