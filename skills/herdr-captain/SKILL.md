@@ -28,7 +28,7 @@ Each run directory holds `spec.md` (the goal), `plan.md` (tasks and their status
 
 Lead with what needs the user, then the rest, one or two lines per run, named by branch:
 
-- **Needs you:** `plan.md` says `waiting for user`, or the orchestrator pane is `blocked`, or it is `idle`/`done` while the plan is not finished. For an idle one, read its last output (`herdr agent read <pane> --source recent-unwrapped --lines 60`) and quote its question.
+- **Needs you:** `plan.md` says `waiting for user`, or the orchestrator pane is `blocked`, or it is `idle`/`done` while the plan is not finished. For an idle one, read its last output (`herdr agent read <pane> --source recent-unwrapped --lines 60`) and quote its question. Text shown in its input box may be Claude Code's suggested next prompt, not something the user typed; ignore it.
 - **Stalled or crashed:** the orchestrator pane is gone, or idle with no question and no recent change in `plan.md`. Say what the run directory shows and how to resume: `/herdr-orchestrator <run-directory>/spec.md` in a new Herdr pane.
 - **Running:** the plan position (tasks merged out of planned, what is in progress) and the progress label. A `working` orchestrator usually sits in a foreground wait; that is normal.
 
