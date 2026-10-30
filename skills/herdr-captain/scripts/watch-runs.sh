@@ -30,6 +30,7 @@ max_herdr_failures=5
 seen_file=$root/.captain-seen
 idle_file=$root/.captain-idle
 mkdir -p "$root"
+chmod 700 "$root"
 touch "$seen_file" "$idle_file"
 
 lock=$root/.captain-watcher
@@ -80,10 +81,10 @@ while :; do
           idle+=("$since	$dir")
           [ $((now - since)) -ge "$idle_grace" ] && reasons+=("orchestrator idle") ;;
       esac
-      for f in "$dir"/status/*.failed; do
+      for f in "$dir"/shared/status/*.failed; do
         [ -e "$f" ] && reasons+=("failed: $(basename "$f" .failed)")
       done
-      for f in "$dir"/status/*.question; do
+      for f in "$dir"/shared/status/*.question; do
         # The marker may be handled (renamed) between the glob and stat.
         asked=$(mtime "$f") || continue
         [ $((now - asked)) -ge "$question_age" ] &&

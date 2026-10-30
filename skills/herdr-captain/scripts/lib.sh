@@ -3,10 +3,11 @@
 # The run-directory protocol, as written by herdr-orchestrator:
 #   <root>/<repo>/<branch>/orchestrator.json  {"pane_id", "tab_id", "repo", "branch"}
 #   <root>/<repo>/<branch>/plan.md            first line "Status: <status>"
-#   <root>/<repo>/<branch>/status/            markers, see MARKER_SUFFIXES
+#   <root>/<repo>/<branch>/inbox/             <name>.message, from the captain
+#   <root>/<repo>/<branch>/shared/status/     sub-agents' markers, see MARKER_SUFFIXES
 
 root=$HOME/.herdr/orchestration
-MARKER_SUFFIXES="done question failed message"
+MARKER_SUFFIXES="done question failed"
 
 # Prints each run's orchestrator.json path.
 run_infos() {
@@ -30,9 +31,12 @@ pane_state() {
 unhandled_markers() {
   local s f
   for s in $MARKER_SUFFIXES; do
-    for f in "$1"/status/*."$s"; do
+    for f in "$1"/shared/status/*."$s"; do
       [ -e "$f" ] && echo "$f"
     done
+  done
+  for f in "$1"/inbox/*.message; do
+    [ -e "$f" ] && echo "$f"
   done
 }
 

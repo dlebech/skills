@@ -7,7 +7,7 @@
 # that has an orchestrator.json, skipping finished runs unless --all is given.
 # For each prints its directory, branch, repository, the Status line of its
 # plan.md, its orchestrator pane's state and progress label, and unhandled
-# markers in status/. Then lists "orc:" tabs that no run directory claims.
+# markers. Then lists "orc:" tabs that no run directory claims.
 set -u
 . "$(dirname "$0")/lib.sh"
 

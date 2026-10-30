@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Wait in the foreground until one of the orchestrator's agents needs attention.
 #
-# Usage: wait-agents.sh --status-dir DIR [--label TEXT] [--max SECONDS] <agent>...
+# Usage: wait-agents.sh --status-dir DIR [--inbox DIR] [--label TEXT] [--max SECONDS] <agent>...
 #
 # <agent> is a Herdr agent name or pane ID. Returns when:
-#   - an agent wrote a marker in DIR: <agent>.done, <agent>.question or <agent>.failed,
-#     or herdr-captain relayed a user message as <name>.message;
+#   - an agent wrote a marker in the status dir: <agent>.done, <agent>.question or
+#     <agent>.failed;
+#   - herdr-captain relayed a user message as <name>.message in the inbox, which
+#     sub-agents cannot write to;
 #   - a listed agent is blocked on an approval or question dialog;
 #   - a listed agent is gone (exited or released); a failed Herdr call never
 #     counts as gone;
@@ -23,6 +25,7 @@
 set -u
 
 status_dir=
+inbox=
 label="waiting on agents"
 max=540
 poll=${WAIT_AGENTS_POLL:-5}
@@ -30,6 +33,7 @@ agents=()
 while [ $# -gt 0 ]; do
   case $1 in
     --status-dir) status_dir=$2; shift 2 ;;
+    --inbox) inbox=$2; shift 2 ;;
     --label) label=$2; shift 2 ;;
     --max) max=$2; shift 2 ;;
     -*) echo "wait-agents.sh: unknown option $1" >&2; exit 2 ;;
@@ -37,7 +41,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 if [ -z "$status_dir" ]; then
-  echo "usage: wait-agents.sh --status-dir DIR [--label TEXT] [--max SECONDS] <agent>..." >&2
+  echo "usage: wait-agents.sh --status-dir DIR [--inbox DIR] [--label TEXT] [--max SECONDS] <agent>..." >&2
   exit 2
 fi
 mkdir -p "$status_dir"
@@ -69,7 +73,7 @@ start=$SECONDS
 list=
 while :; do
   events=()
-  for f in "$status_dir"/*.done "$status_dir"/*.question "$status_dir"/*.failed "$status_dir"/*.message; do
+  for f in "$status_dir"/*.done "$status_dir"/*.question "$status_dir"/*.failed ${inbox:+"$inbox"/*.message}; do
     [ -e "$f" ] && events+=("marker $f")
   done
   if [ ${#agents[@]} -gt 0 ]; then

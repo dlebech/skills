@@ -67,9 +67,11 @@ check "wait returned blocked" \
 herdr agent send-keys "$name" esc >/dev/null 2>&1 || true
 
 echo "== relayed message"
-echo "use pnpm" >"$status_dir/.captain-1.tmp"
-mv "$status_dir/.captain-1.tmp" "$status_dir/captain-1.message"
+inbox=$status_dir/inbox
+mkdir "$inbox"
+echo "use pnpm" >"$inbox/.captain-1.tmp"
+mv "$inbox/.captain-1.tmp" "$inbox/captain-1.message"
 check "wait returned on the message" \
-  "$(WAIT_AGENTS_POLL=2 "$wait_agents" --status-dir "$status_dir" --max 30)" "marker $status_dir/captain-1.message"
+  "$(WAIT_AGENTS_POLL=2 "$wait_agents" --status-dir "$status_dir" --inbox "$inbox" --max 30)" "marker $inbox/captain-1.message"
 
 exit "$failed"
