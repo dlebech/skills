@@ -3,6 +3,7 @@
 # The run-directory protocol, as written by herdr-orchestrator:
 #   <root>/<repo>/<branch>/orchestrator.json  {"pane_id", "tab_id", "repo", "branch"}
 #   <root>/<repo>/<branch>/plan.md            first line "Status: <status>"
+#   <root>/<repo>/<branch>/question.md        the orchestrator's open question to the user
 #   <root>/<repo>/<branch>/inbox/             <name>.message, from the captain
 #   <root>/<repo>/<branch>/shared/status/     sub-agents' markers, see MARKER_SUFFIXES
 
