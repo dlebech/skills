@@ -8,7 +8,7 @@ metadata:
   required-skills: "herdr herdr-orchestrator"
 ---
 
-Act as the captain over several orchestrators. The user talks to you about all their runs at once; each orchestrator still runs its own agents. Answer `$ARGUMENTS`, start watching the runs (unless `watch=no`), and stay available for more questions and instructions.
+Act as the captain over several orchestrators. The user talks to you about all their runs at once; each orchestrator still runs its own agents. Name your tab first, so it stands out in Herdr's Agent panel: `herdr tab rename "$HERDR_TAB_ID" "⚓ captain"`. Answer `$ARGUMENTS`, start watching the runs (unless `watch=no`), and stay available for more questions and instructions.
 
 ## Invariants
 
@@ -22,7 +22,7 @@ Act as the captain over several orchestrators. The user talks to you about all t
 
 ## Find the runs
 
-Run `<skill-dir>/scripts/runs.sh`. It reads every run directory under `~/.herdr/orchestration/` that has an `orchestrator.json`, and for each prints the branch, repository, the `Status:` line of `plan.md`, the orchestrator pane's Herdr state and progress label, and unhandled markers (or warns when Herdr did not answer). It skips finished runs unless given `--all`. It also lists `orc:` tabs that no run directory claims, for example orchestrators started before they recorded themselves; inspect those with `herdr agent read` on the tab's panes.
+Run `<skill-dir>/scripts/runs.sh`. It reads every run directory under `~/.herdr/orchestration/` that has an `orchestrator.json`, and for each prints the branch, repository, the `Status:` line of `plan.md`, the orchestrator pane's Herdr state and progress label, and unhandled markers (or warns when Herdr did not answer). It skips finished runs unless given `--all`. It also lists `🐙` and older `orc:` tabs that no run directory claims, for example orchestrators started before they recorded themselves; inspect those with `herdr agent read` on the tab's panes.
 
 Each run directory holds `spec.md` (the goal), `plan.md` (tasks and their status), `decisions.md`, `inbox/` (relayed messages), and `shared/status/` (sub-agents' markers). Read them for detail rather than asking the orchestrator; it is busy.
 

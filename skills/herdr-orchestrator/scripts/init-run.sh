@@ -25,6 +25,6 @@ jq -n --arg pane "${HERDR_PANE_ID:-}" --arg tab "${HERDR_TAB_ID:-}" --arg repo "
   '{pane_id: $pane, tab_id: $tab, repo: $repo, branch: $branch}' >"$dir/orchestrator.json"
 if [ "$state" = new ]; then
   echo "Status: waiting for user: start-of-run questions" >"$dir/plan.md"
-  [ -z "${HERDR_TAB_ID:-}" ] || herdr tab rename "$HERDR_TAB_ID" "orc: ⏸ $branch" >/dev/null
+  [ -z "${HERDR_TAB_ID:-}" ] || herdr tab rename "$HERDR_TAB_ID" "🐙 ✋ $branch" >/dev/null
 fi
 echo "$state $dir"
