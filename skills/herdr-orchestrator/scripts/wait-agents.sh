@@ -7,13 +7,15 @@
 #   - an agent wrote a marker in DIR: <agent>.done, <agent>.question or <agent>.failed,
 #     or herdr-captain relayed a user message as <name>.message;
 #   - a listed agent is blocked on an approval or question dialog;
-#   - a listed agent is gone (exited or released);
+#   - a listed agent is gone (exited or released); a failed Herdr call never
+#     counts as gone;
 #   - --max seconds passed (default 540, under Claude Code's 10-minute tool limit).
 # Prints one line per event:
 #   marker <file>         rename it to <file>.handled once dealt with
 #   blocked <agent>
 #   gone <agent>
-#   timeout               followed by "state <agent> <status>" for each listed agent
+#   timeout               followed by "state <agent> <status>" for each listed agent;
+#                         the status is "unknown" when Herdr did not answer
 #
 # Herdr's idle/done never counts as finished: an agent that ends its turn while
 # its own background job runs looks idle too. Waiting in the foreground keeps
@@ -40,30 +42,38 @@ if [ -z "$status_dir" ]; then
 fi
 mkdir -p "$status_dir"
 
+now_ns() { # nanoseconds, for Herdr's metadata ordering (date has no %N on macOS)
+  local ns
+  ns=$(date +%s%N)
+  case $ns in *N) echo "$(date +%s)000000000" ;; *) echo "$ns" ;; esac
+}
+
 # Label the caller's pane. The label expires by itself if this script is killed.
 if [ "${HERDR_ENV:-}" = 1 ] && [ -n "${HERDR_PANE_ID:-}" ]; then
   self=$HERDR_PANE_ID
   self_agent=$(herdr agent get "$self" 2>/dev/null | jq -r '.result.agent.agent // empty')
   label_args=(--source herdr-orchestrator --agent "${self_agent:-claude}")
   herdr pane report-metadata "$self" "${label_args[@]}" --state-label working="$label" \
-    --ttl-ms $(((max + 30) * 1000)) --seq "$(date +%s%N)" >/dev/null 2>&1
+    --ttl-ms $(((max + 30) * 1000)) --seq "$(now_ns)" >/dev/null 2>&1
   trap 'herdr pane report-metadata "$self" "${label_args[@]}" --clear-state-labels \
-    --seq "$(date +%s%N)" >/dev/null 2>&1' EXIT
+    --seq "$(($(now_ns) + 1))" >/dev/null 2>&1' EXIT
 fi
 
 status_of() { # status_of <agent-list-json> <agent>; empty when gone
+  [ -n "$1" ] || { echo unknown; return; }
   jq -r --arg a "$2" \
     '.result.agents[] | select(.name == $a or .pane_id == $a) | .agent_status' <<<"$1" | head -1
 }
 
 start=$SECONDS
+list=
 while :; do
   events=()
   for f in "$status_dir"/*.done "$status_dir"/*.question "$status_dir"/*.failed "$status_dir"/*.message; do
     [ -e "$f" ] && events+=("marker $f")
   done
   if [ ${#agents[@]} -gt 0 ]; then
-    list=$(herdr agent list 2>/dev/null) || list='{"result":{"agents":[]}}'
+    list=$(herdr agent list 2>/dev/null) || list=
     for a in "${agents[@]}"; do
       s=$(status_of "$list" "$a")
       case $s in
@@ -78,7 +88,7 @@ while :; do
   fi
   if [ $((SECONDS - start)) -ge "$max" ]; then
     echo timeout
-    for a in "${agents[@]}"; do
+    for a in ${agents[@]+"${agents[@]}"}; do
       echo "state $a $(status_of "$list" "$a")"
     done
     exit 0

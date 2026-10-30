@@ -6,7 +6,8 @@
 #   1. the sub-agent starts a background job that writes its .done marker when it
 #      ends; Herdr shows the sub-agent idle meanwhile, but the wait must not return
 #      until the marker appears, and this pane carries the progress label;
-#   2. the sub-agent hits a permission prompt; the wait must return "blocked".
+#   2. the sub-agent hits a permission prompt; the wait must return "blocked";
+#   3. herdr-captain relays a message; the wait must return on its marker.
 # Closes the pane afterwards. Costs a few cheap agent turns.
 #
 # Usage: tests/herdr-orchestrator/wait-agents-live.sh [model]
@@ -64,5 +65,11 @@ herdr agent prompt "$name" "Run this exact shell command now, in the foreground:
 check "wait returned blocked" \
   "$(WAIT_AGENTS_POLL=2 "$wait_agents" --status-dir "$status_dir" --max 90 "$name")" "blocked $name"
 herdr agent send-keys "$name" esc >/dev/null 2>&1 || true
+
+echo "== relayed message"
+echo "use pnpm" >"$status_dir/.captain-1.tmp"
+mv "$status_dir/.captain-1.tmp" "$status_dir/captain-1.message"
+check "wait returned on the message" \
+  "$(WAIT_AGENTS_POLL=2 "$wait_agents" --status-dir "$status_dir" --max 30)" "marker $status_dir/captain-1.message"
 
 exit "$failed"

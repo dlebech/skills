@@ -1,15 +1,14 @@
 ---
 name: herdr-orchestrator
-description: "Orchestrate a larger implementation through Herdr worktrees, role-specific agent kinds and models, one independent review per task, and an integration branch that is the only PR branch. The work comes from the current session, a description, or a plan file. Use only when the user explicitly asks to orchestrate work with Herdr or invokes this skill, or when another skill such as herdr-issue-orchestrator says to load it."
-argument-hint: "[what to build, or a path to a plan/spec; defaults to this session's discussion] [agent=<kind>] [model=<model>] [implementer/reviewer/specialist overrides] [merge=squash|merge] [push-task-branches=yes|no] [draft-pr=ask|yes|no] [final-review=ask|yes|no] [branch=<name>]"
-compatibility: Requires git, jq, Herdr, and the herdr agent skill. Opening PRs requires the GitHub CLI.
+description: "Manually orchestrate a larger implementation through Herdr worktrees, role-specific agent kinds and models, one independent review per task, and an integration branch that is the only PR branch. The work comes from the current session, a description, a plan file, or one or more GitHub issues (and chosen sub-issues)."
+disable-model-invocation: true
+argument-hint: "[what to build, a path to a plan/spec, or issues like #185 #190; defaults to this session's discussion] [start with #dependency] [sub-issues=ask|all|none] [agent=<kind>] [model=<model>] [implementer/reviewer/specialist overrides] [merge=squash|merge] [push-task-branches=yes|no] [draft-pr=ask|yes|no] [final-review=ask|yes|no] [branch=<name>]"
+compatibility: Requires git, jq, Herdr, and the herdr agent skill. Issues and PRs require the GitHub CLI.
 metadata:
   required-skills: "herdr"
 ---
 
 Act as the sole coordinator for a larger piece of work. The user talks only to you; manage its agents, worktrees, reviews, fixes, and integration.
-
-Other skills can build on this one by supplying the spec, the integration branch name, and PR additions (for example, `herdr-issue-orchestrator` supplies them from GitHub issues). When invoked that way, take those from the calling skill and follow everything else here.
 
 ## Invariants
 
@@ -35,8 +34,8 @@ Parse `$ARGUMENTS` for the work source, constraints, options, and optional profi
 - `agent=<kind>` and `model=<model>` are shorthand defaults for all roles.
 - `implementer=<kind>` and `implementer-model=<model>` override implementation and fixes.
 - `reviewer=<kind>` and `reviewer-model=<model>` override review.
-- `specialist=<kind>` and `specialist-model=<model>` define an optional stronger profile for a user-assigned or unusually complex task.
-- Natural-language equivalents are valid, including models for any other role by name, such as “use Sonnet for implementation, Haiku for review, Opus for complex tasks and for evaluating suggestions.”
+- `specialist=<kind>` and `specialist-model=<model>` define an optional stronger profile for a user-assigned or unusually complex task, and for the final review of a large branch.
+- Natural-language equivalents are valid, such as “use Sonnet for implementation, Haiku for review, Opus for complex tasks.”
 
 Role overrides take precedence. With no configuration, use the orchestrator's agent kind when Herdr can identify it and its normal default model. If it cannot start that kind, ask the user which kind to use. Do not claim the orchestrator's exact model unless Herdr exposes it; if “the same model” cannot be detected, ask the user to name it.
 
@@ -48,7 +47,8 @@ Options:
 - `merge` (default `squash`): `squash` lands each task as one commit with a message you write, so the final PR's history reads like a reviewable changelog. `merge` keeps each task's full commit history in non-fast-forward merges, at the cost of a noisier PR.
 - `draft-pr` (default `ask`): ask once at the start whether to open the integration branch as a draft PR right after the first merge. An early draft PR runs CI on every merge, which catches failures local runs hide.
 - `final-review` (default `ask`): once every planned task is merged, run one review of the whole integration branch (section 8). Ask at the start, not at the end, so the run does not stall waiting for an answer.
-- `branch`: the integration branch name. Otherwise use the repository's branch naming convention, or a short slug of the goal.
+- `sub-issues` (default `ask`, issues only): which open sub-issues of the named issues to include (section 1a).
+- `branch`: the integration branch name. Otherwise use the repository's branch naming convention; for issues, `issue-<number>` for one or `issue-<main>-<slug>` for several, where the main issue is the parent or the first named; otherwise a short slug of the goal.
 
 Then:
 
@@ -56,16 +56,38 @@ Then:
    - **Session (default):** distill this conversation. Include the goal, acceptance criteria, constraints, decisions already made and why, rejected alternatives worth remembering, open questions, and what is out of scope. Prefer the conversation's latest position over earlier ones it replaced. Point at files, docs, or links discussed rather than paraphrasing them.
    - **Description in the arguments:** expand it with what the repository shows; ask only what the repository cannot answer.
    - **Plan or spec file:** read it and link to it from `spec.md`; record only what you add. If it is a `spec.md` inside an existing run directory, this is a handover or a resumed run: use that directory and continue from its `plan.md`.
-   - **Calling skill:** use the spec it provides.
+   - **GitHub issues** (numbers, `#numbers`, or URLs): resolve them as in section 1a. The session's discussion of them also goes in.
 2. Choose the integration branch name.
-3. Ask the start-of-run questions in one message: the `draft-pr` and `final-review` questions when they are `ask`, any calling skill's questions, and, when you drafted the spec from a session or a short description, a brief summary of it (goal, acceptance criteria, open questions, out of scope) and the branch name to confirm. Skip the spec confirmation for a plan file or a calling skill's spec unless something is ambiguous.
-4. Create the run directory at `${XDG_CACHE_HOME:-$HOME/.cache}/herdr-orchestrator/<repo>/<integration-branch>/`, so a fresh session can find it after a crash. If it already exists with a `plan.md`, this is a resumed run: go to section 7. Write `spec.md`, `plan.md`, and `decisions.md` (the decisions log) there. Briefs, review findings, and generated output also go here, and `status/` holds the markers (section 3).
-   Make the run findable by `herdr-captain`: rename your own tab to `orc: <integration-branch>` (`herdr tab rename "$HERDR_TAB_ID" ...`), and write `orchestrator.json` there: `{"pane_id", "tab_id", "workspace_id", "repo", "branch", "agent"}` (your pane, tab, and workspace IDs, the repository path, the integration branch, and your agent kind). Rewrite it whenever you move or resume in another pane.
+3. Create the run directory at `${XDG_CACHE_HOME:-$HOME/.cache}/herdr-orchestrator/<repo>/<integration-branch>/`, so a fresh session can find it after a crash. If it already exists with a `plan.md`, this is a resumed run: go to section 7. Write `spec.md`, `plan.md` (with `Status: waiting for user: start-of-run questions` until they are answered), and `decisions.md` (the decisions log) there. Briefs, review findings, and generated output also go here, and `status/` holds the markers (section 3).
+   Make the run findable by `herdr-captain`: rename your own tab to `orc: <integration-branch>` (`herdr tab rename "$HERDR_TAB_ID" ...`), and write `orchestrator.json` there: `{"pane_id", "tab_id", "repo", "branch"}` (your pane and tab IDs, the repository path, and the integration branch). Rewrite it whenever you move or resume in another pane.
+4. Ask the start-of-run questions in one message: the `draft-pr` and `final-review` questions when they are `ask`, the sub-issue choice and any closed or unreadable issue, and, when you drafted the spec from a session or a short description, a brief summary of it (goal, acceptance criteria, open questions, out of scope) and the branch name to confirm. Skip the spec confirmation for a plan file or issues unless something is ambiguous. Update `spec.md` with the answers.
 5. When the spec came from a long session, offer to continue in a fresh session to save context for the run: the user starts `/herdr-orchestrator <run-directory>/spec.md` in a new Herdr pane, and this session stops. Recommend it when the conversation is long; otherwise continue here.
 6. Discover the default branch (`gh repo view --json defaultBranchRef`, or `git symbolic-ref refs/remotes/origin/HEAD` without GitHub) and fetch it without changing the user's checkout. If there is uncommitted work in the user's checkout that the spec depends on, ask whether to commit it to the integration branch first.
 7. Inspect existing branches and worktrees. Reuse an unambiguous integration branch/worktree; otherwise create a labeled one from `origin/<default-branch>` without taking focus.
 
 Obtain workspace, pane, and path identifiers as directed by the `herdr` skill; never predict them.
+
+### 1a. Issues
+
+When the work comes from GitHub issues, also parse an explicitly named starting issue (“start with #175”).
+
+1. Verify GitHub access with `gh auth status`.
+2. Read each named issue and dependency with `gh issue view <number> --json number,title,body,url,labels,assignees,state`. A closed issue, or one that cannot be read, goes into the start-of-run questions.
+3. List each issue's sub-issues with `gh api repos/{owner}/{repo}/issues/<number>/sub_issues --paginate --jq '.[] | {number, title, state}'`. Also note task-list items in the body that link issues.
+4. If any issue has open sub-issues, apply `sub-issues`:
+   - `ask`: show the open sub-issues per parent (number, title, and a one-line read of size or dependency) in the start-of-run questions and ask which to solve in this run: all, a subset, or none (the parent's own body only). Recommend a set that fits one reviewable PR, and say which are blocked by others.
+   - `all`: include every open sub-issue. `none`: include none.
+   Skip closed sub-issues. Read each chosen sub-issue in full, and repeat this step for its own sub-issues.
+5. Drop duplicates, such as a named issue that is also a chosen sub-issue of another.
+
+Comments on an issue can change its scope. Read them (`gh issue view <number> --comments`) when the body looks outdated or refers to a discussion.
+
+`spec.md` gets a section per included issue (its link, goal, acceptance criteria, constraints, and decisions from its comments), lists the sub-issues deliberately left out of this run, and ends with an **Issue handling** section, so a resumed run keeps it:
+
+- map every task to the issue(s) it serves, honor an explicit starting issue first, and cover each included issue's acceptance criteria with some task;
+- reference the task's issue in each squash or merge commit;
+- in the PR, add a `Closes #<number>` line for each included issue the branch fully resolves, `Part of #<number>` for a parent whose remaining sub-issues stay open, and an issue column in the merged-task table;
+- in the final report, list each included issue with its status and the sub-issues left for later.
 
 ## 2. Plan autonomously
 
@@ -112,7 +134,7 @@ For every ready task:
 
 Run independent tasks in parallel only when their likely edit surfaces do not overlap. Do not start more simultaneous agents than can be monitored reliably, or than machine memory allows.
 
-Wait for agents in the foreground, never in a background shell or monitor. A Claude Code orchestrator that ends its turn to wait looks idle in Herdr, and Herdr does not let outside processes mark it busy. Watch CI the same way, in foreground chunks under 10 minutes. Long-running processes such as dev servers stay in the background; they are not waits. Run `scripts/wait-agents.sh` from this skill's directory:
+Wait for agents in the foreground, never in a background shell or monitor. A Claude Code orchestrator that ends its turn to wait looks idle in Herdr, and Herdr does not let outside processes mark it busy. Watch CI the same way, in foreground chunks under 10 minutes. Long-running processes such as dev servers stay in the background; they are not waits. Run `<skill-dir>/scripts/wait-agents.sh`:
 
 ```bash
 <skill-dir>/scripts/wait-agents.sh --status-dir <run-directory>/status \
@@ -124,7 +146,7 @@ Pass every running agent's name, and a short label with the plan position. Also 
 - `marker <file>`: read it and act on it, then rename it to `<file>.handled`. A `.question` marker goes to section 6. A `.message` marker is an instruction from the user relayed by `herdr-captain`; treat it as the user's own words, then record it in `decisions.md` if it decides something.
 - `blocked <agent>`: an approval or question dialog. Inspect it as in section 6.
 - `gone <agent>`: the agent exited. Check its worktree and decide whether to restart it.
-- `timeout`, with each agent's state: nothing needs you yet. An agent that has been `idle` or `done` without a marker through several timeouts may have stalled or forgotten its marker; read its last output before prompting it. Then run the wait again.
+- `timeout`, with each agent's state (`unknown` when Herdr did not answer): nothing needs you yet. An agent that has been `idle` or `done` without a marker through several timeouts may have stalled or forgotten its marker; read its last output before prompting it. Then run the wait again.
 
 Agent gotchas:
 
@@ -148,7 +170,7 @@ When a task is implemented, reviewed once, fixed, committed, and validated:
 1. Confirm the task branch contains only intended commits.
 2. If it is behind and would conflict, have its agent merge the integration branch in its own worktree, resolve conflicts where its environment and tests are, and re-run its checks. This also fixes ordering clashes such as duplicate migration timestamps.
 3. From the integration worktree, integrate it:
-   - `squash`: write a message with what and why, any reference the calling skill supplies (such as an issue), and key numbers. Afterwards verify `git diff <task-branch> <squash-commit>` is empty.
+   - `squash`: write a message with what and why, the task's issue if any, and key numbers. Afterwards verify `git diff <task-branch> <squash-commit>` is empty.
    - `merge`: make a non-fast-forward merge with a message naming the task.
 4. Run the smallest integration-level validation that covers the merge. If a PR exists, push and watch CI. Fix a red build before merging more, in a short-lived worktree like any change.
 5. Mark the task complete and use the updated integration branch as the base for dependent worktrees.
@@ -173,5 +195,5 @@ Re-read `spec.md`, `plan.md`, and `decisions.md` from the run directory, and act
 Continue until the spec is complete or a real blocker needs input. Keep the integration worktree and branch intact for final review.
 
 1. If `final-review` is on, review the whole integration branch once, after every planned task is merged. Start a fresh agent with the reviewer profile (or the specialist profile for a large branch) in the integration worktree. It reviews `<default>...<integration>` against `spec.md` for what per-task reviews miss: bugs across task boundaries, unmet acceptance criteria, duplication across tasks, dead code, inconsistencies, modules grown too large. Same rules as section 4: read-only, findings to a file, at most about 15. Triage them; fix must-fix findings as one more task with no further review, and let the user pick among the nice-to-haves, or record them as follow-ups. This is the only review of the review fixes; do not loop.
-2. Push the integration branch. Create or update its PR when requested or all planned work is complete. Include: a short statement of the goal from `spec.md`, a table of the merged tasks, validation and measurements, decisions to check (yours and the user's), a pre-launch or deploy checklist (migrations, new env vars, schedules, manual steps), follow-ups, and anything the calling skill adds (such as linked issues). Without a GitHub remote or `gh`, print the description for the user to paste.
-3. Set `plan.md`'s status to `finished`, then report the integration branch/worktree, completed tasks, validation status, and remaining work. Notify the user when the branch is green and ready, if they asked to be pinged. Do not present task branches for review.
+2. Push the integration branch. Create or update its PR when requested or all planned work is complete. Include: a short statement of the goal from `spec.md`, a table of the merged tasks, validation and measurements, decisions to check (yours and the user's), a pre-launch or deploy checklist (migrations, new env vars, schedules, manual steps), follow-ups, and the issue lines from `spec.md`'s Issue handling. Without a GitHub remote or `gh`, print the description for the user to paste.
+3. Set `plan.md`'s status to `finished`, then report the integration branch/worktree, completed tasks, validation status, remaining work, and for issues their status as in `spec.md`'s Issue handling. Notify the user when the branch is green and ready, if they asked to be pinged. Do not present task branches for review.
