@@ -41,7 +41,7 @@ Unhandled `.question` markers are questions sub-agents asked their orchestrator;
 When the user gives an instruction for a run:
 
 1. Identify the run. If the instruction could fit several, ask which.
-2. Write it, in the user's words with any context you add marked as yours, to `<run-directory>/inbox/.captain-<unix-time>.tmp`, then `mv` it to `captain-<unix-time>.message` in the same directory, so the orchestrator never reads it half-written. The orchestrator's foreground wait returns on it within seconds, and it also checks for messages between steps.
+2. Write it, in the user's words with any context you add marked as yours, to `<run-directory>/inbox/.captain-<time>.tmp`, with `<time>` from `date +%s`, then `mv` it to `captain-<time>.message` in the same directory, so the orchestrator never reads it half-written. The orchestrator's foreground wait returns on it within seconds, and it also checks for messages between steps.
 3. If the orchestrator is `idle` or `done`, it is not waiting and will not see the file; also prompt it: `herdr agent prompt <pane> "Read and act on <message-file>."` If it is `blocked` on a dialog, tell the user which tab to answer in rather than pressing keys for them.
 4. Check that the orchestrator picked it up (the message is renamed to `.handled`) the next time you look, and report what changed, from `decisions.md` or `plan.md`. A message still unhandled after a few minutes means the orchestrator is not waiting or checking; prompt it as in step 3.
 
