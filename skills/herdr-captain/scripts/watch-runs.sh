@@ -12,6 +12,8 @@
 # .question unhandled for 30 minutes. An event is reported once; it can fire
 # again after it clears. Exits 1 if Herdr stops answering, and 3 if another
 # watcher is already running, since two would split the events between them.
+# Exits silently once the captain in its pane is gone, since closing a tab does
+# not stop a background job and an orphan would hold the lock.
 #
 # Its memory lives in the runs root, so a restart neither repeats events nor
 # resets the idle timer: .captain-seen (reported events) and .captain-idle
@@ -51,6 +53,9 @@ while :; do
     continue
   fi
   herdr_failures=0
+  if [ -n "${HERDR_PANE_ID:-}" ] && ! herdr agent get "$HERDR_PANE_ID" >/dev/null 2>&1; then
+    exit 0
+  fi
   now=$(date +%s)
   current=()
   idle=()
