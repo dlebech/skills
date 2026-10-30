@@ -10,7 +10,8 @@
 # orchestrator pane gone or blocked on a dialog, the orchestrator idle for two
 # minutes while its plan is unfinished, a .failed marker, or a sub-agent
 # .question unhandled for 30 minutes. An event is reported once; it can fire
-# again after it clears. Exits 1 if Herdr stops answering.
+# again after it clears. Exits 1 if Herdr stops answering, and 3 if another
+# watcher is already running, since two would split the events between them.
 #
 # Its memory lives in the runs root, so a restart neither repeats events nor
 # resets the idle timer: .captain-seen (reported events) and .captain-idle
@@ -28,6 +29,14 @@ seen_file=$root/.captain-seen
 idle_file=$root/.captain-idle
 mkdir -p "$root"
 touch "$seen_file" "$idle_file"
+
+lock=$root/.captain-watcher
+if pid=$(cat "$lock" 2>/dev/null) && ps -p "$pid" -o args= 2>/dev/null | grep -q watch-runs; then
+  echo "another watcher is already running (pid $pid)" >&2
+  exit 3
+fi
+echo $$ >"$lock"
+trap 'rm -f "$lock"' EXIT
 
 herdr_failures=0
 while :; do

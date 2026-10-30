@@ -20,7 +20,7 @@ Act as the captain over several orchestrators. The user talks to you about all t
 
 ## Find the runs
 
-Run `<skill-dir>/scripts/runs.sh`. It reads every run directory under `${XDG_CACHE_HOME:-~/.cache}/herdr-orchestrator/` that has an `orchestrator.json`, and for each prints the branch, repository, the `Status:` line of `plan.md`, the orchestrator pane's Herdr state and progress label, and unhandled markers (or warns when Herdr did not answer). It skips finished runs unless given `--all`. It also lists `orc:` tabs that no run directory claims, for example orchestrators started before they recorded themselves; inspect those with `herdr agent read` on the tab's panes.
+Run `<skill-dir>/scripts/runs.sh`. It reads every run directory under `~/.herdr/orchestration/` that has an `orchestrator.json`, and for each prints the branch, repository, the `Status:` line of `plan.md`, the orchestrator pane's Herdr state and progress label, and unhandled markers (or warns when Herdr did not answer). It skips finished runs unless given `--all`. It also lists `orc:` tabs that no run directory claims, for example orchestrators started before they recorded themselves; inspect those with `herdr agent read` on the tab's panes.
 
 Each run directory holds `spec.md` (the goal), `plan.md` (tasks and their status), `decisions.md`, and `status/` (markers). Read them for detail rather than asking the orchestrator; it is busy.
 
@@ -61,4 +61,4 @@ When it wakes you:
 2. Tell the user in a few lines, needs-you first, and show a Herdr notification: `herdr notification show "herdr-captain" --body "<branch>: <one-line reason>" --sound request`. Ending your turn after that marks your tab Done, which is the user's cue.
 3. Start the watcher again.
 
-If it exits with an error (for example, Herdr stopped answering), say so and restart it once; if it fails again, stop watching and tell the user. Stop when the user says so, or offer to when no unfinished runs are left.
+If it exits with code 3, another captain is already watching: tell the user, keep answering questions and relaying here, and do not retry. If it exits with another error (for example, Herdr stopped answering), say so and restart it once; if it fails again, stop watching and tell the user. Stop when the user says so, or offer to when no unfinished runs are left.

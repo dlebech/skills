@@ -3,7 +3,7 @@
 #
 # Usage: runs.sh [--all]
 #
-# Reads every run directory under ${XDG_CACHE_HOME:-~/.cache}/herdr-orchestrator
+# Reads every run directory under ~/.herdr/orchestration
 # that has an orchestrator.json, skipping finished runs unless --all is given.
 # For each prints its directory, branch, repository, the Status line of its
 # plan.md, its orchestrator pane's state and progress label, and unhandled

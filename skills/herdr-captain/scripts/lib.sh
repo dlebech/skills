@@ -5,7 +5,7 @@
 #   <root>/<repo>/<branch>/plan.md            first line "Status: <status>"
 #   <root>/<repo>/<branch>/status/            markers, see MARKER_SUFFIXES
 
-root=${XDG_CACHE_HOME:-$HOME/.cache}/herdr-orchestrator
+root=$HOME/.herdr/orchestration
 MARKER_SUFFIXES="done question failed message"
 
 # Prints each run's orchestrator.json path.
