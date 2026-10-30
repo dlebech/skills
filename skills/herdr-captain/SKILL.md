@@ -49,9 +49,9 @@ An answer to an orchestrator's question is relayed the same way. An instruction 
 
 When the user asks you to start an orchestrator, start a new agent that runs the `herdr-orchestrator` skill. The skill is manual-only, and you stay the captain: never load it yourself or do the run's work.
 
-1. Identify the repository, which may not be the one you are running in. Look through `herdr workspace list`: each workspace's `.worktree` has `repo_name`, `repo_root`, and `is_linked_worktree`. If the name fits several repositories or none, find it on disk and ask the user when it is not certain.
+1. Identify the repository, which may not be the one you are running in. `<skill-dir>/scripts/repo-workspaces.sh <name-or-path>` lists the open workspaces for it, with the repository root and `primary` or `worktree`; without an argument it lists every repository. If the name fits several repositories or none, find it on disk and ask the user when it is not certain.
 2. Check `runs.sh` for an unfinished run on the same work. If there is one, tell the user rather than starting a second.
-3. Find the repository's own workspace: the one with that `repo_root` and `is_linked_worktree` false. Never use a linked worktree's workspace; those belong to runs. If there is none, create it: `herdr workspace create --cwd <repo-root> --label <repo-name> --no-focus`.
+3. Use the repository's `primary` workspace. Never use a `worktree` workspace; those belong to runs. If there is none, create it: `herdr workspace create --cwd <repo-root> --label <repo-name> --no-focus`.
 4. Create a tab for the orchestrator in that workspace, since it renames its own tab: `herdr tab create --workspace <id> --cwd <repo-root> --no-focus`. Start the agent in the tab's root pane with a unique name, using the kind and any model the user named, otherwise your own kind.
 5. If the start returns `agent_not_ready`, it is usually Claude Code's folder trust prompt. Tell the user which tab to answer it in, and continue when they say so.
 6. Prompt it with the skill's own command and the user's work and options, for example `herdr agent prompt <name> "/herdr-orchestrator 185 sub-issues=all implementer-model=sonnet"`. It has none of your conversation, so the prompt must carry the work: issues, a plan file path, or a full description. If the skill is missing, tell the user to install it.
@@ -73,4 +73,4 @@ When it wakes you:
 2. Tell the user in a few lines, needs-you first, and show a Herdr notification: `herdr notification show "herdr-captain" --body "<branch>: <one-line reason>" --sound request`. Ending your turn after that marks your tab Done, which is the user's cue.
 3. Start the watcher again.
 
-If it exits with code 3, another captain is already watching: tell the user, keep answering questions and relaying here, and do not retry. If it exits with another error (for example, Herdr stopped answering), say so and restart it once; if it fails again, stop watching and tell the user. It picks up new runs by itself, so keep it running with no unfinished runs, and stop only when the user says so.
+If it exits with code 3, a watcher is already running. If it is yours, carry on. If not, another captain is watching: tell the user, keep answering questions and relaying here, and do not retry. If it exits with another error (for example, Herdr stopped answering), say so and restart it once; if it fails again, stop watching and tell the user. It picks up new runs by itself, so keep it running with no unfinished runs, and stop only when the user says so.
