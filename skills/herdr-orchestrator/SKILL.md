@@ -1,8 +1,8 @@
 ---
 name: herdr-orchestrator
-description: "Manually orchestrate a larger implementation through Herdr worktrees, role-specific agent kinds and models, one independent review per task, and an integration branch that is the only PR branch. The work comes from the current session, a description, a plan file, or one or more GitHub issues (and chosen sub-issues)."
+description: "Manually orchestrate a larger implementation through Herdr worktrees, role-specific agent kinds and models, independent reviews per task or of the whole branch, and an integration branch that is the only PR branch. The work comes from the current session, a description, a plan file, or one or more GitHub issues (and chosen sub-issues)."
 disable-model-invocation: true
-argument-hint: "[what to build, a path to a plan/spec, or issues like #185 #190; defaults to this session's discussion] [start with #dependency] [sub-issues=ask|all|none] [agent=<kind>] [model=<model>] [implementer/reviewer/specialist overrides] [merge=squash|merge] [push-task-branches=yes|no] [draft-pr=ask|yes|no] [final-review=ask|yes|no] [ask=text|interactive] [branch=<name>]"
+argument-hint: "[what to build, a path to a plan/spec, or issues like #185 #190; defaults to this session's discussion] [start with #dependency] [sub-issues=ask|all|none] [agent=<kind>] [model=<model>] [implementer/reviewer/specialist overrides] [merge=squash|merge] [push-task-branches=yes|no] [draft-pr=ask|yes|no] [task-review=yes|no] [final-review=ask|yes|no] [review-rounds=<n>] [ask=text|interactive] [branch=<name>]"
 compatibility: Requires git, jq, Herdr, and the herdr agent skill. Issues and PRs require the GitHub CLI.
 metadata:
   required-skills: "herdr"
@@ -18,8 +18,8 @@ Act as the sole coordinator for a larger piece of work. The user talks only to y
 - Create one integration branch from the repository's default branch. All completed task branches merge into it.
 - Give each task its own branch and Herdr worktree, based on the current integration branch.
 - Use the configured Herdr agent kind and model for each role.
-- Review each task exactly once, in the same worktree, with a different agent process. The reviewer must not be the implementer.
-- Fix all actionable review findings before integration, but do not run a second review.
+- Review each task in the same worktree, once per `review-rounds`, unless `task-review=no`. Every round is a new agent process, and a reviewer must not be the implementer.
+- Fix all actionable review findings before integration, but never review beyond the configured rounds.
 - Never open a PR for a task branch. Only the integration branch becomes a PR.
 - Do not ask the user to review task branches. The user reviews the final integration branch.
 - Never commit bulky generated output (evaluation runs, recordings, reports, screenshots). Store it outside the repository and commit only a summary.
@@ -48,7 +48,9 @@ Options:
 - `push-task-branches` (default `yes`): push task branches to the remote as a backup, so work survives a crash. Never open PRs for them. Use `no` when the remote must stay clean or there is no remote.
 - `merge` (default `squash`): `squash` lands each task as one commit with a message you write, so the final PR's history reads like a reviewable changelog. `merge` keeps each task's full commit history in non-fast-forward merges, at the cost of a noisier PR.
 - `draft-pr` (default `ask`): ask once at the start whether to open the integration branch as a draft PR right after the first merge. An early draft PR runs CI on every merge, which catches failures local runs hide.
-- `final-review` (default `ask`): once every planned task is merged, run one review of the whole integration branch (section 8). Ask at the start, not at the end, so the run does not stall waiting for an answer.
+- `task-review` (default `yes`): review each task before it merges (section 4). `no` reviews only the integration branch, which suits a run of one issue or of small tasks; it turns `final-review` on without asking.
+- `final-review` (default `ask`): once every planned task is merged, review the whole integration branch (section 8). Ask at the start, not at the end, so the run does not stall waiting for an answer. If the user set both this and `task-review` to `no`, confirm in the start-of-run questions that the run should have no review.
+- `review-rounds` (default `1`): how many times each review runs, task or final, each round with a new agent after the previous round's fixes. Run every round, even after a clean one.
 - `ask` (default `text`): how you put questions to the user. `interactive` uses dialogs, for when the user is working in this tab; “ask interactively” means the same. Record it in `decisions.md` so a resumed run keeps it, and follow a later change of mind.
 - `sub-issues` (default `ask`, issues only): which open sub-issues of the named issues to include (section 1a).
 - `branch`: the integration branch name. Otherwise use the repository's branch naming convention; for issues, `issue-<number>` for one or `issue-<main>-<slug>` for several, where the main issue is the parent or the first named; otherwise a short slug of the goal.
@@ -62,10 +64,11 @@ Then:
    - **Description in the arguments:** expand it with what the repository shows; keep what only the user can answer for the start-of-run questions in step 4.
    - **Plan or spec file:** read it and link to it from `spec.md`; record only what you add. If it is a `spec.md` inside an existing run directory, this is a handover or a resumed run: use that directory and continue from its `plan.md`.
    - **GitHub issues** (numbers, `#numbers`, or URLs): resolve them as in section 1a. The session's discussion of them also goes in.
-4. Ask the start-of-run questions as one question (section 6): any agent kind or model you could not settle, the `draft-pr` and `final-review` questions when they are `ask`, the sub-issue choice and any closed or unreadable issue, and, when you drafted the spec from a session or a short description, a brief summary of it (goal, acceptance criteria, open questions, out of scope) and the branch name to confirm. Skip the spec confirmation for a plan file or issues unless something is ambiguous. Update `spec.md` with the answers. If the user picks another branch name, move the run directory to match, then run `init-run.sh` again with the new name and rename the tab.
+4. Ask the start-of-run questions as one question (section 6): any agent kind or model you could not settle, the `draft-pr` and `final-review` questions when they are still `ask`, the sub-issue choice and any closed or unreadable issue, and, when you drafted the spec from a session or a short description, a brief summary of it (goal, acceptance criteria, open questions, out of scope) and the branch name to confirm. Skip the spec confirmation for a plan file or issues unless something is ambiguous. Update `spec.md` with the answers. If the user picks another branch name, move the run directory to match, then run `init-run.sh` again with the new name and rename the tab.
 5. When the spec came from a long session, offer to continue in a fresh session to save context for the run: the user starts `/herdr-orchestrator <run-directory>/spec.md` in a new Herdr pane, and this session stops. Recommend it when the conversation is long; otherwise continue here.
 6. Discover the default branch (`gh repo view --json defaultBranchRef`, or `git symbolic-ref refs/remotes/origin/HEAD` without GitHub) and fetch it without changing the user's checkout. If there is uncommitted work in the user's checkout that the spec depends on, ask whether to commit it to the integration branch first.
 7. Inspect existing branches and worktrees. Reuse an unambiguous integration branch/worktree; otherwise create a labeled one from `origin/<default-branch>` without taking focus.
+8. Choose the run prefix and record it in `plan.md`, below the Status line, so every name from this run groups together in Herdr's lists: the issue number (`1190`), or otherwise the first word or two of the integration branch (`plan-outline`). The integration worktree's label starts with it, as do the names in sections 3, 4, and 8.
 
 Obtain workspace, pane, and path identifiers as directed by the `herdr` skill; never predict them.
 
@@ -127,9 +130,9 @@ When a lesson applies to everyone, amend `common.md` once and notify the running
 For every ready task:
 
 1. Ensure the integration worktree is clean and contains prerequisite merges.
-2. Create a labeled task worktree from the integration branch without taking focus, and rename its tab `🦀 <task>`, so workers are easy to tell from orchestrators and reviewers in Herdr's Agent panel.
+2. Create a task worktree from the integration branch without taking focus, with branch `<prefix>-<task>` and label `<prefix> <task>`, and rename its tab `🦀 <prefix> <task>`, for example `🦀 1190 t15-fe`, so workers are easy to tell from orchestrators and reviewers in Herdr's Agent panel, and to trace to their run.
 3. Isolate its runtime state before the agent starts: its own databases, ports, storage buckets, and env files, derived from the user's env with names and ports changed. Copy secrets only with the user's explicit permission. Assign shared, ordered resources (migration timestamps, sequence numbers, generated files such as schema types, lockfiles) and tell each agent which values are taken.
-4. Start a uniquely named implementer in that worktree's root pane, using the specialist profile for user-designated or deliberately escalated tasks and the implementation profile otherwise. Give it access to `shared/`, and not the rest of the run directory, through the agent's startup arguments (for Claude Code, `--add-dir <run-directory>/shared`), or every marker it writes stops at a permission prompt.
+4. Start an implementer named `impl-<prefix>-<task>` in that worktree's root pane (agent names must start with a letter, stay within 32 characters, and be unique across all of Herdr, so shorten the task part if needed), using the specialist profile for user-designated or deliberately escalated tasks and the implementation profile otherwise. Give it access to `shared/`, and not the rest of the run directory, through the agent's startup arguments (for Claude Code, `--add-dir <run-directory>/shared`), or every marker it writes stops at a permission prompt.
 5. Prompt it to read `spec.md`, `common.md`, and its task brief. Tell it to work only in its worktree, inspect existing code before editing, make a focused implementation with tests where appropriate, run the relevant validation, commit work in progress regularly, and ask a precise question through a `.question` marker if blocked, and write its `.done` marker only when everything is finished.
 6. Prompt it according to the `herdr` skill, then wait for it as below.
 7. Independently verify the branch is committed, clean, and satisfies the task's validation before review.
@@ -156,19 +159,21 @@ Agent gotchas:
 - A `--wait` timeout on `herdr agent prompt` does not prove failure; check the status before sending anything again.
 - Claude Code shows a suggested next prompt as ghost text in the input box. In a pane read it looks like an unsent user instruction. Ignore it, and clear it (`ctrl+u`) before prompting.
 
-## 4. Review once, then fix
+## 4. Review, then fix
 
-Create another tab named `🔍 <task>` in the task worktree's Herdr workspace and start a new agent there with the reviewer profile, a distinct reviewer name, and `shared/` access as in section 3. Do not reuse the implementer's pane or identity. The implementer and reviewer may use the same kind or model, but they must be separate agent processes. Review may start once the implementation is committed, while slow verification such as long end-to-end runs continues in parallel.
+With `task-review=no`, skip this section: once a task passes step 7 of section 3, it goes to section 5.
+
+Create another tab named `🔍 <prefix> <task>` in the task worktree's Herdr workspace and start a new agent there with the reviewer profile, the name `rev-<prefix>-<task>`, and `shared/` access as in section 3. Do not reuse the implementer's pane or identity. The implementer and reviewer may use the same kind or model, but they must be separate agent processes. Review may start once the implementation is committed, while slow verification such as long end-to-end runs continues in parallel.
 
 If the reviewer exposes a code-review skill, command, or equivalent, use it with the base branch and task requirements. Otherwise instruct it to inspect the task diff against the integration branch and report only actionable correctness, regression, test, security, and requirement findings. Give it the base branch, `spec.md`, the task requirements, the review template, and a prohibition on editing files. It writes verified findings to a file (most severe first, each with location, failure scenario, suggested fix, and must-fix or nice-to-have), then its `.done` marker pointing at that file.
 
-Either approach is the task's one and only review pass. If the selected agent cannot inspect the repository or perform the requested review by either route, ask the user to select another reviewer profile; do not count that failed capability check as the task's review.
+Either approach is one review round. If the selected agent cannot inspect the repository or perform the requested review by either route, ask the user to select another reviewer profile; do not count that failed capability check as a round.
 
-Triage the findings: decide each one (fix as suggested, fix differently, defer, reject), and send the file with your decisions to the original implementer. Ask it to fix, validate, and commit. Verify the branch and tests directly; do not review again. If the implementer is unavailable, start a fixer with the implementation profile and `shared/` access in the same worktree, in a `🦀 <task>` tab. It receives the triaged findings and does implementation only. Record deferred findings as follow-ups.
+Triage the findings: decide each one (fix as suggested, fix differently, defer, reject), and send the file with your decisions to the original implementer. Ask it to fix, validate, and commit. Verify the branch and tests directly. With rounds left in `review-rounds`, exit the reviewer and repeat this section with a new one, named `rev-<prefix>-<task>-<round>` in a `🔍 <prefix> <task> <round>` tab, which reviews the whole task diff including the fixes. After the last round, do not review again. If the implementer is unavailable, start a fixer with the implementation profile and `shared/` access in the same worktree, in a `🦀 <prefix> <task>` tab. It receives the triaged findings and does implementation only. Record deferred findings as follow-ups.
 
 ## 5. Merge upward
 
-When a task is implemented, reviewed once, fixed, committed, and validated:
+When a task is implemented, reviewed and fixed as configured, committed, and validated:
 
 1. Confirm the task branch contains only intended commits.
 2. If it is behind and would conflict, have its agent merge the integration branch in its own worktree, resolve conflicts where its environment and tests are, and re-run its checks. This also fixes ordering clashes such as duplicate migration timestamps.
@@ -206,6 +211,6 @@ Re-read `spec.md`, `plan.md`, and `decisions.md` from the run directory, and act
 
 Continue until the spec is complete or a real blocker needs input. Keep the integration worktree and branch intact for final review.
 
-1. If `final-review` is on, review the whole integration branch once, after every planned task is merged. Start a fresh agent with the reviewer profile (or the specialist profile for a large branch) in a `🔍 final review` tab in the integration worktree. It reviews `<default>...<integration>` against `spec.md` for what per-task reviews miss: bugs across task boundaries, unmet acceptance criteria, duplication across tasks, dead code, inconsistencies, modules grown too large. Same rules as section 4: read-only, findings to a file, at most about 15. Triage them; fix must-fix findings as one more task with no further review, and let the user pick among the nice-to-haves, or record them as follow-ups. This is the only review of the review fixes; do not loop. Exit the final reviewer and any fixer once they are done.
+1. If `final-review` is on, review the whole integration branch after every planned task is merged, once per `review-rounds`. Start a fresh agent with the reviewer profile (or the specialist profile for a large branch) in a `🔍 <prefix> final review` tab in the integration worktree. It reviews `<default>...<integration>` against `spec.md` for what per-task reviews miss: bugs across task boundaries, unmet acceptance criteria, duplication across tasks, dead code, inconsistencies, modules grown too large. Same rules as section 4: read-only, findings to a file, at most about 15. Triage them, and fix must-fix findings as one more task with no task review. With rounds left, exit the reviewer and start another fresh one in a `🔍 <prefix> final review <round>` tab, on the branch with those fixes merged. After the last round, let the user pick among the nice-to-haves, or record them as follow-ups. The rounds are the only review of the review fixes; do not loop. Exit the final reviewer and any fixer once they are done.
 2. Push the integration branch. Create or update its PR when requested or all planned work is complete. Include: a short statement of the goal from `spec.md`, a table of the merged tasks, validation and measurements, decisions to check (yours and the user's), a pre-launch or deploy checklist (migrations, new env vars, schedules, manual steps), follow-ups, and the issue lines from `spec.md`'s Issue handling. Without a GitHub remote or `gh`, print the description for the user to paste.
 3. Set `plan.md`'s status to `finished`, then report the integration branch/worktree, completed tasks, validation status, remaining work, and for issues their status as in `spec.md`'s Issue handling. Notify the user when the branch is green and ready, if they asked to be pinged. Do not present task branches for review.
