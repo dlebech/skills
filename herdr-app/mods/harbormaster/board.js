@@ -220,13 +220,16 @@ export function crew(view, t) {
   const ctx = facts();
   const cap = captainOf(ctx);
   const runOf = (term) => view.runs.find((r) => r.terminal === term.address);
+  // The focused agent, as Herdr's own Agents list marks it.
+  const current = ctx.agents.find((a) => a.focused)?.address;
   // Unfinished orchestrators first, then finished ones still open.
   const orchestrators = ctx.terminals.filter((term) => term.state === "live" && term.labels?.role === "orchestrator")
     .map((term) => ({ term, r: runOf(term) }))
     .map((o) => ({ ...o, state: o.r?.phase ?? runPhase(o.term.labels?.["run.status"]) }))
     .sort((a, b) => (a.state === "finished") - (b.state === "finished"));
   const row = ({ id, emoji, title, detail, tone, status, address, edge, pin = false }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
-    .rounded(7).bg(edge + "14").cursor_pointer().hover((st) => st.bg(edge + "26"))
+    .rounded(7).bg(address === current ? edge + "33" : edge + "14").cursor_pointer().hover((st) => st.bg(address === current ? edge + "40" : edge + "26"))
+    .when(address === current, (el) => el.border(1).border_color(edge + "aa"))
     .on_click(() => focusAgent(address))
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
     .child(div().flex_none().text_size(15).child(emoji))
@@ -270,7 +273,7 @@ export function crew(view, t) {
     .flatMap((term) => [term.address, ...workersOf(term.address, ctx).map((w) => w.address)]));
   const adrift = ctx.agents.filter((a) => !crewAddrs.has(a.address));
   const stray = (a) => h_flex().id(`adrift-${a.address}`).flex_none().gap(8).h(24).px(8).items_center().rounded(6).cursor_pointer()
-    .hover((st) => st.bg(t.hover)).tooltip(a.title || a.address)
+    .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(t.hover)).tooltip(a.title || a.address)
     .on_click(() => focusAgent(a.address))
     .child(programIcon(a.program, 13, t.muted))
     .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(`${a.space_name} · ${a.tab_name}`))
