@@ -1,0 +1,81 @@
+--- a/main.js	2026-11-03 17:34:56.781148262 +0100
++++ b/main.js	2026-11-03 17:34:56.782034472 +0100
+@@ -231,14 +231,43 @@
+     const urgency = new Map(list.map((a) => [a.address, Math.max(this.rank(a), ...this.tree(all, a.address).map((s) => RANK[kidStatus(s.t, this.listed)] ?? 0))]));
+     const rankOf = (a) => urgency.get(a.address);
+     if (byPriority) list = [...list].sort((x, y) => rankOf(y) - rankOf(x) || this.since(y) - this.since(x) || y.seq - x.seq);
+-    const pinned = list.filter((a) => a.pinned);
+-    const rest = list.filter((a) => !a.pinned);
+-    list = [...pinned, ...rest];
++    // Runs: the captain first, then every orchestrator from any space, by their role labels.
++    const role = new Map(all.map((k) => [k.address, k.labels?.role]));
++    const captains = list.filter((a) => role.get(a.address) === "captain");
++    const orchestrators = list.filter((a) => role.get(a.address) === "orchestrator");
++    const roled = new Set([...captains, ...orchestrators].map((a) => a.address));
++    const pinned = list.filter((a) => a.pinned && !roled.has(a.address));
++    const rest = list.filter((a) => !a.pinned && !roled.has(a.address));
++    list = [...captains, ...orchestrators, ...pinned, ...rest];
+     setAgentOrder(list.map((a) => a.address));
+ 
++    // Runs: what the captain and each orchestrator are doing, from their labels.
++    const runInfo = (a) => {
++      const labels = all.find((k) => k.address === a.address)?.labels ?? {};
++      if (role.get(a.address) === "captain") {
++        const watching = all.some((k) => k.state === "live" && (k.name === "captain-watch" || k.address.endsWith("/captain-watch")));
++        const n = orchestrators.length;
++        return { tone: t.accent, warn: !watching, text: watching ? `on watch \u00b7 ${n} run${n === 1 ? "" : "s"}` : "not watching runs" };
++      }
++      const st = labels["run.status"] ?? "running";
++      const prs = (labels["run.prs"] ?? "").split(/\s+/).filter(Boolean).length;
++      const tone = st === "finished" ? t.done : st === "running" ? t.working : t.blocked;
++      return { tone, status: st, text: [labels.progress, prs ? `${prs} PR${prs === 1 ? "" : "s"}` : null].filter(Boolean).join(" \u00b7 ") };
++    };
++    const roleCard = (a, el) => {
++      const info = runInfo(a);
++      return v_flex().id(`rc-${a.address}`).relative().overflow_hidden().flex_none().rounded(8).mb(3).bg(info.tone + "16")
++        .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(info.tone))
++        .child(el)
++        .when(Boolean(info.text) || (info.status && info.status !== "running"), (el) => el.child(h_flex().pl(33).pr(8).pb(6).mt(-5).gap(6).items_center().text_size(11)
++          .when(Boolean(info.status) && info.status !== "running", (el) => el.child(div().flex_none().px(5).h(15).rounded(4).flex().items_center()
++            .bg(info.tone + "2a").text_size(10).font_semibold().text_color(info.tone).child(info.status)))
++          .child(div().flex_1().min_w(0).truncate().text_color(info.warn ? t.blocked : t.muted).child(info.text))));
++    };
++
+     const withKids = (a, i) => {
+       const subs = collapsed ? [] : this.tree(all, a.address);
+-      const r = row(a, i, subs);
++      const r = roled.has(a.address) && !collapsed ? roleCard(a, row(a, i, subs)) : row(a, i, subs);
+       if (this.folded.has(a.address)) return [r];
+       return [r, ...subs.map((s) => this.subRow(t, s, shown, byPriority))];
+     };
+@@ -324,7 +353,7 @@
+         .child(svg(`mods/workspace-chrome/${isPinned ? "pin-off" : "pin"}.svg`).size(13));
+       // Under a space header the space goes without saying; an automatic tab number says nothing.
+       // Without a space header above (priority, pinned) the row names its space.
+-      const full = byPriority || isPinned;
++      const full = byPriority || isPinned || roled.has(a.address);
+       const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
+       return h_flex()
+         .id(`ag-${a.address}`)
+@@ -361,7 +390,11 @@
+ 
+     // Groups in list order: spaces (grouped) or priority sections. Agents of a
+     // space are next to each other in agents(), so neighbours make a group.
+-    const groups = pinned.length ? [{ id: "pinned", label: "Pinned", status: null, members: pinned }] : [];
++    const groups = [
++      { id: "captain", label: "\u2693 Captain", status: null, members: captains, runs: true },
++      { id: "orchestrators", label: "\u{1F419} Orchestrators", status: null, members: orchestrators, runs: true },
++      { id: "pinned", label: "Pinned", status: null, members: pinned },
++    ].filter((g) => g.members.length);
+     for (const a of rest) {
+       const r = rankOf(a) || RANK.idle;
+       const id = byPriority ? `sec-${r}` : `sp-${a.space}`;
+@@ -389,7 +422,7 @@
+           open ? this.folded.add(g.id) : this.folded.delete(g.id);
+           cx.notify();
+         })
+-        .child(div().truncate().text_color(t[g.status] ?? t.dim).child(g.label))
++        .child(div().truncate().text_color(g.runs ? t.foreground : t[g.status] ?? t.dim).when(Boolean(g.runs), (el) => el.text_size(11.5).font_semibold()).child(g.label))
+         .when(byPriority || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
+         .child(div().flex_1())
+         .when(!open, (el) => el

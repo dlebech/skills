@@ -1,0 +1,14 @@
+{
+  "id": "rp-root", "type": "column", "theme": "paper", "preview": "layouts/runs-pasture.svg",
+  "font_size": 13, "ui_font": "Geist", "background": "#ab7748",
+  "colors": { "background": "#fff9e9", "foreground": "#343c32", "accent": "#658342", "border": "#ab7748" },
+  "terminal_padding": [10, 12], "resizable": false,
+  "children": [
+    { "id": "rp-field", "type": "block", "size": { "weight": 0.95 }, "min": 300, "content": { "mod": "runs", "props": { "role": "pasture" } } },
+    { "id": "rp-rail", "type": "block", "size": { "px": 29 }, "content": { "mod": "runs", "props": { "role": "pasture-rail" } } },
+    { "id": "rp-shed", "type": "block", "size": { "weight": 1 }, "padding": [0, 10], "background": "#ab7748",
+      "content": { "tab": "active", "pane": { "gap": 10, "radius": 3, "lone": true, "background": "#fff9e9",
+        "border": { "width": 4, "color": "#8b5e37" }, "focus": { "width": 4, "color": "#5f3f22" },
+        "header": { "content": { "mod": "runs", "props": { "role": "pasture-pane" } }, "height": 28, "position": "top", "reveal": "always" } } } }
+  ]
+}

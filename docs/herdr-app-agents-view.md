@@ -1,5 +1,7 @@
 # Captain and orchestrators at the top of Herdr's Agents list
 
+> For more (progress on each card, a runs overview with PRs, and two layouts), run `herdr-app/install.sh` instead; see [herdr-app-runs-view.md](herdr-app-runs-view.md). It includes everything below.
+
 The `herdr-app-*` skills label their agents: the captain's terminal carries `role=captain`, and every orchestrator's carries `role=orchestrator`. Herdr's own Agents list does not read those labels. These steps make a copy of it that does, and that shows:
 
 - **⚓ Captain** first,
