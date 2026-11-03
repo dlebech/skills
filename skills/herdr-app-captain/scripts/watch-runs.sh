@@ -13,6 +13,11 @@
 # minutes while its plan is unfinished. An event is reported once; it can fire again
 # after it clears. Exits 1 if hc stops answering.
 #
+# It checks at once whenever an orchestrator's terminal changes (hc events on the
+# role=orchestrator label: status, labels such as set-status.sh's run.status,
+# finishing), and otherwise every WATCH_RUNS_INTERVAL seconds, which keeps the idle
+# timer and plan.md-only changes going.
+#
 # Its memory lives in the runs root, so a restart neither repeats events nor
 # resets the idle timer: .captain-seen (reported events) and .captain-idle
 # ("<since>\t<run-directory>" for orchestrators seen idle).
@@ -30,6 +35,29 @@ mkdir -p "$root"
 chmod 700 "$root"
 touch "$seen_file" "$idle_file"
 
+# Events arrive on fd 4. A restarted stream is checked right away, since it may
+# have missed some.
+open_events() {
+  exec 4< <(hc events --label role=orchestrator 2>/dev/null)
+}
+
+# Returns after an event (taking a burst as one), the interval, or the stream ending.
+wait_for_change() {
+  local line left deadline=$((SECONDS + interval))
+  while left=$((deadline - SECONDS)); [ "$left" -gt 0 ]; do
+    if read -r -t "$left" -u 4 line; then
+      case $line in *'"method":"event"'*) ;; *) continue ;; esac
+      while read -r -t 1 -u 4 line; do :; done
+      return
+    elif [ $? -le 128 ]; then
+      sleep 2
+      open_events
+      return
+    fi
+  done
+}
+
+open_events
 hc_failures=0
 while :; do
   if ! terminals=$(hc ls --json 2>/dev/null); then
@@ -82,5 +110,5 @@ while :; do
     printf '%s\n' "${new[@]}"
     exit 0
   fi
-  sleep "$interval"
+  wait_for_change
 done

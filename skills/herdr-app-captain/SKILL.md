@@ -64,7 +64,7 @@ When the user asks you to start an orchestrator, start a new agent that runs the
 
 1. Identify the repository, which may not be the one you are running in. `<skill-dir>/scripts/repo-spaces.sh <name-or-path>` lists the open spaces for it, with the repository root and `primary` or `worktree`; without an argument it lists every repository. If the name fits several repositories or none, find it on disk and ask the user when it is not certain.
 2. Check `runs.sh` for an unfinished run on the same work. If there is one, tell the user rather than starting a second.
-3. Use the repository's `primary` space. Never use a `worktree` space; those belong to runs. If there is none, create it: `herdr-app do space.new --name <repo-name> --folder <repo-root>`, and read its id from the reply or `herdr-app ls`. That space opens with a shell tab; leave it.
+3. Use the repository's `primary` space. Never use a `worktree` space; those belong to runs. If there is none, create it: `herdr-app do space.new --name <repo-name> --folder <repo-root>`, and read its id from the reply. `space.new` switches the window to the new space, so before it, note the active space's id (`herdr-app ls`, the space with `active: true`), and right after it, select that one again with `herdr-app do space.select --id <id>`. That space opens with a shell tab; leave it.
 4. Write the prompt to a file with the skill's own command and the user's work and options, for example `/herdr-app-orchestrator 185 sub-issues=all implementer-model=sonnet` for Claude Code, `/skill:herdr-app-orchestrator ...` for `pi`, and for other kinds a plain sentence asking it to load that skill. It has none of your conversation, so the prompt must carry the work: issues, a plan file path, or a full description.
 5. Start it, with a unique name such as `orc-<repo>-<work>`, using the kind and any model the user named, otherwise your own kind. Use the orchestrator skill's script, from the skill directory beside this one:
 
@@ -85,7 +85,7 @@ After your first report, even with no runs yet, start the watcher in its own ter
 hc run --bg --name captain-watch --cwd "$HOME" <skill-dir>/scripts/watch-runs.sh
 ```
 
-It ends with you, and hc tells you when it exits, on any agent kind, whether you are idle or busy. It checks every 30 seconds and exits as soon as a run newly needs the user, printing one line per event:
+It ends with you, and hc tells you when it exits, on any agent kind, whether you are idle or busy. It checks as soon as an orchestrator's terminal changes, through `hc events`, and otherwise every 30 seconds, and exits as soon as a run newly needs the user, printing one line per event:
 
 ```
 attention <branch> <reason>	<run-directory>

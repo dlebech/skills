@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Set a run's status: the first line of plan.md, and the orchestrator's tab name.
+# Set a run's status: the first line of plan.md, the orchestrator's tab name, and
+# its terminal's run.status label (running, waiting, blocked, or finished).
 #
 # Usage: set-status.sh <run-directory> <status>
 #
@@ -17,11 +18,18 @@ tmp=$dir/.plan.tmp
 
 branch=$(jq -r .branch "$dir/orchestrator.json") || exit 1
 tab=$(jq -r '.tab_id // empty' "$dir/orchestrator.json")
+terminal=$(jq -r '.terminal // empty' "$dir/orchestrator.json")
 case $status in
-  "waiting for user"* | blocked*) name="🐙 ✋ $branch" ;;
-  finished) name="🐙 ✓ $branch" ;;
-  *) name="🐙 $branch" ;;
+  "waiting for user"*) name="🐙 ✋ $branch" word=waiting ;;
+  blocked*) name="🐙 ✋ $branch" word=blocked ;;
+  finished) name="🐙 ✓ $branch" word=finished ;;
+  *) name="🐙 $branch" word=running ;;
 esac
+# The label change is an hc event, which wakes herdr-app-captain's watcher at once.
+if [ -n "$terminal" ]; then
+  hc label "$terminal" "run.status=$word" >/dev/null 2>&1 ||
+    echo "warning: could not label terminal $terminal" >&2
+fi
 if [ -n "$tab" ]; then
   herdr-app do tab.rename --id "$tab" --name "$name" >/dev/null 2>&1 ||
     echo "warning: could not rename tab $tab (is the Herdr window open?)" >&2
