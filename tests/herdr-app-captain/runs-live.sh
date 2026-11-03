@@ -6,12 +6,14 @@
 #   1. a labelled terminal gets a tab; init-run.sh records it and names it 🐙;
 #   2. set-status.sh changes plan.md, the tab, and the run.status label; publishes
 #      progress, tasks, issues, PRs and waiting agents to status.json and labels,
-#      keeping each until changed, and publishes them again without a status;
+#      keeping each until changed, and publishes them again without a status and
+#      when init-run.sh resumes the run; refuses a newline, and changes nothing
+#      when status.json is unreadable;
 #   2b. integration-worktree.sh creates the worktree and its space, keeps the
 #      active space, and does nothing more the second time; reuses a worktree
 #      that already has the branch, and refuses the main checkout's branch;
 #   3. runs.sh shows the run, its question, its unhandled message, and its
-#      status.json facts, also once its terminal is gone;
+#      status.json facts and their age, also once its terminal is gone;
 #   4. repo-spaces.sh finds the space;
 #   5. watch-runs.sh, in its own terminal, tells this terminal when it exits, and
 #      reports an event once: waiting for user, finished, orchestrator gone; with
@@ -129,6 +131,21 @@ check "facts kept, PR replaced" "$(jq -c '[.progress, .issues, .prs, .waiting]' 
 hc label "$fake" progress= run.prs= >/dev/null
 "$orch/set-status.sh" "$dir"
 check "labels published again" "$(labels)" '["task 2/2 in review","https://example.com/pr/3 https://example.com/pr/2"]'
+hc label "$fake" progress= run.prs= role= >/dev/null
+out=$(cd "$toy" && HC_TERMINAL_ID=$address "$orch/init-run.sh" feature/x)
+check "init-run on a resume" "$out" "existing $dir"
+check "labels after a resume" "$(labels)" '["task 2/2 in review","https://example.com/pr/3 https://example.com/pr/2"]'
+check "role after a resume" "$(hc get "$fake" --json | jq -r .labels.role)" orchestrator
+"$orch/set-status.sh" "$dir" --waiting $'impl-x\t rev-y\n'
+check "waiting split on any space" "$(jq -c .waiting "$dir/status.json")" '["impl-x","rev-y"]'
+"$orch/set-status.sh" "$dir" --waiting ""
+"$orch/set-status.sh" "$dir" --progress $'two\nlines' 2>/dev/null
+check "newline refused" "$?:$(jq -r .progress "$dir/status.json")" "2:task 2/2 in review"
+cp "$dir/status.json" "$work/status.good"
+echo '{broken' >"$dir/status.json"
+"$orch/set-status.sh" "$dir" blocked 2>/dev/null
+check "unreadable status.json changes nothing" "$?:$(head -1 "$dir/plan.md")" "1:Status: waiting for user: which db?"
+mv "$work/status.good" "$dir/status.json"
 
 echo "== integration-worktree.sh"
 before=$(active_space)
@@ -160,6 +177,7 @@ contains "shows message" "$out" "unhandled: captain-1.message"
 contains "shows progress" "$out" "progress: task 2/2 in review; 1/2 tasks merged"
 contains "shows a PR" "$out" "pr: acme/api https://example.com/pr/3"
 contains "shows an issue" "$out" "issue: https://example.com/i/1"
+contains "shows the facts' age" "$out" "facts updated: 20"
 
 echo "== repo-spaces.sh"
 out=$("$capt/repo-spaces.sh" "$toy")

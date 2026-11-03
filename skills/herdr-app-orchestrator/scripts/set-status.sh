@@ -14,7 +14,8 @@
 #   --issue     an issue the run works on; added once
 #   --pr        a repository's PR, e.g. --pr acme/api https://github.com/acme/api/pull/9;
 #               replaces that repository's earlier one
-#   --waiting   the agents waiting for an answer, space-separated; "" clears them
+#   --waiting   every agent now waiting for an answer, space-separated, replacing
+#               the earlier list; "" clears it
 #
 # status.json: {branch, folder, status, state, progress, tasks: {merged, planned},
 # issues: [url], prs: [{repo, url}], waiting: [name], updated}, where state is
@@ -23,7 +24,8 @@
 # run.status (the state), progress, and run.prs (the PR URLs, space-separated).
 # The tab becomes "🐙 <branch>", "🐙 ✋ <branch>" or "🐙 ✓ <branch>".
 # plan.md and status.json are what count: a closed window, or an orchestrator with
-# no tab, only prints a warning, since the run goes on without one.
+# no tab, only prints a warning, since the run goes on without one. An unreadable
+# status.json fails the call before anything changes.
 set -u
 
 usage() {
@@ -51,12 +53,12 @@ while [ $# -gt 0 ]; do
     *) usage ;;
   esac
 done
+# One line each: a newline would split the labels apart.
+case $status$progress in *$'\n'*) echo "status and --progress must be one line" >&2; exit 2 ;; esac
 
-if [ -n "$status" ]; then
-  tmp=$dir/.plan.tmp
-  { echo "Status: $status"; tail -n +2 "$dir/plan.md"; } >"$tmp" && mv "$tmp" "$dir/plan.md" || exit 1
-else
-  status=$(head -1 "$dir/plan.md" | sed 's/^Status: *//') || exit 1
+new_status=$status
+if [ -z "$status" ]; then
+  status=$(sed -n '1s/^Status: *//p' "$dir/plan.md") || exit 1
   [ -n "$status" ] || { echo "no Status line in $dir/plan.md" >&2; exit 1; }
 fi
 
@@ -71,7 +73,10 @@ case $status in
 esac
 
 old='{}'
-[ -e "$dir/status.json" ] && old=$(cat "$dir/status.json")
+if [ -e "$dir/status.json" ]; then
+  old=$(jq -ce 'objects' "$dir/status.json" 2>/dev/null) ||
+    { echo "$dir/status.json is not a JSON object; fix or remove it" >&2; exit 1; }
+fi
 issues_json=$(jq -cn '$ARGS.positional' --args ${issues[@]+"${issues[@]}"})
 prs_json=$(jq -cn '$ARGS.positional as $a | [range(0; $a | length; 2) as $i | {repo: $a[$i], url: $a[$i + 1]}]' \
   --args ${prs[@]+"${prs[@]}"})
@@ -87,9 +92,15 @@ jq -n --argjson old "$old" --argjson issues "$issues_json" --argjson prs "$prs_j
   | .issues = reduce $issues[] as $u (.issues; if index([$u]) then . else . + [$u] end)
   | .prs = reduce $prs[] as $p (.prs;
       if any(.[]; .repo == $p.repo) then map(if .repo == $p.repo then $p else . end) else . + [$p] end)
-  | if $waiting_set != "" then .waiting = ($waiting | split(" ") | map(select(. != ""))) else . end
+  | if $waiting_set != "" then .waiting = [$waiting | splits("\\s+") | select(. != "")] else . end
   | {branch, folder, status, state, progress, tasks, issues, prs, waiting, updated}
-  ' >"$tmp" && mv "$tmp" "$dir/status.json" || exit 1
+  ' >"$tmp" || exit 1
+# plan.md first: it is what counts, and status.json is only written once it changed.
+if [ -n "$new_status" ]; then
+  { echo "Status: $new_status"; tail -n +2 "$dir/plan.md"; } >"$dir/.plan.tmp" &&
+    mv "$dir/.plan.tmp" "$dir/plan.md" || { rm -f "$tmp"; exit 1; }
+fi
+mv "$tmp" "$dir/status.json" || exit 1
 
 # A label change is an hc event, which wakes herdr-app-captain's watcher at once.
 if [ -n "$terminal" ]; then
