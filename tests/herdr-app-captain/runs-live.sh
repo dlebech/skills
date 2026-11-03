@@ -6,7 +6,8 @@
 #   1. a labelled terminal gets a tab; init-run.sh records it and names it 🐙;
 #   2. set-status.sh changes plan.md, the tab, and the run.status label;
 #   2b. integration-worktree.sh creates the worktree and its space, keeps the
-#      active space, and does nothing more the second time;
+#      active space, and does nothing more the second time; reuses a worktree
+#      that already has the branch, and refuses the main checkout's branch;
 #   3. runs.sh shows the run, its question, and its unhandled message;
 #   4. repo-spaces.sh finds the space;
 #   5. watch-runs.sh, in its own terminal, tells this terminal when it exits, and
@@ -14,7 +15,8 @@
 #      a 10-minute interval, so only hc events can wake it for finished;
 #   6. a second watcher is refused by name;
 #   7. a run started in a folder holding two repositories: init-run.sh names it
-#      after the folder, and repo-spaces.sh lists the folder's space;
+#      after the folder, and repo-spaces.sh lists the folder's space; another
+#      folder of the same name cannot take its run directory;
 #   8. a --no-parent terminal outlives the agent that started it.
 #
 # Usage: tests/herdr-app-captain/runs-live.sh
@@ -35,11 +37,12 @@ toy=$work/hctoy-$suffix
 wt=$HOME/.herdr/worktrees/hctoy-$suffix/feature-x
 space=
 wt_space=
+other_space=
 multi_space=
 active_space() { herdr-app ls | jq -r 'first(.spaces[] | select(.active) | .id) // empty'; }
 cleanup() {
   for n in "$fake" "$fake-multi" "$watch" "$watch-2" "$fake-free" "$fake-kid"; do hc kill "$n" >/dev/null 2>&1; hc rm "$n" >/dev/null 2>&1; done
-  for space in $wt_space $space $multi_space; do
+  for space in $wt_space $other_space $space $multi_space; do
     # Closing a space leaves its finished shells behind.
     shells=$(hc ls --all --label "herdr.space=$space" --json | jq -r '.terminals[].address')
     herdr-app do space.close --id "$space" --confirmed true >/dev/null 2>&1
@@ -50,6 +53,7 @@ cleanup() {
     done
   done
   git -C "$toy" worktree remove --force "$wt" >/dev/null 2>&1
+  git -C "$toy" worktree remove --force "$work/elsewhere" >/dev/null 2>&1
   rmdir "${wt%/*}" 2>/dev/null
   rm -rf "$work"
 }
@@ -123,6 +127,12 @@ check "no warnings" "$(cat "$work/wt.err")" ""
 (cd "$toy" && "$orch/integration-worktree.sh" feature/x HEAD >/dev/null 2>&1)
 check "second time, one space" "$(herdr-app ls | jq --arg p "$wt" '[.spaces[] | select(.folder == $p)] | length')" 1
 contains "repo-spaces sees a worktree" "$("$capt/repo-spaces.sh" "$toy")" "$wt_space	worktree"
+git -C "$toy" worktree add -q -b feature/z "$work/elsewhere" HEAD
+out=$(cd "$toy" && "$orch/integration-worktree.sh" feature/z HEAD 2>/dev/null)
+check "reuses a worktree elsewhere" "$out" "$work/elsewhere"
+for _ in 1 2 3 4 5; do other_space=$(space_of "$work/elsewhere"); [ -n "$other_space" ] && break; sleep 1; done
+out=$(cd "$toy" && "$orch/integration-worktree.sh" "$(git -C "$toy" branch --show-current)" HEAD 2>/dev/null)
+check "refuses the main checkout's branch" "$?:$out" "3:"
 
 echo "== runs.sh"
 echo "Which db?" >"$dir/question.md"
@@ -178,6 +188,10 @@ check "named after the folder" "$mdir" "$HERDR_ORCHESTRATION_ROOT/hcmulti-$suffi
 check "records the folder" "$(jq -r .folder "$mdir/orchestrator.json")" "$multi"
 contains "runs.sh shows the folder" "$("$capt/runs.sh")" "folder: $multi"
 contains "repo-spaces lists the folder" "$("$capt/repo-spaces.sh" "$multi")" "$multi_space	folder	$multi"
+# A made-up terminal, so a wrong result cannot label this one.
+mkdir -p "$work/other/hcmulti-$suffix"
+(cd "$work/other/hcmulti-$suffix" && HC_TERMINAL_ID=t0-none "$orch/init-run.sh" feature/y >/dev/null 2>&1)
+check "same name, other folder" "$?" 3
 
 echo "== --no-parent outlives its starter"
 hc run --bg --name "$watch-2" --no-notify --cwd "$work" -- bash -c \

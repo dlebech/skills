@@ -5,7 +5,7 @@
 # Usage: set-status.sh <run-directory> <status>
 #
 # <status> is running, "waiting for user: <question>", "blocked: <reason>", or
-# finished. The tab becomes "🐙 <branch>", "🐙 ✋ <branch>" or "🐙 ✓ <branch>".
+# finished, the vocabulary herdr-app-captain's scripts/lib.sh documents. The tab becomes "🐙 <branch>", "🐙 ✋ <branch>" or "🐙 ✓ <branch>".
 # plan.md is what counts: a closed window, or an orchestrator with no tab, only
 # prints a warning, since the run goes on without one.
 set -u
@@ -16,9 +16,8 @@ status=$2
 tmp=$dir/.plan.tmp
 { echo "Status: $status"; tail -n +2 "$dir/plan.md"; } >"$tmp" && mv "$tmp" "$dir/plan.md" || exit 1
 
-branch=$(jq -r .branch "$dir/orchestrator.json") || exit 1
-tab=$(jq -r '.tab_id // empty' "$dir/orchestrator.json")
-terminal=$(jq -r '.terminal // empty' "$dir/orchestrator.json")
+IFS=$'\x1f' read -r branch terminal tab < <(jq -r '[.branch, .terminal // "", .tab_id // ""] | join("\u001f")' \
+  "$dir/orchestrator.json") && [ -n "$branch" ] || exit 1
 case $status in
   "waiting for user"*) name="🐙 ✋ $branch" word=waiting ;;
   blocked*) name="🐙 ✋ $branch" word=blocked ;;

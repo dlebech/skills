@@ -28,11 +28,11 @@ found=0
 
 while IFS= read -r run_info <&3; do
   dir=$(dirname "$run_info")
-  claimed+="$(jq -r '.tab_id // empty' "$run_info") "
+  IFS=$'\x1f' read -r branch folder terminal tab < <(run_facts "$run_info")
+  claimed+="$tab "
   status=$(plan_status "$dir")
   [ -n "$all" ] || [ "$status" != finished ] || continue
   found=1
-  terminal=$(jq -r '.terminal // empty' "$run_info")
   dialog=
 
   if [ -z "$terminals" ]; then
@@ -52,7 +52,7 @@ while IFS= read -r run_info <&3; do
   messages=$(unhandled_messages "$dir" | while read -r f; do printf '%s ' "${f##*/}"; done)
 
   echo "run: $dir"
-  echo "  branch: $(jq -r '.branch // "?"' "$run_info")  folder: $(jq -r '.folder // .repo // "?"' "$run_info")"
+  echo "  branch: $branch  folder: $folder"
   echo "  plan: ${status:-no Status line}"
   echo "  orchestrator: $orchestrator"
   [ -z "$dialog" ] || echo "  dialog: $dialog"

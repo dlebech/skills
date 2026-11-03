@@ -58,7 +58,7 @@ When the user asks you to start an orchestrator, start a new agent that runs the
 2. Check `runs.sh` for an unfinished run on the same work. If there is one, tell the user rather than starting a second.
 3. Use the repository's `primary` space, or the folder's `folder` space. Never use a `worktree` space; those belong to runs. If there is none, use the id `sp-<name>` (letters, digits, and `-` only) in step 5: Herdr then creates the space with the orchestrator as its first tab, named after the folder. Never use `herdr-app do space.new`, which switches the user's window to the new space.
 4. Write the prompt to a file with the skill's own command and the user's work and options, for example `/herdr-app-orchestrator 185 sub-issues=all implementer-model=sonnet` for Claude Code, `/skill:herdr-app-orchestrator ...` for `pi`, and for other kinds a plain sentence asking it to load that skill. It has none of your conversation, so the prompt must carry the work: issues, a plan file path, or a full description.
-5. Start it, with a unique name such as `orc-<repo>-<work>`, using the kind and any model the user named, otherwise your own kind. Use the orchestrator skill's script, from the skill directory beside this one:
+5. Start it, with a unique name such as `orc-<repo>-<work>`, using the kind and any model the user named, otherwise your own kind. Use the orchestrator skill's script, from the skill directory beside this one; if it is not there, tell the user to install the skill with `npx skills add dlebech/skills --skill herdr-app-orchestrator`, and stop:
 
    ```bash
    <orchestrator-skill-dir>/scripts/start-agent.sh --name <name> --cwd <root> --kind <kind> [--model <model>] \
@@ -66,7 +66,7 @@ When the user asks you to start an orchestrator, start a new agent that runs the
    ```
 
    `--no-parent` matters: a child of yours would end when you do, and take the run with it. The labels give it a new tab in that space. Make up `<tab-id>` yourself, as `tb-<name>`: Herdr creates a tab with an id it does not know, and without this label the terminal never learns its tab, so the orchestrator could not name it.
-6. On `trust <address>`, it is Claude Code's folder trust prompt. Tell the user which tab to answer it in, or if they tell you to accept it, run the same command with `--accept-trust`. After they answer it themselves, also run the same command, which sends the prompt. Handle the other outcomes as `start-agent.sh` documents them. If the skill is missing, tell the user to install it.
+6. On `trust <address>`, it is Claude Code's folder trust prompt. Tell the user which tab to answer it in, or if they tell you to accept it, run the same command with `--accept-trust`. After they answer it themselves, also run the same command, which sends the prompt. Handle the other outcomes as `start-agent.sh` documents them.
 7. Do not wait on it. The run appears in `runs.sh` once it has written its run directory, and the watcher picks it up from there; confirm it has appeared the next time you look.
 
 ## Watch the runs

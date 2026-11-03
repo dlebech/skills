@@ -1,12 +1,17 @@
 # Shared by runs.sh and watch-runs.sh; source it, do not run it.
 #
-# The run-directory protocol, as written by herdr-app-orchestrator:
+# The run-directory protocol, as written by herdr-app-orchestrator's init-run.sh
+# and set-status.sh. <folder> is the last part of the repository's path, or of the
+# folder holding a run's several repositories; <branch> has "/" and the like as "-".
 #   <root>/<folder>/<branch>/orchestrator.json  {"terminal", "tab_id", "folder", "branch"}
-#   (<folder>: the repository, or the folder holding a run's several repositories)
-#   <root>/<repo>/<branch>/plan.md            first line "Status: <status>"
-#   <root>/<repo>/<branch>/question.md        the orchestrator's open question to the user
-#   <root>/<repo>/<branch>/inbox/             <name>.message, from the captain
+#   <root>/<folder>/<branch>/plan.md            first line "Status: <status>", where
+#       <status> is running, "waiting for user: <question>", "blocked: <reason>",
+#       or finished
+#   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
+#   <root>/<folder>/<branch>/inbox/             <name>.message, from the captain
+#   <root>/<folder>/<branch>/shared/            the run's agents' files; not the captain's
 
+# The same default as herdr-app-orchestrator's scripts/init-run.sh.
 root=${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}
 
 # Prints each run's orchestrator.json path.
@@ -15,6 +20,12 @@ run_infos() {
   for info in "$root"/*/*/orchestrator.json; do
     [ -e "$info" ] && echo "$info"
   done
+}
+
+# run_facts <orchestrator.json>: branch, folder, terminal and tab id, separated by
+# \x1f so empty ones survive: IFS=$'\x1f' read -r branch folder terminal tab
+run_facts() {
+  jq -r '[.branch // "?", .folder // .repo // "?", .terminal // "", .tab_id // ""] | join("\u001f")' "$1"
 }
 
 # plan_status <run-dir>: the plan's Status line without its prefix.

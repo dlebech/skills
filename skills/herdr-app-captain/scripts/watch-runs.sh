@@ -15,7 +15,8 @@
 #
 # It checks at once whenever an orchestrator's terminal changes (hc events on the
 # role=orchestrator label: status, labels such as set-status.sh's run.status,
-# finishing), and otherwise every WATCH_RUNS_INTERVAL seconds, which keeps the idle
+# finishing; the filter follows labels, so an orchestrator labelled after the
+# stream opened counts too), and otherwise every WATCH_RUNS_INTERVAL seconds, which keeps the idle
 # timer and plan.md-only changes going.
 #
 # Its memory lives in the runs root, so a restart neither repeats events nor
@@ -76,12 +77,11 @@ while :; do
   idle=()
   while IFS= read -r run_info <&3; do
     dir=$(dirname "$run_info")
-    branch=$(jq -r '.branch // "?"' "$run_info")
-    terminal=$(jq -r '.terminal // empty' "$run_info")
+    IFS=$'\x1f' read -r branch _ terminal _ < <(run_facts "$run_info")
     status=$(plan_status "$dir")
     reasons=()
 
-    case $status in
+    case $status in # the statuses lib.sh lists
       "waiting for user"* | blocked*) reasons+=("$status") ;;
       finished) reasons+=("finished") ;;
     esac
