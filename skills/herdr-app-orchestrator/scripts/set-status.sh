@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Set a run's status: the first line of plan.md, and the orchestrator's tab name.
+#
+# Usage: set-status.sh <run-directory> <status>
+#
+# <status> is running, "waiting for user: <question>", "blocked: <reason>", or
+# finished. The tab becomes "🐙 <branch>", "🐙 ✋ <branch>" or "🐙 ✓ <branch>".
+# plan.md is what counts: a closed window, or an orchestrator with no tab, only
+# prints a warning, since the run goes on without one.
+set -u
+
+[ $# -eq 2 ] || { echo "usage: set-status.sh <run-directory> <status>" >&2; exit 2; }
+dir=$1
+status=$2
+tmp=$dir/.plan.tmp
+{ echo "Status: $status"; tail -n +2 "$dir/plan.md"; } >"$tmp" && mv "$tmp" "$dir/plan.md" || exit 1
+
+branch=$(jq -r .branch "$dir/orchestrator.json") || exit 1
+tab=$(jq -r '.tab_id // empty' "$dir/orchestrator.json")
+case $status in
+  "waiting for user"* | blocked*) name="🐙 ✋ $branch" ;;
+  finished) name="🐙 ✓ $branch" ;;
+  *) name="🐙 $branch" ;;
+esac
+if [ -n "$tab" ]; then
+  herdr-app do tab.rename --id "$tab" --name "$name" >/dev/null 2>&1 ||
+    echo "warning: could not rename tab $tab (is the Herdr window open?)" >&2
+fi
+exit 0
