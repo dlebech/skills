@@ -74,10 +74,9 @@ git init -q "$toy"
 git -C "$toy" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 
 echo "== a labelled terminal gets a tab"
+# As herdr-app-captain does for a repository without a space: a space id of our own.
 before=$(active_space)
-space=$(herdr-app do space.new --name "hc-test" --folder "$toy" | jq -r .space)
-[ -z "$before" ] || herdr-app do space.select --id "$before" >/dev/null # space.new takes focus
-contains "space created" "$space" sp
+space=sp-hctest-$suffix
 # A stand-in orchestrator: runs init-run.sh as if it were the agent in that tab.
 cat >"$work/fake.sh" <<SCRIPT
 export HERDR_ORCHESTRATION_ROOT="$HERDR_ORCHESTRATION_ROOT"
@@ -90,6 +89,8 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$work/init.out" ] && break; hc wait "$fa
 address=$(hc get "$fake" --json | jq -r .address)
 tab=tb-$fake
 contains "Herdr made the tab" "$(tab_name "$tab")" "🐙"
+check "space from the label" "$(herdr-app ls | jq -r --arg s "$space" '.spaces[] | select(.id == $s) | .folder')" "$toy"
+check "focus kept for the repo space" "$(active_space)" "$before"
 read -r state dir <"$work/init.out"
 check "init-run" "$state" new
 check "dashes for slashes" "${dir##*/}" feature-x
@@ -111,7 +112,8 @@ before=$(active_space)
 out=$(cd "$toy" && "$orch/integration-worktree.sh" feature/x HEAD 2>"$work/wt.err")
 check "prints the path" "$out" "$wt"
 check "on the branch" "$(git -C "$wt" branch --show-current)" feature/x
-wt_space=$(herdr-app ls | jq -r --arg p "$wt" '.spaces[] | select(.folder == $p) | .id')
+space_of() { herdr-app ls | jq -r --arg p "$1" '.spaces[] | select(.folder == $p) | .id'; }
+for _ in 1 2 3 4 5; do wt_space=$(space_of "$wt"); [ -n "$wt_space" ] && break; sleep 1; done
 contains "space opened" "$wt_space" sp
 check "focus kept" "$(active_space)" "$before"
 check "no warnings" "$(cat "$work/wt.err")" ""

@@ -7,8 +7,10 @@
 # ~/.herdr/worktrees/<repo>/<branch, with characters other than A-Z a-z 0-9 . _ -
 # as "-">. An existing branch is checked out there; a new one starts from <base>,
 # such as origin/main. The app then nests the space under its repository's space
-# and shows its branch, ahead/behind, and changes. space.new takes focus, so the
-# space the user was looking at is selected again right after. A space already
+# and shows its branch, ahead/behind, and changes. The space comes from a plain
+# shell started with hc and labelled with a space id of our own, which, unlike
+# herdr-app's space.new, leaves the user's view where it is. The shell outlives
+# the orchestrator, so the space stays until the user removes it. A space already
 # open on the worktree is left alone, so this also reopens one after a resume.
 # A window that cannot be reached only prints a warning: the run needs the
 # worktree, not the space. Prints the worktree path.
@@ -33,12 +35,8 @@ fi
 if ! spaces=$(herdr-app ls 2>/dev/null); then
   echo "warning: could not reach the Herdr window; the worktree has no space" >&2
 elif ! jq -e --arg p "$path" 'any(.spaces[]; .folder == $p)' <<<"$spaces" >/dev/null; then
-  active=$(jq -r 'first(.spaces[] | select(.active) | .id) // empty' <<<"$spaces")
-  if herdr-app do space.new --folder "$path" >/dev/null 2>&1; then
-    [ -z "$active" ] || herdr-app do space.select --id "$active" >/dev/null 2>&1 ||
-      echo "warning: could not select space $active again" >&2
-  else
+  space=sp-$(printf '%s' "wt-${repo##*/}-$slug" | sed -E 's/[^A-Za-z0-9-]+/-/g')
+  hc run --bg --no-parent --no-notify --cwd "$path" --label "herdr.space=$space" >/dev/null 2>&1 ||
     echo "warning: could not open a space for $path" >&2
-  fi
 fi
 echo "$path"
