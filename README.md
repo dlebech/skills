@@ -17,7 +17,7 @@ The `herdr-app-*` skills also want Herdr's own `herdr-core` skill, which steers 
 npx skills add https://github.com/herdrdev/herdr-core --skill herdr-core
 ```
 
-To see your runs at a glance in the Herdr app, install Harbormaster with `herdr-app/install.sh` (see [docs/herdr-app-harbormaster.md](docs/herdr-app-harbormaster.md)). It adds a Crew block that shows the captain and every orchestrator with their progress, a runs overview with PRs, checks and open questions, and three layouts: `harbormaster-main`, `harbormaster-board`, and the nautical `harbormaster-sea`. Orchestrators also label their terminals with `run.status`, `progress` and `run.prs`, and keep a `status.json` in each run directory, so you can shape Harbormaster further by asking an agent in the app, for example:
+To see your runs at a glance in the Herdr app, install Harbormaster with `herdr-app/install.sh` (see [docs/herdr-app-harbormaster.md](docs/herdr-app-harbormaster.md)). It adds a Crew block that shows the captain and every orchestrator with their progress, and the agents outside any run, a runs overview with PRs, checks and open questions, and two layouts: `harbormaster-main` and the nautical `harbormaster-sea`. Orchestrators also label their terminals with `run.status`, `progress` and `run.prs`, and keep a `status.json` in each run directory, so you can shape Harbormaster further by asking an agent in the app, for example:
 
 > In the harbormaster mod's Crew block, put a ✓ before each orchestrator whose `run.status` label is `finished`.
 

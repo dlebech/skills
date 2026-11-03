@@ -23,11 +23,11 @@ Act as the captain over several orchestrators. The user talks to you about all t
 
 ## Find the runs
 
-Run `<skill-dir>/scripts/runs.sh`. It reads every run directory under `~/.herdr/hc-orchestration/` that has an `orchestrator.json`, and for each prints the branch, repository, the `Status:` line of `plan.md`, the orchestrator terminal's state, the dialog it is blocked on, the run's published progress, merged and planned tasks, waiting agents, issues, and PRs from `status.json`, any open `question.md`, and unhandled messages (or warns when `hc` did not answer). It skips finished runs unless given `--all`. It also lists `🐙` tabs that no run directory claims, for example an orchestrator that has not finished starting; inspect those with `hc read`.
+Run `<skill-dir>/scripts/runs.sh`. It reads every run directory under `~/.herdr/hc-orchestration/` that has an `orchestrator.json`, and for each prints the branch, repository, the `Status:` line of `plan.md`, the orchestrator terminal's state, the dialog it is blocked on, the run's published progress, merged and planned tasks, waiting agents, issues, and PRs from `status.json`, any open `question.md`, and unhandled messages (or warns when `hc` did not answer). It skips closed runs unless given `--all`. A run's orchestrator sets `finished` once its work is done and its PRs are up and green, but the run stays open, listed as `finished, PR open until its tab is closed`, until the user closes the orchestrator's tab; then it is closed. It also lists `🐙` tabs that no run directory claims, for example an orchestrator that has not finished starting; inspect those with `hc read`.
 
 Runs of the older `herdr-orchestrator` skill live in the Herdr TUI and do not appear here.
 
-Each run directory holds `spec.md` (the goal), `plan.md` (tasks and their status), `status.json` (the facts above, which outlive the orchestrator, so `runs.sh --all` still gives a finished run's PRs), `decisions.md`, `question.md` (the orchestrator's open question to the user, if any), `inbox/` (relayed messages), and `shared/` (briefs, findings). Read them for detail rather than asking the orchestrator; it is busy.
+Each run directory holds `spec.md` (the goal), `plan.md` (tasks and their status), `status.json` (the facts above, which outlive the orchestrator, so `runs.sh --all` still gives a closed run's PRs), `decisions.md`, `question.md` (the orchestrator's open question to the user, if any), `inbox/` (relayed messages), and `shared/` (briefs, findings). Read them for detail rather than asking the orchestrator; it is busy.
 
 ## Report
 
@@ -36,6 +36,7 @@ Lead with what needs the user, then the rest, one or two lines per run, named by
 - **Needs you:** `plan.md` says `waiting for user`, or the orchestrator is `blocked`, or it is `idle`/`done` while the plan is not finished. For a blocked one, `runs.sh` shows its dialog; read the whole dialog (`hc read --lines 0 <terminal>`), quote its question and options, or for a permission prompt exactly what it wants to run, and tell the user to answer it in the `🐙 <branch>` tab; it comes before any `question.md`. Otherwise, if `question.md` exists, it holds the full question: give it to the user with its context, options, and recommendation, by whatever way of asking suits you, since text is only a run's route up to you. If an unhandled `inbox/` message already answers it, do not ask again; the orchestrator has yet to read it, so wake it as in Relay instructions if it is idle. Otherwise, for an idle one, read its last output (`hc read --lines 60 <terminal>`) and quote its question. Text shown in its input box may be Claude Code's suggested next prompt, not something the user typed; ignore it.
 - **Stalled or crashed:** the orchestrator is gone, or idle with no question and no recent change in `plan.md`. Say what the run directory shows and how to resume: `/herdr-app-orchestrator <run-directory>/spec.md` in a new Herdr tab. Its agents ended with it, so the resumed run restarts unfinished tasks from their worktrees.
 - **Running:** the plan position (tasks merged out of planned, what is in progress), its progress line, and any PRs. A `working` orchestrator usually sits in a foreground wait; that is normal.
+- **Finished:** one line with its PRs. It needs nothing: the user reviews the PRs. More work for it is relayed as usual, which sets it running again. Do not watch its PRs yourself; its orchestrator watched CI before finishing, and review comments reach it through the user.
 
 When the user asks about one run, go deeper: per-task status, recent decisions, and what is left. The user can look at any agent without disturbing it, in the Agents list under its orchestrator, or with `herdr-app do agent.focus --terminal <t>` if they ask you to show one.
 
@@ -49,6 +50,10 @@ When the user gives an instruction for a run:
 4. Check that the orchestrator picked it up (the message is renamed to `.handled`) the next time you look, and report what changed, from `decisions.md` or `plan.md`. A message still unhandled after a few minutes means the wake-up was lost; send it again.
 
 An answer to an orchestrator's question is relayed the same way. An instruction for every run goes to each one as a separate message.
+
+## Close a run
+
+When the user asks you to close a run, check that it is the one they mean and that it is `finished`; for an unfinished one, say what is left and close it only if they confirm. Close its orchestrator's tab, from `tab_id` in its `orchestrator.json`, which ends the orchestrator: `herdr-app do tab.close '{"id":"<tab-id>","confirmed":true}'`. Its run directory, integration worktree and branch, integration space, and PRs stay. `runs.sh` then leaves it out, and so do the user's views.
 
 ## Start a run
 

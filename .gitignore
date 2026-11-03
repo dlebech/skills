@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 voice-samples/
+# Written by `herdr-app check` into a mod folder
+herdr-app/mods/*/jsconfig.json
+herdr-app/mods/*/*.d.ts

@@ -6,7 +6,7 @@ import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, panes, run, setAgentOrder } from "herdr";
 import { stats, taskTone, taskCounts, prsOf, PR_TONE } from "./data.js";
-import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, focusAgent, openUrl } from "./live.js";
+import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, needReason, adrift, focusAgent, openUrl } from "./live.js";
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural } from "./ui.js";
 
 const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
@@ -15,8 +15,8 @@ const FLAG = { working: "#3f8fd2", dim: "#9aa1a8", done: "#8256d0", blocked: "#c
 const SKY = 86;
 
 function bubble(text) {
-  return div().absolute().top(-26).left(0).px(9).py(3).rounded(10).bg(sail).border(2).border_color("#d4553e")
-    .text_size(11.5).font_weight(700).text_color("#a3301f").whitespace_nowrap().child(text);
+  return div().absolute().top(-26).left(0).max_w(260).px(9).py(3).rounded(10).bg(sail).border(2).border_color("#d4553e")
+    .text_size(11.5).font_weight(700).text_color("#a3301f").whitespace_nowrap().truncate().child(text);
 }
 
 // One creature: the octopus (an orchestrator) or a crab (a worker, or a drifter outside any run).
@@ -47,6 +47,10 @@ function critter(view, { kind, id, status, label, program, x, y, w, onClick, say
 function reef(view, r, ctx, x, y, w, h, n) {
   const orch = orchestratorState(r, ctx);
   const need = needsYou(r, orch);
+  const reason = needReason(r, orch);
+  // Reefs are only drawn for open runs, so a finished one here is docked: its work is
+  // done and its PR is up, so the reef goes quiet.
+  const docked = r.phase === "finished";
   const workers = workersOf(r.terminal, ctx);
   const prs = prsOf(r) ?? [];
   const { merged, planned } = taskCounts(r);
@@ -61,9 +65,9 @@ function reef(view, r, ctx, x, y, w, h, n) {
     onClick: () => focusAgent(term.address),
   }));
   const sign = v_flex().absolute().left(12).top(10).max_w(w - 24 - Math.min(prs.length, 4) * 46).px(10).py(4).rounded(5)
-    .bg(need ? "#f6c28b" : rope).border(3).border_color(need ? "#c1562c" : "#a07a3f").text_color("#4a3418")
+    .bg(need ? "#f6c28b" : rope).border(3).border_color(need ? "#c1562c" : "#a07a3f").text_color("#4a3418").opacity(docked ? 0.8 : 1)
     .child(div().truncate().text_size(13).font_weight(800).child(`${OCTOPUS} ${r.branch}`))
-    .child(div().truncate().text_size(10.5).font_weight(600).child(`${r.repo}${r.machine ? ` · ${r.machine}` : ""} · ${need ? "NEEDS YOU" : r.phase.toUpperCase()}`));
+    .child(div().truncate().text_size(10.5).font_weight(600).child(`${r.repo}${r.machine ? ` · ${r.machine}` : ""} · ${need ? "NEEDS YOU" : docked ? "FINISHED · PR UP" : r.phase.toUpperCase()}`));
   // Buoys on a line along the bottom of the reef: one per task, lit as it merges.
   const buoys = h_flex().absolute().left(14).bottom(8).gap(8).items_end()
     .children(Array.from({ length: planned }, (_, i) => {
@@ -90,16 +94,16 @@ function reef(view, r, ctx, x, y, w, h, n) {
             .child(p.number ? `#${p.number}${fail ? " ✗" : p.state === "MERGED" ? " ✓" : ""}` : "PR")));
     }));
   return div().id(`reef-${r.key}`).absolute().left(x).top(y).w(w).h(h).rounded(14)
-    .bg(need ? "#f6c28b33" : "#ffffff1a").border(3).border_color(need ? "#f08a5d" : rope).cursor_pointer()
+    .bg(need ? "#f6c28b33" : docked ? "#ffffff0d" : "#ffffff1a").border(3).border_color(need ? "#f08a5d" : docked ? "#e6cf9880" : rope).cursor_pointer()
     .hover((s) => s.bg(need ? "#f6c28b55" : "#ffffff2e"))
     .on_click(focusOrch)
     .child(sign)
     .child(flags)
     .when(Boolean(r.progress), (el) => el.child(div().absolute().left(16).right(16).top(64).truncate().text_size(11.5).italic().text_color(sail).child(`“${r.progress}”`)))
     .child(critter(view, {
-      kind: "octopus", id: r.terminal ?? r.key, i: n * 7, status: orch !== "gone" && need ? "blocked" : orch, w: big,
-      label: orch === "gone" ? "orchestrator (gone)" : "orchestrator", x: 10, y: 114, onClick: focusOrch,
-      say: need ? (r.question ? "? a question for you" : "! needs you") : null,
+      kind: "octopus", id: r.terminal ?? r.key, i: n * 7, status: orch !== "gone" && need ? "blocked" : docked && orch !== "working" ? "done" : orch, w: big,
+      label: orch === "gone" ? "orchestrator (gone)" : docked ? "orchestrator (finished)" : "orchestrator", x: 10, y: 114, onClick: focusOrch,
+      say: need ? `${r.question ? "?" : "!"} ${reason}` : null,
     }))
     .children(crabs)
     .child(buoys);
@@ -114,10 +118,11 @@ export function harbor(view) {
   const bw = Math.max(W, sea * (1600 / 420)), bh = bw * (420 / 1600);
   const ctx = facts();
   const s = stats(view.runs, ctx);
-  const runs = s.live, need = s.need;
+  // Every open run: those still working, then finished ones until their tab is closed.
+  const runs = s.shown, need = s.need;
   const cap = captainOf(ctx);
   const inRuns = new Set(runs.flatMap((r) => (r.terminal ? [r.terminal, ...workersOf(r.terminal, ctx).map((term) => term.address)] : [])));
-  const drifters = ctx.agents.filter((a) => !inRuns.has(a.address) && a.address !== cap.terminal?.address);
+  const drifters = adrift([cap.terminal?.address, ...runs.map((r) => r.terminal)], ctx);
   const capStatus = cap.terminal && agentStatus(cap.terminal, ctx);
   // Herdr asks a mod that shows agents to pass on their order while it draws them, so that
   // alt-up / alt-down step through the harbor in the order it shows (in memory only).
@@ -155,7 +160,8 @@ export function harbor(view) {
       .child(div().text_size(26).font_weight(800).child("The run harbor"))
       .child(div().text_size(12.5).child(`${plural(runs.length, "reef")}, ${plural(runs.length, "octopus", "octopi")}, ${plural(s.workers, "crab")}, ${cap.terminal ? "one captain" : "no captain aboard"}.`)))
     .child(h_flex().absolute().right(130).top(20).gap(16).text_size(12).font_weight(600).text_color(ink)
-      .child(div().child(plural(runs.length, "run")))
+      .child(div().child(plural(s.live.length, "run")))
+      .when(s.docked.length > 0, (el) => el.child(div().child(`${s.docked.length} finished`)))
       .child(div().text_color(need.length ? "#a3301f" : ink).child(`${need.length} need you`))
       .child(div().child(`${plural(s.open.length, "flag")} up`)))
     .child(anchor)
@@ -176,8 +182,8 @@ export function rail(view) {
   return h_flex().size_full().bg(navy).px(20).items_center().justify_between().text_color(sail).text_size(13).font_weight(600)
     .child(div().child(`${s?.name ?? ""}  /  ${tab?.name ?? ""}`))
     .child(h_flex().gap(14).items_center()
-      .child(div().id("to-board").text_size(11).px(8).h(20).flex().items_center().rounded(4).bg(deepNavy).cursor_pointer().hover((st) => st.bg("#10253a"))
-        .on_click(() => run("layout.switch", { name: "harbormaster-board" })).child("Run board"))
+      .child(div().id("to-main").text_size(11).px(8).h(20).flex().items_center().rounded(4).bg(deepNavy).cursor_pointer().hover((st) => st.bg("#10253a"))
+        .on_click(() => run("layout.switch", { name: "harbormaster-main" })).child("Back to main"))
       .child(div().text_size(11).child("BELOW DECK")));
 }
 

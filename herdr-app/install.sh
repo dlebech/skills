@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Installs Harbormaster into the Herdr app on this computer: the `harbormaster` mod,
-# the harbormaster-board and harbormaster-sea layouts, and harbormaster-main (Herdr's
-# main layout with a Crew block above its own, unchanged Agents list), and binds
-# ctrl-shift-h to open and close the overview. Run it from any terminal while the
-# Herdr app is open. Safe to run again: it updates the mod and the two layouts, and
-# adds the Crew block and the key only if they are missing. It refuses to replace a
-# mod or layout of the same name that isn't Harbormaster's.
+# the harbormaster-sea layout, and harbormaster-main (Herdr's main layout with a Crew
+# block above its own, unchanged Agents list), and binds ctrl-shift-h to open and
+# close the overview. Run it from any terminal while the Herdr app is open. Safe to
+# run again: it updates the mod and the sea layout, and adds the Crew block and the
+# key only if they are missing. It refuses to replace a mod or layout of the same
+# name that isn't Harbormaster's, and removes the harbormaster-board layout of
+# earlier versions.
 #
 # Usage: herdr-app/install.sh
 set -euo pipefail
@@ -26,15 +27,19 @@ ours() { # <file> <jq test>: true when the file is missing or passes the test
 }
 { [ ! -e "$home/mods/harbormaster" ] || jq -e '.title == "Harbormaster"' "$home/mods/harbormaster/mod.json" >/dev/null 2>&1; } \
   || die "mods/harbormaster exists and isn't Harbormaster; move it aside first"
-for layout in board:hb-root sea:hs-root; do
-  ours "$home/layouts/harbormaster-${layout%%:*}.json" ".id == \"${layout#*:}\"" \
-    || die "layouts/harbormaster-${layout%%:*}.json exists and isn't Harbormaster's; move it aside first"
-done
+ours "$home/layouts/harbormaster-sea.json" '.id == "hs-root"' \
+  || die "layouts/harbormaster-sea.json exists and isn't Harbormaster's; move it aside first"
 mkdir -p "$home/mods/harbormaster" "$home/layouts"
-cp "$here"/mods/harbormaster/* "$home/mods/harbormaster/"
-cp "$here"/layouts/harbormaster-board.json "$here"/layouts/harbormaster-board.svg \
-   "$here"/layouts/harbormaster-sea.json "$here"/layouts/harbormaster-sea.svg "$home/layouts/"
-echo "installed mods/harbormaster and layouts harbormaster-board, harbormaster-sea"
+cp "$here"/mods/harbormaster/*.js "$here"/mods/harbormaster/*.svg "$here"/mods/harbormaster/mod.json "$home/mods/harbormaster/"
+cp "$here"/layouts/harbormaster-sea.json "$here"/layouts/harbormaster-sea.svg "$home/layouts/"
+echo "installed mods/harbormaster and the harbormaster-sea layout"
+# board.js became overview.js.
+rm -f "$home/mods/harbormaster/board.js"
+# The run board of earlier versions; its views are gone from the mod. Only ours.
+if [ -f "$home/layouts/harbormaster-board.json" ] && jq -e '.id == "hb-root"' "$home/layouts/harbormaster-board.json" >/dev/null 2>&1; then
+  rm -f "$home/layouts/harbormaster-board.json" "$home/layouts/harbormaster-board.svg"
+  echo "removed the harbormaster-board layout of an earlier version"
+fi
 
 # 2. harbormaster-main: a clone of Herdr's main layout (made here, so whatever main
 #    looks like in this Herdr) with the Crew block inserted above the Agents list.
@@ -85,7 +90,6 @@ cat <<'EOF'
 
 Done. ctrl-shift-h opens and closes the overview. Switch layouts with ctrl-shift-l, or:
   herdr-app do layout.switch '{"name":"harbormaster-main"}'   # your usual window, with the Crew block
-  herdr-app do layout.switch '{"name":"harbormaster-board"}'  # the run board
   herdr-app do layout.switch '{"name":"harbormaster-sea"}'    # the harbor
 To keep the overview beside the captain, click "Pin beside captain" on the captain's card.
 EOF

@@ -1,26 +1,22 @@
 # Harbormaster: see your runs in the Herdr app
 
-Harbormaster is a Herdr app mod with three layouts. It shows what `herdr-app-captain` and its `herdr-app-orchestrator` runs are doing, so you don't have to read the Agents list row by row. Everything in it is written from scratch: it uses Herdr's mod API and leaves Herdr's own mods and layouts unchanged.
+Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-captain` and its `herdr-app-orchestrator` runs are doing, so you don't have to read the Agents list row by row. Everything in it is written from scratch: it uses Herdr's mod API and leaves Herdr's own mods and layouts unchanged.
 
-- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge. It sits above Herdr's own Agents list.
-  - The captain's card says whether its watcher is running and how many unfinished runs it watches. Its pane button pins the runs overview beside the captain, or unpins it.
-  - Each orchestrator's card shows its progress, its status when it isn't running, its number of 🦀 workers and its number of PRs. A run that needs you turns red.
-- **Runs overview.** One card per run:
+- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list.
+  - The captain's card says whether its watcher is running and how many runs it watches, running and finished. Its pane button pins the runs overview beside the captain, or unpins it.
+  - Each orchestrator's card shows its progress, its status when it isn't running, its number of 🦀 workers and its PRs. A run that needs you turns red and says what for. Finished ones come last, with a green edge and their PR numbers.
+  - Each Adrift line shows the agent's space and tab; clicking it focuses the agent.
+- **Runs overview.** The totals across runs on top (running, need you, finished, agents, tasks merged, open PRs and failing checks; clicking "need you" focuses the first run that needs you), then the captain, then one card per run:
   - its branch and repository, a status pill, the progress line, and a task bar from `plan.md` (merged, in progress, blocked);
   - its issues, and every PR with its state, checks and review decision;
-  - an open question, shown first when the run is waiting for you;
+  - what the run needs you for, shown first: its open question, the dialog it is blocked on, or the reason in its status;
   - and, when they apply: relayed messages the orchestrator hasn't read, agents waiting on an answer, "No pull request yet", and a hint to ask the captain to resume a run whose orchestrator is gone.
 
-  Clicking a card focuses the orchestrator. Clicking a PR or issue opens it in the browser. Finished runs fold away at the bottom.
+  Clicking a card focuses the orchestrator. Clicking a PR or issue opens it in the browser. Finished runs stay, after the running ones, until you close their orchestrator's tab; closed runs fold away at the bottom.
 - **`harbormaster-main` layout.** Herdr's main layout with the Crew block added.
-- **`harbormaster-board` layout** (serious):
-  - a summary bar (runs, need you, agents, tasks merged, open PRs, failing checks);
-  - the Crew block above the Agents list;
-  - the runs overview;
-  - the focused agent's live terminal.
 - **`harbormaster-sea` layout** (fun):
   - The captain rides a boat on the surface and drops anchor while watching. The captain calls "Ahoy!" when a run needs you, and raises the anchor and naps when nothing is being watched.
-  - Each unfinished run is a reef with its branch on a sign; finished runs leave the harbor. The orchestrator is an octopus and its workers are crabs. Working crabs scuttle, blocked ones jump, and crabs whose turn is done sleep.
+  - Each run is a reef with its branch on a sign. A finished run's reef goes quiet, its octopus asleep and its PR flags up, until you close the orchestrator's tab; then it leaves the harbor. A run that needs you says what for in a bubble. The orchestrator is an octopus and its workers are crabs. Working crabs scuttle, blocked ones jump, and crabs whose turn is done sleep.
   - Buoys along the bottom are the run's tasks and turn green as they merge.
   - Signal flags on the mast are its PRs. Clicking one opens it.
   - Agents outside any run drift on the right. The active tab's terminals sit below deck.
@@ -28,7 +24,7 @@ Harbormaster is a Herdr app mod with three layouts. It shows what `herdr-app-cap
 
 The skills work the same with or without any of this. Tested with Herdr 0.1.12.
 
-![harbormaster-board](../herdr-app/layouts/harbormaster-board.svg) ![harbormaster-sea](../herdr-app/layouts/harbormaster-sea.svg)
+![harbormaster-sea](../herdr-app/layouts/harbormaster-sea.svg)
 
 ## Install
 
@@ -39,16 +35,16 @@ herdr-app/install.sh
 ```
 
 It does four things:
-- copies `herdr-app/mods/harbormaster` and the board and sea layouts into the app's home (`~/.config/herdr-app`, or `$HERDR_APP_HOME`). It refuses to replace a mod or layout of the same name that isn't Harbormaster's, as Herdr asks;
+- copies `herdr-app/mods/harbormaster` and the sea layout into the app's home (`~/.config/herdr-app`, or `$HERDR_APP_HOME`). It refuses to replace a mod or layout of the same name that isn't Harbormaster's, as Herdr asks. It removes the `harbormaster-board` layout earlier versions installed, if it is Harbormaster's;
 - clones your Herdr's `main` layout as `harbormaster-main`, and inserts the Crew block above its Agents block with `jq`;
 - binds `ctrl-shift-h` to `mod.open:harbormaster` under `global` in `keys.json`. It skips this and tells you how to add a key yourself if `ctrl-shift-h` is already bound in any section, or if there is no `keys.json` yet;
 - runs `herdr-app check` on the mod.
 
-To update, pull and run it again. It overwrites the mod and the two layouts. It leaves `harbormaster-main` alone once it has the Crew block, and the key binding alone once it exists.
+To update, pull and run it again. It overwrites the mod and the sea layout. It leaves `harbormaster-main` alone once it has the Crew block, and the key binding alone once it exists.
 
-Note: install copies files; it doesn't delete any. A file removed from the mod in a later version stays in `mods/harbormaster` until you delete it.
+Note: install copies files and deletes only what earlier versions of Harbormaster installed and it knows about (`board.js` and the `harbormaster-board` layout). Any other file removed from the mod in a later version stays in `mods/harbormaster` until you delete it.
 
-To switch layouts, press `ctrl-shift-l`. You can also run `herdr-app do layout.switch '{"name":"harbormaster-board"}'`, with any of `harbormaster-main`, `harbormaster-board`, `harbormaster-sea`, or Herdr's own `main`. The board has a "Back to main" button and the sea has a "Run board" button.
+To switch layouts, press `ctrl-shift-l`. You can also run `herdr-app do layout.switch '{"name":"harbormaster-sea"}'`, with any of `harbormaster-main`, `harbormaster-sea`, or Herdr's own `main`. The sea has a "Back to main" button.
 
 To glance at the runs from anywhere, press `ctrl-shift-h`. It opens the overview as a popup over the window, and pressing it again, or Esc, closes it.
 
@@ -70,7 +66,7 @@ Harbormaster is built for that:
 The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks mods to list those, so here they are:
 
 - **Every 5 seconds, per machine:** one `sh -c` script. For each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json`, `plan.md` and `question.md`, and counts the unhandled `inbox/*.message` files.
-- **Every minute per running run, every 15 minutes per finished one:**
+- **Every minute per open run (running or finished), every 15 minutes per closed one:**
   - `gh pr view <url>` for each PR in `status.json`;
   - `gh pr list --head <branch>` in the run's folder, so a PR shows up before the orchestrator records it.
 
@@ -79,18 +75,24 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 
 It never writes to run directories.
 
+## Finished and closed runs
+
+An orchestrator sets `finished` once its work is done, its PRs are up and their CI is green. The run stays open: in every view, in the captain's `runs.sh`, and on the captain's watch. It is **closed** once its orchestrator's terminal is gone, which is when you close its tab, or ask the captain to close the run. An unfinished run whose orchestrator is gone is not closed but crashed: the views say so, and the captain can resume it.
+
+"Needs you" means an open question, a blocker, or a dialog, never a finished run, and the views show which.
+
 ## Files
 
 | Path | What |
 | --- | --- |
-| `herdr-app/mods/harbormaster/main.js` | Picks the view by `props().role`: none (run cards), `crew`, `summary`, `focus-rail`, `harbor`, `harbor-rail`, `harbor-pane` |
+| `herdr-app/mods/harbormaster/main.js` | Picks the view by `props().role`: none (the runs overview), `crew`, `harbor`, `harbor-rail`, `harbor-pane` |
 | `herdr-app/mods/harbormaster/data.js` | Run directories, tasks, PRs from `gh`, and the totals the views share |
 | `herdr-app/mods/harbormaster/live.js` | Live facts from herdr-core (status, workers, captain, panes) and the focus, pin and open-link actions |
 | `herdr-app/mods/harbormaster/ui.js` | Emoji, program icons, zoom, and text formatting |
-| `herdr-app/mods/harbormaster/board.js` | Run cards, the Crew block, the summary bar, the focused-agent rail |
+| `herdr-app/mods/harbormaster/overview.js` | The runs overview (totals, captain, run cards) and the Crew block |
 | `herdr-app/mods/harbormaster/harbor.js` | The sea, the reefs, the captain's boat, the rail and the pane headers |
 | `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, spinner, chevrons. All original, CC0 like the rest of this repository |
-| `herdr-app/layouts/harbormaster-board.json`, `harbormaster-sea.json` (+ `.svg` previews) | The two standalone layouts. `harbormaster-main` is made by `install.sh` |
+| `herdr-app/layouts/harbormaster-sea.json` (+ `.svg` preview) | The sea layout. `harbormaster-main` is made by `install.sh` |
 | `herdr-app/install.sh` | Install or update |
 
 ## Remove
