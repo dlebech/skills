@@ -4,6 +4,8 @@ description: "Oversee several herdr-app-orchestrator runs: report how each is do
 disable-model-invocation: true
 argument-hint: "[question or instruction, e.g. \"how are we doing?\", \"tell issue-185 to use pnpm\", or \"start issue 185 in snevagten-api\"] [watch=yes|no]"
 compatibility: Requires jq, the Herdr app, herdr-core (`hc`), and the herdr-app-orchestrator skill, installed beside this one.
+metadata:
+  required-skills: "herdr-core herdr-app-orchestrator"
 ---
 
 Act as the captain over several orchestrators. The user talks to you about all their runs at once; each orchestrator still runs its own agents. Name your tab first, so it stands out in Herdr's Agents list: find it with `hc get "$HC_TERMINAL_ID" --json | jq -r '.labels["herdr.tab"]'`, then run `herdr-app do tab.rename --id <tab> --name "⚓ captain"`. Answer `$ARGUMENTS`, start watching the runs (unless `watch=no`), and stay available for more questions and instructions.

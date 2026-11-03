@@ -11,6 +11,12 @@ npx skills add dlebech/skills
 npx skills add dlebech/skills --all -g
 ```
 
+The `herdr-app-*` skills also want Herdr's own `herdr-core` skill, which steers agents to `hc` rather than the older `herdr`:
+
+```sh
+npx skills add https://github.com/herdrdev/herdr-core --skill herdr-core
+```
+
 ## Skills
 
 | Skill | What it does |

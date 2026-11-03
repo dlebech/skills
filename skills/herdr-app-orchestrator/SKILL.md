@@ -4,6 +4,8 @@ description: "Manually orchestrate a larger implementation with hidden hc agents
 disable-model-invocation: true
 argument-hint: "[what to build, a path to a plan/spec, or issues like #185 #190; defaults to this session's discussion] [start with #dependency] [sub-issues=ask|all|none] [agent=<kind>] [model=<model>] [implementer/reviewer/specialist overrides] [merge=squash|merge] [push-task-branches=yes|no] [draft-pr=ask|yes|no] [task-review=yes|no] [final-review=ask|yes|no] [review-rounds=<n>] [ask=text|interactive] [branch=<name>]"
 compatibility: Requires git, jq, the Herdr app, and herdr-core (`hc`). Issues and PRs require the GitHub CLI.
+metadata:
+  required-skills: "herdr-core"
 ---
 
 Act as the sole coordinator for a larger piece of work. The user talks only to you; manage its agents, worktrees, reviews, fixes, and integration.
