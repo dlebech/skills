@@ -13,7 +13,9 @@
 #      reports an event once: waiting for user, finished, orchestrator gone; with
 #      a 10-minute interval, so only hc events can wake it for finished;
 #   6. a second watcher is refused by name;
-#   7. a --no-parent terminal outlives the agent that started it.
+#   7. a run started in a folder holding two repositories: init-run.sh names it
+#      after the folder, and repo-spaces.sh lists the folder's space;
+#   8. a --no-parent terminal outlives the agent that started it.
 #
 # Usage: tests/herdr-app-captain/runs-live.sh
 set -uo pipefail
@@ -33,10 +35,11 @@ toy=$work/hctoy-$suffix
 wt=$HOME/.herdr/worktrees/hctoy-$suffix/feature-x
 space=
 wt_space=
+multi_space=
 active_space() { herdr-app ls | jq -r 'first(.spaces[] | select(.active) | .id) // empty'; }
 cleanup() {
-  for n in "$fake" "$watch" "$watch-2" "$fake-free" "$fake-kid"; do hc kill "$n" >/dev/null 2>&1; hc rm "$n" >/dev/null 2>&1; done
-  for space in $wt_space $space; do
+  for n in "$fake" "$fake-multi" "$watch" "$watch-2" "$fake-free" "$fake-kid"; do hc kill "$n" >/dev/null 2>&1; hc rm "$n" >/dev/null 2>&1; done
+  for space in $wt_space $space $multi_space; do
     # Closing a space leaves its finished shells behind.
     shells=$(hc ls --all --label "herdr.space=$space" --json | jq -r '.terminals[].address')
     herdr-app do space.close --id "$space" --confirmed true >/dev/null 2>&1
@@ -153,6 +156,28 @@ hc rm "$watch" >/dev/null
 hc kill "$fake" >/dev/null
 out=$(watch_once)
 contains "gone" "$out" "attention feature/x orchestrator gone"
+
+echo "== a run across two repositories"
+multi=$work/hcmulti-$suffix
+for r in api web; do
+  git init -q "$multi/$r"
+  git -C "$multi/$r" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+done
+multi_space=sp-hcmulti-$suffix
+cat >"$work/fake-multi.sh" <<SCRIPT
+export HERDR_ORCHESTRATION_ROOT="$HERDR_ORCHESTRATION_ROOT"
+sleep 3
+cd "$multi" && "$orch/init-run.sh" feature/y >"$work/init-multi.out"
+exec sleep 300
+SCRIPT
+hc run --bg --name "$fake-multi" --no-notify --cwd "$multi" --label "herdr.space=$multi_space" --label "herdr.tab=tb-$fake-multi" bash "$work/fake-multi.sh" >/dev/null
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$work/init-multi.out" ] && break; hc wait "$fake-multi" --output nothing --timeout 1 >/dev/null 2>&1; done
+read -r state mdir <"$work/init-multi.out"
+check "init-run outside a repository" "$state" new
+check "named after the folder" "$mdir" "$HERDR_ORCHESTRATION_ROOT/hcmulti-$suffix/feature-y"
+check "records the folder" "$(jq -r .folder "$mdir/orchestrator.json")" "$multi"
+contains "runs.sh shows the folder" "$("$capt/runs.sh")" "folder: $multi"
+contains "repo-spaces lists the folder" "$("$capt/repo-spaces.sh" "$multi")" "$multi_space	folder	$multi"
 
 echo "== --no-parent outlives its starter"
 hc run --bg --name "$watch-2" --no-notify --cwd "$work" -- bash -c \

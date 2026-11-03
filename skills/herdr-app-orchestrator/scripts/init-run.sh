@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Create this orchestrator's run directory, or register it again after a resume.
 #
-# Usage: init-run.sh <integration-branch>    (run inside the repository, in an hc terminal)
+# Usage: init-run.sh <integration-branch>    (run in an hc terminal, from the folder the
+#        orchestrator started in: a repository, or a folder holding the run's repositories)
 #
-# Creates ~/.herdr/hc-orchestration/<repo>/<branch>/ with inbox/ and shared/,
+# Creates ~/.herdr/hc-orchestration/<folder>/<branch>/ with inbox/ and shared/, where
+# <folder> is the repository's name, or the start folder's for a run across several,
 # with any "/" in the branch name as "-", since herdr-app-captain scans one level
 # deep; keeps the runs root private, and writes orchestrator.json, which is how
 # herdr-app-captain finds the run. A new run also gets plan.md and its tab name.
@@ -13,18 +15,21 @@ set -eu
 [ $# -eq 1 ] || { echo "usage: init-run.sh <integration-branch>" >&2; exit 2; }
 [ -n "${HC_TERMINAL_ID:-}" ] || { echo "not in an hc terminal: HC_TERMINAL_ID is unset" >&2; exit 1; }
 branch=$1
-common=$(git rev-parse --path-format=absolute --git-common-dir)
-repo=${common%/.git}
+if common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+  folder=${common%/.git}
+else
+  folder=$(pwd -P)
+fi
 root=${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}
-dir=$root/${repo##*/}/${branch//\//-}
+dir=$root/${folder##*/}/${branch//\//-}
 
 state=existing
 [ -e "$dir/plan.md" ] || state=new
 mkdir -p "$dir/inbox" "$dir/shared"
 chmod 700 "$root"
 tab=$(hc get "$HC_TERMINAL_ID" --json | jq -r '.labels["herdr.tab"] // empty')
-jq -n --arg terminal "$HC_TERMINAL_ID" --arg tab "$tab" --arg repo "$repo" --arg branch "$branch" \
-  '{terminal: $terminal, tab_id: $tab, repo: $repo, branch: $branch}' >"$dir/orchestrator.json"
+jq -n --arg terminal "$HC_TERMINAL_ID" --arg tab "$tab" --arg folder "$folder" --arg branch "$branch" \
+  '{terminal: $terminal, tab_id: $tab, folder: $folder, branch: $branch}' >"$dir/orchestrator.json"
 hc label "$HC_TERMINAL_ID" role=orchestrator >/dev/null
 if [ "$state" = new ]; then
   echo "Status: running" >"$dir/plan.md"

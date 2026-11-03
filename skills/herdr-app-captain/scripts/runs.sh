@@ -5,7 +5,8 @@
 #
 # Reads every run directory under ~/.herdr/hc-orchestration that has an
 # orchestrator.json, skipping finished runs unless --all is given. For each prints
-# its directory, branch, repository, the Status line of its plan.md, its
+# its directory, branch, start folder (its repository, or the folder holding
+# several), the Status line of its plan.md, its
 # orchestrator terminal's state and progress label, the dialog it is blocked on,
 # its open question to the user, and unhandled messages. Then lists "🐙" tabs that
 # no run directory claims, when the Herdr window is open.
@@ -51,7 +52,7 @@ while IFS= read -r run_info <&3; do
   messages=$(unhandled_messages "$dir" | while read -r f; do printf '%s ' "${f##*/}"; done)
 
   echo "run: $dir"
-  echo "  branch: $(jq -r '.branch // "?"' "$run_info")  repo: $(jq -r '.repo // "?"' "$run_info")"
+  echo "  branch: $(jq -r '.branch // "?"' "$run_info")  folder: $(jq -r '.folder // .repo // "?"' "$run_info")"
   echo "  plan: ${status:-no Status line}"
   echo "  orchestrator: $orchestrator"
   [ -z "$dialog" ] || echo "  dialog: $dialog"

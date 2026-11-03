@@ -1,7 +1,8 @@
 # Shared by runs.sh and watch-runs.sh; source it, do not run it.
 #
 # The run-directory protocol, as written by herdr-app-orchestrator:
-#   <root>/<repo>/<branch>/orchestrator.json  {"terminal", "tab_id", "repo", "branch"}
+#   <root>/<folder>/<branch>/orchestrator.json  {"terminal", "tab_id", "folder", "branch"}
+#   (<folder>: the repository, or the folder holding a run's several repositories)
 #   <root>/<repo>/<branch>/plan.md            first line "Status: <status>"
 #   <root>/<repo>/<branch>/question.md        the orchestrator's open question to the user
 #   <root>/<repo>/<branch>/inbox/             <name>.message, from the captain

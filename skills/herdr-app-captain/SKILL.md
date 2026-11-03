@@ -54,14 +54,14 @@ An answer to an orchestrator's question is relayed the same way. An instruction 
 
 When the user asks you to start an orchestrator, start a new agent that runs the `herdr-app-orchestrator` skill. The skill is manual-only, and you stay the captain: never load it yourself or do the run's work.
 
-1. Identify the repository, which may not be the one you are running in. `<skill-dir>/scripts/repo-spaces.sh <name-or-path>` lists the open spaces for it, with the repository root and `primary` or `worktree`; without an argument it lists every repository. If the name fits several repositories or none, find it on disk and ask the user when it is not certain.
+1. Identify the repository, which may not be the one you are running in, or for work across several, such as a frontend and a backend, the folder that holds them; the orchestrator works out which repositories inside it the work touches. `<skill-dir>/scripts/repo-spaces.sh <name-or-path>` lists the open spaces for it, with its root and `primary`, `worktree`, or `folder`; without an argument it lists them all. If the name fits several or none, find it on disk and ask the user when it is not certain.
 2. Check `runs.sh` for an unfinished run on the same work. If there is one, tell the user rather than starting a second.
-3. Use the repository's `primary` space. Never use a `worktree` space; those belong to runs. If there is none, use the id `sp-<repo-name>` (letters, digits, and `-` only) in step 5: Herdr then creates the space with the orchestrator as its first tab, named after the folder. Never use `herdr-app do space.new`, which switches the user's window to the new space.
+3. Use the repository's `primary` space, or the folder's `folder` space. Never use a `worktree` space; those belong to runs. If there is none, use the id `sp-<name>` (letters, digits, and `-` only) in step 5: Herdr then creates the space with the orchestrator as its first tab, named after the folder. Never use `herdr-app do space.new`, which switches the user's window to the new space.
 4. Write the prompt to a file with the skill's own command and the user's work and options, for example `/herdr-app-orchestrator 185 sub-issues=all implementer-model=sonnet` for Claude Code, `/skill:herdr-app-orchestrator ...` for `pi`, and for other kinds a plain sentence asking it to load that skill. It has none of your conversation, so the prompt must carry the work: issues, a plan file path, or a full description.
 5. Start it, with a unique name such as `orc-<repo>-<work>`, using the kind and any model the user named, otherwise your own kind. Use the orchestrator skill's script, from the skill directory beside this one:
 
    ```bash
-   <orchestrator-skill-dir>/scripts/start-agent.sh --name <name> --cwd <repo-root> --kind <kind> [--model <model>] \
+   <orchestrator-skill-dir>/scripts/start-agent.sh --name <name> --cwd <root> --kind <kind> [--model <model>] \
      --task-file <file> --no-parent --label herdr.space=<space-id> --label herdr.tab=<tab-id>
    ```
 
