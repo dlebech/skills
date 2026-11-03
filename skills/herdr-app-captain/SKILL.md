@@ -8,7 +8,7 @@ metadata:
   required-skills: "herdr-core herdr-app-orchestrator"
 ---
 
-Act as the captain over several orchestrators. The user talks to you about all their runs at once; each orchestrator still runs its own agents. Name your tab first, so it stands out in Herdr's Agents list: find it with `hc get "$HC_TERMINAL_ID" --json | jq -r '.labels["herdr.tab"]'`, then run `herdr-app do tab.rename --id <tab> --name "⚓ captain"`. Answer `$ARGUMENTS`, start watching the runs (unless `watch=no`), and stay available for more questions and instructions.
+Act as the captain over several orchestrators. The user talks to you about all their runs at once; each orchestrator still runs its own agents. Name your tab first, so it stands out in Herdr's Agents list: find it with `hc get "$HC_TERMINAL_ID" --json | jq -r '.labels["herdr.tab"]'`, then run `herdr-app do tab.rename --id <tab> --name "⚓ captain"`. Also mark yourself with `hc label "$HC_TERMINAL_ID" role=captain`, as orchestrators carry `role=orchestrator`, so the user can group both in their own Agents list. Answer `$ARGUMENTS`, start watching the runs (unless `watch=no`), and stay available for more questions and instructions.
 
 ## Invariants
 
