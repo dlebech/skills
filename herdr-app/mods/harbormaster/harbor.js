@@ -6,7 +6,7 @@ import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, panes, run, setAgentOrder } from "herdr";
 import { stats, taskTone, taskCounts, prsOf, PR_TONE } from "./data.js";
-import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, needReason, focusAgent, openUrl } from "./live.js";
+import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, needReason, adrift, focusAgent, openUrl } from "./live.js";
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural } from "./ui.js";
 
 const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
@@ -48,7 +48,8 @@ function reef(view, r, ctx, x, y, w, h, n) {
   const orch = orchestratorState(r, ctx);
   const need = needsYou(r, orch);
   const reason = needReason(r, orch);
-  // Finished but still open: its work is done and its PR is up, so the reef goes quiet.
+  // Reefs are only drawn for open runs, so a finished one here is docked: its work is
+  // done and its PR is up, so the reef goes quiet.
   const docked = r.phase === "finished";
   const workers = workersOf(r.terminal, ctx);
   const prs = prsOf(r) ?? [];
@@ -121,7 +122,7 @@ export function harbor(view) {
   const runs = s.shown, need = s.need;
   const cap = captainOf(ctx);
   const inRuns = new Set(runs.flatMap((r) => (r.terminal ? [r.terminal, ...workersOf(r.terminal, ctx).map((term) => term.address)] : [])));
-  const drifters = ctx.agents.filter((a) => !inRuns.has(a.address) && a.address !== cap.terminal?.address);
+  const drifters = adrift([cap.terminal?.address, ...runs.map((r) => r.terminal)], ctx);
   const capStatus = cap.terminal && agentStatus(cap.terminal, ctx);
   // Herdr asks a mod that shows agents to pass on their order while it draws them, so that
   // alt-up / alt-down step through the harbor in the order it shows (in memory only).

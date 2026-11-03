@@ -221,7 +221,7 @@ export function isClosed(run, ctx) {
 // Totals across runs, for the summary bar, the overview header, the Crew block and the harbor.
 // `live`: runs still working (not finished); `docked`: finished but still open;
 // `shown`: both, every run the views and the captain keep; `closed`: the rest.
-// The run and need-you counts are of `live` only.
+// The run, need-you and task counts are of `live` only: a finished run's tasks are done.
 export function stats(runs, ctx) {
   const live = runs.filter((r) => r.phase !== "finished");
   const docked = runs.filter((r) => r.phase === "finished" && !isClosed(r, ctx));

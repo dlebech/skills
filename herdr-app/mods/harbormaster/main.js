@@ -36,7 +36,8 @@ export default class Harbormaster extends View {
       this.errors = errors;
       if (changed) cx.notify();
       // PRs land in shared state, which re-renders every copy by itself.
-      for (const r of runs) await refreshPrs(r, isClosed(r, facts())).catch(() => {});
+      const ctx = facts();
+      for (const r of runs) await refreshPrs(r, isClosed(r, ctx)).catch(() => {});
     });
   }
 

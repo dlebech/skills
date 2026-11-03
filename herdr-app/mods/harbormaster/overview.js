@@ -3,7 +3,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { stats, runPhase, taskTone, taskCounts, prsOf, unknownPr, PR_TONE } from "./data.js";
-import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, focusAgent, openUrl } from "./live.js";
+import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, focusAgent, openUrl } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef } from "./ui.js";
 
 // How each runPhase() reads on a card.
@@ -121,8 +121,11 @@ function pinButton(t, ctx, labelled = false) {
     .when(labelled, (el) => el.child(captain.pinned ? "Unpin" : "Pin beside captain"));
 }
 
+// What the captain watches, from stats(): "2 runs, 1 finished".
+const watchedText = (s) => [plural(s.live.length, "run"), s.docked.length ? `${s.docked.length} finished` : null].filter(Boolean).join(", ");
+
 function captainStrip(t, ctx, s) {
-  const watched = [plural(s.live.length, "run"), s.docked.length ? `${s.docked.length} finished` : null].filter(Boolean).join(", ");
+  const watched = watchedText(s);
   const cap = captainOf(ctx);
   if (!cap.terminal) return h_flex().flex_none().gap(8).p(10).rounded(10).border(1).border_color(t.border).text_size(12).text_color(t.dim)
     .child(CAPTAIN).child("No captain running. Start one with /herdr-app-captain.");
@@ -209,8 +212,7 @@ export function crew(view, t) {
   const rows = [];
   if (cap.terminal) {
     // The same counts as the overview: runs still working, and finished ones still open.
-    const s = stats(view.runs, ctx);
-    const watched = [plural(s.live.length, "run"), s.docked.length ? `${s.docked.length} finished` : null].filter(Boolean).join(", ");
+    const watched = watchedText(stats(view.runs, ctx));
     rows.push(row({
       id: "crew-captain", emoji: CAPTAIN, title: "Captain", pin: true,
       detail: cap.watching ? `on watch · ${watched}` : "not watching runs",
@@ -220,8 +222,10 @@ export function crew(view, t) {
   for (const { term, r, state } of orchestrators) {
     const labels = term.labels ?? {};
     const status = agentStatus(term, ctx);
-    const need = r ? needsYou(r, status) : status === "blocked";
-    const reason = r ? needReason(r, status) : need ? "blocked on a dialog" : null;
+    // Without a run directory, the run.status label stands in for the run.
+    const run = r ?? { phase: state };
+    const need = needsYou(run, status);
+    const reason = needReason(run, status);
     const prs = r ? prsOf(r) : null;
     const prText = prs?.length ? prs.map((p) => (p.number ? `PR #${p.number}` : "PR")).join(", ")
       : labels["run.prs"] ? plural(String(labels["run.prs"]).split(/[\s,]+/).filter(Boolean).length, "PR") : null;
@@ -237,9 +241,7 @@ export function crew(view, t) {
     }));
   }
   // Adrift: agents outside the crew, on any machine.
-  const crewAddrs = new Set([cap.terminal, ...orchestrators.map((o) => o.term)].filter(Boolean)
-    .flatMap((term) => [term.address, ...workersOf(term.address, ctx).map((w) => w.address)]));
-  const adrift = ctx.agents.filter((a) => !crewAddrs.has(a.address));
+  const drifters = adrift([cap.terminal?.address, ...orchestrators.map((o) => o.term.address)], ctx);
   const stray = (a) => h_flex().id(`adrift-${a.address}`).flex_none().gap(8).h(24).px(8).items_center().rounded(6).cursor_pointer()
     .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(t.hover)).tooltip(a.title || a.address)
     .on_click(() => focusAgent(a.address))
@@ -251,6 +253,6 @@ export function crew(view, t) {
     .child(v_flex().id("crew-list").flex_1().min_h(0).px(8).pb(6).gap(4).overflow_y_scrollbar()
       .when(rows.length === 0, (el) => el.child(div().px(4).text_size(11.5).text_color(t.dim).child("No captain or orchestrators. Start one with /herdr-app-captain.")))
       .children(rows)
-      .when(adrift.length > 0, (el) => el.child(div().flex_none().px(4).pt(6).text_size(10.5).font_semibold().text_color(t.dim).child(`Adrift · ${adrift.length}`)))
-      .children(adrift.map(stray)));
+      .when(drifters.length > 0, (el) => el.child(div().flex_none().px(4).pt(6).text_size(10.5).font_semibold().text_color(t.dim).child(`Adrift · ${drifters.length}`)))
+      .children(drifters.map(stray)));
 }

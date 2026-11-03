@@ -26,6 +26,12 @@ export function workersOf(address, ctx) {
   return kids.flatMap((t) => [t, ...workersOf(t.address, ctx)]);
 }
 
+// Agents adrift: every agent that is none of `roots` (addresses) or their workers.
+export function adrift(roots, ctx) {
+  const crew = new Set(roots.filter(Boolean).flatMap((a) => [a, ...workersOf(a, ctx).map((w) => w.address)]));
+  return ctx.agents.filter((a) => !crew.has(a.address));
+}
+
 export function captainOf(ctx) {
   const live = ctx.terminals.filter((t) => t.state === "live");
   const terminal = live.find((t) => t.labels?.role === "captain") ?? null;
@@ -42,11 +48,12 @@ export function needsYou(run, orchState) {
 
 // What a run needs the person for, in a few words: the question's first line, the
 // dialog, or the reason in the plan's Status line. null when it doesn't need them.
+// The question comes first, so it matches a view's "Waiting for your answer".
 export function needReason(run, orchState) {
   if (!needsYou(run, orchState)) return null;
-  if (orchState === "blocked") return "blocked on a dialog";
   const question = run.question?.split("\n").map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean);
   if (question) return question;
+  if (orchState === "blocked") return "blocked on a dialog";
   const why = (run.statusLine ?? "").replace(/^(waiting for user|blocked)\s*:?\s*/i, "").trim();
   return why || (run.phase === "blocked" ? "blocked" : "waiting for you");
 }
