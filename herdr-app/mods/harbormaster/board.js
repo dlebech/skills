@@ -1,15 +1,13 @@
 // The serious views: run cards, the Crew block, the summary bar, and the rail above the focused agent.
 
-import { div, svg, image } from "gpui-kit";
+import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { focused, run, settings } from "herdr";
-import {
-  facts, stats, taskTone, prsOf, unknownPr, PR_TONE, orchestratorState, agentStatus, workersOf,
-  captainOf, captainPane, togglePin, needsYou, plural, openUrl, ago, shortRef,
-} from "./data.js";
+import { focused, run } from "herdr";
+import { stats, runPhase, taskTone, taskCounts, prsOf, unknownPr, PR_TONE } from "./data.js";
+import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, focusAgent, openUrl } from "./live.js";
+import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef } from "./ui.js";
 
-const CAPTAIN = "\u{1F9D1}‍✈️", OCTOPUS = "\u{1F419}", CRAB = "\u{1F980}";
-
+// How each runPhase() reads on a card.
 const PHASE = {
   running: { label: "Running", tone: "working" },
   waiting: { label: "Needs you", tone: "blocked" },
@@ -48,15 +46,12 @@ function prRow(t, pr, i) {
     .child(pill(t, pr.state === "DRAFT" ? "Draft" : pr.state[0] + pr.state.slice(1).toLowerCase(), tone));
 }
 
-const hasTasks = (r) => r.tasks.length > 0 || r.planned != null;
-
-function taskStrip(t, r) {
-  const merged = r.merged ?? r.tasks.filter((task) => task.state === "merged").length;
-  const planned = Math.max(r.planned ?? 0, r.tasks.length, 1);
+// One segment per planned task; only for runs that plan at least one.
+function taskStrip(t, r, counts) {
   return v_flex().gap(5)
-    .child(h_flex().gap(3).h(6).children(Array.from({ length: planned }, (_, i) => {
+    .child(h_flex().gap(3).h(6).children(Array.from({ length: counts.planned }, (_, i) => {
       const task = r.tasks[i];
-      const tone = task ? taskTone(task.state) : i < merged ? "done" : null;
+      const tone = task ? taskTone(task.state) : i < counts.merged ? "done" : null;
       return div().flex_1().h_full().rounded(3).bg(tone ? t[tone] : t.border)
         .when(tone === "working", (el) => el.loop("opacity", { from: 0.45, to: 1, period: 1400 }));
     })))
@@ -70,11 +65,12 @@ function taskStrip(t, r) {
 function card(t, r, ctx, compact = false) {
   const orch = orchestratorState(r, ctx);
   const need = needsYou(r, orch);
-  const phase = PHASE[r.phase] ?? PHASE.unknown;
+  const badge = PHASE[r.phase] ?? PHASE.unknown;
+  const counts = taskCounts(r);
   const prs = prsOf(r) ?? r.prs.map((p) => unknownPr(p.url, p.repo));
   const workers = workersOf(r.terminal, ctx);
-  const edge = need ? t.blocked : t[phase.tone] ?? t.border;
-  const focus = () => r.terminal && orch !== "gone" && run("agent.focus", { terminal: r.terminal });
+  const edge = need ? t.blocked : t[badge.tone] ?? t.border;
+  const focus = () => orch !== "gone" && focusAgent(r.terminal);
   const question = r.question?.split("\n").map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean);
   const meta = [r.repo, workers.length ? plural(workers.length, "agent") : null, r.updated ? ago(r.updated) : null].filter(Boolean).join(" · ");
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(8).p(12).pl(16).rounded(10).bg(t.surface)
@@ -89,14 +85,14 @@ function card(t, r, ctx, compact = false) {
           .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
         .child(div().truncate().text_size(11.5).text_color(t.dim).child(meta)))
       .child(statusDot(t, orch))
-      .child(pill(t, phase.label, need ? "blocked" : phase.tone, need)))
+      .child(pill(t, badge.label, need ? "blocked" : badge.tone, need)))
     .when(need && Boolean(question), (el) => el.child(h_flex().gap(8).p(8).rounded(7).bg(t.blocked + "1c").items_start()
       .child(div().flex_none().text_color(t.blocked).font_bold().child("?"))
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(div().text_size(11).font_semibold().text_color(t.blocked).child("Waiting for your answer — click to open the orchestrator"))
         .child(div().text_size(12).text_color(t.foreground).child(question.slice(0, 220))))))
     .when(Boolean(r.progress), (el) => el.child(div().text_size(12.5).text_color(t.foreground).child(r.progress)))
-    .when(!compact && hasTasks(r), (el) => el.child(taskStrip(t, r)))
+    .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts)))
     .when(need && !question && Boolean(r.statusLine) && r.phase !== "running", (el) => el.child(div().text_size(12).text_color(t.blocked).child(r.statusLine)))
     .when(orch === "gone" && r.phase !== "finished", (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Orchestrator terminal is gone — ask the captain to resume this run.")))
     .when(r.waiting.length > 0, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(`Waiting on an answer: ${r.waiting.join(", ")}`)))
@@ -110,30 +106,35 @@ function card(t, r, ctx, compact = false) {
     .when(prs.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(11).text_color(t.dim).child("No pull request yet")));
 }
 
-// Adds or removes the runs overview as a pane beside the captain.
+// Adds or removes the runs overview as a pane beside the captain. Shown greyed out,
+// with the reason, while the captain's terminal is not on screen.
 function pinButton(t, ctx, labelled = false) {
   const captain = captainPane(ctx);
   if (!captain) return div();
-  const tip = captain.pinned ? "Close the runs pane beside the captain" : "Keep the runs open as a pane beside the captain";
-  return h_flex().id("pin").flex_none().gap(5).items_center().px(labelled ? 8 : 4).h(22).rounded(5).cursor_pointer()
-    .text_size(11).text_color(captain.pinned ? t.accent : t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip(tip)
+  const usable = Boolean(captain.pinned || captain.pane);
+  const tip = captain.pinned ? "Close the runs pane beside the captain"
+    : usable ? "Keep the runs open as a pane beside the captain"
+    : "The captain's terminal isn't on screen. Show its tab, then pin.";
+  return h_flex().id("pin").flex_none().gap(5).items_center().px(labelled ? 8 : 4).h(22).rounded(5).tooltip(tip)
+    .text_size(11).text_color(captain.pinned ? t.accent : t.dim).opacity(usable ? 1 : 0.45)
+    .when(usable, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)))
     .on_click((_e, cx) => { cx.stop_propagation(); togglePin(captain); })
     .child(svg("mods/harbormaster/pin.svg").size(13))
     .when(labelled, (el) => el.child(captain.pinned ? "Unpin" : "Pin beside captain"));
 }
 
-function captainStrip(t, ctx, liveRuns) {
+function captainStrip(t, ctx, watched) {
   const cap = captainOf(ctx);
   if (!cap.terminal) return h_flex().flex_none().gap(8).p(10).rounded(10).border(1).border_color(t.border).text_size(12).text_color(t.dim)
     .child(CAPTAIN).child("No captain running. Start one with /herdr-app-captain.");
   return h_flex().id("captain").flex_none().gap(10).p(10).px(12).rounded(10).bg(t.accent + "18").border(1).border_color(t.accent + "55")
     .items_center().cursor_pointer().hover((s) => s.bg(t.accent + "26"))
-    .on_click(() => run("agent.focus", { terminal: cap.terminal.address }))
+    .on_click(() => focusAgent(cap.terminal.address))
     .child(div().text_size(18).child(CAPTAIN))
     .child(v_flex().flex_1().min_w(0)
       .child(div().font_semibold().text_size(13).text_color(t.foreground).child("Captain"))
       .child(div().text_size(11.5).text_color(cap.watching ? t.muted : t.blocked)
-        .child(cap.watching ? `Watching ${plural(liveRuns, "run")}` : "Watcher is not running — ask the captain to watch")))
+        .child(cap.watching ? `Watching ${plural(watched, "run")}` : "Watcher is not running — ask the captain to watch")))
     .child(pinButton(t, ctx, true))
     .child(statusDot(t, agentStatus(cap.terminal, ctx)));
 }
@@ -148,14 +149,14 @@ export function cards(view, t, runs, errors) {
   const s = stats(runs, ctx);
   const needing = new Set(s.need);
   const live = [...s.need, ...s.live.filter((r) => !needing.has(r))];
-  const narrow = (view.size?.width ?? 600) / (Number(settings()?.zoom) || 1) < 360;
+  const narrow = (view.size?.width ?? 600) / zoom() < 360;
   return v_flex().id("root").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .on_size_change((size, cx) => { view.size = size; cx.notify(); })
     .child(h_flex().flex_none().px(14).pt(12).pb(8).items_center().justify_between()
       .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Runs"))
       .child(div().text_size(11).text_color(t.dim).child(summaryText(s))))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
-      .child(captainStrip(t, ctx, live.length))
+      .child(captainStrip(t, ctx, s.live.length))
       .when(live.length === 0, (el) => el.child(div().p(12).text_size(12).text_color(t.dim).child("No runs in progress. Ask the captain to start one, e.g. “start issue 185 in snelogin”.")))
       .children(live.map((r) => card(t, r, ctx, narrow)))
       .when(s.finished.length > 0, (el) => el.child(h_flex().id("finished-toggle").pt(6).px(4).gap(6).items_center().text_size(11).text_color(t.dim).cursor_pointer()
@@ -183,7 +184,7 @@ export function summary(t, runs) {
       .child(div().text_size(11).text_color(cap.terminal ? (cap.watching ? t.muted : t.blocked) : t.dim)
         .child(`${CAPTAIN} ${cap.terminal ? (cap.watching ? "Captain on watch" : "Captain not watching") : "No captain"}`)))
     .child(stat(s.live.length, "runs", null, "s-runs"))
-    .child(stat(s.need.length, "need you", s.need.length ? "blocked" : null, "s-need", firstNeed ? () => run("agent.focus", { terminal: firstNeed }) : null))
+    .child(stat(s.need.length, "need you", s.need.length ? "blocked" : null, "s-need", firstNeed ? () => focusAgent(firstNeed) : null))
     .child(stat(s.workers, "agents", s.workers ? "working" : null, "s-workers"))
     .child(stat(`${s.merged}/${s.planned}`, "tasks merged", null, "s-tasks"))
     .child(stat(s.open.length, s.failing ? `open PRs · ${s.failing} failing` : "open PRs", s.failing ? "blocked" : s.open.length ? "done" : null, "s-prs"))
@@ -205,7 +206,7 @@ export function focusRail(t, runs) {
     : role === "orchestrator" ? `${OCTOPUS} ${branch ?? term.name ?? agent?.tab_name ?? "orchestrator"}`
     : agent ? `${agent.space_name} · ${agent.tab_name}` : "No agent";
   return h_flex().size_full().px(14).gap(8).items_center().bg(t.chrome).border_b(1).border_color(t.border).text_size(12)
-    .when(Boolean(agent?.program?.icon), (el) => el.child(agent.program.tint ? svg(agent.program.icon).size(14).text_color(t.foreground) : image(agent.program.icon).size(14)))
+    .when(Boolean(agent?.program?.icon), (el) => el.child(programIcon(agent.program, 14, t.foreground)))
     .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).font_medium().child(name))
     .when(Boolean(term?.labels?.progress), (el) => el.child(div().max_w(320).truncate().text_color(t.dim).child(term.labels.progress)))
     .when(Boolean(agent), (el) => el.child(statusDot(t, agent.status)))
@@ -219,10 +220,9 @@ export function crew(view, t) {
   const cap = captainOf(ctx);
   const orchestrators = ctx.terminals.filter((term) => term.state === "live" && term.labels?.role === "orchestrator");
   const runOf = (term) => view.runs.find((r) => r.terminal === term.address);
-  const runStatus = (term) => term.labels?.["run.status"] ?? runOf(term)?.phase ?? "running";
   const row = ({ id, emoji, title, detail, tone, status, address, edge, pin = false }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
     .rounded(7).bg(edge + "14").cursor_pointer().hover((st) => st.bg(edge + "26"))
-    .on_click(() => run("agent.focus", { terminal: address }))
+    .on_click(() => focusAgent(address))
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
     .child(div().flex_none().text_size(15).child(emoji))
     .child(v_flex().flex_1().min_w(0)
@@ -232,7 +232,8 @@ export function crew(view, t) {
     .child(statusDot(t, status));
   const rows = [];
   if (cap.terminal) {
-    const watched = orchestrators.filter((term) => runStatus(term) !== "finished").length;
+    // The same count as the overview: every run directory not finished.
+    const watched = stats(view.runs, ctx).live.length;
     rows.push(row({
       id: "crew-captain", emoji: CAPTAIN, title: "Captain", pin: true,
       detail: cap.watching ? `on watch · ${plural(watched, "run")}` : "not watching runs",
@@ -243,11 +244,12 @@ export function crew(view, t) {
     const r = runOf(term), labels = term.labels ?? {};
     const status = agentStatus(term, ctx);
     const need = r ? needsYou(r, status) : status === "blocked";
-    const phase = runStatus(term);
+    // The run directory's phase, as on the overview; the run.status label only when there is none.
+    const state = r?.phase ?? runPhase(labels["run.status"]);
     const prCount = (r && prsOf(r)?.length) || (labels["run.prs"] ? String(labels["run.prs"]).split(/[\s,]+/).filter(Boolean).length : 0);
     const workers = workersOf(term.address, ctx).length;
     const detail = [
-      need ? "needs you" : phase !== "running" ? phase : null,
+      need ? "needs you" : state !== "running" ? (PHASE[state] ?? PHASE.unknown).label.toLowerCase() : null,
       labels.progress ?? r?.progress,
       workers ? `${CRAB} ${workers}` : null,
       prCount ? plural(prCount, "PR") : null,
@@ -255,7 +257,7 @@ export function crew(view, t) {
     rows.push(row({
       id: `crew-${term.address}`, emoji: OCTOPUS, title: r?.branch ?? term.name ?? term.address, detail: detail || "orchestrator",
       tone: need ? "blocked" : "muted", status, address: term.address,
-      edge: (need ? t.blocked : phase === "finished" ? t.done : t.working) ?? t.border,
+      edge: (need ? t.blocked : state === "finished" ? t.done : t.working) ?? t.border,
     }));
   }
   return v_flex().id("crew").size_full().min_h(0).bg(t.chrome).text_size(12.5)

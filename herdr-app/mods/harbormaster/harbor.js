@@ -4,15 +4,15 @@
 
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, panes, run, setAgentOrder, settings } from "herdr";
-import { facts, stats, taskTone, prsOf, PR_TONE, orchestratorState, agentStatus, workersOf, captainOf, needsYou, plural, openUrl } from "./data.js";
+import { spaces, panes, run, setAgentOrder } from "herdr";
+import { stats, taskTone, taskCounts, prsOf, PR_TONE } from "./data.js";
+import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, focusAgent, openUrl } from "./live.js";
+import { CAPTAIN, OCTOPUS, programIcon, zoom, plural } from "./ui.js";
 
 const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
 // PR_TONE's tones as signal-flag colors.
 const FLAG = { working: "#3f8fd2", dim: "#9aa1a8", done: "#8256d0", blocked: "#c24a3a" };
-const CAPTAIN = "\u{1F9D1}\u200D\u2708\uFE0F", OCTOPUS = "\u{1F419}";
 const SKY = 86;
-const icon = (p, size = 15) => p?.icon ? (p.tint ? svg(p.icon).text_color(p.color ?? ink) : image(p.icon)).size(size) : div().size(size);
 
 function bubble(text) {
   return div().absolute().top(-26).left(0).px(9).py(3).rounded(10).bg(sail).border(2).border_color("#d4553e")
@@ -31,7 +31,7 @@ function critter(view, { kind, id, status, label, program, x, y, w, onClick, say
     .child(image(`mods/harbormaster/${art}.svg`).w(w).h(h).opacity(status === "gone" ? 0.4 : 1))
     .when(!octo && Boolean(program?.icon), (el) => el.child(div().absolute().left(Math.round(w * 0.4)).top(Math.round(h * 0.56)).size(Math.round(w * 0.2))
       .rounded(Math.round(w * 0.1)).bg(sail).border(1.5).border_color("#a8431f").flex().items_center().justify_center()
-      .child(icon(program, Math.round(w * 0.13)))));
+      .child(programIcon(program, Math.round(w * 0.13), ink))));
   if (blocked) body.id(`jump-${id}`).loop("top", { from: 0, to: -Math.round(h * 0.18), period: 800 });
   else if (octo && !done) body.id(`float-${id}`).loop("top", { from: 0, to: -6, period: working ? 1500 : 3200 });
   else if (!done) body.id(`bob-${id}`).loop("top", { from: 0, to: 2, period: 2600 });
@@ -49,17 +49,16 @@ function reef(view, r, ctx, x, y, w, h, n) {
   const need = needsYou(r, orch);
   const workers = workersOf(r.terminal, ctx);
   const prs = prsOf(r) ?? [];
-  const planned = Math.max(r.planned ?? 0, r.tasks.length);
-  const merged = r.merged ?? r.tasks.filter((task) => task.state === "merged").length;
+  const { merged, planned } = taskCounts(r);
   const big = Math.min(104, Math.max(70, w * 0.26));
   const small = Math.min(74, Math.max(50, w * 0.17));
   const cols = Math.max(1, Math.floor((w - big - 40) / (small + 24)));
-  const focusOrch = () => r.terminal && orch !== "gone" && run("agent.focus", { terminal: r.terminal });
+  const focusOrch = () => orch !== "gone" && focusAgent(r.terminal);
   const crabs = workers.map((term, i) => critter(view, {
     kind: "crab", id: term.address, i: i + n * 7, status: agentStatus(term, ctx), w: small,
     label: term.name || term.program?.name || term.address, program: term.program,
     x: big + 36 + (i % cols) * (small + 24), y: 122 + Math.floor(i / cols) * (small * 0.75 + 32),
-    onClick: () => run("agent.focus", { terminal: term.address }),
+    onClick: () => focusAgent(term.address),
   }));
   const sign = v_flex().absolute().left(12).top(10).max_w(w - 24 - Math.min(prs.length, 4) * 46).px(10).py(4).rounded(5)
     .bg(need ? "#f6c28b" : rope).border(3).border_color(need ? "#c1562c" : "#a07a3f").text_color("#4a3418")
@@ -108,7 +107,7 @@ function reef(view, r, ctx, x, y, w, h, n) {
 
 export function harbor(view) {
   // on_size_change reports unzoomed px; everything here is drawn in zoomed px.
-  const z = Number(settings()?.zoom) || 1;
+  const z = zoom();
   const W = (view.size?.width ?? 1400 * z) / z, H = (view.size?.height ?? 380 * z) / z;
   // The seabed covers the water, anchored at the bottom so the sand stays in view.
   const sea = H - SKY;
@@ -132,7 +131,7 @@ export function harbor(view) {
 
   // The captain's boat rides the surface; the anchor is down while the watcher runs.
   const boat = div().id("boat").absolute().left(18).top(SKY - 82).cursor_pointer()
-    .when(Boolean(cap.terminal), (el) => el.on_click(() => run("agent.focus", { terminal: cap.terminal.address })))
+    .when(Boolean(cap.terminal), (el) => el.on_click(() => focusAgent(cap.terminal.address)))
     .child(div().relative().w(150).h(122).id("boat-rock").loop("top", { from: 0, to: 4, period: 2400 })
       .child(image("mods/harbormaster/captain.svg").w(150).h(122).opacity(cap.terminal ? 1 : 0.45)))
     .when(need.length > 0 && Boolean(cap.terminal), (el) => el.child(div().absolute().top(132).left(4).px(9).py(3).rounded(10).bg(sail).border(2).border_color("#d4553e")
@@ -167,7 +166,7 @@ export function harbor(view) {
     .children(runs.map((r, i) => reef(view, r, ctx, start + i * (rw + gap), top, rw, bottom - top, i)))
     .children(drifters.slice(0, 6).map((a, i) => critter(view, {
       kind: "crab", id: a.address, i: 50 + i, status: a.status, w: 54, label: a.tab_name || a.program?.name, program: a.program,
-      x: W - 150 + (i % 2) * 70, y: top + 10 + Math.floor(i / 2) * 82, onClick: () => run("agent.focus", { terminal: a.address }),
+      x: W - 150 + (i % 2) * 70, y: top + 10 + Math.floor(i / 2) * 82, onClick: () => focusAgent(a.address),
     })))
     .when(drifters.length > 0, (el) => el.child(div().absolute().right(24).top(top - 20).text_size(10.5).font_weight(700).text_color(sail).child("ADRIFT")));
 }
@@ -187,7 +186,7 @@ export function paneHeader(p) {
   const role = facts().terminals.find((t) => t.address === pane?.terminal)?.labels?.role;
   const who = role === "captain" ? `${CAPTAIN} captain` : role === "orchestrator" ? `${OCTOPUS} orchestrator` : null;
   return h_flex().size_full().px(12).gap(9).items_center().bg("#d9c39a").text_color("#3b2c17").text_size(12).font_weight(600)
-    .child(icon(pane?.program)).child(div().child(pane?.program?.name ?? pane?.title ?? "Terminal"))
+    .child(programIcon(pane?.program, 15, "#3b2c17")).child(div().child(pane?.program?.name ?? pane?.title ?? "Terminal"))
     .when(Boolean(who), (el) => el.child(div().px(6).h(17).flex().items_center().rounded(4).bg(sail).text_size(10.5).child(who)))
     .child(div().flex_1()).child(div().child(pane?.status === "blocked" ? "needs you" : pane?.status ?? ""));
 }

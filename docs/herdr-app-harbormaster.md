@@ -38,19 +38,21 @@ Needs `jq`. Run this from any terminal while the Herdr app is open, in a checkou
 herdr-app/install.sh
 ```
 
-It does three things:
-- copies `herdr-app/mods/harbormaster` and the board and sea layouts into the app's home (`~/.config/herdr-app`, or `$HERDR_APP_HOME`);
+It does four things:
+- copies `herdr-app/mods/harbormaster` and the board and sea layouts into the app's home (`~/.config/herdr-app`, or `$HERDR_APP_HOME`). It refuses to replace a mod or layout of the same name that isn't Harbormaster's, as Herdr asks;
 - clones your Herdr's `main` layout as `harbormaster-main`, and inserts the Crew block above its Agents block with `jq`;
-- binds `ctrl-shift-h` to `mod.open:harbormaster` in `keys.json`, unless that key is already taken (then it tells you);
+- binds `ctrl-shift-h` to `mod.open:harbormaster` under `global` in `keys.json`. It skips this and tells you how to add a key yourself if `ctrl-shift-h` is already bound in any section, or if there is no `keys.json` yet;
 - runs `herdr-app check` on the mod.
 
 To update, pull and run it again. It overwrites the mod and the two layouts. It leaves `harbormaster-main` alone once it has the Crew block, and the key binding alone once it exists.
+
+Note: install copies files; it doesn't delete any. A file removed from the mod in a later version stays in `mods/harbormaster` until you delete it.
 
 To switch layouts, press `ctrl-shift-l`. You can also run `herdr-app do layout.switch '{"name":"harbormaster-board"}'`, with any of `harbormaster-main`, `harbormaster-board`, `harbormaster-sea`, or Herdr's own `main`. The board has a "Back to main" button and the sea has a "Run board" button.
 
 To glance at the runs from anywhere, press `ctrl-shift-h`. It opens the overview as a popup over the window, and pressing it again, or Esc, closes it.
 
-To keep the overview open beside the captain, click **Pin beside captain** on the captain's card in the overview (or the pane icon on the captain's Crew card). It opens a `harbormaster` pane to the right of the captain's terminal, in the captain's tab, and is saved with that tab. The same button then says **Unpin** and closes it. You can also close it like any pane: its header, or `ctrl-shift-x` while it has focus.
+To keep the overview open beside the captain, click **Pin beside captain** on the captain's card in the overview (or the pane icon on the captain's Crew card). It opens a `harbormaster` pane to the right of the captain's terminal, in the captain's tab, and is saved with that tab. The same button then says **Unpin** and closes it. While the captain's terminal isn't on screen (for example, parked), the button is greyed out and its tooltip says why. You can also close the pane like any pane: its header, or `ctrl-shift-x` while it has focus.
 
 To use the Crew block in a layout of your own, add a block with `{ "mod": "harbormaster", "props": { "role": "crew" } }`.
 
@@ -82,7 +84,9 @@ It never writes to run directories.
 | Path | What |
 | --- | --- |
 | `herdr-app/mods/harbormaster/main.js` | Picks the view by `props().role`: none (run cards), `crew`, `summary`, `focus-rail`, `harbor`, `harbor-rail`, `harbor-pane` |
-| `herdr-app/mods/harbormaster/data.js` | Reads run directories, PRs and live facts (orchestrator state, workers, captain) |
+| `herdr-app/mods/harbormaster/data.js` | Run directories, tasks, PRs from `gh`, and the totals the views share |
+| `herdr-app/mods/harbormaster/live.js` | Live facts from herdr-core (status, workers, captain, panes) and the focus, pin and open-link actions |
+| `herdr-app/mods/harbormaster/ui.js` | Emoji, program icons, zoom, and text formatting |
 | `herdr-app/mods/harbormaster/board.js` | Run cards, the Crew block, the summary bar, the focused-agent rail |
 | `herdr-app/mods/harbormaster/harbor.js` | The sea, the reefs, the captain's boat, the rail and the pane headers |
 | `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, spinner, chevrons. All original, CC0 like the rest of this repository |
@@ -93,3 +97,5 @@ It never writes to run directories.
 
 1. Switch to `main`.
 2. Delete these from the app's home: `mods/harbormaster`, and `layouts/harbormaster-*`.
+3. In `keys.json`, delete the `"ctrl-shift-h": "mod.open:harbormaster"` line (or whichever key you bound to it).
+4. Close any `harbormaster` pane still beside the captain.
