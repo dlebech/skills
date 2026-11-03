@@ -181,8 +181,8 @@ export function rail(view) {
   return h_flex().size_full().bg(navy).px(20).items_center().justify_between().text_color(sail).text_size(13).font_weight(600)
     .child(div().child(`${s?.name ?? ""}  /  ${tab?.name ?? ""}`))
     .child(h_flex().gap(14).items_center()
-      .child(div().id("to-board").text_size(11).px(8).h(20).flex().items_center().rounded(4).bg(deepNavy).cursor_pointer().hover((st) => st.bg("#10253a"))
-        .on_click(() => run("layout.switch", { name: "harbormaster-board" })).child("Run board"))
+      .child(div().id("to-main").text_size(11).px(8).h(20).flex().items_center().rounded(4).bg(deepNavy).cursor_pointer().hover((st) => st.bg("#10253a"))
+        .on_click(() => run("layout.switch", { name: "harbormaster-main" })).child("Back to main"))
       .child(div().text_size(11).child("BELOW DECK")));
 }
 

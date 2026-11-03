@@ -1,8 +1,7 @@
-// The serious views: run cards, the Crew block, the summary bar, and the rail above the focused agent.
+// The serious views: the runs overview (totals, captain, run cards) and the Crew block.
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { focused, run } from "herdr";
 import { stats, runPhase, taskTone, taskCounts, prsOf, unknownPr, PR_TONE } from "./data.js";
 import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, focusAgent, openUrl } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef } from "./ui.js";
@@ -122,7 +121,8 @@ function pinButton(t, ctx, labelled = false) {
     .when(labelled, (el) => el.child(captain.pinned ? "Unpin" : "Pin beside captain"));
 }
 
-function captainStrip(t, ctx, watched) {
+function captainStrip(t, ctx, s) {
+  const watched = [plural(s.live.length, "run"), s.docked.length ? `${s.docked.length} finished` : null].filter(Boolean).join(", ");
   const cap = captainOf(ctx);
   if (!cap.terminal) return h_flex().flex_none().gap(8).p(10).rounded(10).border(1).border_color(t.border).text_size(12).text_color(t.dim)
     .child(CAPTAIN).child("No captain running. Start one with /herdr-app-captain.");
@@ -133,13 +133,26 @@ function captainStrip(t, ctx, watched) {
     .child(v_flex().flex_1().min_w(0)
       .child(div().font_semibold().text_size(13).text_color(t.foreground).child("Captain"))
       .child(div().text_size(11.5).text_color(cap.watching ? t.muted : t.blocked)
-        .child(cap.watching ? `Watching ${plural(watched, "run")}` : "Watcher is not running — ask the captain to watch")))
+        .child(cap.watching ? `Watching ${watched}` : "Watcher is not running — ask the captain to watch")))
     .child(pinButton(t, ctx, true))
     .child(statusDot(t, agentStatus(cap.terminal, ctx)));
 }
 
-function summaryText(s) {
-  return [`${s.live.length} running`, s.need.length ? `${s.need.length} need you` : null, s.docked.length ? `${s.docked.length} finished` : null, plural(s.open.length, "open PR")].filter(Boolean).join(" · ");
+// The totals across runs, as small stats under the overview's title. "need you" focuses
+// the first run that needs you.
+function totals(t, s) {
+  const stat = (id, value, label, tone, onClick) => h_flex().id(id).flex_none().gap(4).items_baseline().px(6).h(22).rounded(5)
+    .when(Boolean(onClick), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click(onClick))
+    .child(div().text_size(13).font_semibold().text_color(tone ? t[tone] : t.foreground).child(String(value)))
+    .child(div().text_size(11).text_color(t.dim).child(label));
+  const firstNeed = s.need[0]?.terminal;
+  return h_flex().flex_wrap().gap(2).items_center()
+    .child(stat("t-runs", s.live.length, "running", null))
+    .child(stat("t-need", s.need.length, "need you", s.need.length ? "blocked" : null, firstNeed ? () => focusAgent(firstNeed) : null))
+    .when(s.docked.length > 0, (el) => el.child(stat("t-done", s.docked.length, "finished", "done")))
+    .child(stat("t-agents", s.workers, s.workers === 1 ? "agent" : "agents", s.workers ? "working" : null))
+    .when(s.planned > 0, (el) => el.child(stat("t-tasks", `${s.merged}/${s.planned}`, "tasks merged", null)))
+    .child(stat("t-prs", s.open.length, s.failing ? `open PRs · ${s.failing} failing` : s.open.length === 1 ? "open PR" : "open PRs", s.failing ? "blocked" : s.open.length ? "done" : null));
 }
 
 // The cards list: captain, runs that need you, the others, finished runs still open, then closed runs folded.
@@ -151,11 +164,11 @@ export function cards(view, t, runs, errors) {
   const narrow = (view.size?.width ?? 600) / zoom() < 360;
   return v_flex().id("root").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .on_size_change((size, cx) => { view.size = size; cx.notify(); })
-    .child(h_flex().flex_none().px(14).pt(12).pb(8).items_center().justify_between()
-      .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Runs"))
-      .child(div().text_size(11).text_color(t.dim).child(summaryText(s))))
+    .child(v_flex().flex_none().px(10).pt(10).pb(6).gap(2)
+      .child(div().px(4).text_size(11.5).font_medium().text_color(t.dim).child("Runs"))
+      .child(totals(t, s)))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
-      .child(captainStrip(t, ctx, s.shown.length))
+      .child(captainStrip(t, ctx, s))
       .when(s.shown.length === 0, (el) => el.child(div().p(12).text_size(12).text_color(t.dim).child("No runs in progress. Ask the captain to start one, e.g. “start issue 185 in snelogin”.")))
       .children(live.map((r) => card(t, r, ctx, narrow)))
       .children(s.docked.map((r) => card(t, r, ctx, true)))
@@ -166,51 +179,6 @@ export function cards(view, t, runs, errors) {
         .child(`${s.closed.length} closed`)))
       .when(Boolean(view.showDone), (el) => el.children(s.closed.map((r) => card(t, r, ctx, true))))
       .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n")))));
-}
-
-// The top bar of the harbormaster-board layout.
-export function summary(t, runs) {
-  const ctx = facts();
-  const s = stats(runs, ctx);
-  const cap = captainOf(ctx);
-  const stat = (value, label, tone, id, onClick) => v_flex().id(id).px(14).py(4).rounded(8).gap(0).cursor_pointer().hover((st) => st.bg(t.hover))
-    .when(Boolean(onClick), (el) => el.on_click(onClick))
-    .child(div().text_size(22).font_semibold().text_color(tone ? t[tone] : t.foreground).child(String(value)))
-    .child(div().text_size(10.5).text_color(t.dim).child(label));
-  const firstNeed = s.need[0]?.terminal;
-  return h_flex().size_full().px(18).gap(8).items_center().bg(t.chrome).border_b(1).border_color(t.border)
-    .child(v_flex().gap(1).mr(16)
-      .child(h_flex().gap(8).items_center().child(div().text_size(17).font_semibold().text_color(t.foreground).child("Run board")))
-      .child(div().text_size(11).text_color(cap.terminal ? (cap.watching ? t.muted : t.blocked) : t.dim)
-        .child(`${CAPTAIN} ${cap.terminal ? (cap.watching ? "Captain on watch" : "Captain not watching") : "No captain"}`)))
-    .child(stat(s.live.length, "runs", null, "s-runs"))
-    .child(stat(s.need.length, "need you", s.need.length ? "blocked" : null, "s-need", firstNeed ? () => focusAgent(firstNeed) : null))
-    .child(stat(s.workers, "agents", s.workers ? "working" : null, "s-workers"))
-    .child(stat(`${s.merged}/${s.planned}`, "tasks merged", null, "s-tasks"))
-    .child(stat(s.open.length, s.failing ? `open PRs · ${s.failing} failing` : "open PRs", s.failing ? "blocked" : s.open.length ? "done" : null, "s-prs"))
-    .child(div().flex_1())
-    .child(div().id("to-main").px(10).h(26).rounded(6).flex().items_center().text_size(11.5).text_color(t.muted).border(1).border_color(t.border)
-      .cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))
-      .on_click(() => run("layout.switch", { name: "harbormaster-main" })).child("Back to main"));
-}
-
-// One line above the focused agent's terminal in the harbormaster-board layout.
-export function focusRail(t, runs) {
-  const ctx = facts();
-  const address = focused()?.agent;
-  const agent = ctx.agents.find((a) => a.address === address) ?? ctx.agents[0];
-  const term = ctx.terminals.find((x) => x.address === (agent?.address ?? address));
-  const role = term?.labels?.role;
-  const branch = runs.find((r) => r.terminal === term?.address)?.branch;
-  const name = role === "captain" ? `${CAPTAIN} Captain`
-    : role === "orchestrator" ? `${OCTOPUS} ${branch ?? term.name ?? agent?.tab_name ?? "orchestrator"}`
-    : agent ? `${agent.space_name} · ${agent.tab_name}` : "No agent";
-  return h_flex().size_full().px(14).gap(8).items_center().bg(t.chrome).border_b(1).border_color(t.border).text_size(12)
-    .when(Boolean(agent?.program?.icon), (el) => el.child(programIcon(agent.program, 14, t.foreground)))
-    .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).font_medium().child(name))
-    .when(Boolean(term?.labels?.progress), (el) => el.child(div().max_w(320).truncate().text_color(t.dim).child(term.labels.progress)))
-    .when(Boolean(agent), (el) => el.child(statusDot(t, agent.status)))
-    .child(div().id("peek-hint").text_size(11).text_color(t.dim).child("click a run or agent to show it here"));
 }
 
 // The Crew block: the captain and every orchestrator as cards, from their role labels,
