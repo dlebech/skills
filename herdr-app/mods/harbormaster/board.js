@@ -3,7 +3,7 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, focused, run, theme, settings } from "herdr";
-import { taskTone, prsOf, orchestratorState, workersOf, workerStatus, captainOf, needsYou, openUrl, ago, short } from "./data.js";
+import { taskTone, prsOf, orchestratorState, workersOf, captainOf, captainPane, togglePin, needsYou, openUrl, ago, short } from "./data.js";
 
 const PHASE = {
   running: { label: "Running", tone: "working" },
@@ -21,7 +21,7 @@ export function pill(t, text, tone, solid = false) {
 }
 
 function statusDot(t, s) {
-  if (s === "working") return svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900);
+  if (s === "working") return svg("mods/harbormaster/spinner.svg").size(11).flex_none().text_color(t.working).spin(900);
   if (s === "blocked") return div().size(8).flex_none().rounded(4).bg(t.blocked).loop("opacity", { from: 0.35, to: 1, period: 1100 });
   if (s === "gone") return div().size(8).flex_none().rounded(4).border(1.5).border_color(t.dim);
   if (s === "idle") return div().size(8).flex_none().rounded(4).border(1.5).border_color(t.idle ?? t.dim);
@@ -85,13 +85,13 @@ export function card(t, r, ctx, compact = false) {
         .child(div().truncate().text_size(11.5).text_color(t.dim).child(`${r.repo}${workers.length ? ` · ${workers.length} agent${workers.length > 1 ? "s" : ""}` : ""}${r.updated ? ` · ${ago(r.updated)}` : ""}`)))
       .child(statusDot(t, o))
       .child(pill(t, ph.label, need ? "blocked" : ph.tone, need)))
-    .when(Boolean(r.progress), (el) => el.child(div().text_size(12.5).text_color(t.foreground).child(r.progress)))
-    .when(!compact && (r.tasks.length > 0 || r.planned != null), (el) => el.child(taskStrip(t, r)))
     .when(need && Boolean(question), (el) => el.child(h_flex().gap(8).p(8).rounded(7).bg(t.blocked + "1c").items_start()
       .child(div().flex_none().text_color(t.blocked).font_bold().child("?"))
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(div().text_size(11).font_semibold().text_color(t.blocked).child("Waiting for your answer — click to open the orchestrator"))
         .child(div().text_size(12).text_color(t.foreground).child(question.slice(0, 220))))))
+    .when(Boolean(r.progress), (el) => el.child(div().text_size(12.5).text_color(t.foreground).child(r.progress)))
+    .when(!compact && (r.tasks.length > 0 || r.planned != null), (el) => el.child(taskStrip(t, r)))
     .when(need && !question && Boolean(r.statusLine) && r.phase !== "running", (el) => el.child(div().text_size(12).text_color(t.blocked).child(r.statusLine)))
     .when(o === "gone" && r.phase !== "finished", (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Orchestrator terminal is gone — ask the captain to resume this run.")))
     .when(r.waiting.length > 0, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(`Waiting on an answer: ${r.waiting.join(", ")}`)))
@@ -103,6 +103,18 @@ export function card(t, r, ctx, compact = false) {
           .hover((s) => s.text_color(t.foreground)).tooltip(u)
           .on_click((_e, cx) => { cx.stop_propagation(); openUrl(u); }).child(`◎ ${short(u)}`)))))))
     .when(prs.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(11).text_color(t.dim).child("No pull request yet")));
+}
+
+// Adds or removes the runs overview as a pane beside the captain.
+function pinButton(t, all, labelled = false) {
+  const cp = captainPane(all);
+  if (!cp) return div();
+  const tip = cp.pinned ? "Close the runs pane beside the captain" : "Keep the runs open as a pane beside the captain";
+  return h_flex().id("pin").flex_none().gap(5).items_center().px(labelled ? 8 : 4).h(22).rounded(5).cursor_pointer()
+    .text_size(11).text_color(cp.pinned ? t.accent : t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip(tip)
+    .on_click((_e, cx) => { cx.stop_propagation(); togglePin(cp); })
+    .child(svg("mods/harbormaster/pin.svg").size(13))
+    .when(labelled, (el) => el.child(cp.pinned ? "Unpin" : "Pin beside captain"));
 }
 
 export function captainStrip(t, ctx, runs) {
@@ -118,6 +130,7 @@ export function captainStrip(t, ctx, runs) {
       .child(div().font_semibold().text_size(13).text_color(t.foreground).child("Captain"))
       .child(div().text_size(11.5).text_color(cap.watching ? t.muted : t.blocked)
         .child(cap.watching ? `Watching ${runs.length} run${runs.length === 1 ? "" : "s"}` : "Watcher is not running — ask the captain to watch")))
+    .child(pinButton(t, ctx.all, true))
     .child(statusDot(t, status));
 }
 
@@ -141,7 +154,7 @@ export function cards(view, t, runs, errors) {
       .when(done.length > 0, (el) => el.child(h_flex().id("finished-toggle").pt(6).px(4).gap(6).items_center().text_size(11).text_color(t.dim).cursor_pointer()
         .hover((s) => s.text_color(t.foreground))
         .on_click((_e, cx) => { view.showDone = !view.showDone; cx.notify(); })
-        .child(svg(`mods/workspace-chrome/chevron-${view.showDone ? "down" : "right"}.svg`).size(11))
+        .child(svg(`mods/harbormaster/chevron-${view.showDone ? "down" : "right"}.svg`).size(11))
         .child(`${done.length} finished`)))
       .when(Boolean(view.showDone), (el) => el.children(done.map((r) => card(t, r, ctx, true))))
       .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n")))));
@@ -186,13 +199,14 @@ export function summary(t, runs) {
 }
 
 // One line above the focused agent's terminal in the harbormaster-board layout.
-export function focusRail(t) {
+export function focusRail(t, runs) {
   const listed = agents();
   const addr = focused()?.agent;
   const a = listed.find((x) => x.address === addr) ?? listed[0];
   const k = terminals().find((x) => x.address === (a?.address ?? addr));
   const role = k?.labels?.role;
-  const name = role === "captain" ? "\u{1F9D1}\u200D\u2708\uFE0F Captain" : role === "orchestrator" ? `\u{1F419} ${k.labels?.["herdr.tab"] ? a?.tab_name ?? "" : ""}` : a ? `${a.space_name} · ${a.tab_name}` : "No agent";
+  const branch = runs.find((r) => r.terminal === k?.address)?.branch;
+  const name = role === "captain" ? "\u{1F9D1}\u200D\u2708\uFE0F Captain" : role === "orchestrator" ? `\u{1F419} ${branch ?? k.name ?? a?.tab_name ?? "orchestrator"}` : a ? `${a.space_name} · ${a.tab_name}` : "No agent";
   return h_flex().size_full().px(14).gap(8).items_center().bg(t.chrome).border_b(1).border_color(t.border).text_size(12)
     .when(Boolean(a?.program?.icon), (el) => el.child(a.program.tint ? svg(a.program.icon).size(14).text_color(t.foreground) : image(a.program.icon).size(14)))
     .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).font_medium().child(name))
@@ -217,10 +231,12 @@ export function crew(view, t) {
     .child(v_flex().flex_1().min_w(0)
       .child(div().truncate().text_size(12.5).font_semibold().text_color(t.foreground).child(title))
       .child(div().truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail)))
+    .when(id === "crew-captain", (el) => el.child(pinButton(t, all)))
     .child(statusDot(t, s));
   const rows = [];
+  const watched = orchs.filter((k) => (k.labels?.["run.status"] ?? runOf(k)?.phase) !== "finished").length;
   if (cap.terminal) rows.push(row("crew-captain", "\u{1F9D1}‍✈️", "Captain",
-    cap.watching ? `on watch · ${orchs.length} run${orchs.length === 1 ? "" : "s"}` : "not watching runs",
+    cap.watching ? `on watch · ${watched} run${watched === 1 ? "" : "s"}` : "not watching runs",
     cap.watching ? "muted" : "blocked", status(cap.terminal), cap.terminal.address, t.accent));
   for (const k of orchs) {
     const r = runOf(k), l = k.labels ?? {};

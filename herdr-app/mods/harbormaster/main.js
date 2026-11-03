@@ -47,7 +47,7 @@ export default class Harbormaster extends View {
     switch (p.role) {
       case "crew": return crew(this, t);
       case "summary": return summary(t, this.runs);
-      case "focus-rail": return focusRail(t);
+      case "focus-rail": return focusRail(t, this.runs);
       case "harbor": return harbor(this);
       case "harbor-rail": return rail(this);
       case "harbor-pane": return paneHeader(p);

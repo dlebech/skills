@@ -1,4 +1,4 @@
-// Run facts for the runs mod: herdr-app-orchestrator run directories, read on
+// Run facts for Harbormaster: herdr-app-orchestrator run directories, read on
 // every machine (this one and each one added with `hc machine add`), plus each
 // run's pull requests from `gh`, asked on the machine that owns the run.
 //
@@ -9,7 +9,7 @@
 //   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
 //   <root>/<folder>/<branch>/inbox/*.message    relayed messages not yet handled
 
-import { exec, machines, terminals, agents, shared, setShared, window } from "herdr";
+import { exec, machines, terminals, agents, panes, run, shared, setShared, window } from "herdr";
 
 const RS = "\u001e", US = "\u001f";
 
@@ -203,13 +203,29 @@ export function workersOf(address, all = terminals()) {
 
 export function workerStatus(k, listed = agents()) {
   const s = listed.find((a) => a.address === k.address)?.status ?? k.status;
-  return s === "error" ? "blocked" : s === "done" ? "idle" : s ?? "idle";
+  return s === "error" ? "blocked" : s ?? "idle";
 }
 
 export function captainOf(all = terminals()) {
   const cap = all.find((t) => t.state === "live" && t.labels?.role === "captain") ?? null;
   const watch = all.find((t) => t.state === "live" && (t.name === "captain-watch" || t.address?.endsWith("/captain-watch")));
   return { terminal: cap, watching: Boolean(watch) };
+}
+
+// The captain's pane, and the Harbormaster pane pinned beside it in the same tab, if any.
+export function captainPane(all = terminals()) {
+  const cap = captainOf(all).terminal;
+  const ps = panes();
+  const p = cap && ps.find((x) => x.terminal === cap.address);
+  if (!p) return null;
+  return { pane: p.pane, pinned: ps.find((x) => x.tab === p.tab && x.mod === "harbormaster")?.pane ?? null };
+}
+
+// Shows the runs overview as a pane right of the captain, or closes it again.
+export function togglePin(cp) {
+  if (!cp) return;
+  if (cp.pinned) run("pane.close", { pane: cp.pinned });
+  else run("pane.split", { pane: cp.pane, direction: "right", mod: "harbormaster" });
 }
 
 // Does this run need the person? An open question, a blocked plan, or a blocked orchestrator.

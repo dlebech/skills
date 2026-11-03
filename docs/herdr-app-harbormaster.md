@@ -3,12 +3,13 @@
 Harbormaster is a Herdr app mod with three layouts. It shows what `herdr-app-captain` and its `herdr-app-orchestrator` runs are doing, so you don't have to read the Agents list row by row. Everything in it is written from scratch: it uses Herdr's mod API and leaves Herdr's own mods and layouts unchanged.
 
 - **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge. It sits above Herdr's own Agents list.
-  - The captain's card says whether its watcher is running and how many runs it watches.
+  - The captain's card says whether its watcher is running and how many unfinished runs it watches. Its pane button pins the runs overview beside the captain, or unpins it.
   - Each orchestrator's card shows its progress, its status when it isn't running, its number of 🦀 workers and its number of PRs. A run that needs you turns red.
 - **Runs overview.** One card per run:
   - its branch and repository, a status pill, the progress line, and a task bar from `plan.md` (merged, in progress, blocked);
   - its issues, and every PR with its state, checks and review decision;
-  - an open question, shown first when the run is waiting for you.
+  - an open question, shown first when the run is waiting for you;
+  - and, when they apply: relayed messages the orchestrator hasn't read, agents waiting on an answer, "No pull request yet", and a hint to ask the captain to resume a run whose orchestrator is gone.
 
   Clicking a card focuses the orchestrator. Clicking a PR or issue opens it in the browser. Finished runs fold away at the bottom.
 - **`harbormaster-main` layout.** Herdr's main layout with the Crew block added.
@@ -19,10 +20,11 @@ Harbormaster is a Herdr app mod with three layouts. It shows what `herdr-app-cap
   - the focused agent's live terminal.
 - **`harbormaster-sea` layout** (fun):
   - The captain rides a boat on the surface and drops anchor while watching. The captain calls "Ahoy!" when a run needs you, and raises the anchor and naps when nothing is being watched.
-  - Each run is a reef with its branch on a sign. The orchestrator is an octopus and its workers are crabs. Working crabs scuttle, blocked ones jump and finished ones sleep.
+  - Each unfinished run is a reef with its branch on a sign; finished runs leave the harbor. The orchestrator is an octopus and its workers are crabs. Working crabs scuttle, blocked ones jump, and crabs whose turn is done sleep.
   - Buoys along the bottom are the run's tasks and turn green as they merge.
   - Signal flags on the mast are its PRs. Clicking one opens it.
   - Agents outside any run drift on the right. The active tab's terminals sit below deck.
+  - While it shows, `alt-up` / `alt-down` step through agents in the harbor's order (captain, each run's octopus and crabs, then drifters), through Herdr's `setAgentOrder`. Other layouts set their own order again.
 
 The skills work the same with or without any of this. Tested with Herdr 0.1.12.
 
@@ -33,8 +35,7 @@ The skills work the same with or without any of this. Tested with Herdr 0.1.12.
 Needs `jq`. Run this from any terminal while the Herdr app is open, in a checkout of this repository:
 
 ```sh
-herdr-app/install.sh                 # the mod and layouts
-herdr-app/install.sh --captain-pane  # the same, and opens the overview beside the captain now
+herdr-app/install.sh
 ```
 
 It does three things:
@@ -49,7 +50,7 @@ To switch layouts, press `ctrl-shift-l`. You can also run `herdr-app do layout.s
 
 To glance at the runs from anywhere, press `ctrl-shift-h`. It opens the overview as a popup over the window, and pressing it again, or Esc, closes it.
 
-To keep the overview open beside the captain, run `herdr-app/captain-pane.sh` (or pass `--captain-pane` to `install.sh`). It opens a `harbormaster` pane to the right of the terminal labelled `role=captain`. It is saved with the captain's tab, so you need it only once per captain tab. Running it again adds a second pane. Close it like any pane: its header, or `ctrl-shift-x` while it has focus.
+To keep the overview open beside the captain, click **Pin beside captain** on the captain's card in the overview (or the pane icon on the captain's Crew card). It opens a `harbormaster` pane to the right of the captain's terminal, in the captain's tab, and is saved with that tab. The same button then says **Unpin** and closes it. You can also close it like any pane: its header, or `ctrl-shift-x` while it has focus.
 
 To use the Crew block in a layout of your own, add a block with `{ "mod": "harbormaster", "props": { "role": "crew" } }`.
 
@@ -84,9 +85,9 @@ It never writes to run directories.
 | `herdr-app/mods/harbormaster/data.js` | Reads run directories, PRs and live facts (orchestrator state, workers, captain) |
 | `herdr-app/mods/harbormaster/board.js` | Run cards, the Crew block, the summary bar, the focused-agent rail |
 | `herdr-app/mods/harbormaster/harbor.js` | The sea, the reefs, the captain's boat, the rail and the pane headers |
-| `herdr-app/mods/harbormaster/*.svg` | Art: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR icon. All original, CC0 like the rest of this repository |
+| `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, spinner, chevrons. All original, CC0 like the rest of this repository |
 | `herdr-app/layouts/harbormaster-board.json`, `harbormaster-sea.json` (+ `.svg` previews) | The two standalone layouts. `harbormaster-main` is made by `install.sh` |
-| `herdr-app/install.sh`, `captain-pane.sh` | Install, and open the overview beside the captain |
+| `herdr-app/install.sh` | Install or update |
 
 ## Remove
 

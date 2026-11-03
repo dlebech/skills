@@ -5,18 +5,12 @@
 # any terminal while the Herdr app is open. Safe to run again: it updates the mod
 # and the two layouts, and adds the Crew block to harbormaster-main only if missing.
 #
-# Usage: herdr-app/install.sh [--captain-pane]
-#   --captain-pane  also opens the runs overview as a pane beside the captain
+# Usage: herdr-app/install.sh
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 home=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
-captain_pane=
-case ${1:-} in
-  "") ;;
-  --captain-pane) captain_pane=1 ;;
-  *) echo "usage: install.sh [--captain-pane]" >&2; exit 2 ;;
-esac
+[ $# -eq 0 ] || { echo "usage: install.sh" >&2; exit 2; }
 
 die() { echo "install.sh: $*" >&2; exit 1; }
 command -v herdr-app >/dev/null || die "herdr-app is not on PATH"
@@ -70,15 +64,11 @@ fi
 # 4. Check the mod.
 herdr-app check "$home/mods/harbormaster"
 
-if [ -n "$captain_pane" ]; then
-  "$here/captain-pane.sh"
-fi
-
 cat <<'EOF'
 
 Done. ctrl-shift-h opens and closes the overview. Switch layouts with ctrl-shift-l, or:
   herdr-app do layout.switch '{"name":"harbormaster-main"}'   # your usual window, with the Crew block
   herdr-app do layout.switch '{"name":"harbormaster-board"}'  # the run board
   herdr-app do layout.switch '{"name":"harbormaster-sea"}'    # the harbor
-Open the overview beside the captain: herdr-app/captain-pane.sh
+To keep the overview beside the captain, click "Pin beside captain" on the captain's card.
 EOF
