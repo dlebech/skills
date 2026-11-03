@@ -85,7 +85,7 @@ function parse(machine, stdout) {
 }
 
 // Every copy asks through one cache, so a layout with several copies reads once.
-let cache = { at: 0, runs: [], errors: [], p: null };
+let cache = { at: 0, runs: [], errors: [], pending: null };
 
 export function cachedRuns() {
   return cache;
@@ -93,8 +93,8 @@ export function cachedRuns() {
 
 export function loadRuns() {
   if (Date.now() - cache.at < 2500) return Promise.resolve(cache);
-  if (cache.p) return cache.p;
-  cache.p = (async () => {
+  if (cache.pending) return cache.pending;
+  cache.pending = (async () => {
     const names = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
     if (!names.includes(null)) names.unshift(null);
     const runs = [], errors = [];
@@ -107,19 +107,23 @@ export function loadRuns() {
       }
     }));
     runs.sort((a, b) => (a.machine ?? "").localeCompare(b.machine ?? "") || a.dir.localeCompare(b.dir));
-    cache = { at: Date.now(), runs, errors, p: null };
+    cache = { at: Date.now(), runs, errors, pending: null };
     return cache;
   })().catch((e) => {
-    cache = { ...cache, p: null, errors: [String(e)] };
+    cache = { ...cache, pending: null, errors: [String(e)] };
     return cache;
   });
-  return cache.p;
+  return cache.pending;
 }
 
 // ---- pull requests (gh), cached in shared state so every copy and layout reuses them ----
 
 const PR_FIELDS = "number,title,state,isDraft,reviewDecision,statusCheckRollup,url,headRefName";
-let prBusy = new Set();
+const prBusy = new Set();
+
+// A PR's state → a theme tone; the harbor maps the same tones to its own colors.
+export const PR_TONE = { OPEN: "working", DRAFT: "dim", MERGED: "done", CLOSED: "blocked" };
+const isOpen = (pr) => pr.state === "OPEN" || pr.state === "DRAFT";
 
 function checks(rollup) {
   const c = { pass: 0, fail: 0, pending: 0 };
@@ -132,7 +136,8 @@ function checks(rollup) {
   return c;
 }
 
-const slim = (p, repo) => ({
+// What the views need from `gh pr view --json` output.
+const prSummary = (p, repo) => ({
   number: p.number,
   title: p.title,
   state: p.isDraft && p.state === "OPEN" ? "DRAFT" : p.state,
@@ -141,6 +146,10 @@ const slim = (p, repo) => ({
   url: p.url,
   repo: repo ?? (/github\.com\/([^/]+\/[^/]+)\//.exec(p.url ?? "")?.[1] ?? null),
 });
+
+// A PR recorded in status.json that gh hasn't described (yet).
+export const unknownPr = (url, repo = null) =>
+  ({ number: null, title: url, state: "UNKNOWN", review: null, checks: { pass: 0, fail: 0, pending: 0 }, url, repo });
 
 export function prsOf(run) {
   return shared("harbormaster.prs")?.[run.key]?.list ?? null;
@@ -151,30 +160,28 @@ export async function refreshPrs(run) {
   const all = shared("harbormaster.prs") ?? {};
   const have = all[run.key];
   const ttl = run.phase === "finished" ? 15 * 60000 : 60000;
-  if (prBusy.has(run.key) || (have && Date.now() - have.at < ttl)) return false;
+  if (prBusy.has(run.key) || (have && Date.now() - have.at < ttl)) return;
   prBusy.add(run.key);
   try {
     const list = [];
     const seen = new Set();
     for (const pr of run.prs) {
       if (!pr.url) continue;
-      const r = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch(() => null);
-      const p = r?.code === 0 ? json(r.stdout) : null;
-      if (p) { list.push(slim(p, pr.repo)); seen.add(p.url); }
-      else list.push({ number: null, title: pr.url, state: "UNKNOWN", review: null, checks: { pass: 0, fail: 0, pending: 0 }, url: pr.url, repo: pr.repo ?? null });
+      const out = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch(() => null);
+      const p = out?.code === 0 ? json(out.stdout) : null;
+      if (p) { list.push(prSummary(p, pr.repo)); seen.add(p.url); }
+      else list.push(unknownPr(pr.url, pr.repo));
     }
     // Before the orchestrator records one: a PR from the run's branch.
     if (run.folder && run.branch) {
-      const r = await exec("gh", ["pr", "list", "--head", run.branch, "--state", "all", "--limit", "3", "--json", PR_FIELDS], { cwd: run.folder, on: run.machine }).catch(() => null);
-      for (const p of (r?.code === 0 ? json(r.stdout) : null) ?? []) if (!seen.has(p.url)) list.push(slim(p));
+      const out = await exec("gh", ["pr", "list", "--head", run.branch, "--state", "all", "--limit", "3", "--json", PR_FIELDS], { cwd: run.folder, on: run.machine }).catch(() => null);
+      for (const p of (out?.code === 0 ? json(out.stdout) : null) ?? []) if (!seen.has(p.url)) list.push(prSummary(p));
     }
     const next = { ...(shared("harbormaster.prs") ?? {}) };
     next[run.key] = { at: Date.now(), list };
     // Forget runs that are gone.
-    for (const k of Object.keys(next)) if (!cache.runs.some((r) => r.key === k) && cache.runs.length) delete next[k];
-    if (JSON.stringify(next[run.key]?.list) !== JSON.stringify(have?.list) || !have) setShared("harbormaster.prs", next);
-    else { all[run.key] = { ...have, at: Date.now() }; setShared("harbormaster.prs", { ...all }); }
-    return true;
+    for (const key of Object.keys(next)) if (cache.runs.length && !cache.runs.some((r) => r.key === key)) delete next[key];
+    setShared("harbormaster.prs", next);
   } finally {
     prBusy.delete(run.key);
   }
@@ -182,55 +189,71 @@ export async function refreshPrs(run) {
 
 // ---- live facts from herdr-core ----
 
-export function termOf(address, all = terminals()) {
-  return address ? all.find((t) => t.address === address) ?? null : null;
-}
+// The terminal and agent lists every helper below reads, taken once per render.
+export const facts = () => ({ terminals: terminals(), agents: agents() });
 
-// The orchestrator's own agent status (working, blocked, idle, done) or "gone".
-export function orchestratorState(run, all = terminals(), listed = agents()) {
-  const a = listed.find((x) => x.address === run.terminal);
-  if (a) return a.status;
-  const t = termOf(run.terminal, all);
-  if (!t || t.state !== "live") return "gone";
-  return t.status === "error" ? "blocked" : t.status ?? "idle";
-}
-
-// Live sub-agents of an address, depth first.
-export function workersOf(address, all = terminals()) {
-  const kids = all.filter((k) => k.parent === address && k.state === "live");
-  return kids.flatMap((k) => [k, ...workersOf(k.address, all)]);
-}
-
-export function workerStatus(k, listed = agents()) {
-  const s = listed.find((a) => a.address === k.address)?.status ?? k.status;
+// One status rule for any agent: its agent status, else its terminal's ("error" means
+// blocked), else idle. Values: working, blocked, done, idle.
+export function agentStatus(term, ctx) {
+  const s = ctx.agents.find((a) => a.address === term.address)?.status ?? term.status;
   return s === "error" ? "blocked" : s ?? "idle";
 }
 
-export function captainOf(all = terminals()) {
-  const cap = all.find((t) => t.state === "live" && t.labels?.role === "captain") ?? null;
-  const watch = all.find((t) => t.state === "live" && (t.name === "captain-watch" || t.address?.endsWith("/captain-watch")));
-  return { terminal: cap, watching: Boolean(watch) };
+// The orchestrator's status, or "gone" when its terminal has ended.
+export function orchestratorState(run, ctx) {
+  const term = run.terminal && ctx.terminals.find((t) => t.address === run.terminal);
+  if (!ctx.agents.some((a) => a.address === run.terminal) && (!term || term.state !== "live")) return "gone";
+  return agentStatus(term ?? { address: run.terminal }, ctx);
+}
+
+// Live sub-agents of an address, depth first.
+export function workersOf(address, ctx) {
+  if (!address) return [];
+  const kids = ctx.terminals.filter((t) => t.parent === address && t.state === "live");
+  return kids.flatMap((t) => [t, ...workersOf(t.address, ctx)]);
+}
+
+export function captainOf(ctx) {
+  const live = ctx.terminals.filter((t) => t.state === "live");
+  const terminal = live.find((t) => t.labels?.role === "captain") ?? null;
+  const watching = live.some((t) => t.name === "captain-watch" || t.address?.endsWith("/captain-watch"));
+  return { terminal, watching };
 }
 
 // The captain's pane, and the Harbormaster pane pinned beside it in the same tab, if any.
-export function captainPane(all = terminals()) {
-  const cap = captainOf(all).terminal;
-  const ps = panes();
-  const p = cap && ps.find((x) => x.terminal === cap.address);
-  if (!p) return null;
-  return { pane: p.pane, pinned: ps.find((x) => x.tab === p.tab && x.mod === "harbormaster")?.pane ?? null };
+export function captainPane(ctx) {
+  const cap = captainOf(ctx).terminal;
+  const all = panes();
+  const own = cap && all.find((p) => p.terminal === cap.address);
+  if (!own) return null;
+  return { pane: own.pane, pinned: all.find((p) => p.tab === own.tab && p.mod === "harbormaster")?.pane ?? null };
 }
 
 // Shows the runs overview as a pane right of the captain, or closes it again.
-export function togglePin(cp) {
-  if (!cp) return;
-  if (cp.pinned) run("pane.close", { pane: cp.pinned });
-  else run("pane.split", { pane: cp.pane, direction: "right", mod: "harbormaster" });
+export function togglePin(captain) {
+  if (captain.pinned) run("pane.close", { pane: captain.pinned });
+  else run("pane.split", { pane: captain.pane, direction: "right", mod: "harbormaster" });
 }
 
 // Does this run need the person? An open question, a blocked plan, or a blocked orchestrator.
-export function needsYou(run, oState) {
-  return Boolean(run.question) || run.phase === "waiting" || run.phase === "blocked" || oState === "blocked";
+export function needsYou(run, orchState) {
+  return Boolean(run.question) || run.phase === "waiting" || run.phase === "blocked" || orchState === "blocked";
+}
+
+// Totals across runs, for the summary bar, the overview header and the harbor.
+export function stats(runs, ctx) {
+  const live = runs.filter((r) => r.phase !== "finished");
+  const open = runs.flatMap((r) => prsOf(r) ?? []).filter(isOpen);
+  return {
+    live,
+    finished: runs.filter((r) => r.phase === "finished"),
+    need: live.filter((r) => needsYou(r, orchestratorState(r, ctx))),
+    open,
+    failing: open.filter((p) => p.checks?.fail).length,
+    merged: live.reduce((n, r) => n + (r.merged ?? 0), 0),
+    planned: live.reduce((n, r) => n + (r.planned ?? 0), 0),
+    workers: live.reduce((n, r) => n + workersOf(r.terminal, ctx).length, 0),
+  };
 }
 
 // A task's state word(s) → "done" | "working" | "blocked" | null (not started).
@@ -242,8 +265,12 @@ export function taskTone(state) {
   return "working";
 }
 
+// "1 run", "2 runs"; pass the plural when it isn't word + "s".
+export const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
+
 export function openUrl(url) {
-  const cmd = window()?.platform === "macos" ? "open" : window()?.platform === "windows" ? "explorer" : "xdg-open";
+  const platform = window()?.platform;
+  const cmd = platform === "macos" ? "open" : platform === "windows" ? "explorer" : "xdg-open";
   exec(cmd, [url]).catch(() => {});
 }
 
@@ -256,7 +283,8 @@ export function ago(ms) {
   return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
 }
 
-export const short = (url) => {
+// "https://github.com/o/repo/issues/12" → "repo#12".
+export const shortRef = (url) => {
   const m = /github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/.exec(url ?? "");
   return m ? `${m[2]}#${m[4]}` : url;
 };

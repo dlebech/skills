@@ -4,10 +4,13 @@
 
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, spaces, panes, run, setAgentOrder, settings } from "herdr";
-import { taskTone, prsOf, orchestratorState, workersOf, workerStatus, captainOf, needsYou, openUrl } from "./data.js";
+import { spaces, panes, run, setAgentOrder, settings } from "herdr";
+import { facts, stats, taskTone, prsOf, PR_TONE, orchestratorState, agentStatus, workersOf, captainOf, needsYou, plural, openUrl } from "./data.js";
 
-const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sand = "#e9d19c", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
+const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
+// PR_TONE's tones as signal-flag colors.
+const FLAG = { working: "#3f8fd2", dim: "#9aa1a8", done: "#8256d0", blocked: "#c24a3a" };
+const CAPTAIN = "\u{1F9D1}\u200D\u2708\uFE0F", OCTOPUS = "\u{1F419}";
 const SKY = 86;
 const icon = (p, size = 15) => p?.icon ? (p.tint ? svg(p.icon).text_color(p.color ?? ink) : image(p.icon)).size(size) : div().size(size);
 
@@ -42,25 +45,25 @@ function critter(view, { kind, id, status, label, program, x, y, w, onClick, say
 }
 
 function reef(view, r, ctx, x, y, w, h, n) {
-  const o = orchestratorState(r, ctx.all, ctx.listed);
-  const need = needsYou(r, o);
-  const workers = r.terminal ? workersOf(r.terminal, ctx.all) : [];
+  const orch = orchestratorState(r, ctx);
+  const need = needsYou(r, orch);
+  const workers = workersOf(r.terminal, ctx);
   const prs = prsOf(r) ?? [];
   const planned = Math.max(r.planned ?? 0, r.tasks.length);
-  const merged = r.merged ?? r.tasks.filter((t) => t.state === "merged").length;
+  const merged = r.merged ?? r.tasks.filter((task) => task.state === "merged").length;
   const big = Math.min(104, Math.max(70, w * 0.26));
   const small = Math.min(74, Math.max(50, w * 0.17));
   const cols = Math.max(1, Math.floor((w - big - 40) / (small + 24)));
-  const focusO = () => r.terminal && o !== "gone" && run("agent.focus", { terminal: r.terminal });
-  const crew = workers.map((k, i) => critter(view, {
-    kind: "crab", id: k.address, i: i + n * 7, status: workerStatus(k, ctx.listed), w: small,
-    label: k.name || k.program?.name || k.address, program: k.program,
+  const focusOrch = () => r.terminal && orch !== "gone" && run("agent.focus", { terminal: r.terminal });
+  const crabs = workers.map((term, i) => critter(view, {
+    kind: "crab", id: term.address, i: i + n * 7, status: agentStatus(term, ctx), w: small,
+    label: term.name || term.program?.name || term.address, program: term.program,
     x: big + 36 + (i % cols) * (small + 24), y: 122 + Math.floor(i / cols) * (small * 0.75 + 32),
-    onClick: () => run("agent.focus", { terminal: k.address }),
+    onClick: () => run("agent.focus", { terminal: term.address }),
   }));
   const sign = v_flex().absolute().left(12).top(10).max_w(w - 24 - Math.min(prs.length, 4) * 46).px(10).py(4).rounded(5)
     .bg(need ? "#f6c28b" : rope).border(3).border_color(need ? "#c1562c" : "#a07a3f").text_color("#4a3418")
-    .child(div().truncate().text_size(13).font_weight(800).child(`\u{1F419} ${r.branch}`))
+    .child(div().truncate().text_size(13).font_weight(800).child(`${OCTOPUS} ${r.branch}`))
     .child(div().truncate().text_size(10.5).font_weight(600).child(`${r.repo}${r.machine ? ` · ${r.machine}` : ""} · ${need ? "NEEDS YOU" : r.phase.toUpperCase()}`));
   // Buoys on a line along the bottom of the reef: one per task, lit as it merges.
   const buoys = h_flex().absolute().left(14).bottom(8).gap(8).items_end()
@@ -78,7 +81,7 @@ function reef(view, r, ctx, x, y, w, h, n) {
     .when(planned > 0, (el) => el.child(div().pl(4).pb(1).px(5).rounded(4).bg("#173450aa").text_size(10.5).font_weight(700).text_color(sail).child(`${merged}/${planned} merged`)));
   const flags = h_flex().absolute().right(12).top(8).gap(6)
     .children(prs.map((p, i) => {
-      const c = { OPEN: "#3f8fd2", DRAFT: "#9aa1a8", MERGED: "#8256d0", CLOSED: "#c24a3a" }[p.state] ?? "#9aa1a8";
+      const c = FLAG[PR_TONE[p.state] ?? "dim"];
       const fail = p.checks?.fail > 0;
       return v_flex().id(`flag-${r.key}-${i}`).cursor_pointer().tooltip(`${p.title ?? p.url} (${p.state.toLowerCase()}${fail ? ", checks failing" : ""})`)
         .on_click((_e, cx) => { cx.stop_propagation(); openUrl(p.url); })
@@ -90,16 +93,16 @@ function reef(view, r, ctx, x, y, w, h, n) {
   return div().id(`reef-${r.key}`).absolute().left(x).top(y).w(w).h(h).rounded(14)
     .bg(need ? "#f6c28b33" : "#ffffff1a").border(3).border_color(need ? "#f08a5d" : rope).cursor_pointer()
     .hover((s) => s.bg(need ? "#f6c28b55" : "#ffffff2e"))
-    .on_click(focusO)
+    .on_click(focusOrch)
     .child(sign)
     .child(flags)
     .when(Boolean(r.progress), (el) => el.child(div().absolute().left(16).right(16).top(64).truncate().text_size(11.5).italic().text_color(sail).child(`“${r.progress}”`)))
     .child(critter(view, {
-      kind: "octopus", id: r.terminal ?? r.key, i: n * 7, status: o === "gone" ? "gone" : need ? "blocked" : o, w: big,
-      label: o === "gone" ? "orchestrator (gone)" : "orchestrator", x: 10, y: 114, onClick: focusO,
+      kind: "octopus", id: r.terminal ?? r.key, i: n * 7, status: orch !== "gone" && need ? "blocked" : orch, w: big,
+      label: orch === "gone" ? "orchestrator (gone)" : "orchestrator", x: 10, y: 114, onClick: focusOrch,
       say: need ? (r.question ? "? a question for you" : "! needs you") : null,
     }))
-    .children(crew)
+    .children(crabs)
     .child(buoys);
 }
 
@@ -110,13 +113,15 @@ export function harbor(view) {
   // The seabed covers the water, anchored at the bottom so the sand stays in view.
   const sea = H - SKY;
   const bw = Math.max(W, sea * (1600 / 420)), bh = bw * (420 / 1600);
-  const ctx = { all: terminals(), listed: agents() };
-  const runs = view.runs.filter((r) => r.phase !== "finished");
-  const cap = captainOf(ctx.all);
-  const inRuns = new Set(runs.flatMap((r) => (r.terminal ? [r.terminal, ...workersOf(r.terminal, ctx.all).map((k) => k.address)] : [])));
-  const drifters = ctx.listed.filter((a) => !inRuns.has(a.address) && a.address !== cap.terminal?.address);
-  const need = runs.filter((r) => needsYou(r, orchestratorState(r, ctx.all, ctx.listed)));
-  const capStatus = ctx.listed.find((a) => a.address === cap.terminal?.address)?.status;
+  const ctx = facts();
+  const s = stats(view.runs, ctx);
+  const runs = s.live, need = s.need;
+  const cap = captainOf(ctx);
+  const inRuns = new Set(runs.flatMap((r) => (r.terminal ? [r.terminal, ...workersOf(r.terminal, ctx).map((term) => term.address)] : [])));
+  const drifters = ctx.agents.filter((a) => !inRuns.has(a.address) && a.address !== cap.terminal?.address);
+  const capStatus = cap.terminal && agentStatus(cap.terminal, ctx);
+  // Herdr asks a mod that shows agents to pass on their order while it draws them, so that
+  // alt-up / alt-down step through the harbor in the order it shows (in memory only).
   setAgentOrder([cap.terminal?.address, ...inRuns, ...drifters.map((a) => a.address)].filter(Boolean));
 
   const x0 = 190, x1 = W - (drifters.length ? 170 : 24), top = SKY + 26, bottom = H - 14;
@@ -124,7 +129,6 @@ export function harbor(view) {
   const rw = Math.max(240, Math.min(520, (x1 - x0 - gap * (n - 1)) / n));
   const total = rw * runs.length + gap * (runs.length - 1);
   const start = x0 + Math.max(0, (x1 - x0 - total) / 2);
-  const crabs = runs.reduce((s, r) => s + (r.terminal ? workersOf(r.terminal, ctx.all).length : 0), 0);
 
   // The captain's boat rides the surface; the anchor is down while the watcher runs.
   const boat = div().id("boat").absolute().left(18).top(SKY - 82).cursor_pointer()
@@ -139,7 +143,7 @@ export function harbor(view) {
     .child(div().w(2).h(chainLen).bg("#1a3550aa"))
     .child(svg("mods/harbormaster/anchor.svg").w(26).h(28).text_color(deepNavy));
   const capSign = v_flex().absolute().left(16).top(SKY + 82).px(10).py(4).rounded(5).bg(rope).border(3).border_color("#a07a3f").text_color("#4a3418")
-    .child(div().text_size(12).font_weight(800).child("\u{1F9D1}‍✈️ THE CAPTAIN"))
+    .child(div().text_size(12).font_weight(800).child(`${CAPTAIN} THE CAPTAIN`))
     .child(div().text_size(10.5).font_weight(600).child(!cap.terminal ? "ashore" : cap.watching ? (capStatus === "working" ? "plotting a course…" : "on watch") : "anchor up, not watching"));
 
   return div().id("root").relative().size_full().overflow_hidden().bg("#4a9cc2")
@@ -150,11 +154,11 @@ export function harbor(view) {
     .child(div().absolute().right(90).top(14).size(26).rounded(13).bg("#fff3b0"))
     .child(v_flex().absolute().left(186).top(12).gap(2).text_color(ink)
       .child(div().text_size(26).font_weight(800).child("The run harbor"))
-      .child(div().text_size(12.5).child(`${runs.length} reef${runs.length === 1 ? "" : "s"}, ${runs.length} octop${runs.length === 1 ? "us" : "i"}, ${crabs} crab${crabs === 1 ? "" : "s"}, ${cap.terminal ? "one captain" : "no captain aboard"}.`)))
+      .child(div().text_size(12.5).child(`${plural(runs.length, "reef")}, ${plural(runs.length, "octopus", "octopi")}, ${plural(s.workers, "crab")}, ${cap.terminal ? "one captain" : "no captain aboard"}.`)))
     .child(h_flex().absolute().right(130).top(20).gap(16).text_size(12).font_weight(600).text_color(ink)
-      .child(div().child(`${runs.length} run${runs.length === 1 ? "" : "s"}`))
+      .child(div().child(plural(runs.length, "run")))
       .child(div().text_color(need.length ? "#a3301f" : ink).child(`${need.length} need you`))
-      .child(div().child(`${runs.reduce((s, r) => s + (prsOf(r) ?? []).filter((p) => p.state === "OPEN" || p.state === "DRAFT").length, 0)} flags up`)))
+      .child(div().child(`${plural(s.open.length, "flag")} up`)))
     .child(anchor)
     .child(capSign)
     .child(boat)
@@ -180,8 +184,8 @@ export function rail(view) {
 
 export function paneHeader(p) {
   const pane = panes().find((x) => x.pane === p.pane);
-  const role = terminals().find((t) => t.address === pane?.terminal)?.labels?.role;
-  const who = role === "captain" ? "\u{1F9D1}‍✈️ captain" : role === "orchestrator" ? "\u{1F419} orchestrator" : null;
+  const role = facts().terminals.find((t) => t.address === pane?.terminal)?.labels?.role;
+  const who = role === "captain" ? `${CAPTAIN} captain` : role === "orchestrator" ? `${OCTOPUS} orchestrator` : null;
   return h_flex().size_full().px(12).gap(9).items_center().bg("#d9c39a").text_color("#3b2c17").text_size(12).font_weight(600)
     .child(icon(pane?.program)).child(div().child(pane?.program?.name ?? pane?.title ?? "Terminal"))
     .when(Boolean(who), (el) => el.child(div().px(6).h(17).flex().items_center().rounded(4).bg(sail).text_size(10.5).child(who)))
