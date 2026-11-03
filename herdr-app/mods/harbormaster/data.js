@@ -178,10 +178,10 @@ export function prsOf(run) {
   return shared("harbormaster.prs")?.[run.key]?.list ?? null;
 }
 
-// Refreshes a run's PRs when stale: every 60 s while it runs, every 15 min once finished.
-export async function refreshPrs(run) {
+// Refreshes a run's PRs when stale: every 60 s while the run is open, every 15 min once closed.
+export async function refreshPrs(run, closed = false) {
   const have = (shared("harbormaster.prs") ?? {})[run.key];
-  const ttl = run.phase === "finished" ? 15 * 60000 : 60000;
+  const ttl = closed ? 15 * 60000 : 60000;
   if (prBusy.has(run.key) || (have && Date.now() - have.at < ttl)) return;
   prBusy.add(run.key);
   try {
@@ -211,20 +211,33 @@ export async function refreshPrs(run) {
 
 // ---- totals ----
 
+// A run is closed once it is finished and its orchestrator's terminal is gone: the
+// person closed its tab. A finished run whose orchestrator is still there stays open,
+// with its PR up; an unfinished run whose terminal is gone is not closed but crashed.
+export function isClosed(run, ctx) {
+  return run.phase === "finished" && orchestratorState(run, ctx) === "gone";
+}
+
 // Totals across runs, for the summary bar, the overview header, the Crew block and the harbor.
-// `live` (every run not finished) is the one count of runs the captain watches.
+// `live`: runs still working (not finished); `docked`: finished but still open;
+// `shown`: both, every run the views and the captain keep; `closed`: the rest.
+// The run and need-you counts are of `live` only.
 export function stats(runs, ctx) {
   const live = runs.filter((r) => r.phase !== "finished");
-  const open = runs.flatMap((r) => prsOf(r) ?? []).filter(isOpen);
+  const docked = runs.filter((r) => r.phase === "finished" && !isClosed(r, ctx));
+  const shown = [...live, ...docked];
+  const open = shown.flatMap((r) => prsOf(r) ?? []).filter(isOpen);
   const tasks = live.map(taskCounts);
   return {
     live,
-    finished: runs.filter((r) => r.phase === "finished"),
+    docked,
+    shown,
+    closed: runs.filter((r) => isClosed(r, ctx)),
     need: live.filter((r) => needsYou(r, orchestratorState(r, ctx))),
     open,
     failing: open.filter((p) => p.checks?.fail).length,
     merged: tasks.reduce((n, c) => n + c.merged, 0),
     planned: tasks.reduce((n, c) => n + c.planned, 0),
-    workers: live.reduce((n, r) => n + workersOf(r.terminal, ctx).length, 0),
+    workers: shown.reduce((n, r) => n + workersOf(r.terminal, ctx).length, 0),
   };
 }

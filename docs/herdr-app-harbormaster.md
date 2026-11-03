@@ -2,16 +2,17 @@
 
 Harbormaster is a Herdr app mod with three layouts. It shows what `herdr-app-captain` and its `herdr-app-orchestrator` runs are doing, so you don't have to read the Agents list row by row. Everything in it is written from scratch: it uses Herdr's mod API and leaves Herdr's own mods and layouts unchanged.
 
-- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge. It sits above Herdr's own Agents list.
-  - The captain's card says whether its watcher is running and how many unfinished runs it watches. Its pane button pins the runs overview beside the captain, or unpins it.
-  - Each orchestrator's card shows its progress, its status when it isn't running, its number of 🦀 workers and its number of PRs. A run that needs you turns red.
+- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list.
+  - The captain's card says whether its watcher is running and how many runs it watches, running and finished. Its pane button pins the runs overview beside the captain, or unpins it.
+  - Each orchestrator's card shows its progress, its status when it isn't running, its number of 🦀 workers and its PRs. A run that needs you turns red and says what for. Finished ones come last, with a green edge and their PR numbers.
+  - Each Adrift line shows the agent's space and tab; clicking it focuses the agent.
 - **Runs overview.** One card per run:
   - its branch and repository, a status pill, the progress line, and a task bar from `plan.md` (merged, in progress, blocked);
   - its issues, and every PR with its state, checks and review decision;
-  - an open question, shown first when the run is waiting for you;
+  - what the run needs you for, shown first: its open question, the dialog it is blocked on, or the reason in its status;
   - and, when they apply: relayed messages the orchestrator hasn't read, agents waiting on an answer, "No pull request yet", and a hint to ask the captain to resume a run whose orchestrator is gone.
 
-  Clicking a card focuses the orchestrator. Clicking a PR or issue opens it in the browser. Finished runs fold away at the bottom.
+  Clicking a card focuses the orchestrator. Clicking a PR or issue opens it in the browser. Finished runs stay, after the running ones, until you close their orchestrator's tab; closed runs fold away at the bottom.
 - **`harbormaster-main` layout.** Herdr's main layout with the Crew block added.
 - **`harbormaster-board` layout** (serious):
   - a summary bar (runs, need you, agents, tasks merged, open PRs, failing checks);
@@ -20,7 +21,7 @@ Harbormaster is a Herdr app mod with three layouts. It shows what `herdr-app-cap
   - the focused agent's live terminal.
 - **`harbormaster-sea` layout** (fun):
   - The captain rides a boat on the surface and drops anchor while watching. The captain calls "Ahoy!" when a run needs you, and raises the anchor and naps when nothing is being watched.
-  - Each unfinished run is a reef with its branch on a sign; finished runs leave the harbor. The orchestrator is an octopus and its workers are crabs. Working crabs scuttle, blocked ones jump, and crabs whose turn is done sleep.
+  - Each run is a reef with its branch on a sign. A finished run's reef goes quiet, its octopus asleep and its PR flags up, until you close the orchestrator's tab; then it leaves the harbor. A run that needs you says what for in a bubble. The orchestrator is an octopus and its workers are crabs. Working crabs scuttle, blocked ones jump, and crabs whose turn is done sleep.
   - Buoys along the bottom are the run's tasks and turn green as they merge.
   - Signal flags on the mast are its PRs. Clicking one opens it.
   - Agents outside any run drift on the right. The active tab's terminals sit below deck.
@@ -70,7 +71,7 @@ Harbormaster is built for that:
 The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks mods to list those, so here they are:
 
 - **Every 5 seconds, per machine:** one `sh -c` script. For each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json`, `plan.md` and `question.md`, and counts the unhandled `inbox/*.message` files.
-- **Every minute per running run, every 15 minutes per finished one:**
+- **Every minute per open run (running or finished), every 15 minutes per closed one:**
   - `gh pr view <url>` for each PR in `status.json`;
   - `gh pr list --head <branch>` in the run's folder, so a PR shows up before the orchestrator records it.
 
@@ -78,6 +79,12 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 - **Live from herdr-core:** the terminal labels `role`, `run.status`, `progress` and `run.prs`, and the `captain-watch` terminal.
 
 It never writes to run directories.
+
+## Finished and closed runs
+
+An orchestrator sets `finished` once its work is done, its PRs are up and their CI is green. The run stays open: in every view, in the captain's `runs.sh`, and on the captain's watch. It is **closed** once its orchestrator's terminal is gone, which is when you close its tab, or ask the captain to close the run. An unfinished run whose orchestrator is gone is not closed but crashed: the views say so, and the captain can resume it.
+
+"Needs you" means an open question, a blocker, or a dialog, never a finished run, and the views show which.
 
 ## Files
 

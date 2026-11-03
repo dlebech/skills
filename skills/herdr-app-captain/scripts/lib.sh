@@ -6,7 +6,9 @@
 #   <root>/<folder>/<branch>/orchestrator.json  {"terminal", "tab_id", "folder", "branch"}
 #   <root>/<folder>/<branch>/plan.md            first line "Status: <status>", where
 #       <status> is running, "waiting for user: <question>", "blocked: <reason>",
-#       or finished
+#       or finished (the work is done and its PRs are up; the run stays open,
+#       in runs.sh and the user's views, until its orchestrator's terminal is
+#       gone: the user closed its tab)
 #   <root>/<folder>/<branch>/status.json        {branch, folder, status, state, progress,
 #       tasks: {merged, planned}, issues: [url], prs: [{repo, url}], waiting: [name],
 #       updated}, kept by set-status.sh, which also sets the terminal's run.status,

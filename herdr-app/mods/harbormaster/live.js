@@ -33,9 +33,22 @@ export function captainOf(ctx) {
   return { terminal, watching };
 }
 
-// Does this run need the person? An open question, a blocked plan, or a blocked orchestrator.
+// Does this run need the person? An open question, a waiting or blocked plan, or an
+// orchestrator blocked on a dialog. A finished run never does.
 export function needsYou(run, orchState) {
+  if (run.phase === "finished") return false;
   return Boolean(run.question) || run.phase === "waiting" || run.phase === "blocked" || orchState === "blocked";
+}
+
+// What a run needs the person for, in a few words: the question's first line, the
+// dialog, or the reason in the plan's Status line. null when it doesn't need them.
+export function needReason(run, orchState) {
+  if (!needsYou(run, orchState)) return null;
+  if (orchState === "blocked") return "blocked on a dialog";
+  const question = run.question?.split("\n").map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean);
+  if (question) return question;
+  const why = (run.statusLine ?? "").replace(/^(waiting for user|blocked)\s*:?\s*/i, "").trim();
+  return why || (run.phase === "blocked" ? "blocked" : "waiting for you");
 }
 
 // Where the runs pane can go: null without a captain; { pane: null } when the captain's

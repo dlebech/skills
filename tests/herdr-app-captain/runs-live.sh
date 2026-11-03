@@ -8,12 +8,15 @@
 #      progress, tasks, issues, PRs and waiting agents to status.json and labels,
 #      keeping each until changed, and publishes them again without a status and
 #      when init-run.sh resumes the run; refuses a newline, and changes nothing
-#      when status.json is unreadable;
+#      when status.json is unreadable; warns on "waiting for user" without a
+#      question.md;
 #   2b. integration-worktree.sh creates the worktree and its space, keeps the
 #      active space, and does nothing more the second time; reuses a worktree
 #      that already has the branch, and refuses the main checkout's branch;
 #   3. runs.sh shows the run, its question, its unhandled message, and its
-#      status.json facts and their age, also once its terminal is gone;
+#      status.json facts and their age, also once its terminal is gone; keeps a
+#      finished run while its terminal lives, and leaves it out (but not with
+#      --all) once it is gone;
 #   4. repo-spaces.sh finds the space;
 #   5. watch-runs.sh, in its own terminal, tells this terminal when it exits, and
 #      reports an event once: waiting for user, finished, orchestrator gone; with
@@ -113,7 +116,8 @@ check "tab name, running" "$(tab_name "$tab")" "🐙 feature/x"
 
 echo "== set-status.sh"
 echo "t1 planned" >>"$dir/plan.md"
-"$orch/set-status.sh" "$dir" "waiting for user: which db?"
+warn=$("$orch/set-status.sh" "$dir" "waiting for user: which db?" 2>&1)
+contains "warns without question.md" "$warn" "without $dir/question.md"
 check "plan line" "$(head -1 "$dir/plan.md")" "Status: waiting for user: which db?"
 check "plan body kept" "$(tail -1 "$dir/plan.md")" "t1 planned"
 check "tab name, waiting" "$(tab_name "$tab")" "🐙 ✋ feature/x"
@@ -194,6 +198,7 @@ hc run --bg --name "$watch" --no-notify --cwd "$work" sleep 1 >/dev/null 2>"$wor
 contains "second watcher refused" "$(cat "$work/second")" name_taken
 "$orch/set-status.sh" "$dir" finished
 check "tab name, finished" "$(tab_name "$tab")" "🐙 ✓ feature/x"
+contains "finished run stays open" "$("$capt/runs.sh")" "plan: finished, PR open until its tab is closed"
 hc wait "$watch" --timeout 15 >/dev/null
 contains "finished" "$(hc read "$watch" --lines 20)" "attention feature/x finished"
 hc rm "$watch" >/dev/null
@@ -202,6 +207,9 @@ hc kill "$fake" >/dev/null
 out=$(watch_once)
 contains "gone" "$out" "attention feature/x orchestrator gone"
 contains "PR after the terminal ends" "$("$capt/runs.sh")" "pr: acme/web https://example.com/pr/2"
+"$orch/set-status.sh" "$dir" finished 2>/dev/null
+check "closed run left out" "$("$capt/runs.sh" | grep -c "run: $dir")" 0
+contains "closed run with --all" "$("$capt/runs.sh" --all)" "plan: finished, closed"
 
 echo "== a run across two repositories"
 multi=$work/hcmulti-$suffix

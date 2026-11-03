@@ -8,7 +8,10 @@
 # <status> is running, "waiting for user: <question>", "blocked: <reason>", or
 # finished, the vocabulary herdr-app-captain's scripts/lib.sh documents. Without
 # it, the status stays what plan.md says, and the rest is published again, as after
-# a resume in a new terminal. The other facts are kept until changed:
+# a resume in a new terminal. "waiting for user" goes with a question.md in the run
+# directory; without one it warns. finished means the work is done and its PRs are
+# up; the run stays open until the orchestrator's tab is closed.
+# The other facts are kept until changed:
 #   --progress  one line on what is going on, e.g. "task 3/7 in review"; "" clears it
 #   --tasks     tasks merged out of planned, e.g. 3/7
 #   --issue     an issue the run works on; added once
@@ -57,6 +60,11 @@ done
 case $status$progress in *$'\n'*) echo "status and --progress must be one line" >&2; exit 2 ;; esac
 
 new_status=$status
+case $status in
+  "waiting for user"*)
+    [ -e "$dir/question.md" ] ||
+      echo "warning: \"waiting for user\" without $dir/question.md; write the question first, or finish if there is nothing to ask" >&2 ;;
+esac
 if [ -z "$status" ]; then
   status=$(sed -n '1s/^Status: *//p' "$dir/plan.md") || exit 1
   [ -n "$status" ] || { echo "no Status line in $dir/plan.md" >&2; exit 1; }

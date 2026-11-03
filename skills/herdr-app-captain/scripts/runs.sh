@@ -4,7 +4,9 @@
 # Usage: runs.sh [--all]
 #
 # Reads every run directory under ~/.herdr/hc-orchestration that has an
-# orchestrator.json, skipping finished runs unless --all is given. For each prints
+# orchestrator.json, skipping closed runs (finished, and the orchestrator terminal
+# gone) unless --all is given. A finished run whose orchestrator is still there is
+# open: its plan line says "finished, PR open until its tab is closed". For each prints
 # its directory, branch, start folder (its repository, or the folder holding
 # several), the Status line of its plan.md, its orchestrator terminal's state, the
 # dialog it is blocked on, its status.json's progress, tasks, waiting agents, issues,
@@ -32,14 +34,16 @@ while IFS= read -r run_info <&3; do
   IFS=$'\x1f' read -r branch folder terminal tab < <(run_facts "$run_info")
   claimed+="$tab "
   status=$(plan_status "$dir")
-  [ -n "$all" ] || [ "$status" != finished ] || continue
+  state=
+  [ -z "$terminals" ] || state=$(terminal_state "$terminals" "$terminal")
+  # Closed: finished and its terminal gone. Without hc, every finished run is listed.
+  [ -n "$all" ] || [ "$status" != finished ] || [ -z "$terminals" ] || [ -n "$state" ] || continue
   found=1
   dialog=
 
   if [ -z "$terminals" ]; then
     orchestrator="$terminal unknown"
   else
-    state=$(terminal_state "$terminals" "$terminal")
     if [ -z "$state" ]; then
       orchestrator="$terminal gone (no live terminal)"
     else
@@ -52,7 +56,12 @@ while IFS= read -r run_info <&3; do
 
   echo "run: $dir"
   echo "  branch: $branch  folder: $folder"
-  echo "  plan: ${status:-no Status line}"
+  plan=${status:-no Status line}
+  if [ "$status" = finished ]; then
+    if [ -n "$state" ]; then plan="finished, PR open until its tab is closed"
+    elif [ -n "$terminals" ]; then plan="finished, closed"; fi
+  fi
+  echo "  plan: $plan"
   echo "  orchestrator: $orchestrator"
   [ -z "$dialog" ] || echo "  dialog: $dialog"
   [ ! -e "$dir/status.json" ] || jq -r '
@@ -65,7 +74,7 @@ while IFS= read -r run_info <&3; do
   [ -e "$dir/question.md" ] && echo "  question: $dir/question.md"
   [ -n "$messages" ] && echo "  unhandled: $messages"
 done 3< <(run_infos)
-[ "$found" = 1 ] || if [ -n "$all" ]; then echo "no runs under $root"; else echo "no unfinished runs under $root (--all includes finished ones)"; fi
+[ "$found" = 1 ] || if [ -n "$all" ]; then echo "no runs under $root"; else echo "no open runs under $root (--all includes closed ones)"; fi
 
 layout=$(herdr-app ls 2>/dev/null) || exit 0
 jq -r '.spaces[].tabs[] | select(.name | startswith("🐙")) | "\(.id)\t\(.name)"' <<<"$layout" |
