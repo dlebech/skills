@@ -11,7 +11,7 @@ Act as the sole coordinator for a larger piece of work. The user talks only to y
 ## Invariants
 
 - Read `hc --skill` before your first `hc` command, and `herdr-app --skill` before your first `herdr-app` command. If `$HC_TERMINAL_ID` is unset, you are not in an hc terminal: stop and tell the user to invoke this skill from a Herdr app tab.
-- Follow those manuals' rules for addresses, waiting, recovery, and safety. Use `hc` for agents and programs. Use `herdr-app` only for your own tab's name and, through `integration-worktree.sh`, the integration worktree's space. Agents and task worktrees stay hidden: never give them tabs, panes, or spaces unless the user asks. They show as sub-agents under you in Herdr's Agents list.
+- Follow those manuals' rules for addresses, waiting, recovery, and safety. Use `hc` for agents and programs. Use `herdr-app` only for your own tab's name and, through `integration-worktree.sh`, the integration worktree's space. Agents and task worktrees stay hidden: never give them tabs, panes, or spaces unless the user asks. They show as sub-agents under you in Herdr's Agents list. Delegate only through `hc`, never with your own harness's sub-agent tool, which `herdr-app-captain` cannot see and which dies with your turn; and run anything that outlives a command, such as builds, CI watches, and dev servers, with `hc run --bg`, never with shell `&`, `nohup`, `tmux`, or your harness's background shell.
 - Use a git worktree for every code or documentation change, under `~/.herdr/worktrees/<repo>/<branch>`, where the Herdr app's own worktrees go, so the user can open any of them from its Open worktree menu.
 - Create one integration branch from the repository's default branch. All completed task branches merge into it.
 - Give each task its own branch and git worktree, based on the current integration branch.
@@ -119,6 +119,7 @@ Keep briefs as files in `shared/`, and point prompts at them:
 
 - `spec.md`: the overall goal, as above. Every agent reads the copy in `shared/`.
 - `common.md`: rules every agent follows: environment, the checks that define “done” and how to run them the way CI does, browser-check and end-to-end test guidance, and commit and push rules. It also gives the reporting protocol, with your address (`$HC_TERMINAL_ID`; an agent cannot find it by itself) and the absolute path of `shared/`:
+  - run dev servers, watchers, and slow builds or test suites with `hc run --bg --name <agent-name>-<what>`, never with shell `&`, `nohup`, `tmux`, or the harness's background shell, so they end with the agent and the orchestrator can see them;
   - when the assigned work is completely finished, including any background jobs it started, run `hc send <your-address> "done: <agent-name>: <one-line result>"`, then end the turn;
   - to ask you something, write the question with its context and options to `shared/<agent-name>-question.md`, run `hc send <your-address> "question: <agent-name>: <that path>"`, then end the turn and wait for the answer; never use an interactive question dialog, even when a skill would;
   - if the work cannot be completed, run `hc send <your-address> "failed: <agent-name>: <reason>"`;
@@ -160,7 +161,7 @@ Agents run as their kind sets them up, with its normal permission prompts. Pass 
 
 ### Waiting
 
-Wait for agents in the foreground, never in a background shell or monitor, so you stay `working` and `herdr-app-captain` can tell a wait from a stall. Long-running processes such as dev servers stay in the background; they are not waits. Run slow commands (CI, builds) with `hc run --bg`, as `hc --skill` describes, so you stay reachable. Set a progress label for the captain, then wait, giving your shell tool a limit above 540 seconds (for Claude Code's Bash, `timeout: 600000`):
+Wait for agents in the foreground, never in a background shell or monitor, so you stay `working` and `herdr-app-captain` can tell a wait from a stall. Long-running processes such as dev servers run with `hc run --bg` too; they are not waits. Run slow commands (CI, builds) with `hc run --bg`, as `hc --skill` describes, so you stay reachable. Set a progress label for the captain, then wait, giving your shell tool a limit above 540 seconds (for Claude Code's Bash, `timeout: 600000`):
 ```bash
 hc label "$HC_TERMINAL_ID" progress="task 3/7 in review"
 hc wait --children any --timeout 540
