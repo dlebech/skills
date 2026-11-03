@@ -93,11 +93,13 @@ Comments on an issue can change its scope. Read them (`gh issue view <number> --
 - in the PR, add a `Closes #<number>` line for each included issue the branch fully resolves, `Part of #<number>` for a parent whose remaining sub-issues stay open, and an issue column in the merged-task table;
 - in the final report, list each included issue with its status and the sub-issues left for later.
 
+Once `spec.md` is written, publish each included issue with `<skill-dir>/scripts/set-status.sh <run-directory> --issue <url>`, as in section 2.
+
 ## 2. Plan autonomously
 
 Turn the spec into the smallest independently implementable and reviewable tasks. Honor any ordering in the spec, such as “start with the schema change.” A task can be non-code (a measurement run, a recording, docs). It gets a worktree when it produces files, and a review only when it changes code or docs.
 
-Keep the plan in `plan.md`. Its first line is `Status: <one line>`, kept current: `running`, `waiting for user: <question>`, `blocked: <reason>`, or `finished`. Set it with `<skill-dir>/scripts/set-status.sh <run-directory> "<status>"`, which also renames your tab, so the user sees it in Herdr's Agents list: `🐙 <integration-branch>` while running, `🐙 ✋ <integration-branch>` when waiting for the user or blocked, and `🐙 ✓ <integration-branch>` when finished. For each task, record:
+Keep the plan in `plan.md`. Its first line is `Status: <one line>`, kept current: `running`, `waiting for user: <question>`, `blocked: <reason>`, or `finished`. Set it with `<skill-dir>/scripts/set-status.sh <run-directory> "<status>"`, which also renames your tab, so the user sees it in Herdr's Agents list: `🐙 <integration-branch>` while running, `🐙 ✋ <integration-branch>` when waiting for the user or blocked, and `🐙 ✓ <integration-branch>` when finished. The same script publishes the run's other facts, to `status.json` in the run directory and to labels on your terminal, for the captain, for anything the user builds on Herdr's lists, and as the record of a finished run. Pass them with or without a status, whenever one changes; each is kept until changed: `--issue <url>` for each issue the run works on, once the spec names them; `--tasks <merged>/<planned>` when the plan is made and after every merge; `--progress "<one line>"` whenever you start a new step; `--pr <owner/repo> <url>` as soon as a repository's PR exists; and `--waiting "<agent names>"` while agents wait for an answer from you or the user, naming every one each time, since it replaces the list, and `--waiting ""` once none do. Keep `--progress` and the status to one line. For each task, record:
 
 - its repository; a change that spans repositories becomes one task per repository, with the dependency between them (often the backend first);
 - the acceptance criteria it satisfies;
@@ -161,9 +163,9 @@ Agents run as their kind sets them up, with its normal permission prompts. Pass 
 
 ### Waiting
 
-Wait for agents in the foreground, never in a background shell or monitor, so you stay `working` and `herdr-app-captain` can tell a wait from a stall. Long-running processes such as dev servers run with `hc run --bg` too; they are not waits. Run slow commands (CI, builds) with `hc run --bg`, as `hc --skill` describes, so you stay reachable. Set a progress label for the captain, then wait, giving your shell tool a limit above 540 seconds (for Claude Code's Bash, `timeout: 600000`):
+Wait for agents in the foreground, never in a background shell or monitor, so you stay `working` and `herdr-app-captain` can tell a wait from a stall. Long-running processes such as dev servers run with `hc run --bg` too; they are not waits. Run slow commands (CI, builds) with `hc run --bg`, as `hc --skill` describes, so you stay reachable. Publish your progress for the captain, then wait, giving your shell tool a limit above 540 seconds (for Claude Code's Bash, `timeout: 600000`):
 ```bash
-hc label "$HC_TERMINAL_ID" progress="task 3/7 in review"
+<skill-dir>/scripts/set-status.sh <run-directory> --progress "task 3/7 in review"
 hc wait --children any --timeout 540
 ```
 
@@ -200,8 +202,8 @@ When a task is implemented, reviewed and fixed as configured, committed, and val
 3. From its repository's integration worktree, integrate it:
    - `squash`: write a message with what and why, the task's issue if any, and key numbers. Afterwards verify `git diff <task-branch> <squash-commit>` is empty.
    - `merge`: make a non-fast-forward merge with a message naming the task.
-4. Run the smallest integration-level validation that covers the merge. If a PR exists, push and watch CI. Fix a red build before merging more, in a short-lived worktree like any change.
-5. Mark the task complete and use the updated integration branch as the base for dependent worktrees.
+4. Run the smallest integration-level validation that covers the merge. After the first merge, if the user chose `draft-pr`, push and open the integration branch as a draft PR, and publish it with `set-status.sh <run-directory> --pr <owner/repo> <url>`. If a PR exists, push and watch CI. Fix a red build before merging more, in a short-lived worktree like any change.
+5. Mark the task complete, publish the new count with `set-status.sh <run-directory> --tasks <merged>/<planned>`, and use the updated integration branch as the base for dependent worktrees.
 6. Clean up: `hc kill` and `hc rm` the task's agents, then remove its worktree with `git worktree remove` after checking it is clean, pushed if pushing is on, and identical to what was merged. Drop its throwaway resources, but move anything costly to rebuild, like caches, to the integration worktree or a backup location first. Idle agents still hold memory, so do not wait until the end.
 
 Resolve straightforward mechanical conflicts in the integration worktree. If a conflict requires a product or design choice, ask the user before choosing.
@@ -217,9 +219,9 @@ Questions arrive as `question:` messages, or as a `blocked` child when an agent 
 To ask the user, with or without a captain, since `herdr-app-captain` reads the file and the user may be in your tab:
 
 1. Write one concise question, or several that belong together, with context, options, and a recommendation, to `<run-directory>/.question.tmp`, then `mv` it to `question.md`, so it is never read half-written.
-2. Set `plan.md`'s status to `waiting for user: <short summary>`, different for each question, since the captain is alerted when it changes, with `set-status.sh`, as in section 2.
+2. Set `plan.md`'s status to `waiting for user: <short summary>`, different for each question, since the captain is alerted when it changes, with `set-status.sh`, as in section 2. When the question is an agent's, pass `--waiting` in the same call, with that agent added to those already waiting.
 3. Repeat the question in your reply as plain text, and end your turn.
-4. The answer arrives as your next prompt, typed in your tab or an `inbox/` `.message` that `herdr-app-captain` relayed. Rename a message to `.handled`, delete `question.md`, set the status back to `running`, and continue.
+4. The answer arrives as your next prompt, typed in your tab or an `inbox/` `.message` that `herdr-app-captain` relayed. Rename a message to `.handled`, delete `question.md`, set the status back to `running` with `--waiting` updated (`""` when no agent waits any more), and continue.
 
 Pass the user's mid-run decisions to every affected running agent without waiting for them to ask, and update `spec.md` when they change the goal or scope. Do not expose routine coordination or ask the user to interact with a task agent.
 
@@ -232,5 +234,5 @@ Re-read `spec.md`, `plan.md`, and `decisions.md` from the run directory, and act
 Continue until the spec is complete or a real blocker needs input. Keep the integration worktree and branch intact for final review.
 
 1. If `final-review` is on, review the whole integration branch after every planned task is merged, once per `review-rounds`. Start a fresh agent with the reviewer profile (or the specialist profile for a large branch) named `rev-<prefix>-final` in the integration worktree, or with several repositories, in the first one with the others' paths in its task. It reviews `<default>...<integration>` in each against `spec.md` for what per-task reviews miss: bugs across task and repository boundaries, such as an API and its client disagreeing, unmet acceptance criteria, duplication across tasks, dead code, inconsistencies, modules grown too large. Same rules as section 4: read-only, findings to a file, at most about 15. Triage them, and fix must-fix findings as one more task with no task review. With rounds left, remove the reviewer and start another fresh one, named `rev-<prefix>-final-<round>`, on the branch with those fixes merged. After the last round, let the user pick among the nice-to-haves, or record them as follow-ups. The rounds are the only review of the review fixes; do not loop. Remove the final reviewer and any fixer once they are done.
-2. Push each integration branch. Create or update one PR per repository when requested or all planned work is complete. With several, each PR links the others and says they merge together; put the `Closes` lines only in the one meant to merge last, and `Part of` lines in the rest. Include: a short statement of the goal from `spec.md`, a table of the merged tasks, validation and measurements, decisions to check (yours and the user's), a pre-launch or deploy checklist (migrations, new env vars, schedules, manual steps), follow-ups, and the issue lines from `spec.md`'s Issue handling. Without a GitHub remote or `gh`, print the description for the user to paste.
+2. Push each integration branch. Create or update one PR per repository when requested or all planned work is complete. With several, each PR links the others and says they merge together; put the `Closes` lines only in the one meant to merge last, and `Part of` lines in the rest. Include: a short statement of the goal from `spec.md`, a table of the merged tasks, validation and measurements, decisions to check (yours and the user's), a pre-launch or deploy checklist (migrations, new env vars, schedules, manual steps), follow-ups, and the issue lines from `spec.md`'s Issue handling. Publish each PR with `set-status.sh <run-directory> --pr <owner/repo> <url>` as soon as it exists. Without a GitHub remote or `gh`, print the description for the user to paste.
 3. Set the status to `finished` with `set-status.sh`, then report each integration branch/worktree and PR, completed tasks, validation status, remaining work, and for issues their status as in `spec.md`'s Issue handling. Do not present task branches for review.

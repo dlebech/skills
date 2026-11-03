@@ -7,6 +7,10 @@
 #   <root>/<folder>/<branch>/plan.md            first line "Status: <status>", where
 #       <status> is running, "waiting for user: <question>", "blocked: <reason>",
 #       or finished
+#   <root>/<folder>/<branch>/status.json        {branch, folder, status, state, progress,
+#       tasks: {merged, planned}, issues: [url], prs: [{repo, url}], waiting: [name],
+#       updated}, kept by set-status.sh, which also sets the terminal's run.status,
+#       progress, and run.prs labels
 #   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
 #   <root>/<folder>/<branch>/inbox/             <name>.message, from the captain
 #   <root>/<folder>/<branch>/shared/            the run's agents' files; not the captain's
