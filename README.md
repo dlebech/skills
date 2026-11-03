@@ -17,6 +17,8 @@ The `herdr-app-*` skills also want Herdr's own `herdr-core` skill, which steers 
 npx skills add https://github.com/herdrdev/herdr-core --skill herdr-core
 ```
 
+To put the captain and every orchestrator at the top of Herdr's Agents list, follow [docs/herdr-app-agents-view.md](docs/herdr-app-agents-view.md).
+
 ## Skills
 
 | Skill | What it does |
