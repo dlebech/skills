@@ -9,7 +9,8 @@
 # run across several, and <branch> is the branch as branch_slug in lib.sh writes it,
 # since herdr-app-captain scans one level deep; keeps the runs root private, and
 # writes orchestrator.json, which is how herdr-app-captain finds the run. A new run
-# also gets plan.md and its tab name.
+# also gets plan.md; either way set-status.sh then publishes the run's status.json,
+# labels, and tab name, so a resumed run's new terminal carries them too.
 # Prints "new <run-directory>" or "existing <run-directory>". Exits 3 if the
 # directory belongs to a run from another folder of the same name.
 set -euo pipefail
@@ -45,5 +46,7 @@ hc label "$HC_TERMINAL_ID" role=orchestrator >/dev/null
 if [ "$state" = new ]; then
   echo "Status: running" >"$dir/plan.md"
   "$(dirname "$0")/set-status.sh" "$dir" running
+else
+  "$(dirname "$0")/set-status.sh" "$dir"
 fi
 echo "$state $dir"

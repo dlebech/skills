@@ -17,7 +17,9 @@ The `herdr-app-*` skills also want Herdr's own `herdr-core` skill, which steers 
 npx skills add https://github.com/herdrdev/herdr-core --skill herdr-core
 ```
 
-To put the captain and every orchestrator at the top of Herdr's Agents list, follow [docs/herdr-app-agents-view.md](docs/herdr-app-agents-view.md).
+To put the captain and every orchestrator at the top of Herdr's Agents list, follow [docs/herdr-app-agents-view.md](docs/herdr-app-agents-view.md). Orchestrators also label their terminals with `run.status`, `progress` and `run.prs`, and keep a `status.json` in each run directory, so you can shape the list further by asking an agent in the app, for example:
+
+> In my copy of the Agents list, show each orchestrator's `progress` label under its name, and a ✓ before it when its `run.status` label is `finished`.
 
 ## Skills
 

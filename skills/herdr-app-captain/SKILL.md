@@ -23,11 +23,11 @@ Act as the captain over several orchestrators. The user talks to you about all t
 
 ## Find the runs
 
-Run `<skill-dir>/scripts/runs.sh`. It reads every run directory under `~/.herdr/hc-orchestration/` that has an `orchestrator.json`, and for each prints the branch, repository, the `Status:` line of `plan.md`, the orchestrator terminal's state and progress label, the dialog it is blocked on, any open `question.md`, and unhandled messages (or warns when `hc` did not answer). It skips finished runs unless given `--all`. It also lists `🐙` tabs that no run directory claims, for example an orchestrator that has not finished starting; inspect those with `hc read`.
+Run `<skill-dir>/scripts/runs.sh`. It reads every run directory under `~/.herdr/hc-orchestration/` that has an `orchestrator.json`, and for each prints the branch, repository, the `Status:` line of `plan.md`, the orchestrator terminal's state, the dialog it is blocked on, the run's published progress, merged and planned tasks, waiting agents, issues, and PRs from `status.json`, any open `question.md`, and unhandled messages (or warns when `hc` did not answer). It skips finished runs unless given `--all`. It also lists `🐙` tabs that no run directory claims, for example an orchestrator that has not finished starting; inspect those with `hc read`.
 
 Runs of the older `herdr-orchestrator` skill live in the Herdr TUI and do not appear here.
 
-Each run directory holds `spec.md` (the goal), `plan.md` (tasks and their status), `decisions.md`, `question.md` (the orchestrator's open question to the user, if any), `inbox/` (relayed messages), and `shared/` (briefs, findings). Read them for detail rather than asking the orchestrator; it is busy.
+Each run directory holds `spec.md` (the goal), `plan.md` (tasks and their status), `status.json` (the facts above, which outlive the orchestrator, so `runs.sh --all` still gives a finished run's PRs), `decisions.md`, `question.md` (the orchestrator's open question to the user, if any), `inbox/` (relayed messages), and `shared/` (briefs, findings). Read them for detail rather than asking the orchestrator; it is busy.
 
 ## Report
 
@@ -35,7 +35,7 @@ Lead with what needs the user, then the rest, one or two lines per run, named by
 
 - **Needs you:** `plan.md` says `waiting for user`, or the orchestrator is `blocked`, or it is `idle`/`done` while the plan is not finished. For a blocked one, `runs.sh` shows its dialog; read the whole dialog (`hc read --lines 0 <terminal>`), quote its question and options, or for a permission prompt exactly what it wants to run, and tell the user to answer it in the `🐙 <branch>` tab; it comes before any `question.md`. Otherwise, if `question.md` exists, it holds the full question: give it to the user with its context, options, and recommendation, by whatever way of asking suits you, since text is only a run's route up to you. If an unhandled `inbox/` message already answers it, do not ask again; the orchestrator has yet to read it, so wake it as in Relay instructions if it is idle. Otherwise, for an idle one, read its last output (`hc read --lines 60 <terminal>`) and quote its question. Text shown in its input box may be Claude Code's suggested next prompt, not something the user typed; ignore it.
 - **Stalled or crashed:** the orchestrator is gone, or idle with no question and no recent change in `plan.md`. Say what the run directory shows and how to resume: `/herdr-app-orchestrator <run-directory>/spec.md` in a new Herdr tab. Its agents ended with it, so the resumed run restarts unfinished tasks from their worktrees.
-- **Running:** the plan position (tasks merged out of planned, what is in progress) and the progress label. A `working` orchestrator usually sits in a foreground wait; that is normal.
+- **Running:** the plan position (tasks merged out of planned, what is in progress), its progress line, and any PRs. A `working` orchestrator usually sits in a foreground wait; that is normal.
 
 When the user asks about one run, go deeper: per-task status, recent decisions, and what is left. The user can look at any agent without disturbing it, in the Agents list under its orchestrator, or with `herdr-app do agent.focus --terminal <t>` if they ask you to show one.
 

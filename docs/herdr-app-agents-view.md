@@ -82,6 +82,16 @@ To see it without a run going, label any agent's terminal for a moment: `hc labe
 
 To go back to Herdr's own list: `herdr-app do layout.switch '{"name":"main"}'`. Delete `mods/agents-runs` and `layouts/main-runs.json` to remove the copy.
 
+## Other run facts
+
+Orchestrators also label their terminals with:
+
+- `run.status`: `running`, `waiting`, `blocked`, or `finished`;
+- `progress`: one line on what the run is doing, such as `task 3/7 in review`;
+- `run.prs`: the run's PR URLs, space-separated, once there are any.
+
+Labels end with the terminal. The same facts, plus merged and planned tasks, issues, and waiting agents, stay in `status.json` in the run directory under `~/.herdr/hc-orchestration/`. To show any of them, ask an agent in the app to change your copy, as in the [README](../README.md#install)'s example.
+
 ## Prompt for a newer Herdr
 
 > Clone the `agents` mod as `agents-runs` and the `main` layout as `main-runs`, and point the layout's Agents block at `agents-runs`. In the mod, read each terminal's `role` label from `terminals()`. Show agents with `role=captain` in a group "⚓ Captain" at the very top, then agents with `role=orchestrator` from every space in a group "🐙 Orchestrators", each row naming its space the way pinned rows do and keeping its sub-agents nested under it. Then pinned agents and the rest, unchanged. Run `herdr-app check` on the mod when done.

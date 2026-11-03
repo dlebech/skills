@@ -97,7 +97,7 @@ Comments on an issue can change its scope. Read them (`gh issue view <number> --
 
 Turn the spec into the smallest independently implementable and reviewable tasks. Honor any ordering in the spec, such as “start with the schema change.” A task can be non-code (a measurement run, a recording, docs). It gets a worktree when it produces files, and a review only when it changes code or docs.
 
-Keep the plan in `plan.md`. Its first line is `Status: <one line>`, kept current: `running`, `waiting for user: <question>`, `blocked: <reason>`, or `finished`. Set it with `<skill-dir>/scripts/set-status.sh <run-directory> "<status>"`, which also renames your tab, so the user sees it in Herdr's Agents list: `🐙 <integration-branch>` while running, `🐙 ✋ <integration-branch>` when waiting for the user or blocked, and `🐙 ✓ <integration-branch>` when finished. For each task, record:
+Keep the plan in `plan.md`. Its first line is `Status: <one line>`, kept current: `running`, `waiting for user: <question>`, `blocked: <reason>`, or `finished`. Set it with `<skill-dir>/scripts/set-status.sh <run-directory> "<status>"`, which also renames your tab, so the user sees it in Herdr's Agents list: `🐙 <integration-branch>` while running, `🐙 ✋ <integration-branch>` when waiting for the user or blocked, and `🐙 ✓ <integration-branch>` when finished. The same script publishes the run's other facts, to `status.json` in the run directory and to labels on your terminal, for the captain, for anything the user builds on Herdr's lists, and as the record of a finished run. Pass them with or without a status, whenever one changes; each is kept until changed: `--issue <url>` for each issue the run works on, once the spec names them; `--tasks <merged>/<planned>` when the plan is made and after every merge; `--progress "<one line>"` whenever you start a new step; `--pr <owner/repo> <url>` as soon as a repository's PR exists; and `--waiting "<agent names>"` while agents wait for an answer from you or the user, `--waiting ""` once none do. For each task, record:
 
 - its repository; a change that spans repositories becomes one task per repository, with the dependency between them (often the backend first);
 - the acceptance criteria it satisfies;
@@ -161,9 +161,9 @@ Agents run as their kind sets them up, with its normal permission prompts. Pass 
 
 ### Waiting
 
-Wait for agents in the foreground, never in a background shell or monitor, so you stay `working` and `herdr-app-captain` can tell a wait from a stall. Long-running processes such as dev servers run with `hc run --bg` too; they are not waits. Run slow commands (CI, builds) with `hc run --bg`, as `hc --skill` describes, so you stay reachable. Set a progress label for the captain, then wait, giving your shell tool a limit above 540 seconds (for Claude Code's Bash, `timeout: 600000`):
+Wait for agents in the foreground, never in a background shell or monitor, so you stay `working` and `herdr-app-captain` can tell a wait from a stall. Long-running processes such as dev servers run with `hc run --bg` too; they are not waits. Run slow commands (CI, builds) with `hc run --bg`, as `hc --skill` describes, so you stay reachable. Publish your progress for the captain, then wait, giving your shell tool a limit above 540 seconds (for Claude Code's Bash, `timeout: 600000`):
 ```bash
-hc label "$HC_TERMINAL_ID" progress="task 3/7 in review"
+<skill-dir>/scripts/set-status.sh <run-directory> --progress "task 3/7 in review"
 hc wait --children any --timeout 540
 ```
 
@@ -201,7 +201,7 @@ When a task is implemented, reviewed and fixed as configured, committed, and val
    - `squash`: write a message with what and why, the task's issue if any, and key numbers. Afterwards verify `git diff <task-branch> <squash-commit>` is empty.
    - `merge`: make a non-fast-forward merge with a message naming the task.
 4. Run the smallest integration-level validation that covers the merge. If a PR exists, push and watch CI. Fix a red build before merging more, in a short-lived worktree like any change.
-5. Mark the task complete and use the updated integration branch as the base for dependent worktrees.
+5. Mark the task complete, publish the new count with `set-status.sh <run-directory> --tasks <merged>/<planned>`, and use the updated integration branch as the base for dependent worktrees.
 6. Clean up: `hc kill` and `hc rm` the task's agents, then remove its worktree with `git worktree remove` after checking it is clean, pushed if pushing is on, and identical to what was merged. Drop its throwaway resources, but move anything costly to rebuild, like caches, to the integration worktree or a backup location first. Idle agents still hold memory, so do not wait until the end.
 
 Resolve straightforward mechanical conflicts in the integration worktree. If a conflict requires a product or design choice, ask the user before choosing.

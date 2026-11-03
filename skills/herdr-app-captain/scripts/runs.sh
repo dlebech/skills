@@ -6,9 +6,9 @@
 # Reads every run directory under ~/.herdr/hc-orchestration that has an
 # orchestrator.json, skipping finished runs unless --all is given. For each prints
 # its directory, branch, start folder (its repository, or the folder holding
-# several), the Status line of its plan.md, its
-# orchestrator terminal's state and progress label, the dialog it is blocked on,
-# its open question to the user, and unhandled messages. Then lists "🐙" tabs that
+# several), the Status line of its plan.md, its orchestrator terminal's state, the
+# dialog it is blocked on, its status.json's progress, tasks, waiting agents, issues
+# and PRs, its open question to the user, and unhandled messages. Then lists "🐙" tabs that
 # no run directory claims, when the Herdr window is open.
 set -u
 . "$(dirname "$0")/lib.sh"
@@ -42,10 +42,8 @@ while IFS= read -r run_info <&3; do
     if [ -z "$state" ]; then
       orchestrator="$terminal gone (no live terminal)"
     else
-      facts=$(hc get "$terminal" --json 2>/dev/null) || facts='{}'
-      progress=$(jq -r '.labels.progress // empty' <<<"$facts")
-      orchestrator="$terminal $state${progress:+ ($progress)}"
-      [ "$state" != blocked ] || dialog=$(jq -r '.status.msg // empty' <<<"$facts")
+      orchestrator="$terminal $state"
+      [ "$state" != blocked ] || dialog=$(hc get "$terminal" --json 2>/dev/null | jq -r '.status.msg // empty')
     fi
   fi
 
@@ -56,6 +54,12 @@ while IFS= read -r run_info <&3; do
   echo "  plan: ${status:-no Status line}"
   echo "  orchestrator: $orchestrator"
   [ -z "$dialog" ] || echo "  dialog: $dialog"
+  [ ! -e "$dir/status.json" ] || jq -r '
+    (if .progress or .tasks then "  progress: \([.progress // empty,
+      (.tasks // empty | "\(.merged)/\(.planned) tasks merged")] | join("; "))" else empty end),
+    (if (.waiting | length) > 0 then "  waiting agents: \(.waiting | join(" "))" else empty end),
+    (.issues[] | "  issue: \(.)"),
+    (.prs[] | "  pr: \(.repo) \(.url)")' "$dir/status.json"
   [ -e "$dir/question.md" ] && echo "  question: $dir/question.md"
   [ -n "$messages" ] && echo "  unhandled: $messages"
 done 3< <(run_infos)
