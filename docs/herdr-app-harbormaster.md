@@ -40,13 +40,16 @@ herdr-app/install.sh --captain-pane  # the same, and opens the overview beside t
 It does three things:
 - copies `herdr-app/mods/harbormaster` and the board and sea layouts into the app's home (`~/.config/herdr-app`, or `$HERDR_APP_HOME`);
 - clones your Herdr's `main` layout as `harbormaster-main`, and inserts the Crew block above its Agents block with `jq`;
+- binds `ctrl-shift-h` to `mod.open:harbormaster` in `keys.json`, unless that key is already taken (then it tells you);
 - runs `herdr-app check` on the mod.
 
-To update, pull and run it again. It overwrites the mod and the two layouts, and leaves `harbormaster-main` alone once it has the Crew block.
+To update, pull and run it again. It overwrites the mod and the two layouts. It leaves `harbormaster-main` alone once it has the Crew block, and the key binding alone once it exists.
 
 To switch layouts, press `ctrl-shift-l`. You can also run `herdr-app do layout.switch '{"name":"harbormaster-board"}'`, with any of `harbormaster-main`, `harbormaster-board`, `harbormaster-sea`, or Herdr's own `main`. The board has a "Back to main" button and the sea has a "Run board" button.
 
-To show the overview beside the captain at any time, run `herdr-app/captain-pane.sh`. It opens a `harbormaster` pane to the right of the terminal labelled `role=captain`. Close it like any pane. It is saved with the captain's tab.
+To glance at the runs from anywhere, press `ctrl-shift-h`. It opens the overview as a popup over the window, and pressing it again, or Esc, closes it.
+
+To keep the overview open beside the captain, run `herdr-app/captain-pane.sh` (or pass `--captain-pane` to `install.sh`). It opens a `harbormaster` pane to the right of the terminal labelled `role=captain`. It is saved with the captain's tab, so you need it only once per captain tab. Running it again adds a second pane. Close it like any pane: its header, or `ctrl-shift-x` while it has focus.
 
 To use the Crew block in a layout of your own, add a block with `{ "mod": "harbormaster", "props": { "role": "crew" } }`.
 

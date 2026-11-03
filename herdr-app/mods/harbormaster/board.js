@@ -86,7 +86,7 @@ export function card(t, r, ctx, compact = false) {
       .child(statusDot(t, o))
       .child(pill(t, ph.label, need ? "blocked" : ph.tone, need)))
     .when(Boolean(r.progress), (el) => el.child(div().text_size(12.5).text_color(t.foreground).child(r.progress)))
-    .when(!compact, (el) => el.child(taskStrip(t, r)))
+    .when(!compact && (r.tasks.length > 0 || r.planned != null), (el) => el.child(taskStrip(t, r)))
     .when(need && Boolean(question), (el) => el.child(h_flex().gap(8).p(8).rounded(7).bg(t.blocked + "1c").items_start()
       .child(div().flex_none().text_color(t.blocked).font_bold().child("?"))
       .child(v_flex().flex_1().min_w(0).gap(2)

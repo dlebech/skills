@@ -53,7 +53,21 @@ fi
 rm -f "$tmp"
 grep -q '"role": "crew"' "$main" || echo "install.sh: no Agents block found in main; harbormaster-main has no Crew block" >&2
 
-# 3. Check the mod.
+# 3. ctrl-shift-h opens and closes the overview as a popup, unless that key is taken.
+keys="$home/keys.json"
+[ -f "$keys" ] || echo '{}' > "$keys"
+if jq -e '[.. | objects | to_entries[] | select(.value == "mod.open:harbormaster")] | length > 0' "$keys" >/dev/null; then
+  :
+elif jq -e '.global["ctrl-shift-h"]' "$keys" >/dev/null; then
+  echo "ctrl-shift-h is taken in keys.json; bind another key to \"mod.open:harbormaster\" to toggle the overview"
+else
+  tmp=$(mktemp)
+  jq '.global = ((.global // {}) + {"ctrl-shift-h": "mod.open:harbormaster"})' "$keys" > "$tmp" && cat "$tmp" > "$keys"
+  rm -f "$tmp"
+  echo "bound ctrl-shift-h to open and close the overview"
+fi
+
+# 4. Check the mod.
 herdr-app check "$home/mods/harbormaster"
 
 if [ -n "$captain_pane" ]; then
@@ -62,7 +76,7 @@ fi
 
 cat <<'EOF'
 
-Done. Switch layouts with ctrl-shift-l, or:
+Done. ctrl-shift-h opens and closes the overview. Switch layouts with ctrl-shift-l, or:
   herdr-app do layout.switch '{"name":"harbormaster-main"}'   # your usual window, with the Crew block
   herdr-app do layout.switch '{"name":"harbormaster-board"}'  # the run board
   herdr-app do layout.switch '{"name":"harbormaster-sea"}'    # the harbor

@@ -1,1 +1,1 @@
-{ "place": "none", "title": "Harbormaster" }
+{ "place": "none", "title": "Harbormaster", "overlay": { "width": 760, "height": 640 } }
