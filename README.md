@@ -17,7 +17,7 @@ The `herdr-app-*` skills also want Herdr's own `herdr-core` skill, which steers 
 npx skills add https://github.com/herdrdev/herdr-core --skill herdr-core
 ```
 
-To see your runs at a glance in the Herdr app, run `herdr-app/install.sh` (see [docs/herdr-app-runs-view.md](docs/herdr-app-runs-view.md)). It puts the captain and every orchestrator at the top of the Agents list with their progress, and adds a runs overview with PRs, checks and open questions, a `runs-board` layout, and a sheep-themed `runs-pasture` layout. The manual steps for only the Agents list are in [docs/herdr-app-agents-view.md](docs/herdr-app-agents-view.md). Orchestrators also label their terminals with `run.status`, `progress` and `run.prs`, and keep a `status.json` in each run directory, so you can shape the list further by asking an agent in the app, for example:
+To see your runs at a glance in the Herdr app, install Harbormaster with `herdr-app/install.sh` (see [docs/herdr-app-harbormaster.md](docs/herdr-app-harbormaster.md)). It adds a Crew block that shows the captain and every orchestrator with their progress, a runs overview with PRs, checks and open questions, and three layouts: `harbormaster-main`, `harbormaster-board`, and the nautical `harbormaster-sea`. Steps for changing Herdr's own Agents list instead are in [docs/herdr-app-agents-view.md](docs/herdr-app-agents-view.md). Orchestrators also label their terminals with `run.status`, `progress` and `run.prs`, and keep a `status.json` in each run directory, so you can shape the list further by asking an agent in the app, for example:
 
 > In my copy of the Agents list, show each orchestrator's `progress` label under its name, and a ✓ before it when its `run.status` label is `finished`.
 

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 420">
+  <defs><linearGradient id="w" x2="0" y2="1"><stop stop-color="#4a9cc2"/><stop offset="1" stop-color="#2b6f98"/></linearGradient></defs>
+  <rect width="1600" height="420" fill="url(#w)"/>
+  <g fill="#ffffff" opacity=".07"><path d="M120 0L220 0L60 420L-60 420Z"/><path d="M520 0L580 0L420 420L330 420Z"/><path d="M1000 0L1110 0L960 420L840 420Z"/><path d="M1400 0L1450 0L1330 420L1250 420Z"/></g>
+  <g fill="none" stroke="#2f8a5b" stroke-width="9" stroke-linecap="round">
+    <path d="M70 400C56 370 84 350 70 320C58 296 80 280 72 260"/>
+    <path d="M96 404C88 380 106 366 98 342"/>
+    <path d="M760 404C748 380 770 362 760 336C752 316 768 300 762 286"/>
+    <path d="M1480 404C1466 374 1494 354 1480 324C1470 304 1488 290 1482 272"/>
+    <path d="M1508 404C1500 384 1516 370 1510 350"/>
+  </g>
+  <path d="M0 372C120 352 260 366 400 360C560 352 680 372 840 364C1000 356 1140 350 1300 362C1420 370 1520 356 1600 360V420H0Z" fill="#e9d19c"/>
+  <path d="M0 392C160 384 300 396 460 390C640 384 800 398 980 392C1160 386 1340 396 1600 388V420H0Z" fill="#dcbf85"/>
+  <g fill="#8d97a0" stroke="#6b747c" stroke-width="3"><path d="M200 372C204 352 236 346 250 360C258 368 254 376 240 378Z"/><path d="M1180 366C1188 344 1226 342 1236 360C1240 370 1230 374 1210 374Z"/></g>
+  <g fill="#f08aa0" stroke="#c45a74" stroke-width="2.5"><path d="M620 372C612 356 626 352 630 362C628 346 646 346 642 362C650 352 662 358 652 372Z"/><path d="M1340 372C1332 356 1346 352 1350 362C1348 346 1366 346 1362 362C1370 352 1382 358 1372 372Z"/></g>
+  <g fill="#f4e7c8" stroke="#c9a76a" stroke-width="2"><path d="M420 390L432 378L444 390Z"/><circle cx="980" cy="384" r="5"/><path d="M1060 392Q1068 378 1076 392Z"/></g>
+  <g fill="none" stroke="#dff2fa" stroke-width="2" opacity=".55"><circle cx="300" cy="240" r="6"/><circle cx="310" cy="210" r="4"/><circle cx="296" cy="186" r="3"/><circle cx="1100" cy="200" r="5"/><circle cx="1110" cy="172" r="3.5"/><circle cx="1540" cy="160" r="4"/></g>
+</svg>

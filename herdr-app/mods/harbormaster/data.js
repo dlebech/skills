@@ -143,12 +143,12 @@ const slim = (p, repo) => ({
 });
 
 export function prsOf(run) {
-  return shared("runs.prs")?.[run.key]?.list ?? null;
+  return shared("harbormaster.prs")?.[run.key]?.list ?? null;
 }
 
 // Refreshes a run's PRs when stale: every 60 s while it runs, every 15 min once finished.
 export async function refreshPrs(run) {
-  const all = shared("runs.prs") ?? {};
+  const all = shared("harbormaster.prs") ?? {};
   const have = all[run.key];
   const ttl = run.phase === "finished" ? 15 * 60000 : 60000;
   if (prBusy.has(run.key) || (have && Date.now() - have.at < ttl)) return false;
@@ -168,12 +168,12 @@ export async function refreshPrs(run) {
       const r = await exec("gh", ["pr", "list", "--head", run.branch, "--state", "all", "--limit", "3", "--json", PR_FIELDS], { cwd: run.folder, on: run.machine }).catch(() => null);
       for (const p of (r?.code === 0 ? json(r.stdout) : null) ?? []) if (!seen.has(p.url)) list.push(slim(p));
     }
-    const next = { ...(shared("runs.prs") ?? {}) };
+    const next = { ...(shared("harbormaster.prs") ?? {}) };
     next[run.key] = { at: Date.now(), list };
     // Forget runs that are gone.
     for (const k of Object.keys(next)) if (!cache.runs.some((r) => r.key === k) && cache.runs.length) delete next[k];
-    if (JSON.stringify(next[run.key]?.list) !== JSON.stringify(have?.list) || !have) setShared("runs.prs", next);
-    else { all[run.key] = { ...have, at: Date.now() }; setShared("runs.prs", { ...all }); }
+    if (JSON.stringify(next[run.key]?.list) !== JSON.stringify(have?.list) || !have) setShared("harbormaster.prs", next);
+    else { all[run.key] = { ...have, at: Date.now() }; setShared("harbormaster.prs", { ...all }); }
     return true;
   } finally {
     prBusy.delete(run.key);

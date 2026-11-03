@@ -36,7 +36,7 @@ function prRow(t, pr, i) {
   const review = { APPROVED: ["Approved", "done"], CHANGES_REQUESTED: ["Changes requested", "blocked"], REVIEW_REQUIRED: ["Review needed", "dim"] }[pr.review];
   return h_flex().id(`pr-${i}-${pr.url}`).gap(7).items_center().h(24).px(6).rounded(6).cursor_pointer()
     .hover((s) => s.bg(t.hover)).tooltip(pr.url).on_click((_e, cx) => { cx.stop_propagation(); openUrl(pr.url); })
-    .child(svg("mods/runs/pr.svg").size(13).flex_none().text_color(t[tone] ?? t.dim))
+    .child(svg("mods/harbormaster/pr.svg").size(13).flex_none().text_color(t[tone] ?? t.dim))
     .child(div().flex_none().text_color(t.muted).child(pr.number ? `#${pr.number}` : "PR"))
     .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(pr.title ?? pr.url))
     .when(Boolean(checkText), (el) => el.child(div().flex_none().text_size(11).text_color(t[checkTone]).child(checkText)))
@@ -108,12 +108,12 @@ export function card(t, r, ctx, compact = false) {
 export function captainStrip(t, ctx, runs) {
   const cap = captainOf(ctx.all);
   if (!cap.terminal) return h_flex().flex_none().gap(8).p(10).rounded(10).border(1).border_color(t.border).text_size(12).text_color(t.dim)
-    .child("⚓").child("No captain running. Start one with /herdr-app-captain.");
+    .child("\u{1F9D1}\u200D\u2708\uFE0F").child("No captain running. Start one with /herdr-app-captain.");
   const status = ctx.listed.find((a) => a.address === cap.terminal.address)?.status ?? "idle";
   return h_flex().id("captain").flex_none().gap(10).p(10).px(12).rounded(10).bg(t.accent + "18").border(1).border_color(t.accent + "55")
     .items_center().cursor_pointer().hover((s) => s.bg(t.accent + "26"))
     .on_click(() => run("agent.focus", { terminal: cap.terminal.address }))
-    .child(div().text_size(18).child("⚓"))
+    .child(div().text_size(18).child("\u{1F9D1}\u200D\u2708\uFE0F"))
     .child(v_flex().flex_1().min_w(0)
       .child(div().font_semibold().text_size(13).text_color(t.foreground).child("Captain"))
       .child(div().text_size(11.5).text_color(cap.watching ? t.muted : t.blocked)
@@ -154,7 +154,7 @@ export function summaryText(runs, ctx) {
   return [`${live.length} running`, need ? `${need} need you` : null, `${open} open PR${open === 1 ? "" : "s"}`].filter(Boolean).join(" · ");
 }
 
-// The top bar of the runs-board layout.
+// The top bar of the harbormaster-board layout.
 export function summary(t, runs) {
   const ctx = { all: terminals(), listed: agents() };
   const live = runs.filter((r) => r.phase !== "finished");
@@ -173,7 +173,7 @@ export function summary(t, runs) {
     .child(v_flex().gap(1).mr(16)
       .child(h_flex().gap(8).items_center().child(div().text_size(17).font_semibold().text_color(t.foreground).child("Run board")))
       .child(div().text_size(11).text_color(cap.terminal ? (cap.watching ? t.muted : t.blocked) : t.dim)
-        .child(cap.terminal ? (cap.watching ? "⚓ Captain on watch" : "⚓ Captain not watching") : "⚓ No captain")))
+        .child(cap.terminal ? (cap.watching ? "\u{1F9D1}\u200D\u2708\uFE0F Captain on watch" : "\u{1F9D1}\u200D\u2708\uFE0F Captain not watching") : "\u{1F9D1}\u200D\u2708\uFE0F No captain")))
     .child(stat(live.length, "runs", null, "s-runs"))
     .child(stat(need.length, "need you", need.length ? "blocked" : null, "s-need", need[0]?.terminal ? () => run("agent.focus", { terminal: need[0].terminal }) : null))
     .child(stat(workers, "agents", workers ? "working" : null, "s-workers"))
@@ -182,21 +182,59 @@ export function summary(t, runs) {
     .child(div().flex_1())
     .child(div().id("to-main").px(10).h(26).rounded(6).flex().items_center().text_size(11.5).text_color(t.muted).border(1).border_color(t.border)
       .cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
-      .on_click(() => run("layout.switch", { name: "main-runs" })).child("Back to main"));
+      .on_click(() => run("layout.switch", { name: "harbormaster-main" })).child("Back to main"));
 }
 
-// One line above the focused agent's terminal in the runs-board layout.
+// One line above the focused agent's terminal in the harbormaster-board layout.
 export function focusRail(t) {
   const listed = agents();
   const addr = focused()?.agent;
   const a = listed.find((x) => x.address === addr) ?? listed[0];
   const k = terminals().find((x) => x.address === (a?.address ?? addr));
   const role = k?.labels?.role;
-  const name = role === "captain" ? "⚓ Captain" : role === "orchestrator" ? `\u{1F419} ${k.labels?.["herdr.tab"] ? a?.tab_name ?? "" : ""}` : a ? `${a.space_name} · ${a.tab_name}` : "No agent";
+  const name = role === "captain" ? "\u{1F9D1}\u200D\u2708\uFE0F Captain" : role === "orchestrator" ? `\u{1F419} ${k.labels?.["herdr.tab"] ? a?.tab_name ?? "" : ""}` : a ? `${a.space_name} · ${a.tab_name}` : "No agent";
   return h_flex().size_full().px(14).gap(8).items_center().bg(t.chrome).border_b(1).border_color(t.border).text_size(12)
     .when(Boolean(a?.program?.icon), (el) => el.child(a.program.tint ? svg(a.program.icon).size(14).text_color(t.foreground) : image(a.program.icon).size(14)))
     .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).font_medium().child(name))
     .when(Boolean(k?.labels?.progress), (el) => el.child(div().max_w(320).truncate().text_color(t.dim).child(k.labels.progress)))
     .when(Boolean(a), (el) => el.child(statusDot(t, a.status)))
     .child(div().id("peek-hint").text_size(11).text_color(t.dim).child("click a run or agent to show it here"));
+}
+
+// The Crew block: the captain and every orchestrator as cards, from their role labels.
+// Sits above Herdr's own Agents list in the harbormaster-main layout, so that list stays stock.
+export function crew(view, t) {
+  const all = terminals(), listed = agents();
+  const cap = captainOf(all);
+  const orchs = all.filter((k) => k.state === "live" && k.labels?.role === "orchestrator");
+  const runOf = (k) => view.runs.find((r) => r.terminal === k.address);
+  const status = (k) => listed.find((a) => a.address === k.address)?.status ?? (k.status === "error" ? "blocked" : k.status ?? "idle");
+  const row = (id, emoji, title, detail, tone, s, address, edge) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
+    .rounded(7).bg(edge + "14").cursor_pointer().hover((st) => st.bg(edge + "26"))
+    .on_click(() => address && run("agent.focus", { terminal: address }))
+    .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
+    .child(div().flex_none().text_size(15).child(emoji))
+    .child(v_flex().flex_1().min_w(0)
+      .child(div().truncate().text_size(12.5).font_semibold().text_color(t.foreground).child(title))
+      .child(div().truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail)))
+    .child(statusDot(t, s));
+  const rows = [];
+  if (cap.terminal) rows.push(row("crew-captain", "\u{1F9D1}‍✈️", "Captain",
+    cap.watching ? `on watch · ${orchs.length} run${orchs.length === 1 ? "" : "s"}` : "not watching runs",
+    cap.watching ? "muted" : "blocked", status(cap.terminal), cap.terminal.address, t.accent));
+  for (const k of orchs) {
+    const r = runOf(k), l = k.labels ?? {};
+    const need = r ? needsYou(r, status(k)) : status(k) === "blocked";
+    const rs = l["run.status"] ?? r?.phase ?? "running";
+    const nPrs = (r && prsOf(r)?.length) || (l["run.prs"] ? String(l["run.prs"]).split(/[\s,]+/).filter(Boolean).length : 0);
+    const kids = workersOf(k.address, all).length;
+    const detail = [need ? "needs you" : rs !== "running" ? rs : null, l.progress ?? r?.progress, kids ? `\u{1F980} ${kids}` : null, nPrs ? `${nPrs} PR${nPrs > 1 ? "s" : ""}` : null].filter(Boolean).join(" · ");
+    const edge = need ? t.blocked : rs === "finished" ? t.done : t.working;
+    rows.push(row(`crew-${k.address}`, "\u{1F419}", r?.branch ?? k.name ?? k.address, detail || "orchestrator", need ? "blocked" : "muted", status(k), k.address, edge ?? t.border));
+  }
+  return v_flex().id("crew").size_full().min_h(0).bg(t.chrome).text_size(12.5)
+    .child(div().flex_none().px(12).pt(8).pb(4).text_size(11.5).font_semibold().text_color(t.foreground).child("Crew"))
+    .child(v_flex().id("crew-list").flex_1().min_h(0).px(8).pb(6).gap(4).overflow_y_scrollbar()
+      .when(rows.length === 0, (el) => el.child(div().px(4).text_size(11.5).text_color(t.dim).child("No captain or orchestrators. Start one with /herdr-app-captain.")))
+      .children(rows));
 }

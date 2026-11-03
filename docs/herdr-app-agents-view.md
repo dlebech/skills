@@ -1,6 +1,6 @@
 # Captain and orchestrators at the top of Herdr's Agents list
 
-> For more (progress on each card, a runs overview with PRs, and two layouts), run `herdr-app/install.sh` instead; see [herdr-app-runs-view.md](herdr-app-runs-view.md). It includes everything below.
+> Harbormaster does this without editing Herdr's Agents list. It adds its own Crew block above the list, plus a runs overview with PRs and three layouts. Run `herdr-app/install.sh`; see [herdr-app-harbormaster.md](herdr-app-harbormaster.md).
 
 The `herdr-app-*` skills label their agents: the captain's terminal carries `role=captain`, and every orchestrator's carries `role=orchestrator`. Herdr's own Agents list does not read those labels. These steps make a copy of it that does, and that shows:
 

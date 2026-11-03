@@ -1,0 +1,14 @@
+{
+  "id": "hs-root", "type": "column", "theme": "paper", "preview": "layouts/harbormaster-sea.svg",
+  "font_size": 13, "ui_font": "Geist", "background": "#264a6b",
+  "colors": { "background": "#fbf7ee", "foreground": "#1d2b3a", "accent": "#2f7fb0", "border": "#264a6b" },
+  "terminal_padding": [10, 12], "resizable": false,
+  "children": [
+    { "id": "hs-sea", "type": "block", "size": { "weight": 0.95 }, "min": 300, "content": { "mod": "harbormaster", "props": { "role": "harbor" } } },
+    { "id": "hs-rail", "type": "block", "size": { "px": 29 }, "content": { "mod": "harbormaster", "props": { "role": "harbor-rail" } } },
+    { "id": "hs-deck", "type": "block", "size": { "weight": 1 }, "padding": [0, 10], "background": "#264a6b",
+      "content": { "tab": "active", "pane": { "gap": 10, "radius": 4, "lone": true, "background": "#fbf7ee",
+        "border": { "width": 4, "color": "#1a3550" }, "focus": { "width": 4, "color": "#f2c94c" },
+        "header": { "content": { "mod": "harbormaster", "props": { "role": "harbor-pane" } }, "height": 28, "position": "top", "reveal": "always" } } } }
+  ]
+}
