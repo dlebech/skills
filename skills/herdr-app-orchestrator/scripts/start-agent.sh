@@ -5,11 +5,15 @@
 #          [--model MODEL] [--shared DIR] [--arg ARG]... [--label K=V]...
 #          [--no-parent] [--accept-trust]
 #
-# One flow for every kind: launch with no task, wait until the agent reports a
-# status, then send. Kinds differ in how they take a first task (opencode's
-# --prompt only fills its input box, pi sits idle while a local model loads), so
-# nothing is passed on the command line. The task is a file, because it can hold
-# the user's or a run's text, and a shell argument could run part of it.
+# Claude Code gets its task on the command line, as its initial prompt: hc send
+# pastes, and Claude Code wraps a long paste in <pasted_content>, so a task such as
+# `/herdr-app-orchestrator ...` would arrive as text instead of running the skill.
+# The prompt also waits behind the folder trust prompt. Every other kind launches
+# with no task, and once it reports a status, gets it sent: kinds differ in how they
+# take a first task (opencode's --prompt only fills its input box, pi sits idle
+# while a local model loads). The task is a file, because it can hold the user's or
+# a run's text, and a shell argument could run part of it; it goes to the agent as
+# one argv entry, never through a shell.
 #
 #   --kind     claude, pi or opencode (tested), codex (untested), or any program
 #   --model    claude: sonnet; pi: provider/id; opencode: provider/id
@@ -37,7 +41,7 @@
 # Exits 1 if hc fails, 2 on bad usage.
 set -uo pipefail
 
-name= cwd= kind= task_file= model= shared= accept_trust= ready_wait=${START_AGENT_WAIT:-120}
+name= cwd= kind= task_file= model= shared= accept_trust= prompt_arg= ready_wait=${START_AGENT_WAIT:-120}
 extra=() labels=() parent=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -69,7 +73,8 @@ case $kind in
     settings=$(jq -cn --arg dir "$shared" '{permissions: (if $dir == "" then {allow: ["Bash(hc send:*)"]}
       else {additionalDirectories: [$dir],
         allow: ["Bash(hc send:*)", "Read(/\($dir)/**)", "Edit(/\($dir)/**)", "Write(/\($dir)/**)"]} end)}')
-    argv+=(--settings "$settings") ;;
+    argv+=(--settings "$settings")
+    prompt_arg=1 ;;
   pi) argv=(pi ${model:+--model "$model"}) ;;
   opencode)
     argv=(opencode)
@@ -83,6 +88,7 @@ case $kind in
   *) argv=("$kind" ${model:+--model "$model"}) ;;
 esac
 argv+=(${extra[@]+"${extra[@]}"})
+[ -z "$prompt_arg" ] || argv+=(-- "$task")
 
 status() { hc get "$name" --json 2>/dev/null | jq -r '.status.state // empty'; }
 state() { hc get "$name" --json 2>/dev/null | jq -r '.state // "gone"'; }
@@ -111,8 +117,12 @@ while :; do
   hc wait "$name" --timeout 3 >/dev/null 2>&1
 done
 
+# Claude Code took the task at launch, also when this resumes a start that stopped
+# at the trust prompt; sending it again would run it twice.
+[ -z "$prompt_arg" ] || { echo "started $address"; exit 0; }
+
 # Without HC_TERMINAL_ID it arrives as a plain prompt, not in an <hc from="..."> tag,
-# which would stop a task such as /herdr-app-orchestrator from running as a command.
+# which would stop a task such as /skill:herdr-app-orchestrator from running as a command.
 result=$(env -u HC_TERMINAL_ID hc send "$name" "$task" --json) || exit 1
 if [ "$(jq -r '.started // false' <<<"$result")" = true ]; then
   echo "started $address"

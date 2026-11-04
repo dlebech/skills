@@ -13,8 +13,8 @@
 # several), the Status line of its plan.md, its orchestrator terminal's state, the
 # dialog it is blocked on, its status.json's progress, tasks, waiting agents, issues,
 # PRs and when they were last published, its open question to the user, and
-# unhandled messages. Then lists "🐙" tabs that no run directory claims, when the
-# Herdr window is open.
+# unhandled messages. Then lists orchestrator terminals (role=orchestrator) that no
+# run directory claims, and "🐙" tabs that none claims, when the Herdr window is open.
 set -u
 . "$(dirname "$0")/lib.sh"
 
@@ -28,13 +28,14 @@ if ! terminals=$(hc ls --json 2>/dev/null); then
   terminals=
   echo "warning: hc ls failed; orchestrator states are unknown"
 fi
-claimed=" "
+claimed=" " claimed_terminals=" "
 found=0
 
 while IFS= read -r run_info <&3; do
   dir=$(dirname "$run_info")
   IFS=$'\x1f' read -r branch folder terminal tab < <(run_facts "$run_info")
   claimed+="$tab "
+  claimed_terminals+="$terminal "
   status=$(plan_status "$dir")
   state=
   [ -z "$terminals" ] || state=$(terminal_state "$terminals" "$terminal")
@@ -82,6 +83,16 @@ while IFS= read -r run_info <&3; do
   [ -n "$messages" ] && echo "  unhandled: $messages"
 done 3< <(run_infos)
 [ "$found" = 1 ] || if [ -n "$all" ]; then echo "no runs under $root"; else echo "no open runs under $root (--all includes closed ones)"; fi
+
+# The captain labels the orchestrators it starts role=orchestrator, as init-run.sh
+# does. One that no run directory names has not run init-run.sh: still starting, or
+# working without the skill.
+[ -z "$terminals" ] || hc ls --json --label role=orchestrator 2>/dev/null |
+  jq -r '.terminals[] | [.address, (.name // "-"), (.status // "starting"), (.where // "-")] | join("\t")' |
+  while IFS=$'\t' read -r address name state where; do
+    case $claimed_terminals in *" $address "*) continue ;; esac
+    echo "unclaimed orchestrator: $address $name $state ($where), no run directory"
+  done
 
 layout=$(herdr-app ls 2>/dev/null) || exit 0
 jq -r '.spaces[].tabs[] | select(.name | startswith("🐙")) | "\(.id)\t\(.name)"' <<<"$layout" |
