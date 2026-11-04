@@ -5,7 +5,8 @@
 //   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
 // Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute.
 
-import { View, InputState } from "gpui-kit";
+import { View } from "gpui-kit";
+import { InputState } from "gpui-base";
 import { props, theme } from "herdr";
 import { loadRuns, cachedRuns, refreshPrs, isClosed } from "./data.js";
 import { facts } from "./live.js";
