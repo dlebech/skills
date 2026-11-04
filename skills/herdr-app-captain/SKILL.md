@@ -93,13 +93,15 @@ When the user asks you to start an orchestrator, start a new agent that runs the
 
 ## Watch the runs
 
-After your first report, even with no runs yet, start the watcher in its own terminal, not as a background job of your shell tool:
+After your first report, even with no runs yet, start the watcher in its own terminal, not as a background job of your shell tool, with `--no-notify`:
 
 ```bash
-hc run --bg --name captain-watch --cwd "$HOME" <skill-dir>/scripts/watch-runs.sh
+hc run --bg --no-notify --name captain-watch --cwd "$HOME" <skill-dir>/scripts/watch-runs.sh
 ```
 
-It ends with you, and hc tells you when it exits. It exits as soon as a run newly needs the user, printing one line per event:
+Then wait for it with `<skill-dir>/scripts/wait-watch.sh` as a background job that wakes you when it ends (for Claude Code, a background Bash command; not Monitor). Keep one such wait running per watcher. Do not let hc tell you instead: hc types its exit note into your input and presses Enter, and your input is where the user types to you, so a note arriving mid-sentence sends their half-written message with the note stuck on. Only if your harness has no background job that wakes you, start the watcher without `--no-notify` and wait for its note (`<hc>... captain-watch exited ...</hc>`).
+
+The watcher ends with you. It exits as soon as a run newly needs the user, printing one line per event:
 
 ```
 attention <branch> <reason>	<run-directory>
@@ -107,11 +109,11 @@ attention <branch> <reason>	<run-directory>
 
 Its header lists the reasons. It reports each event once, and remembers across restarts, so restart it freely.
 
-When its exit note arrives (`<hc>... captain-watch exited ...</hc>`):
+When the wait ends:
 
 1. Read its output with `hc read --lines 50 captain-watch`, then remove it with `hc rm captain-watch`.
 2. Look at each run it names, as in Report, so the alert says what is needed and not only that something is.
 3. Tell the user in a few lines, needs-you first. Ending your turn marks your tab, and the app plays its sound and shows a toast if they are looking elsewhere.
-4. Start the watcher again, every time, without asking, even when every run has finished. New runs need it, and stopping is the user's call.
+4. Start the watcher and its wait again, every time, without asking, even when every run has finished. New runs need it, and stopping is the user's call.
 
-If starting it fails with `name_taken`, a watcher is already running. If it is your child (`parent` in `hc get captain-watch`), carry on. If not, another captain is watching: tell the user, keep answering questions and relaying here, and do not retry. If it exits nonzero (for example, `hc` stopped answering), say so and restart it once; if it fails again, stop watching and tell the user. It picks up new runs by itself, so keep it running with no unfinished runs, and stop only when the user says so.
+If starting it fails with `name_taken`, a watcher is already running. If it is your child (`parent` in `hc get captain-watch`), make sure a wait for it is running, then carry on. If not, another captain is watching: tell the user, keep answering questions and relaying here, and do not retry. If it exits nonzero (for example, `hc` stopped answering), say so and restart it once; if it fails again, stop watching and tell the user. It picks up new runs by itself, so keep it running with no unfinished runs, and stop only when the user says so.

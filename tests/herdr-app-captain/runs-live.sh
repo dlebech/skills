@@ -24,7 +24,7 @@
 #      for a program that reports none, and warns in a linked worktree and in a
 #      terminal without a tab;
 #   4. repo-spaces.sh finds the space;
-#   5. watch-runs.sh, in its own terminal, tells this terminal when it exits, and
+#   5. watch-runs.sh, in its own terminal, is waited for by wait-watch.sh, and
 #      reports an event once: waiting for user, finished, orchestrator gone; with
 #      a 10-minute interval, so only hc events can wake it for finished;
 #   6. a second watcher is refused by name;
@@ -213,9 +213,13 @@ contains "second watcher refused" "$(cat "$work/second")" name_taken
 "$orch/set-status.sh" "$dir" finished
 check "tab name, finished" "$(tab_name "$tab")" "🐙 ✓ feature/x"
 contains "finished run stays open" "$("$capt/runs.sh")" "plan: finished, PR open until its tab is closed"
-hc wait "$watch" --timeout 15 >/dev/null
+# As the captain waits: wait-watch.sh ends once the watcher has, with its exit.
+out=$(timeout 15 "$capt/wait-watch.sh" "$watch")
+check "wait-watch.sh ends with the watcher" "$(jq -r '"\(.ended) \(.exit_code)"' <<<"$out")" "true 0"
 contains "finished" "$(hc read "$watch" --lines 20)" "attention feature/x finished"
 hc rm "$watch" >/dev/null
+timeout 5 "$capt/wait-watch.sh" "$watch" >/dev/null 2>&1
+check "wait-watch.sh fails for no watcher" "$?" 3
 "$orch/set-status.sh" "$dir" running
 hc kill "$fake" >/dev/null
 out=$(watch_once)
