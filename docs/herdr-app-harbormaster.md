@@ -3,20 +3,22 @@
 Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-captain` and its `herdr-app-orchestrator` runs are doing, so you don't have to read the Agents list row by row. Everything in it is written from scratch: it uses Herdr's mod API and leaves Herdr's own mods and layouts unchanged.
 
 - **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list.
-  - The captain's card says whether its watcher is running and how many runs it watches, running and finished. Its pane button pins the runs overview beside the captain, or unpins it.
+  - The captain's card says whether its watcher is running and how many runs it watches, running and finished, and turns red with how many decisions it is waiting on you for. Its pane button pins the runs overview beside the captain, or unpins it.
   - Each orchestrator's card shows its progress, its status when it isn't running, its number of 🦀 workers and its PRs. A run that needs you turns red and says what for. Finished ones come last, with a green edge and their PR numbers.
   - Each Adrift line shows the agent's space and its name as Herdr's own Agents list gives it: the tab's name when someone named it, otherwise the agent's own title (Claude Code sets one from its session), never a bare tab number like "1". Clicking it focuses the agent.
-- **Runs overview.** The totals across runs on top (running, need you, finished, agents, tasks merged, open PRs and failing checks; clicking "need you" focuses the first run that needs you), then the captain, then one card per run:
+- **Runs overview.** The totals across runs on top (running, need you, finished, agents, tasks merged, open PRs and failing checks; "need you" counts the captain's open decisions and the runs that need you, and clicking it focuses the first of them), then **Waiting on you**, then the captain, then one card per run:
   - its branch and repository, a status pill, the progress line, and a task bar from `plan.md` (merged, in progress, blocked);
   - every PR the run opened, with its state, checks and review decision, and below them its related links: its issues, and the PRs it is about but did not open, such as the PR a review-only run reviews (their icon takes the PR's state color; they don't count as open PRs);
   - what the run needs you for, shown first: its open question, the dialog it is blocked on, or the reason in its status;
   - and, when they apply: relayed messages the orchestrator hasn't read, agents waiting on an answer, "No pull request yet", and a note when the run's orchestrator is gone;
   - buttons to **Park**, **Resume**, or **Close** the run (see Parked, resumed, and closed runs). Each asks on the card first, naming what is left.
 
+  **Waiting on you** lists everything you have yet to decide, so a question doesn't get lost when alerts and reports pile up after it: first each decision the captain asked you and is still waiting on, oldest first, with its run and how long it has waited, then each run that needs you, with its question, dialog or reason. The captain records its own decisions with `decisions.sh` and removes them when you answer; a run's question goes away when its orchestrator gets the answer. Clicking a decision focuses the captain, a run its orchestrator. The list is hidden while nothing is waiting.
+
   Clicking a card focuses the orchestrator. Clicking a PR or issue opens it in the browser. Finished runs stay, after the running ones, until you close their orchestrator's tab. Parked runs come next, under **Parked**. Closed runs fold away at the bottom.
 - **`harbormaster-main` layout.** Herdr's main layout with the Crew block added.
 - **`harbormaster-sea` layout** (fun):
-  - The captain rides a boat on the surface and drops anchor while watching. The captain calls "Ahoy!" when a run needs you, and raises the anchor and naps when nothing is being watched.
+  - The captain rides a boat on the surface and drops anchor while watching. The captain calls "Ahoy!" when it has a decision for you or a run needs you, and raises the anchor and naps when nothing is being watched.
   - Each run is a reef with its branch on a sign. A finished run's reef goes quiet, its octopus asleep and its PR flags up, until you close the orchestrator's tab; then it leaves the harbor. A parked run keeps its reef, dimmed and without its octopus. Clicking a parked reef, or one whose orchestrator is gone, offers to resume it. A run that needs you says what for in a bubble. The orchestrator is an octopus and its workers are crabs. Working crabs scuttle, blocked ones jump, and crabs whose turn is done sleep.
   - Buoys along the bottom are the run's tasks and turn green as they merge.
   - Signal flags on the mast are its PRs. Clicking one opens it.
@@ -66,7 +68,7 @@ Harbormaster is built for that:
 
 The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks mods to list those, so here they are:
 
-- **Every 5 seconds, per machine:** one `sh -c` script. For each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json`, `plan.md`, `question.md`, and the `parked` and `closed` markers, and counts the unhandled `inbox/*.message` files.
+- **Every 5 seconds, per machine:** one `sh -c` script. It prints the captain's open decisions, `.captain-decisions.json` in the runs root, then for each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json`, `plan.md`, `question.md`, and the `parked` and `closed` markers, and counts the unhandled `inbox/*.message` files.
 - **Every minute per open run (running or finished), every 15 minutes per closed one:**
   - `gh pr view <url>` for each PR and related PR in `status.json`;
   - `gh pr list --head <branch>` in the run's folder, so a PR shows up before the orchestrator records it.

@@ -1,4 +1,4 @@
-// The serious views: the runs overview (totals, captain, run cards) and the Crew block.
+// The serious views: the runs overview (totals, what's waiting on you, captain, run cards) and the Crew block.
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -217,36 +217,77 @@ function captainStrip(t, ctx, s) {
     .child(statusDot(t, agentStatus(cap.terminal, ctx)));
 }
 
-// The totals across runs, as small stats under the overview's title. "need you" focuses
-// the first run that needs you.
-function totals(t, s) {
+// Everything waiting on the person, in one list at the top of the overview: the captain's
+// open decisions (decisions.sh), oldest first, then each run that needs them, with what
+// for. A decision clicks through to the captain, a run to its orchestrator.
+function waitingOnYou(t, s, decisions, runs, ctx) {
+  const cap = captainOf(ctx);
+  const runName = (d) => {
+    if (!d.run) return null;
+    const r = runs.find((x) => x.dir === d.run && x.machine === d.machine);
+    return r?.branch ?? d.run.split("/").pop();
+  };
+  const items = [
+    ...decisions.map((d) => ({
+      id: `dec-${d.key}`, emoji: CAPTAIN, text: d.question, address: cap.terminal?.address,
+      meta: ["captain asks", runName(d), d.machine, d.asked ? ago(d.asked) : null],
+      tip: cap.terminal ? "Answer the captain: click to open it" : "The captain isn't running; start /herdr-app-captain to answer",
+    })),
+    ...s.need.map((r) => {
+      const orch = orchestratorState(r, ctx);
+      return {
+        id: `need-${r.key}`, emoji: OCTOPUS, text: needReason(r, orch) ?? "needs you", address: r.terminal,
+        meta: [r.branch, r.machine, r.question ? "question" : orch === "blocked" ? "dialog" : r.phase, r.updated ? ago(r.updated) : null],
+        tip: "Click to open the orchestrator",
+      };
+    }),
+  ];
+  if (!items.length) return null;
+  const row = (it) => h_flex().id(it.id).gap(8).p(8).rounded(7).items_start().bg(t.surface).tooltip(it.tip)
+    .when(Boolean(it.address), (el) => el.cursor_pointer().hover((st) => st.bg(t.raised)).on_click(() => focusAgent(it.address)))
+    .child(div().flex_none().text_size(14).child(it.emoji))
+    .child(v_flex().flex_1().min_w(0).gap(2)
+      .child(div().text_size(12.5).text_color(t.foreground).child(it.text.slice(0, 300)))
+      .child(div().truncate().text_size(11).text_color(t.dim).child(it.meta.filter(Boolean).join(" · "))));
+  return v_flex().id("waiting").flex_none().gap(6).p(10).rounded(10).bg(t.blocked + "14").border(1).border_color(t.blocked + "66")
+    .child(div().text_size(11.5).font_semibold().text_color(t.blocked).child(`Waiting on you · ${items.length}`))
+    .children(items.map(row));
+}
+
+// The totals across runs, as small stats under the overview's title. "need you" counts
+// the captain's open decisions and the runs that need you, and focuses the first of them.
+function totals(t, s, decisions, ctx) {
   const stat = (id, value, label, tone, onClick) => h_flex().id(id).flex_none().gap(4).items_baseline().px(6).h(22).rounded(5)
     .when(Boolean(onClick), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click(onClick))
     .child(div().text_size(13).font_semibold().text_color(tone ? t[tone] : t.foreground).child(String(value)))
     .child(div().text_size(11).text_color(t.dim).child(label));
-  const firstNeed = s.need[0]?.terminal;
+  const firstNeed = (decisions.length ? captainOf(ctx).terminal?.address : null) ?? s.need[0]?.terminal;
+  const needCount = s.need.length + decisions.length;
   return h_flex().flex_wrap().gap(2).items_center()
     .child(stat("t-runs", s.live.length, "running", null))
-    .child(stat("t-need", s.need.length, "need you", s.need.length ? "blocked" : null, firstNeed ? () => focusAgent(firstNeed) : null))
+    .child(stat("t-need", needCount, "need you", needCount ? "blocked" : null, firstNeed ? () => focusAgent(firstNeed) : null))
     .when(s.docked.length > 0, (el) => el.child(stat("t-done", s.docked.length, "finished", "done")))
     .child(stat("t-agents", s.workers, s.workers === 1 ? "agent" : "agents", s.workers ? "working" : null))
     .when(s.planned > 0, (el) => el.child(stat("t-tasks", `${s.merged}/${s.planned}`, "tasks merged", null)))
     .child(stat("t-prs", s.open.length, s.failing ? `open PRs · ${s.failing} failing` : s.open.length === 1 ? "open PR" : "open PRs", s.failing ? "blocked" : s.open.length ? "done" : null));
 }
 
-// The cards list: captain, runs that need you, the others, finished runs still open, then closed runs folded.
-export function cards(view, t, runs, errors) {
+// The cards list: what's waiting on you, captain, runs that need you, the others, finished
+// runs still open, then closed runs folded.
+export function cards(view, t, runs, errors, decisions = []) {
   const ctx = facts();
   const s = stats(runs, ctx);
   const needing = new Set(s.need);
   const live = [...s.need, ...s.live.filter((r) => !needing.has(r))];
   const narrow = (view.size?.width ?? 600) / zoom() < 360;
+  const waiting = waitingOnYou(t, s, decisions, runs, ctx);
   return v_flex().id("root").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .on_size_change((size, cx) => { view.size = size; cx.notify(); })
     .child(v_flex().flex_none().px(10).pt(10).pb(6).gap(2)
       .child(div().px(4).text_size(11.5).font_medium().text_color(t.dim).child("Runs"))
-      .child(totals(t, s)))
+      .child(totals(t, s, decisions, ctx)))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
+      .when(Boolean(waiting), (el) => el.child(waiting))
       .child(captainStrip(t, ctx, s))
       .when(s.shown.length === 0, (el) => el.child(div().p(12).text_size(12).text_color(t.dim).child("No runs in progress. Ask the captain to start one, e.g. “start issue 185 in my-app”.")))
       .children(live.map((r) => card(view, t, r, ctx, narrow)))
@@ -292,10 +333,11 @@ export function crew(view, t) {
   if (cap.terminal) {
     // The same counts as the overview: runs still working, and finished ones still open.
     const watched = watchedText(stats(view.runs, ctx));
+    const asks = view.decisions?.length ?? 0;
     rows.push(row({
       id: "crew-captain", emoji: CAPTAIN, title: "Captain", pin: true,
-      detail: cap.watching ? `on watch · ${watched}` : "not watching runs",
-      tone: cap.watching ? "muted" : "blocked", status: agentStatus(cap.terminal, ctx), address: cap.terminal.address, edge: t.accent,
+      detail: [asks ? `asks you: ${plural(asks, "decision")}` : null, cap.watching ? `on watch · ${watched}` : "not watching runs"].filter(Boolean).join(" · "),
+      tone: asks || !cap.watching ? "blocked" : "muted", status: agentStatus(cap.terminal, ctx), address: cap.terminal.address, edge: t.accent,
     }));
   }
   for (const { term, r, state } of orchestrators) {

@@ -1,6 +1,6 @@
 // Harbormaster: an overview of herdr-app-orchestrator runs and the captain watching them.
 // props().role picks the view:
-//   (none) / "cards"  the runs overview: totals, the captain, run cards with progress, tasks, PRs, what a run needs you for
+//   (none) / "cards"  the runs overview: totals, what's waiting on you, the captain, run cards with progress, tasks, PRs
 //   "crew"            the captain, orchestrators and agents adrift, above Herdr's own Agents list
 //   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
 // Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute.
@@ -18,6 +18,7 @@ export default class Harbormaster extends View {
   init(_props, cx) {
     const role = props()?.role;
     this.runs = cachedRuns().runs;
+    this.decisions = cachedRuns().decisions;
     this.errors = [];
     this.step = 0;
     this.showDone = false;
@@ -30,9 +31,11 @@ export default class Harbormaster extends View {
 
   refresh(cx) {
     cx.spawn(async (cx) => {
-      const { runs, errors } = await loadRuns();
-      const changed = JSON.stringify(runs) !== JSON.stringify(this.runs) || errors.join() !== this.errors.join();
+      const { runs, decisions, errors } = await loadRuns();
+      const changed = JSON.stringify(runs) !== JSON.stringify(this.runs) || JSON.stringify(decisions) !== JSON.stringify(this.decisions)
+        || errors.join() !== this.errors.join();
       this.runs = runs;
+      this.decisions = decisions;
       this.errors = errors;
       if (changed) cx.notify();
       // PRs land in shared state, which re-renders every copy by itself.
@@ -49,7 +52,7 @@ export default class Harbormaster extends View {
       case "harbor": return harbor(this);
       case "harbor-rail": return rail(this);
       case "harbor-pane": return paneHeader(p);
-      default: return cards(this, t, this.runs, this.errors);
+      default: return cards(this, t, this.runs, this.errors, this.decisions);
     }
   }
 }

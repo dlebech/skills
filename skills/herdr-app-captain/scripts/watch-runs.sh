@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Watch herdr-app-orchestrator runs and exit as soon as one newly needs the user.
 #
-# Usage: hc run --bg --name captain-watch <path>/watch-runs.sh
+# Usage: hc run --bg --no-notify --name captain-watch <path>/watch-runs.sh
 #
-# Runs in its own hc terminal, as a child of herdr-app-captain: hc tells the captain
-# when it exits, whatever the agent kind, it ends with the captain, and the unique
-# name means only one runs at a time. The captain reads its output and starts it
-# again. Prints one line per new event, then exits:
+# Runs in its own hc terminal, as a child of herdr-app-captain: it ends with the
+# captain, and the unique name means only one runs at a time. The captain learns
+# that it exited from wait-watch.sh, run as its own background job, rather than
+# from hc's exit note, which would be typed into the box the user writes in. The
+# captain reads its output and starts it again. Prints one line per new event, then
+# exits:
 #   attention <branch> <reason>    <run-directory>
 # Reasons: the plan's "waiting for user" or "blocked" status, finished, the
 # orchestrator terminal gone or blocked on a dialog, or the orchestrator idle for two

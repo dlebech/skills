@@ -10,15 +10,18 @@
 //   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
 //   <root>/<folder>/<branch>/inbox/*.message    relayed messages not yet handled
 //   <root>/<folder>/<branch>/parked, closed     the person put the run away: "<time>\t<status then>"
+//   <root>/.captain-decisions.json              the captain's open decisions: [{id, question, run, asked}]
 
 import { exec, machines, shared, setShared, run as command } from "herdr";
 import { orchestratorState, workersOf, needsYou, tabOf, homeSpace } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
 
-// One sh script per machine: every run, its files separated by \x1f, runs by \x1e.
+// One sh script per machine: the captain's decisions, then every run, its files
+// separated by \x1f, runs by \x1e.
 const SCRIPT = [
   'root="${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}"',
+  'head -c 60000 "$root/.captain-decisions.json" 2>/dev/null',
   'for f in "$root"/*/*/orchestrator.json; do',
   '  [ -e "$f" ] || continue',
   '  d="${f%/orchestrator.json}"',
@@ -57,8 +60,22 @@ function tasksOf(plan) {
   return out;
 }
 
+// The captain's open decisions, oldest first: {key, id, question, run, asked, machine}.
+function parseDecisions(machine, text) {
+  const list = json(text);
+  if (!Array.isArray(list)) return [];
+  return list.filter((d) => d && d.id && d.question).map((d) => ({
+    key: `${machine ?? ""}:${d.id}`,
+    id: String(d.id),
+    question: String(d.question),
+    run: typeof d.run === "string" ? d.run : null,
+    asked: Date.parse(d.asked) || null,
+    machine,
+  }));
+}
+
 function parse(machine, stdout) {
-  return stdout.split(RS).filter((s) => s.trim()).map((chunk) => {
+  return stdout.split(RS).slice(1).filter((s) => s.trim()).map((chunk) => {
     const [dir, orchFile, statusFile, plan, question, parkedFile, closedFile, inbox] = chunk.split(US);
     const orch = json(orchFile) ?? {};
     const status = json(statusFile) ?? {};
@@ -103,7 +120,7 @@ function marker(how, text) {
 }
 
 // Every copy asks through one cache, so a layout with several copies reads once.
-let cache = { at: 0, runs: [], errors: [], pending: null };
+let cache = { at: 0, runs: [], decisions: [], errors: [], pending: null };
 
 export function cachedRuns() {
   return cache;
@@ -115,17 +132,19 @@ export function loadRuns() {
   cache.pending = (async () => {
     const names = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
     if (!names.includes(null)) names.unshift(null);
-    const runs = [], errors = [];
+    const runs = [], decisions = [], errors = [];
     await Promise.all(names.map(async (on) => {
       try {
         const out = await exec("sh", ["-c", SCRIPT], { on });
+        decisions.push(...parseDecisions(on, out.stdout.split(RS)[0]));
         runs.push(...parse(on, out.stdout));
       } catch (e) {
         errors.push(`${on ?? "this machine"}: ${e?.message ?? e}`);
       }
     }));
     runs.sort((a, b) => (a.machine ?? "").localeCompare(b.machine ?? "") || a.dir.localeCompare(b.dir));
-    cache = { at: Date.now(), runs, errors, pending: null };
+    decisions.sort((a, b) => (a.asked ?? 0) - (b.asked ?? 0));
+    cache = { at: Date.now(), runs, decisions, errors, pending: null };
     return cache;
   })().catch((e) => {
     cache = { ...cache, pending: null, errors: [String(e)] };
