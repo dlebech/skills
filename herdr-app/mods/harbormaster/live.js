@@ -124,6 +124,15 @@ export function focusAgent(address) {
   if (address) run("agent.focus", { terminal: address });
 }
 
+// Types an answer into the captain's input as a reply to one decision, naming the decision
+// (id and question) so the captain knows which it is for, and shows the captain.
+export function replyToCaptain(address, decision, text) {
+  const q = decision.question.replace(/\s+/g, " ").slice(0, 200);
+  const msg = `Re decision "${decision.id}" (${q}): ${text}`;
+  exec("hc", ["send", address, msg]).catch(() => {});
+  focusAgent(address);
+}
+
 export function openUrl(url) {
   const platform = window()?.platform;
   const cmd = platform === "macos" ? "open" : platform === "windows" ? "explorer" : "xdg-open";

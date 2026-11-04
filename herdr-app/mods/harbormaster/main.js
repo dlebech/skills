@@ -5,11 +5,11 @@
 //   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
 // Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute.
 
-import { View } from "gpui-kit";
+import { View, InputState } from "gpui-kit";
 import { props, theme } from "herdr";
 import { loadRuns, cachedRuns, refreshPrs, isClosed } from "./data.js";
 import { facts } from "./live.js";
-import { cards, crew } from "./overview.js";
+import { cards, crew, submitReply } from "./overview.js";
 import { harbor, rail, paneHeader } from "./harbor.js";
 
 const DATA_ROLES = new Set([undefined, "cards", "crew", "harbor"]);
@@ -22,6 +22,9 @@ export default class Harbormaster extends View {
     this.errors = [];
     this.step = 0;
     this.showDone = false;
+    this.replying = null; // the key of the decision being answered inline
+    this.reply = InputState.new({ placeholder: "Your answer…" });
+    this.reply.on("submit", (_e, cx) => submitReply(this, cx));
     if (!DATA_ROLES.has(role)) return;
     this.refresh(cx);
     cx.timer.every(5000, (cx) => this.refresh(cx));
