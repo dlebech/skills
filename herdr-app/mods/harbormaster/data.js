@@ -6,7 +6,7 @@
 // Run directory protocol (herdr-app-captain's lib.sh):
 //   <root>/<folder>/<branch>/orchestrator.json  {terminal, tab_id, folder, branch}
 //   <root>/<folder>/<branch>/plan.md            "Status: <status>" first, then "### t1 name ... — <state>" tasks
-//   <root>/<folder>/<branch>/status.json        {status, progress, tasks:{merged,planned}, issues, prs:[{repo,url}], waiting, updated}
+//   <root>/<folder>/<branch>/status.json        {status, progress, tasks:{merged,planned}, issues, prs:[{repo,url}], related:[{repo,url}], waiting, updated}
 //   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
 //   <root>/<folder>/<branch>/inbox/*.message    relayed messages not yet handled
 //   <root>/<folder>/<branch>/parked, closed     the person put the run away: "<time>\t<status then>"
@@ -84,6 +84,8 @@ function parse(machine, stdout) {
       planned: status.tasks?.planned ?? null,
       issues: status.issues ?? [],
       prs: (status.prs ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
+      // PRs the run is about but did not open, such as the one a review-only run reviews.
+      related: (status.related ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
       waiting: status.waiting ?? [],
       updated: status.updated ? Date.parse(status.updated) : null,
       question: question?.trim() || null,
@@ -190,6 +192,11 @@ export function prsOf(run) {
   return shared("harbormaster.prs")?.[run.key]?.list ?? null;
 }
 
+// The run's related PRs: shown beside its issues, never counted as its own.
+export function relatedOf(run) {
+  return shared("harbormaster.prs")?.[run.key]?.related ?? run.related.map((p) => unknownPr(p.url, p.repo));
+}
+
 // Refreshes a run's PRs when stale: every 60 s while the run is open, every 15 min once closed.
 export async function refreshPrs(run, closed = false) {
   const have = (shared("harbormaster.prs") ?? {})[run.key];
@@ -197,22 +204,27 @@ export async function refreshPrs(run, closed = false) {
   if (prBusy.has(run.key) || (have && Date.now() - have.at < ttl)) return;
   prBusy.add(run.key);
   try {
-    const list = [];
-    const seen = new Set();
-    for (const pr of run.prs) {
-      if (!pr.url) continue;
-      const out = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch(() => null);
-      const p = out?.code === 0 ? json(out.stdout) : null;
-      if (p) { list.push(prSummary(p, pr.repo)); seen.add(p.url); }
-      else list.push(unknownPr(pr.url, pr.repo));
-    }
+    const seen = new Set(run.related.map((p) => p.url));
+    const view = async (recorded) => {
+      const out = [];
+      for (const pr of recorded) {
+        if (!pr.url) continue;
+        const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch(() => null);
+        const p = res?.code === 0 ? json(res.stdout) : null;
+        if (p) { out.push(prSummary(p, pr.repo)); seen.add(p.url); }
+        else out.push(unknownPr(pr.url, pr.repo));
+      }
+      return out;
+    };
+    const related = await view(run.related);
+    const list = await view(run.prs);
     // Before the orchestrator records one: a PR from the run's branch.
     if (run.folder && run.branch) {
       const out = await exec("gh", ["pr", "list", "--head", run.branch, "--state", "all", "--limit", "3", "--json", PR_FIELDS], { cwd: run.folder, on: run.machine }).catch(() => null);
       for (const p of (out?.code === 0 ? json(out.stdout) : null) ?? []) if (!seen.has(p.url)) list.push(prSummary(p));
     }
     const next = { ...(shared("harbormaster.prs") ?? {}) };
-    next[run.key] = { at: Date.now(), list };
+    next[run.key] = { at: Date.now(), list, related };
     // Forget runs that are gone.
     for (const key of Object.keys(next)) if (cache.runs.length && !cache.runs.some((r) => r.key === key)) delete next[key];
     setShared("harbormaster.prs", next);

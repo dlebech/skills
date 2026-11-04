@@ -12,8 +12,8 @@
 # its directory, branch, start folder (its repository, or the folder holding
 # several), the Status line of its plan.md, its orchestrator terminal's state, the
 # dialog it is blocked on, its status.json's progress, tasks, waiting agents, issues,
-# PRs and when they were last published, its open question to the user, and
-# unhandled messages. Then lists orchestrator terminals (role=orchestrator) that no
+# PRs, related PRs (ones the run is about but did not open) and when they were last
+# published, its open question to the user, and unhandled messages. Then lists orchestrator terminals (role=orchestrator) that no
 # run directory claims, and "🐙" tabs that none claims, when the Herdr window is open.
 set -u
 . "$(dirname "$0")/lib.sh"
@@ -78,6 +78,7 @@ while IFS= read -r run_info <&3; do
     (if (.waiting // [] | length) > 0 then "  waiting agents: \(.waiting | join(" "))" else empty end),
     (.issues[]? | "  issue: \(.)"),
     (.prs[]? | "  pr: \(.repo) \(.url)"),
+    (.related[]? | "  related pr: \(.repo) \(.url)"),
     (.updated // empty | "  facts updated: \(.)")' "$dir/status.json"
   [ -e "$dir/question.md" ] && echo "  question: $dir/question.md"
   [ -n "$messages" ] && echo "  unhandled: $messages"

@@ -8,7 +8,7 @@ Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-capta
   - Each Adrift line shows the agent's space and its name as Herdr's own Agents list gives it: the tab's name when someone named it, otherwise the agent's own title (Claude Code sets one from its session), never a bare tab number like "1". Clicking it focuses the agent.
 - **Runs overview.** The totals across runs on top (running, need you, finished, agents, tasks merged, open PRs and failing checks; clicking "need you" focuses the first run that needs you), then the captain, then one card per run:
   - its branch and repository, a status pill, the progress line, and a task bar from `plan.md` (merged, in progress, blocked);
-  - its issues, and every PR with its state, checks and review decision;
+  - every PR the run opened, with its state, checks and review decision, and below them its related links: its issues, and the PRs it is about but did not open, such as the PR a review-only run reviews (their icon takes the PR's state color; they don't count as open PRs);
   - what the run needs you for, shown first: its open question, the dialog it is blocked on, or the reason in its status;
   - and, when they apply: relayed messages the orchestrator hasn't read, agents waiting on an answer, "No pull request yet", and a note when the run's orchestrator is gone;
   - buttons to **Park**, **Resume**, or **Close** the run (see Parked, resumed, and closed runs). Each asks on the card first, naming what is left.
@@ -68,7 +68,7 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 
 - **Every 5 seconds, per machine:** one `sh -c` script. For each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json`, `plan.md`, `question.md`, and the `parked` and `closed` markers, and counts the unhandled `inbox/*.message` files.
 - **Every minute per open run (running or finished), every 15 minutes per closed one:**
-  - `gh pr view <url>` for each PR in `status.json`;
+  - `gh pr view <url>` for each PR and related PR in `status.json`;
   - `gh pr list --head <branch>` in the run's folder, so a PR shows up before the orchestrator records it.
 
   The results are kept in Herdr's shared state (`harbormaster.prs`), so every copy of the mod and every layout uses the same ones.

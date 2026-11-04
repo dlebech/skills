@@ -10,8 +10,9 @@
 #       in runs.sh and the user's views, until its orchestrator's terminal is
 #       gone: the user closed its tab)
 #   <root>/<folder>/<branch>/status.json        {branch, folder, status, state, progress,
-#       tasks: {merged, planned}, issues: [url], prs: [{repo, url}], waiting: [name],
-#       updated}, kept by set-status.sh, which also sets the terminal's run.status,
+#       tasks: {merged, planned}, issues: [url], prs: [{repo, url}] (the run's own),
+#       related: [{repo, url}] (PRs it is about but did not open, such as the one a
+#       review-only run reviews), waiting: [name], updated}, kept by set-status.sh, which also sets the terminal's run.status,
 #       progress, and run.prs labels
 #   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
 #   <root>/<folder>/<branch>/inbox/             <name>.message, from the captain

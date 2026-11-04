@@ -2,7 +2,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { stats, runPhase, taskTone, taskCounts, prsOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun } from "./data.js";
+import { stats, runPhase, taskTone, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun } from "./data.js";
 import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, openUrl } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef } from "./ui.js";
 
@@ -46,6 +46,16 @@ function prRow(t, pr, i) {
     .when(Boolean(review), (el) => el.child(div().flex_none().text_size(11).text_color(t[review[1]]).child(review[0])))
     .child(pill(t, pr.state === "DRAFT" ? "Draft" : pr.state[0] + pr.state.slice(1).toLowerCase(), tone));
 }
+
+// A link chip: the run's issues, and PRs it is about but did not open, side by side.
+// A PR chip's icon takes its state's color; its title and state are in the tooltip.
+function linkChip(t, id, url, icon, tip) {
+  return h_flex().id(id).gap(4).px(6).h(20).items_center().rounded(5).bg(t.raised).text_size(11).text_color(t.muted).cursor_pointer()
+    .hover((s) => s.text_color(t.foreground)).tooltip(tip ?? url)
+    .on_click((_e, cx) => { cx.stop_propagation(); openUrl(url); })
+    .child(icon).child(shortRef(url));
+}
+const prStateText = (pr) => (pr.state === "UNKNOWN" ? null : pr.state === "DRAFT" ? "Draft" : pr.state[0] + pr.state.slice(1).toLowerCase());
 
 // One segment per planned task; only for runs that plan at least one.
 function taskStrip(t, r, counts) {
@@ -127,6 +137,13 @@ function card(view, t, r, ctx, compact = false) {
   const badge = (parked ? PHASE.parked : r.away?.how === "closed" ? PHASE.closed : PHASE[r.phase]) ?? PHASE.unknown;
   const counts = taskCounts(r);
   const prs = prsOf(r) ?? r.prs.map((p) => unknownPr(p.url, p.repo));
+  const related = relatedOf(r);
+  const links = [
+    ...r.issues.map((url) => linkChip(t, `is-${r.key}-${url}`, url, div().child("◎"))),
+    ...related.map((p) => linkChip(t, `rel-${r.key}-${p.url}`, p.url,
+      svg("mods/harbormaster/pr.svg").size(11).flex_none().text_color(t[PR_TONE[p.state]] ?? t.dim),
+      [p.number ? p.title : null, prStateText(p), p.url].filter(Boolean).join(" · "))),
+  ];
   const workers = workersOf(r.terminal, ctx);
   const edge = need ? t.blocked : t[badge.tone] ?? t.border;
   const focus = () => orch !== "gone" && focusAgent(r.terminal);
@@ -156,13 +173,10 @@ function card(view, t, r, ctx, compact = false) {
     .when(!r.away && orch === "gone" && r.phase !== "finished", (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Orchestrator is gone: resume or close this run.")))
     .when(r.waiting.length > 0, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(`Waiting on an answer: ${r.waiting.join(", ")}`)))
     .when(r.unhandled > 0, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(`${plural(r.unhandled, "relayed message")} not read yet`)))
-    .when(prs.length > 0 || r.issues.length > 0, (el) => el.child(v_flex().gap(1).text_size(12)
+    .when(prs.length > 0 || links.length > 0, (el) => el.child(v_flex().gap(1).text_size(12)
       .children(prs.map((p, i) => prRow(t, p, i)))
-      .when(r.issues.length > 0, (el) => el.child(h_flex().flex_wrap().gap(6).px(6).pt(2)
-        .children(r.issues.map((url) => div().id(`is-${r.key}-${url}`).px(6).h(20).flex().items_center().rounded(5).bg(t.raised).text_size(11).text_color(t.muted).cursor_pointer()
-          .hover((s) => s.text_color(t.foreground)).tooltip(url)
-          .on_click((_e, cx) => { cx.stop_propagation(); openUrl(url); }).child(`◎ ${shortRef(url)}`)))))))
-    .when(prs.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(11).text_color(t.dim).child("No pull request yet")))
+      .when(links.length > 0, (el) => el.child(h_flex().flex_wrap().gap(6).px(6).pt(2).children(links)))))
+    .when(prs.length === 0 && related.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(11).text_color(t.dim).child("No pull request yet")))
     .child(actionRow(view, t, r, orch, closed, counts));
 }
 
