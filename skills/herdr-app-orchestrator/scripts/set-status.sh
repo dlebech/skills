@@ -3,7 +3,7 @@
 # the orchestrator's tab name, and labels on its terminal.
 #
 # Usage: set-status.sh <run-directory> [<status>] [--progress TEXT] [--tasks MERGED/PLANNED]
-#          [--issue URL]... [--pr REPO URL]... [--waiting "NAME..."]
+#          [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]
 #
 # <status> is running, "waiting for user: <question>", "blocked: <reason>", or
 # finished, the vocabulary herdr-app-captain's scripts/lib.sh documents. Without
@@ -19,11 +19,13 @@
 #   --issue     an issue the run works on; added once
 #   --pr        a repository's PR, e.g. --pr acme/api https://github.com/acme/api/pull/9;
 #               replaces that repository's earlier one
+#   --related   a PR the run is about but did not open, such as the PR a review-only
+#               run reviews, or one the run depends on; added once
 #   --waiting   every agent now waiting for an answer, space-separated, replacing
 #               the earlier list; "" clears it
 #
 # status.json: {branch, folder, status, state, progress, tasks: {merged, planned},
-# issues: [url], prs: [{repo, url}], waiting: [name], updated}, where state is
+# issues: [url], prs: [{repo, url}], related: [{repo, url}], waiting: [name], updated}, where state is
 # running, waiting, blocked, or finished. It outlives the terminal, so it is the
 # record of a finished run. The labels, for live lists such as Herdr's Agents list:
 # run.status (the state), progress, and run.prs (the PR URLs, space-separated).
@@ -34,7 +36,7 @@
 set -u
 
 usage() {
-  echo 'usage: set-status.sh <run-directory> [<status>] [--progress TEXT] [--tasks M/N] [--issue URL]... [--pr REPO URL]... [--waiting "NAME..."]' >&2
+  echo 'usage: set-status.sh <run-directory> [<status>] [--progress TEXT] [--tasks M/N] [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]' >&2
   exit 2
 }
 [ $# -ge 1 ] || usage
@@ -45,7 +47,7 @@ if [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then
   status=$1
   shift
 fi
-progress= progress_set= tasks= waiting= waiting_set= issues=() prs=()
+progress= progress_set= tasks= waiting= waiting_set= issues=() prs=() related=()
 while [ $# -gt 0 ]; do
   case $1 in
     --progress) [ $# -ge 2 ] || usage; progress=$2 progress_set=1; shift 2 ;;
@@ -54,6 +56,7 @@ while [ $# -gt 0 ]; do
       tasks=$2; shift 2 ;;
     --issue) [ $# -ge 2 ] || usage; issues+=("$2"); shift 2 ;;
     --pr) [ $# -ge 3 ] || usage; prs+=("$2" "$3"); shift 3 ;;
+    --related) [ $# -ge 3 ] || usage; related+=("$2" "$3"); shift 3 ;;
     --waiting) [ $# -ge 2 ] || usage; waiting=$2 waiting_set=1; shift 2 ;;
     *) usage ;;
   esac
@@ -90,22 +93,24 @@ if [ -e "$dir/status.json" ]; then
     { echo "$dir/status.json is not a JSON object; fix or remove it" >&2; exit 1; }
 fi
 issues_json=$(jq -cn '$ARGS.positional' --args ${issues[@]+"${issues[@]}"})
-prs_json=$(jq -cn '$ARGS.positional as $a | [range(0; $a | length; 2) as $i | {repo: $a[$i], url: $a[$i + 1]}]' \
-  --args ${prs[@]+"${prs[@]}"})
+pairs='$ARGS.positional as $a | [range(0; $a | length; 2) as $i | {repo: $a[$i], url: $a[$i + 1]}]'
+prs_json=$(jq -cn "$pairs" --args ${prs[@]+"${prs[@]}"})
+related_json=$(jq -cn "$pairs" --args ${related[@]+"${related[@]}"})
 tmp=$dir/.status.tmp
-jq -n --argjson old "$old" --argjson issues "$issues_json" --argjson prs "$prs_json" \
+jq -n --argjson old "$old" --argjson issues "$issues_json" --argjson prs "$prs_json" --argjson related "$related_json" \
   --arg branch "$branch" --arg folder "$folder" --arg status "$status" --arg state "$state" \
   --arg progress "$progress" --arg progress_set "$progress_set" --arg tasks "$tasks" \
   --arg waiting "$waiting" --arg waiting_set "$waiting_set" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
-  {progress: null, tasks: null, issues: [], prs: [], waiting: []} + $old
+  {progress: null, tasks: null, issues: [], prs: [], related: [], waiting: []} + $old
   | .branch = $branch | .folder = $folder | .status = $status | .state = $state | .updated = $updated
   | if $progress_set != "" then .progress = (if $progress == "" then null else $progress end) else . end
   | if $tasks != "" then .tasks = ($tasks | split("/") | {merged: (.[0] | tonumber), planned: (.[1] | tonumber)}) else . end
   | .issues = reduce $issues[] as $u (.issues; if index([$u]) then . else . + [$u] end)
   | .prs = reduce $prs[] as $p (.prs;
       if any(.[]; .repo == $p.repo) then map(if .repo == $p.repo then $p else . end) else . + [$p] end)
+  | .related = reduce $related[] as $p (.related; if any(.[]; .url == $p.url) then . else . + [$p] end)
   | if $waiting_set != "" then .waiting = [$waiting | splits("\\s+") | select(. != "")] else . end
-  | {branch, folder, status, state, progress, tasks, issues, prs, waiting, updated}
+  | {branch, folder, status, state, progress, tasks, issues, prs, related, waiting, updated}
   ' >"$tmp" || exit 1
 # plan.md first: it is what counts, and status.json is only written once it changed.
 if [ -n "$new_status" ]; then

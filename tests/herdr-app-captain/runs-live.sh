@@ -142,6 +142,10 @@ check "fact labels" "$(labels)" '["task 2/2 in review","https://example.com/pr/1
 "$orch/set-status.sh" "$dir" --pr acme/api https://example.com/pr/3 --issue https://example.com/i/1 --waiting ""
 check "facts kept, PR replaced" "$(jq -c '[.progress, .issues, .prs, .waiting]' "$dir/status.json")" \
   '["task 2/2 in review",["https://example.com/i/1"],[{"repo":"acme/api","url":"https://example.com/pr/3"},{"repo":"acme/web","url":"https://example.com/pr/2"}],[]]'
+"$orch/set-status.sh" "$dir" --related acme/api https://example.com/pr/7 --related acme/api https://example.com/pr/8 \
+  --related acme/api https://example.com/pr/7
+check "related PRs added once, own PRs untouched" "$(jq -c '[[.related[].url], [.prs[].url]]' "$dir/status.json")" \
+  '[["https://example.com/pr/7","https://example.com/pr/8"],["https://example.com/pr/3","https://example.com/pr/2"]]'
 hc label "$fake" progress= run.prs= >/dev/null
 "$orch/set-status.sh" "$dir"
 check "labels published again" "$(labels)" '["task 2/2 in review","https://example.com/pr/3 https://example.com/pr/2"]'
