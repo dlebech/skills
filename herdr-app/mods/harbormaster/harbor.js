@@ -5,8 +5,8 @@
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, panes, run, setAgentOrder } from "herdr";
-import { stats, taskTone, taskCounts, prsOf, PR_TONE, resumeRun } from "./data.js";
-import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, needReason, adrift, agentName, focusAgent, openUrl } from "./live.js";
+import { stats, taskTone, taskCounts, prsOf, PR_TONE, isParked, resumeRun } from "./data.js";
+import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, needReason, adrift, agentNames, focusAgent, openUrl } from "./live.js";
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural } from "./ui.js";
 
 const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
@@ -64,7 +64,7 @@ function reef(view, r, ctx, x, y, w, h, n) {
   // work is done and its PR is up, so the reef goes quiet. A parked one is set aside
   // for later: dimmed, with no octopus, and a click offers to resume it, as for a run
   // whose orchestrator is gone.
-  const parked = r.away?.how === "parked";
+  const parked = isParked(r);
   const docked = r.phase === "finished" && !parked;
   const resumable = parked || (orch === "gone" && r.phase !== "finished");
   const asking = view.confirm?.key === r.key && view.confirm.action === "resume";
@@ -145,6 +145,7 @@ export function harbor(view) {
   const cap = captainOf(ctx);
   const inRuns = new Set(runs.flatMap((r) => (r.terminal ? [r.terminal, ...workersOf(r.terminal, ctx).map((term) => term.address)] : [])));
   const drifters = adrift([cap.terminal?.address, ...runs.map((r) => r.terminal)], ctx);
+  const crabNames = agentNames(drifters.slice(0, 6));
   const capStatus = cap.terminal && agentStatus(cap.terminal, ctx);
   // Herdr asks a mod that shows agents to pass on their order while it draws them, so that
   // alt-up / alt-down step through the harbor in the order it shows (in memory only).
@@ -193,7 +194,7 @@ export function harbor(view) {
       .child("Calm waters. Ask the captain to start a run and a reef shows up here.")))
     .children(runs.map((r, i) => reef(view, r, ctx, start + i * (rw + gap), top, rw, bottom - top, i)))
     .children(drifters.slice(0, 6).map((a, i) => critter(view, {
-      kind: "crab", id: a.address, i: 50 + i, status: a.status, w: 54, label: agentName(a), program: a.program,
+      kind: "crab", id: a.address, i: 50 + i, status: a.status, w: 54, label: crabNames[i], program: a.program,
       x: W - 150 + (i % 2) * 70, y: top + 10 + Math.floor(i / 2) * 82, onClick: () => focusAgent(a.address),
     })))
     .when(drifters.length > 0, (el) => el.child(div().absolute().right(24).top(top - 20).text_size(10.5).font_weight(700).text_color(sail).child("ADRIFT")));

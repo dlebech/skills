@@ -56,7 +56,7 @@ plan's status, and then closes the orchestrator's tab.
   watcher raises nothing for it, and the captain's report gives it one line under
   "Parked".
 - In the sea view, it keeps its reef, dimmed, with a "parked" sign and no octopus
-  or crabs. Clicking the sign resumes it, after a confirm dialog.
+  or crabs. Clicking the reef resumes it, after a confirm on the reef.
 - Its agents end with the orchestrator. Worktrees, branches, spaces and PRs stay.
   On resume, unfinished tasks restart from their worktrees (orchestrator §7), so
   only uncommitted work in a running task is lost.
@@ -118,8 +118,10 @@ These go on Harbormaster's run cards in the overview pane next to the captain
 - **gone or parked run:** Resume and Close;
 - **closed run:** Resume.
 
-Close on an unfinished run, and Resume, first ask with the app's confirm dialog,
-naming what is left. The mod writes markers with `exec` on the run's machine, as
+A finished run whose orchestrator is still there gets Close only: there is nothing
+left to park. Park, Close on an unfinished run, and Resume first ask on the card
+itself, naming what is left. (The app's `confirm` dialog can only run a Herdr
+command, not the mod's marker write, so the card asks inline.) The mod writes markers with `exec` on the run's machine, as
 `data.js` already reads run directories. It closes the tab with
 `run("tab.close", { id, confirmed: true })`, using the `tab_id` from
 `orchestrator.json`, or otherwise the tab of the orchestrator's pane in `panes()`.
@@ -291,8 +293,10 @@ label-made "my-app" space by hand.
   a worktree space.
 
 **`skills/herdr-app-captain/scripts/lib.sh`**: document both markers. Add
-`run_put_away <run-dir> <terminal-state>`, which prints `parked`, `closed`, or
-nothing.
+`run_marker <run-dir>` (`parked`, `closed`, or nothing), `away_state <run-dir>
+<plan-status> <terminal-state>`, which also counts a finished run with its terminal
+gone as `closed`, and `mark_run <run-dir> parked|closed`, the marker writer the
+captain and the live test use.
 
 **`skills/herdr-app-captain/scripts/runs.sh`**: closed runs are hidden unless
 `--all` is given, and parked runs are shown as parked.
@@ -323,18 +327,21 @@ sits in a linked worktree.
 
 **`herdr-app/mods/harbormaster/data.js`**:
 - read the markers;
-- add `putAway`, and make `isClosed()` use it;
+- make `isClosed()` read the markers;
 - add `parked` to `stats()`;
-- add `parkRun`, `closeRun`, and `resumeRun` (`tab.new` in the repository's space,
+- add `putAway(run, how, orch)`, which refuses when the orchestrator is there but
+  its tab cannot be found, and `resumeRun` (`tab.new` in the repository's space,
   or `space.new` when it is not open).
 
 **`herdr-app/mods/harbormaster/overview.js`**: the buttons and a "Parked" group.
-The gone message becomes "resume, park, or close". Adrift rows use `agentName()`.
+The gone message becomes "resume or close", the gone card's buttons. Adrift rows
+use `agentNames()`, which adds the tab's name where two rows read the same.
 
 **`herdr-app/mods/harbormaster/harbor.js`**: parked runs as dimmed reefs, with a
-sign that resumes them. Crab labels use `agentName()`.
+reef that resumes them. Crab labels use `agentNames()`.
 
-**`herdr-app/mods/harbormaster/live.js`**: `agentName(a)`.
+**`herdr-app/mods/harbormaster/live.js`**: `agentName(a)` and `agentNames(list)`;
+`tabOf` and `homeSpace`, which read the live layout.
 
 **`docs/herdr-app-harbormaster.md`**: the buttons, parked reefs, and adrift names.
 

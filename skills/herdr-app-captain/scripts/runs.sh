@@ -41,7 +41,7 @@ while IFS= read -r run_info <&3; do
   # Without hc, a terminal's state is unknown, so only a closed marker closes a run.
   known=$state
   [ -n "$terminals" ] || known=unknown
-  away=$(put_away "$dir" "$status" "$known")
+  away=$(away_state "$dir" "$status" "$known")
   [ "$away" != closed ] || [ -n "$all" ] || continue
   found=1
   dialog=
@@ -62,8 +62,8 @@ while IFS= read -r run_info <&3; do
   echo "run: $dir"
   echo "  branch: $branch  folder: $folder"
   plan=${status:-no Status line}
-  if [ -e "$dir/closed" ]; then plan="closed $(marker_text "$dir/closed")"
-  elif [ -e "$dir/parked" ]; then plan="parked $(marker_text "$dir/parked")"
+  marker=$(run_marker "$dir")
+  if [ -n "$marker" ]; then plan="$marker $(marker_text "$dir/$marker")"
   elif [ "$status" = finished ]; then
     if [ -n "$state" ]; then plan="finished, PR open until its tab is closed"
     elif [ -n "$terminals" ]; then plan="finished, closed"; fi

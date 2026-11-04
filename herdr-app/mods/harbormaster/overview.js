@@ -2,8 +2,8 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { stats, runPhase, taskTone, taskCounts, prsOf, unknownPr, PR_TONE, isClosed, putAway, resumeRun } from "./data.js";
-import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentName, focusAgent, openUrl } from "./live.js";
+import { stats, runPhase, taskTone, taskCounts, prsOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun } from "./data.js";
+import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, openUrl } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef } from "./ui.js";
 
 // How each runPhase() reads on a card.
@@ -67,7 +67,7 @@ function taskStrip(t, r, counts) {
 // finished), Resume and Close once it is gone or parked, Resume once closed.
 function actionsOf(r, orch, closed) {
   if (closed) return ["resume"];
-  if (r.away?.how === "parked" || orch === "gone") return ["resume", "close"];
+  if (isParked(r) || orch === "gone") return ["resume", "close"];
   return r.phase === "finished" ? ["close"] : ["park", "close"];
 }
 
@@ -103,7 +103,7 @@ function actionRow(view, t, r, orch, closed, counts) {
     const yes = (cx) => {
       set(cx, null);
       if (asking === "resume") resumeRun(r);
-      else putAway(r, asking === "park" ? "parked" : "closed").catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
+      else putAway(r, asking === "park" ? "parked" : "closed", orch).catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
     };
     return v_flex().gap(6).p(8).rounded(7).bg(t.raised)
       .child(div().text_size(12).text_color(t.foreground).child(confirmText(r, asking, counts)))
@@ -119,7 +119,7 @@ function actionRow(view, t, r, orch, closed, counts) {
 function card(view, t, r, ctx, compact = false) {
   const orch = orchestratorState(r, ctx);
   const closed = isClosed(r, ctx);
-  const parked = r.away?.how === "parked";
+  const parked = isParked(r);
   const need = needsYou(r, orch);
   const reason = needReason(r, orch);
   const badge = (parked ? PHASE.parked : r.away?.how === "closed" ? PHASE.closed : PHASE[r.phase]) ?? PHASE.unknown;
@@ -151,7 +151,7 @@ function card(view, t, r, ctx, compact = false) {
     .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts)))
     .when(Boolean(r.away), (el) => el.child(div().text_size(11.5).text_color(t.muted)
       .child(`${parked ? "Parked" : "Closed"} ${ago(r.away.at)}${r.away.was ? ` · was: ${r.away.was}` : ""}`)))
-    .when(!r.away && orch === "gone" && r.phase !== "finished", (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Orchestrator is gone: resume, park, or close this run.")))
+    .when(!r.away && orch === "gone" && r.phase !== "finished", (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Orchestrator is gone: resume or close this run.")))
     .when(r.waiting.length > 0, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(`Waiting on an answer: ${r.waiting.join(", ")}`)))
     .when(r.unhandled > 0, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(`${plural(r.unhandled, "relayed message")} not read yet`)))
     .when(prs.length > 0 || r.issues.length > 0, (el) => el.child(v_flex().gap(1).text_size(12)
@@ -305,11 +305,12 @@ export function crew(view, t) {
   }
   // Adrift: agents outside the crew, on any machine.
   const drifters = adrift([cap.terminal?.address, ...orchestrators.map((o) => o.term.address)], ctx);
-  const stray = (a) => h_flex().id(`adrift-${a.address}`).flex_none().gap(8).h(24).px(8).items_center().rounded(6).cursor_pointer()
-    .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(t.hover)).tooltip([agentName(a), a.title, `${a.space_name} · ${a.tab_name}`].filter((x, i, all) => x && all.indexOf(x) === i).join("\n"))
+  const names = agentNames(drifters, (a) => a.space_name);
+  const stray = (a, i) => h_flex().id(`adrift-${a.address}`).flex_none().gap(8).h(24).px(8).items_center().rounded(6).cursor_pointer()
+    .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(t.hover)).tooltip([names[i], a.title, `${a.space_name} · ${a.tab_name}`].filter((x, i, all) => x && all.indexOf(x) === i).join("\n"))
     .on_click(() => focusAgent(a.address))
     .child(programIcon(a.program, 13, t.muted))
-    .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(`${a.space_name} · ${agentName(a)}`))
+    .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(`${a.space_name} · ${names[i]}`))
     .child(statusDot(t, a.status));
   return v_flex().id("crew").size_full().min_h(0).bg(t.chrome).text_size(12.5)
     .child(div().flex_none().px(12).pt(8).pb(4).text_size(11.5).font_semibold().text_color(t.foreground).child("Crew"))

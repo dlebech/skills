@@ -60,9 +60,7 @@ Do each only when the user asks for it, for the run they mean. Its run directory
 - **Park** sets an unfinished run aside for later: it stays listed, quietly. **Close** ends a run for good. For an unfinished run, say what is left (tasks, PRs, open question) and close it only if they confirm. Both write a marker, then close the orchestrator's tab if it is open, which ends the orchestrator and its agents:
 
   ```bash
-  dir=<run-directory> marker=parked    # or closed
-  { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d '\n'; printf '\t'; sed -n '1s/^Status: *//p' "$dir/plan.md"; } >"$dir/.$marker.tmp" &&
-    mv "$dir/.$marker.tmp" "$dir/$marker"
+  (. <skill-dir>/scripts/lib.sh && mark_run <run-directory> parked)    # or closed
   ```
 
   The tab is `tab_id` in its `orchestrator.json`, or when that is empty, the tab holding its terminal in `herdr-app ls`: `herdr-app do tab.close '{"id":"<tab-id>","confirmed":true}'`. A finished run needs no marker: closing its tab closes it.

@@ -80,7 +80,7 @@ while :; do
     dir=$(dirname "$run_info")
     IFS=$'\x1f' read -r branch _ terminal _ < <(run_facts "$run_info")
     # The user put it away; resuming deletes the marker and brings it back.
-    [ -e "$dir/parked" ] || [ -e "$dir/closed" ] && continue
+    [ -z "$(run_marker "$dir")" ] || continue
     status=$(plan_status "$dir")
     reasons=()
 

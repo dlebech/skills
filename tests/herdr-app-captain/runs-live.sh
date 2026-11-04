@@ -222,14 +222,9 @@ check "closed run left out" "$("$capt/runs.sh" | grep -c "run: $dir")" 0
 contains "closed run with --all" "$("$capt/runs.sh" --all)" "plan: finished, closed"
 
 echo "== parked and closed"
-# As herdr-app-captain's SKILL.md writes them.
-mark() { # mark <run-directory> parked|closed
-  local dir=$1 marker=$2
-  { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d '\n'; printf '\t'; sed -n '1s/^Status: *//p' "$dir/plan.md"; } >"$dir/.$marker.tmp" &&
-    mv "$dir/.$marker.tmp" "$dir/$marker"
-}
+# With lib.sh's mark_run, as herdr-app-captain writes them.
 "$orch/set-status.sh" "$dir" running
-mark "$dir" parked
+(. "$capt/lib.sh" && mark_run "$dir" parked)
 out=$("$capt/runs.sh")
 contains "parked run listed" "$out" "plan: parked 20"
 contains "parked from its status" "$out" "(was: running)"
@@ -238,7 +233,7 @@ hc wait "$watch" --output nothing --timeout 4 >/dev/null 2>&1
 check "watcher quiet about a parked run" "$(hc get "$watch" --json | jq -r .state)" live
 hc kill "$watch" >/dev/null; hc rm "$watch" >/dev/null 2>&1
 rm "$dir/parked"
-mark "$dir" closed
+(. "$capt/lib.sh" && mark_run "$dir" closed)
 check "closed unfinished run left out" "$("$capt/runs.sh" | grep -c "run: $dir")" 0
 contains "closed run with --all, marked" "$("$capt/runs.sh" --all)" "plan: closed 20"
 
@@ -263,7 +258,7 @@ check "named after the folder" "$mdir" "$HERDR_ORCHESTRATION_ROOT/hcmulti-$suffi
 check "records the folder" "$(jq -r .folder "$mdir/orchestrator.json")" "$multi"
 contains "runs.sh shows the folder" "$("$capt/runs.sh")" "folder: $multi"
 contains "repo-spaces lists the folder" "$("$capt/repo-spaces.sh" "$multi")" "$multi_space	folder	$multi"
-mark "$mdir" parked
+(. "$capt/lib.sh" && mark_run "$mdir" parked)
 maddr=$(hc get "$fake-multi" --json | jq -r .address)
 err=$(cd "$multi" && HC_TERMINAL_ID=$maddr "$orch/init-run.sh" feature/y 2>&1 >/dev/null)
 check "resume deletes the marker" "$([ -e "$mdir/parked" ] && echo kept || echo deleted)" deleted

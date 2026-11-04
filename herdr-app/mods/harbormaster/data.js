@@ -11,8 +11,8 @@
 //   <root>/<folder>/<branch>/inbox/*.message    relayed messages not yet handled
 //   <root>/<folder>/<branch>/parked, closed     the person put the run away: "<time>\t<status then>"
 
-import { exec, machines, shared, setShared, spaces, panes, run as command } from "herdr";
-import { orchestratorState, workersOf, needsYou } from "./live.js";
+import { exec, machines, shared, setShared, run as command } from "herdr";
+import { orchestratorState, workersOf, needsYou, tabOf, homeSpace } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
 
@@ -262,37 +262,25 @@ export function stats(runs, ctx) {
 }
 
 // ---- putting runs away and bringing them back ----
-// The same markers the captain writes (its lib.sh), on the run's machine.
+// The marker line herdr-app-captain's lib.sh writes with mark_run, written here on the
+// run's machine: the mod is installed on its own, without the captain's scripts.
 
 const MARK = 'd=$1 m=$2; { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d "\\n"; printf "\\t"; sed -n "1s/^Status: *//p" "$d/plan.md"; } >"$d/.$m.tmp" && mv "$d/.$m.tmp" "$d/$m"';
 
-// The orchestrator's tab: from orchestrator.json, else the tab holding its terminal.
-function tabOf(run) {
-  return run.tab || (run.terminal && panes().find((p) => p.terminal === run.terminal)?.tab) || null;
-}
-
 // Parks the run (for later) or closes it for good: writes the marker, then closes the
 // orchestrator's tab, which ends it and its agents. The run directory, worktrees,
-// branches, spaces and PRs stay. how: "parked" | "closed". A finished run needs no
-// marker to close: closing its tab does.
-export async function putAway(run, how) {
+// branches, spaces and PRs stay. how: "parked" | "closed"; orch: orchestratorState().
+// A finished run needs no marker to close: closing its tab does. With the orchestrator
+// still there but no tab to close, it refuses, so a marker never hides a live run.
+export async function putAway(run, how, orch) {
+  const tab = tabOf(run);
+  if (!tab && orch !== "gone") throw new Error("cannot find the orchestrator's tab; close it by hand");
   if (how === "parked" || run.phase !== "finished") {
     const out = await exec("sh", ["-c", MARK, "sh", run.dir, how], { on: run.machine });
     if (out.code !== 0) throw new Error(out.stderr || `could not write ${how}`);
   }
-  const tab = tabOf(run);
   if (tab) command("tab.close", { id: tab, confirmed: true });
   cache.at = 0;
-}
-
-// Where the run's repository is open: the space whose first terminal is in its folder,
-// the repository's own checkout (never the integration worktree's space).
-function homeSpace(run) {
-  const ps = panes();
-  return spaces().find((s) => (s.machine ?? null) === (run.machine ?? null) && (() => {
-    const tabs = new Set((s.tabs ?? []).map((t) => t.id));
-    return (ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder) === run.folder;
-  })()) ?? null;
 }
 
 // Resumes the run with a new orchestrator of its kind, in the repository's space, or in a
