@@ -4,9 +4,11 @@
 # Usage: runs.sh [--all]
 #
 # Reads every run directory under ~/.herdr/hc-orchestration that has an
-# orchestrator.json, skipping closed runs (finished, and the orchestrator terminal
-# gone) unless --all is given. A finished run whose orchestrator is still there is
-# open: its plan line says "finished, PR open until its tab is closed". For each prints
+# orchestrator.json, skipping closed runs (a closed marker, or finished with the
+# orchestrator terminal gone) unless --all is given. A finished run whose
+# orchestrator is still there is open: its plan line says "finished, PR open until
+# its tab is closed". A parked run is listed, its plan line saying "parked <time>
+# (was: <status>)". For each prints
 # its directory, branch, start folder (its repository, or the folder holding
 # several), the Status line of its plan.md, its orchestrator terminal's state, the
 # dialog it is blocked on, its status.json's progress, tasks, waiting agents, issues,
@@ -36,8 +38,11 @@ while IFS= read -r run_info <&3; do
   status=$(plan_status "$dir")
   state=
   [ -z "$terminals" ] || state=$(terminal_state "$terminals" "$terminal")
-  # Closed: finished and its terminal gone. Without hc, every finished run is listed.
-  [ -n "$all" ] || [ "$status" != finished ] || [ -z "$terminals" ] || [ -n "$state" ] || continue
+  # Without hc, a terminal's state is unknown, so only a closed marker closes a run.
+  known=$state
+  [ -n "$terminals" ] || known=unknown
+  away=$(away_state "$dir" "$status" "$known")
+  [ "$away" != closed ] || [ -n "$all" ] || continue
   found=1
   dialog=
 
@@ -57,7 +62,9 @@ while IFS= read -r run_info <&3; do
   echo "run: $dir"
   echo "  branch: $branch  folder: $folder"
   plan=${status:-no Status line}
-  if [ "$status" = finished ]; then
+  marker=$(run_marker "$dir")
+  if [ -n "$marker" ]; then plan="$marker $(marker_text "$dir/$marker")"
+  elif [ "$status" = finished ]; then
     if [ -n "$state" ]; then plan="finished, PR open until its tab is closed"
     elif [ -n "$terminals" ]; then plan="finished, closed"; fi
   fi

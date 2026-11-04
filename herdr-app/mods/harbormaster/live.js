@@ -1,6 +1,6 @@
 // Live facts from herdr-core (terminals, agents, panes) and the few actions the views take.
 
-import { exec, terminals, agents, panes, run, window } from "herdr";
+import { exec, terminals, agents, panes, spaces, run, window } from "herdr";
 
 // The terminal and agent lists every helper below reads, taken once per render.
 export const facts = () => ({ terminals: terminals(), agents: agents() });
@@ -32,6 +32,32 @@ export function adrift(roots, ctx) {
   return ctx.agents.filter((a) => !crew.has(a.address));
 }
 
+// An agent's name as Herdr's own Agents list gives it: the tab's name when someone
+// named it (other than after the program), else the agent's own title (Claude Code
+// sets one from its session) with leading symbols stripped, unless that title is just
+// the program, a path, or user@host. Never a bare tab number when anything else will do.
+const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
+export function agentName(a) {
+  const tab = spaces().flatMap((s) => s.tabs ?? []).find((t) => t.id === a.tab);
+  const prog = a.program?.name;
+  const live = clean(a.title);
+  const telling = live && live !== prog && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== a.program?.key;
+  const tabName = tab?.name ?? a.tab_name ?? "";
+  if (tab?.named && tabName !== prog) return tabName;
+  if (telling) return live;
+  return /^\d+$/.test(tabName) ? prog || tabName : tabName || prog || a.address;
+}
+
+// agentName() for each of a list, with the tab's own name (its number when unnamed)
+// added where two rows in the same `scope` would otherwise read the same.
+export function agentNames(list, scope = () => "") {
+  const names = list.map(agentName);
+  const key = (a, i) => `${scope(a)}\u001f${names[i]}`;
+  const count = new Map();
+  list.forEach((a, i) => count.set(key(a, i), (count.get(key(a, i)) ?? 0) + 1));
+  return list.map((a, i) => (count.get(key(a, i)) > 1 && a.tab_name && a.tab_name !== names[i] ? `${names[i]} · ${a.tab_name}` : names[i]));
+}
+
 export function captainOf(ctx) {
   const live = ctx.terminals.filter((t) => t.state === "live");
   const terminal = live.find((t) => t.labels?.role === "captain") ?? null;
@@ -40,9 +66,9 @@ export function captainOf(ctx) {
 }
 
 // Does this run need the person? An open question, a waiting or blocked plan, or an
-// orchestrator blocked on a dialog. A finished run never does.
+// orchestrator blocked on a dialog. A finished, parked or closed run never does.
 export function needsYou(run, orchState) {
-  if (run.phase === "finished") return false;
+  if (run.phase === "finished" || run.away) return false;
   return Boolean(run.question) || run.phase === "waiting" || run.phase === "blocked" || orchState === "blocked";
 }
 
@@ -74,6 +100,24 @@ export function captainPane(ctx) {
 export function togglePin(captain) {
   if (captain.pinned) run("pane.close", { pane: captain.pinned });
   else if (captain.pane) run("pane.split", { pane: captain.pane, direction: "right", mod: "harbormaster" });
+}
+
+// The orchestrator's tab: the tab holding its terminal now, else orchestrator.json's.
+export function tabOf(run) {
+  return (run.terminal && panes().find((p) => p.terminal === run.terminal)?.tab) || run.tab || null;
+}
+
+// Where the run's repository is open: the space on the run's machine whose first tab's
+// first pane is in its folder, the repository's own checkout (never the integration
+// worktree's space). The space's creation folder counts only when no pane reports one.
+export function homeSpace(run) {
+  const ps = panes();
+  return spaces().find((s) => {
+    if ((s.machine ?? null) !== (run.machine ?? null)) return false;
+    const first = s.tabs?.[0]?.id;
+    const cwd = first ? ps.find((p) => p.tab === first)?.cwd : null;
+    return (cwd || s.folder) === run.folder;
+  }) ?? null;
 }
 
 export function focusAgent(address) {

@@ -8,14 +8,28 @@
 # ~/.herdr/worktrees/<repo>/<branch as branch_slug in lib.sh writes it>. An existing
 # branch is checked out there; a new one starts from <base>, such as origin/main.
 # A branch checked out in the repository's main checkout, the user's, is not
-# taken over: that exits 3. The app then nests the space under its repository's space
-# and shows its branch, ahead/behind, and changes. The space comes from a plain
-# shell started with hc and labelled with a space id of our own, which, unlike
-# herdr-app's space.new, leaves the user's view where it is. The shell outlives
-# the orchestrator, so the space stays until the user removes it. A space already
-# open on the worktree is left alone, so this also reopens one after a resume.
-# A window that cannot be reached only prints a warning: the run needs the
-# worktree, not the space. Prints the worktree path.
+# taken over: that exits 3.
+#
+# The space is made the way the worktree mod's "Open worktree" makes it: space.new
+# on the worktree's folder, unnamed, so the sidebar names it after the folder (the
+# branch), nests it under the repository's own space, and shows its branch,
+# ahead/behind, and changes. space.new always shows the new space, so this switches
+# back to the space that was showing, a brief flicker. Only the integration worktree
+# gets a space; task worktrees stay hidden.
+# (This replaced a space made by starting a plain shell with only a herdr.space
+# label. A resumed orchestrator once started inside that shell and moved its folder
+# to the main checkout, so the sidebar showed the space as a second, unnested
+# checkout, Open worktree made a duplicate, and without herdr.tab the run's
+# orchestrator.json got an empty tab_id.)
+#
+# A space counts as open on the worktree when its first terminal is in it now: the
+# rule the worktree mod and the sidebar use, which follow a terminal's live folder.
+# Such a space is left alone, so this also reopens a space after a resume. A space
+# that was made on the worktree but whose terminal has moved elsewhere no longer
+# shows it; that gets a warning, a new space is opened, and the old one is left for
+# the user. Never start an orchestrator in this space: it starts in the
+# repository's own checkout. A window that cannot be reached only prints a warning:
+# the run needs the worktree, not the space. Prints the worktree path.
 set -u
 . "$(dirname "$0")/lib.sh"
 
@@ -42,11 +56,36 @@ if ! git -C "$path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fi
 fi
 
+# live_folder <terminal>: where it is now, its foreground program's folder first.
+live_folder() {
+  hc get "$1" --json 2>/dev/null | jq -r '.foreground.cwd // .cwd // empty'
+}
+
 if ! spaces=$(herdr-app ls 2>/dev/null); then
   echo "warning: could not reach the Herdr window; the worktree has no space" >&2
-elif ! jq -e --arg p "$path" 'any(.spaces[]; .folder == $p)' <<<"$spaces" >/dev/null; then
-  space=sp-$(printf '%s' "wt-${repo##*/}-$slug" | sed -E 's/[^A-Za-z0-9-]+/-/g')
-  hc run --bg --no-parent --no-notify --cwd "$path" --label "herdr.space=$space" >/dev/null 2>&1 ||
-    echo "warning: could not open a space for $path" >&2
+else
+  shown= drifted=
+  while IFS=$'\t' read -r id made first; do
+    # As the sidebar does: a space without a terminal folder is where it was made.
+    at=
+    [ -z "$first" ] || at=$(live_folder "$first")
+    at=${at:-$made}
+    case $at in
+      "$path" | "$path"/*) shown=$id; break ;;
+    esac
+    [ "$made" != "$path" ] || drifted+="$id (now in $at) "
+  done < <(jq -r '.spaces[] | select(.machine == null)
+    | [.id, .folder // "", ([.tabs[].terminals[].terminal | select(.)] | first // "")] | @tsv' <<<"$spaces")
+  if [ -z "$shown" ]; then
+    [ -z "$drifted" ] ||
+      echo "warning: spaces made on $path no longer show it, since their terminal moved: $drifted; opening a new one" >&2
+    before=$(herdr-app status 2>/dev/null | jq -r '.space // empty')
+    if herdr-app do space.new --folder "$path" >/dev/null 2>&1; then
+      [ -z "$before" ] || herdr-app do space.select --id "$before" >/dev/null 2>&1 ||
+        echo "warning: could not switch back to space $before" >&2
+    else
+      echo "warning: could not open a space for $path" >&2
+    fi
+  fi
 fi
 echo "$path"

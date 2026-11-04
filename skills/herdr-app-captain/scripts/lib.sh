@@ -1,4 +1,4 @@
-# Shared by runs.sh and watch-runs.sh; source it, do not run it.
+# Shared by runs.sh, watch-runs.sh and the captain (mark_run); source it, do not run it.
 #
 # The run-directory protocol, as written by herdr-app-orchestrator's init-run.sh
 # and set-status.sh. <folder> is the last part of the repository's path, or of the
@@ -16,6 +16,14 @@
 #   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
 #   <root>/<folder>/<branch>/inbox/             <name>.message, from the captain
 #   <root>/<folder>/<branch>/shared/            the run's agents' files; not the captain's
+#   <root>/<folder>/<branch>/parked             the user set the run aside for now: its
+#       orchestrator's tab was closed on purpose, to resume later
+#   <root>/<folder>/<branch>/closed             the user closed the run for good, finished
+#       or not
+#       Both hold one line, "<time>\t<plan status then>", and are written by the
+#       captain (mark_run) or Harbormaster on the user's word; init-run.sh deletes both when an
+#       orchestrator resumes the run. A finished run whose orchestrator's terminal
+#       is gone is closed without a marker.
 
 # The same default as herdr-app-orchestrator's scripts/init-run.sh.
 root=${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}
@@ -51,4 +59,36 @@ unhandled_messages() {
   for f in "$1"/inbox/*.message; do
     [ -e "$f" ] && echo "$f"
   done
+}
+
+# run_marker <run-dir>: "closed" or "parked" when the user put the run away (a
+# closed marker wins), else nothing.
+run_marker() {
+  if [ -e "$1/closed" ]; then echo closed
+  elif [ -e "$1/parked" ]; then echo parked
+  fi
+}
+
+# away_state <run-dir> <plan-status> <terminal-state>: "closed" for a closed run (a
+# closed marker, or finished with its terminal gone), "parked" for a parked one,
+# else nothing. Pass a nonempty <terminal-state> when hc could not answer, so an
+# unknown terminal never counts as gone.
+away_state() {
+  local marker
+  marker=$(run_marker "$1")
+  if [ -n "$marker" ]; then echo "$marker"
+  elif [ "$2" = finished ] && [ -z "$3" ]; then echo closed
+  fi
+}
+
+# mark_run <run-dir> parked|closed: writes the marker, "<time>\t<plan status>",
+# atomically. Harbormaster's data.js writes the same line on its own.
+mark_run() {
+  { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d '\n'; printf '\t'; plan_status "$1"; } >"$1/.$2.tmp" &&
+    mv "$1/.$2.tmp" "$1/$2"
+}
+
+# marker_text <file>: "<time> (was: <status>)" from a parked or closed marker.
+marker_text() {
+  awk -F '\t' 'NR == 1 { printf "%s (was: %s)", $1, ($2 == "" ? "?" : $2) }' "$1"
 }

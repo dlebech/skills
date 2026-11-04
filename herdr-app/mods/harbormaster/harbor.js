@@ -5,8 +5,8 @@
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, panes, run, setAgentOrder } from "herdr";
-import { stats, taskTone, taskCounts, prsOf, PR_TONE } from "./data.js";
-import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, needReason, adrift, focusAgent, openUrl } from "./live.js";
+import { stats, taskTone, taskCounts, prsOf, PR_TONE, isParked, resumeRun } from "./data.js";
+import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, needReason, adrift, agentNames, focusAgent, openUrl } from "./live.js";
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural } from "./ui.js";
 
 const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
@@ -44,20 +44,40 @@ function critter(view, { kind, id, status, label, program, x, y, w, onClick, say
     .child(div().max_w(w + 30).truncate().px(5).rounded(4).bg("#173450aa").text_size(11).font_weight(600).text_color(sail).child(label));
 }
 
+// Asks before resuming a parked or gone run from its reef: a new orchestrator starts.
+function resumeAsk(view, r) {
+  const button = (id, label, bg, fg, onClick) => div().id(id).px(10).h(22).flex().items_center().rounded(5).bg(bg).text_color(fg)
+    .text_size(11.5).font_weight(700).cursor_pointer().hover((s) => s.opacity(0.85))
+    .on_click((_e, cx) => { cx.stop_propagation(); onClick(); view.confirm = null; cx.notify(); }).child(label);
+  return v_flex().absolute().left(12).right(12).top(64).gap(6).p(8).rounded(8).bg(sail).border(2).border_color("#a07a3f")
+    .child(div().text_size(12).font_weight(600).text_color(ink).child(`Resume ${r.branch}? A new orchestrator picks it up in ${r.repo}.`))
+    .child(h_flex().gap(6)
+      .child(button(`resume-yes-${r.key}`, "Resume", navy, sail, () => resumeRun(r)))
+      .child(button(`resume-no-${r.key}`, "Cancel", "#e9e2d0", ink, () => {})));
+}
+
 function reef(view, r, ctx, x, y, w, h, n) {
   const orch = orchestratorState(r, ctx);
   const need = needsYou(r, orch);
   const reason = needReason(r, orch);
-  // Reefs are only drawn for open runs, so a finished one here is docked: its work is
-  // done and its PR is up, so the reef goes quiet.
-  const docked = r.phase === "finished";
+  // Reefs are drawn for open runs and parked ones. A finished one here is docked: its
+  // work is done and its PR is up, so the reef goes quiet. A parked one is set aside
+  // for later: dimmed, with no octopus, and a click offers to resume it, as for a run
+  // whose orchestrator is gone.
+  const parked = isParked(r);
+  const docked = r.phase === "finished" && !parked;
+  const resumable = parked || (orch === "gone" && r.phase !== "finished");
+  const asking = view.confirm?.key === r.key && view.confirm.action === "resume";
   const workers = workersOf(r.terminal, ctx);
   const prs = prsOf(r) ?? [];
   const { merged, planned } = taskCounts(r);
   const big = Math.min(104, Math.max(70, w * 0.26));
   const small = Math.min(74, Math.max(50, w * 0.17));
   const cols = Math.max(1, Math.floor((w - big - 40) / (small + 24)));
-  const focusOrch = () => orch !== "gone" && focusAgent(r.terminal);
+  const focusOrch = (_e, cx) => {
+    if (resumable) { view.confirm = { key: r.key, action: "resume" }; cx?.notify(); }
+    else if (orch !== "gone") focusAgent(r.terminal);
+  };
   const crabs = workers.map((term, i) => critter(view, {
     kind: "crab", id: term.address, i: i + n * 7, status: agentStatus(term, ctx), w: small,
     label: term.name || term.program?.name || term.address, program: term.program,
@@ -67,7 +87,7 @@ function reef(view, r, ctx, x, y, w, h, n) {
   const sign = v_flex().absolute().left(12).top(10).max_w(w - 24 - Math.min(prs.length, 4) * 46).px(10).py(4).rounded(5)
     .bg(need ? "#f6c28b" : rope).border(3).border_color(need ? "#c1562c" : "#a07a3f").text_color("#4a3418").opacity(docked ? 0.8 : 1)
     .child(div().truncate().text_size(13).font_weight(800).child(`${OCTOPUS} ${r.branch}`))
-    .child(div().truncate().text_size(10.5).font_weight(600).child(`${r.repo}${r.machine ? ` · ${r.machine}` : ""} · ${need ? "NEEDS YOU" : docked ? "FINISHED · PR UP" : r.phase.toUpperCase()}`));
+    .child(div().truncate().text_size(10.5).font_weight(600).child(`${r.repo}${r.machine ? ` · ${r.machine}` : ""} · ${parked ? "PARKED · CLICK TO RESUME" : need ? "NEEDS YOU" : docked ? "FINISHED · PR UP" : orch === "gone" ? "GONE · CLICK TO RESUME" : r.phase.toUpperCase()}`));
   // Buoys on a line along the bottom of the reef: one per task, lit as it merges.
   const buoys = h_flex().absolute().left(14).bottom(8).gap(8).items_end()
     .children(Array.from({ length: planned }, (_, i) => {
@@ -93,18 +113,19 @@ function reef(view, r, ctx, x, y, w, h, n) {
             .when(fail, (el) => el.border(2).border_color(brass))
             .child(p.number ? `#${p.number}${fail ? " ✗" : p.state === "MERGED" ? " ✓" : ""}` : "PR")));
     }));
-  return div().id(`reef-${r.key}`).absolute().left(x).top(y).w(w).h(h).rounded(14)
-    .bg(need ? "#f6c28b33" : docked ? "#ffffff0d" : "#ffffff1a").border(3).border_color(need ? "#f08a5d" : docked ? "#e6cf9880" : rope).cursor_pointer()
+  return div().id(`reef-${r.key}`).absolute().left(x).top(y).w(w).h(h).rounded(14).opacity(parked && !asking ? 0.55 : 1)
+    .bg(need ? "#f6c28b33" : docked || parked ? "#ffffff0d" : "#ffffff1a").border(3).border_color(need ? "#f08a5d" : docked || parked ? "#e6cf9880" : rope).cursor_pointer()
     .hover((s) => s.bg(need ? "#f6c28b55" : "#ffffff2e"))
     .on_click(focusOrch)
     .child(sign)
     .child(flags)
-    .when(Boolean(r.progress), (el) => el.child(div().absolute().left(16).right(16).top(64).truncate().text_size(11.5).italic().text_color(sail).child(`“${r.progress}”`)))
-    .child(critter(view, {
+    .when(Boolean(r.progress) && !asking, (el) => el.child(div().absolute().left(16).right(16).top(64).truncate().text_size(11.5).italic().text_color(sail).child(`“${r.progress}”`)))
+    .when(asking, (el) => el.child(resumeAsk(view, r)))
+    .when(!parked, (el) => el.child(critter(view, {
       kind: "octopus", id: r.terminal ?? r.key, i: n * 7, status: orch !== "gone" && need ? "blocked" : docked && orch !== "working" ? "done" : orch, w: big,
       label: orch === "gone" ? "orchestrator (gone)" : docked ? "orchestrator (finished)" : "orchestrator", x: 10, y: 114, onClick: focusOrch,
       say: need ? `${r.question ? "?" : "!"} ${reason}` : null,
-    }))
+    })))
     .children(crabs)
     .child(buoys);
 }
@@ -118,11 +139,13 @@ export function harbor(view) {
   const bw = Math.max(W, sea * (1600 / 420)), bh = bw * (420 / 1600);
   const ctx = facts();
   const s = stats(view.runs, ctx);
-  // Every open run: those still working, then finished ones until their tab is closed.
-  const runs = s.shown, need = s.need;
+  // Every open run: those still working, then finished ones until their tab is closed,
+  // then parked ones, set aside for later.
+  const runs = [...s.shown, ...s.parked], need = s.need;
   const cap = captainOf(ctx);
   const inRuns = new Set(runs.flatMap((r) => (r.terminal ? [r.terminal, ...workersOf(r.terminal, ctx).map((term) => term.address)] : [])));
   const drifters = adrift([cap.terminal?.address, ...runs.map((r) => r.terminal)], ctx);
+  const crabNames = agentNames(drifters.slice(0, 6));
   const capStatus = cap.terminal && agentStatus(cap.terminal, ctx);
   // Herdr asks a mod that shows agents to pass on their order while it draws them, so that
   // alt-up / alt-down step through the harbor in the order it shows (in memory only).
@@ -171,7 +194,7 @@ export function harbor(view) {
       .child("Calm waters. Ask the captain to start a run and a reef shows up here.")))
     .children(runs.map((r, i) => reef(view, r, ctx, start + i * (rw + gap), top, rw, bottom - top, i)))
     .children(drifters.slice(0, 6).map((a, i) => critter(view, {
-      kind: "crab", id: a.address, i: 50 + i, status: a.status, w: 54, label: a.tab_name || a.program?.name, program: a.program,
+      kind: "crab", id: a.address, i: 50 + i, status: a.status, w: 54, label: crabNames[i], program: a.program,
       x: W - 150 + (i % 2) * 70, y: top + 10 + Math.floor(i / 2) * 82, onClick: () => focusAgent(a.address),
     })))
     .when(drifters.length > 0, (el) => el.child(div().absolute().right(24).top(top - 20).text_size(10.5).font_weight(700).text_color(sail).child("ADRIFT")));

@@ -2,7 +2,7 @@
 name: herdr-captain
 description: "Oversee several herdr-orchestrator runs across Herdr: report how each is doing, watch them in the background and alert the user when one needs attention, relay the user's instructions and answers to the right orchestrator, including its open dialogs, and start new runs in any repository."
 disable-model-invocation: true
-argument-hint: "[question or instruction, e.g. \"how are we doing?\", \"tell issue-185 to use pnpm\", or \"start issue 185 in snevagten-api\"] [watch=yes|no]"
+argument-hint: "[question or instruction, e.g. \"how are we doing?\", \"tell issue-185 to use pnpm\", or \"start issue 185 in my-api\"] [watch=yes|no]"
 compatibility: Requires jq, Herdr, the herdr agent skill, and the herdr-orchestrator skill.
 metadata:
   required-skills: "herdr herdr-orchestrator"
