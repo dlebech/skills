@@ -18,11 +18,18 @@ set -u
 
 file=$root/.captain-decisions.json
 usage() { echo "usage: decisions.sh add <id> [--run <run-directory>] <question> | done <id>... | ls" >&2; exit 2; }
-current() { if [ -s "$file" ] && jq -e 'type == "array"' "$file" >/dev/null 2>&1; then cat "$file"; else echo '[]'; fi; }
+# A missing or empty file is no decisions; anything else that is not a list is
+# refused, so a write never replaces a file this script did not write.
+current() {
+  if [ ! -s "$file" ]; then echo '[]'
+  elif jq -e 'type == "array"' "$file" >/dev/null 2>&1; then cat "$file"
+  else echo "$file is not a JSON list; fix or remove it" >&2; return 1
+  fi
+}
 save() { # filter, then jq args: applied to the current list
   local tmp
   mkdir -p "$root" && tmp=$(mktemp "$root/.captain-decisions.XXXXXX") || exit 1
-  current | jq "$1" "${@:2}" >"$tmp" && mv "$tmp" "$file" || { rm -f "$tmp"; exit 1; }
+  { list=$(current) && jq "$1" "${@:2}" <<<"$list" >"$tmp" && mv "$tmp" "$file"; } || { rm -f "$tmp"; exit 1; }
 }
 
 [ $# -ge 1 ] || usage
@@ -34,7 +41,7 @@ case $cmd in
     run=
     if [ "$1" = --run ]; then [ $# -ge 3 ] || usage; run=$2; shift 2; fi
     [ $# -eq 1 ] && [ -n "$1" ] || usage
-    case $id in *[!a-z0-9_-]* | "") echo "id: use a-z 0-9 - _ only" >&2; exit 2 ;; esac
+    case $id in -* | *[!a-z0-9_-]* | "") echo "id: use a-z 0-9 - _ only, not starting with -" >&2; exit 2 ;; esac
     now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     save '(if $run == "" then null else $run end) as $r
       | if any(.id == $id) then map(if .id == $id then .question = $q | .run = ($r // .run) else . end)
@@ -43,11 +50,12 @@ case $cmd in
     ;;
   done)
     [ $# -ge 1 ] || usage
-    save 'map(select(.id as $i | $ARGS.positional | index($i) | not))' --args "$@"
+    save 'map(select(.id as $i | $ARGS.positional | index($i) | not))' --args -- "$@"
     ;;
   ls)
     [ $# -eq 0 ] || usage
-    current | jq -r '.[] | [.id, .asked, (.run // "-"), (.question | gsub("[\t\n]"; " "))] | @tsv'
+    list=$(current) || exit 1
+    jq -r '.[] | [.id, .asked, (.run // "-"), (.question | gsub("[\t\n]"; " "))] | @tsv' <<<"$list"
     ;;
   *) usage ;;
 esac

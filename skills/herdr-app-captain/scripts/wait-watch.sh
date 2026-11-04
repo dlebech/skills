@@ -11,13 +11,14 @@
 #
 # hc wait checks in every --timeout seconds without the watcher ending; this waits
 # again until it has. Prints hc wait's last JSON ({"ended":true,"exit_code":...}).
-# Exits 0 once it has ended, or with hc's code when hc fails (the watcher is gone,
-# or hc stopped answering): either way, look at it with hc get or hc read.
+# Exits with the watcher's own code once it has ended, so a watcher that failed
+# (exit 1: hc stopped answering) makes this fail too, or with hc's code when hc
+# fails (3: no such watcher; others: hc stopped answering).
 set -u
 
 [ $# -le 1 ] || { echo "usage: wait-watch.sh [watcher-name]" >&2; exit 2; }
 name=${1:-captain-watch}
 while :; do
   r=$(hc wait "$name" --timeout 3600 --json) || { code=$?; printf '%s\n' "$r"; exit "$code"; }
-  [ "$(jq -r .ended <<<"$r")" = true ] && { printf '%s\n' "$r"; exit 0; }
+  [ "$(jq -r .ended <<<"$r")" = true ] && { printf '%s\n' "$r"; exit "$(jq -r '.exit_code // 0' <<<"$r")"; }
 done
