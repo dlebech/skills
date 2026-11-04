@@ -9,8 +9,10 @@
 # finished, the vocabulary herdr-app-captain's scripts/lib.sh documents. Without
 # it, the status stays what plan.md says, and the rest is published again, as after
 # a resume in a new terminal. "waiting for user" goes with a question.md in the run
-# directory; without one it is refused (exit 2) and nothing changes. finished means the work is done and its PRs are
-# up; the run stays open until the orchestrator's tab is closed.
+# directory; without one it is refused (exit 2) and nothing changes: a warning was
+# ignored once and left a run waiting with nothing to answer, while writing
+# question.md first is cheap. finished means the work is done and its PRs are up;
+# the run stays open until the orchestrator's tab is closed.
 # The other facts are kept until changed:
 #   --progress  one line on what is going on, e.g. "task 3/7 in review"; "" clears it
 #   --tasks     tasks merged out of planned, e.g. 3/7

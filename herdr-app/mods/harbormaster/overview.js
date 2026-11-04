@@ -96,6 +96,8 @@ function actionButton(t, id, label, tip, onClick, primary = false) {
 }
 
 // The card's buttons, or, after one is clicked, its question with a confirm and Cancel.
+// It asks on the card, not in the app's confirm dialog, which can only run a Herdr
+// command, not putAway's marker write.
 function actionRow(view, t, r, orch, closed, counts) {
   const asking = view.confirm?.key === r.key ? view.confirm.action : null;
   const set = (cx, value) => { view.confirm = value; view.actionError = null; cx.notify(); };

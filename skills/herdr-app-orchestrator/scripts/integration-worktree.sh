@@ -16,6 +16,11 @@
 # ahead/behind, and changes. space.new always shows the new space, so this switches
 # back to the space that was showing, a brief flicker. Only the integration worktree
 # gets a space; task worktrees stay hidden.
+# (This replaced a space made by starting a plain shell with only a herdr.space
+# label. A resumed orchestrator once started inside that shell and moved its folder
+# to the main checkout, so the sidebar showed the space as a second, unnested
+# checkout, Open worktree made a duplicate, and without herdr.tab the run's
+# orchestrator.json got an empty tab_id.)
 #
 # A space counts as open on the worktree when its first terminal is in it now: the
 # rule the worktree mod and the sidebar use, which follow a terminal's live folder.
