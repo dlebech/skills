@@ -1,9 +1,9 @@
 // The serious views: the runs overview (totals, what's waiting on you, captain, run cards) and the Crew block.
 
-import { div, svg } from "gpui-kit";
+import { div, svg, Input } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { stats, runPhase, taskTone, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun } from "./data.js";
-import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, openUrl } from "./live.js";
+import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, openUrl, replyToCaptain } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef } from "./ui.js";
 
 // How each runPhase() reads on a card.
@@ -217,10 +217,22 @@ function captainStrip(t, ctx, s) {
     .child(statusDot(t, agentStatus(cap.terminal, ctx)));
 }
 
+// Sends the inline reply to the captain as an answer to the decision being replied to.
+export function submitReply(view, cx) {
+  const text = view.reply.value().trim();
+  const d = view.decisions.find((x) => x.key === view.replying);
+  const cap = captainOf(facts()).terminal;
+  if (!text || !d || !cap) return;
+  replyToCaptain(cap.address, d, text);
+  view.reply.set_value("");
+  view.replying = null;
+  cx.notify();
+}
+
 // Everything waiting on the person, in one list at the top of the overview: the captain's
 // open decisions (decisions.sh), oldest first, then each run that needs them, with what
 // for. A decision clicks through to the captain, a run to its orchestrator.
-function waitingOnYou(t, s, decisions, runs, ctx) {
+function waitingOnYou(view, t, s, decisions, runs, ctx) {
   const cap = captainOf(ctx);
   const runName = (d) => {
     if (!d.run) return null;
@@ -229,9 +241,9 @@ function waitingOnYou(t, s, decisions, runs, ctx) {
   };
   const items = [
     ...decisions.map((d) => ({
-      id: `dec-${d.key}`, emoji: CAPTAIN, text: d.question, address: cap.terminal?.address,
+      id: `dec-${d.key}`, emoji: CAPTAIN, decision: d, text: d.question, address: cap.terminal?.address,
       meta: ["captain asks", runName(d), d.machine, d.asked ? ago(d.asked) : null],
-      tip: cap.terminal ? "Answer the captain: click to open it" : "The captain isn't running; start /herdr-app-captain to answer",
+      tip: cap.terminal ? "Click to open the captain, or Reply to answer this decision from here" : "The captain isn't running; start /herdr-app-captain to answer",
     })),
     ...s.need.map((r) => {
       const orch = orchestratorState(r, ctx);
@@ -243,12 +255,32 @@ function waitingOnYou(t, s, decisions, runs, ctx) {
     }),
   ];
   if (!items.length) return null;
-  const row = (it) => h_flex().id(it.id).gap(8).p(8).rounded(7).items_start().bg(t.surface).tooltip(it.tip)
-    .when(Boolean(it.address), (el) => el.cursor_pointer().hover((st) => st.bg(t.raised)).on_click(() => focusAgent(it.address)))
-    .child(div().flex_none().text_size(14).child(it.emoji))
-    .child(v_flex().flex_1().min_w(0).gap(2)
-      .child(div().text_size(12.5).text_color(t.foreground).child(it.text.slice(0, 300)))
-      .child(div().truncate().text_size(11).text_color(t.dim).child(it.meta.filter(Boolean).join(" · "))));
+  const row = (it) => {
+    const d = it.decision;
+    const open = d && view.replying === d.key;
+    const body = h_flex().id(it.id + "-body").flex_1().min_w(0).gap(8).items_start()
+      .when(Boolean(it.address), (el) => el.cursor_pointer().on_click(() => focusAgent(it.address)))
+      .child(div().flex_none().text_size(14).child(it.emoji))
+      .child(v_flex().flex_1().min_w(0).gap(2)
+        .child(div().text_size(12.5).text_color(t.foreground).child(it.text.slice(0, 300)))
+        .child(div().truncate().text_size(11).text_color(t.dim).child(it.meta.filter(Boolean).join(" · "))));
+    const replyBtn = d && cap.terminal && h_flex().id(it.id + "-reply").flex_none().items_center().px(8).h(22).rounded(5)
+      .text_size(11).text_color(open ? t.accent : t.dim).cursor_pointer().tooltip("Answer this decision without leaving the overview")
+      .hover((st) => st.bg(t.hover).text_color(t.foreground))
+      .on_click((_e, cx) => {
+        view.replying = open ? null : d.key;
+        view.reply.set_value("");
+        if (!open) view.reply.focus();
+        cx.notify();
+      })
+      .child(open ? "Cancel" : "Reply");
+    return v_flex().id(it.id).gap(6).p(8).rounded(7).bg(t.surface).tooltip(it.tip)
+      .hover((st) => st.bg(t.raised))
+      .child(h_flex().gap(8).items_start().child(body).when(Boolean(replyBtn), (el) => el.child(replyBtn)))
+      .when(open, (el) => el.child(v_flex().gap(4)
+        .child(Input.new(view.reply))
+        .child(div().text_size(10.5).text_color(t.dim).child("Enter sends it to the captain, with this decision attached"))));
+  };
   return v_flex().id("waiting").flex_none().gap(6).p(10).rounded(10).bg(t.blocked + "14").border(1).border_color(t.blocked + "66")
     .child(div().text_size(11.5).font_semibold().text_color(t.blocked).child(`Waiting on you · ${items.length}`))
     .children(items.map(row));
@@ -280,7 +312,7 @@ export function cards(view, t, runs, errors, decisions = []) {
   const needing = new Set(s.need);
   const live = [...s.need, ...s.live.filter((r) => !needing.has(r))];
   const narrow = (view.size?.width ?? 600) / zoom() < 360;
-  const waiting = waitingOnYou(t, s, decisions, runs, ctx);
+  const waiting = waitingOnYou(view, t, s, decisions, runs, ctx);
   return v_flex().id("root").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .on_size_change((size, cx) => { view.size = size; cx.notify(); })
     .child(v_flex().flex_none().px(10).pt(10).pb(6).gap(2)
