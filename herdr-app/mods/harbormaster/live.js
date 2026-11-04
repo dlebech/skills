@@ -1,6 +1,6 @@
 // Live facts from herdr-core (terminals, agents, panes) and the few actions the views take.
 
-import { exec, terminals, agents, panes, run, window } from "herdr";
+import { exec, terminals, agents, panes, spaces, run, window } from "herdr";
 
 // The terminal and agent lists every helper below reads, taken once per render.
 export const facts = () => ({ terminals: terminals(), agents: agents() });
@@ -32,6 +32,22 @@ export function adrift(roots, ctx) {
   return ctx.agents.filter((a) => !crew.has(a.address));
 }
 
+// An agent's name as Herdr's own Agents list gives it: the tab's name when someone
+// named it (other than after the program), else the agent's own title (Claude Code
+// sets one from its session) with leading symbols stripped, unless that title is just
+// the program, a path, or user@host. Never a bare tab number when anything else will do.
+const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
+export function agentName(a) {
+  const tab = spaces().flatMap((s) => s.tabs ?? []).find((t) => t.id === a.tab);
+  const prog = a.program?.name;
+  const live = clean(a.title);
+  const telling = live && live !== prog && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== a.program?.key;
+  const tabName = tab?.name ?? a.tab_name ?? "";
+  if (tab?.named && tabName !== prog) return tabName;
+  if (telling) return live;
+  return /^\d+$/.test(tabName) ? prog || tabName : tabName || prog || a.address;
+}
+
 export function captainOf(ctx) {
   const live = ctx.terminals.filter((t) => t.state === "live");
   const terminal = live.find((t) => t.labels?.role === "captain") ?? null;
@@ -40,9 +56,9 @@ export function captainOf(ctx) {
 }
 
 // Does this run need the person? An open question, a waiting or blocked plan, or an
-// orchestrator blocked on a dialog. A finished run never does.
+// orchestrator blocked on a dialog. A finished, parked or closed run never does.
 export function needsYou(run, orchState) {
-  if (run.phase === "finished") return false;
+  if (run.phase === "finished" || run.away) return false;
   return Boolean(run.question) || run.phase === "waiting" || run.phase === "blocked" || orchState === "blocked";
 }
 

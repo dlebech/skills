@@ -2,8 +2,8 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { stats, runPhase, taskTone, taskCounts, prsOf, unknownPr, PR_TONE } from "./data.js";
-import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, focusAgent, openUrl } from "./live.js";
+import { stats, runPhase, taskTone, taskCounts, prsOf, unknownPr, PR_TONE, isClosed, putAway, resumeRun } from "./data.js";
+import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentName, focusAgent, openUrl } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef } from "./ui.js";
 
 // How each runPhase() reads on a card.
@@ -13,6 +13,8 @@ const PHASE = {
   blocked: { label: "Blocked", tone: "blocked" },
   finished: { label: "Finished", tone: "done" },
   unknown: { label: "Starting", tone: "dim" },
+  parked: { label: "Parked", tone: "dim" },
+  closed: { label: "Closed", tone: "dim" },
 };
 
 function pill(t, text, tone, solid = false) {
@@ -61,11 +63,66 @@ function taskStrip(t, r, counts) {
         .child(div().text_color(t.dim).child(task.state))))));
 }
 
-function card(t, r, ctx, compact = false) {
+// What a card offers: Park and Close while its orchestrator runs (Close alone once
+// finished), Resume and Close once it is gone or parked, Resume once closed.
+function actionsOf(r, orch, closed) {
+  if (closed) return ["resume"];
+  if (r.away?.how === "parked" || orch === "gone") return ["resume", "close"];
+  return r.phase === "finished" ? ["close"] : ["park", "close"];
+}
+
+const ACTION = {
+  park: { label: "Park", tip: "Set this run aside: closes its orchestrator's tab; resume it any time" },
+  close: { label: "Close", tip: "Close this run for good: closes its orchestrator's tab; it can still be resumed" },
+  resume: { label: "Resume", tip: "Start a new orchestrator that picks this run up where it stopped" },
+};
+
+// The question a card asks before acting, naming what is left.
+function confirmText(r, action, counts) {
+  const left = [counts.planned ? `${counts.merged} of ${counts.planned} tasks merged` : null,
+    r.prs.length ? plural(r.prs.length, "PR") + " stay open" : null].filter(Boolean).join(", ");
+  if (action === "park") return `Park ${r.branch}? Its orchestrator and agents end; the run waits here until you resume it.${left ? ` ${left}.` : ""}`;
+  if (action === "close") return r.phase === "finished" ? `Close ${r.branch}? Its PRs stay up.`
+    : `Close ${r.branch} for good, unfinished?${left ? ` ${left}.` : ""}`;
+  return `Resume ${r.branch}? A new orchestrator starts in ${r.repo}${r.machine ? ` on ${r.machine}` : ""}, restarting unfinished tasks.`;
+}
+
+function actionButton(t, id, label, tip, onClick, primary = false) {
+  return div().id(id).flex_none().px(9).h(22).rounded(5).flex().items_center().cursor_pointer().text_size(11.5).font_medium()
+    .bg(primary ? t.accent : t.raised).text_color(primary ? t.background : t.muted).tooltip(tip ?? label)
+    .hover((s) => s.opacity(0.85).text_color(primary ? t.background : t.foreground))
+    .on_click((_e, cx) => { cx.stop_propagation(); onClick(cx); })
+    .child(label);
+}
+
+// The card's buttons, or, after one is clicked, its question with a confirm and Cancel.
+function actionRow(view, t, r, orch, closed, counts) {
+  const asking = view.confirm?.key === r.key ? view.confirm.action : null;
+  const set = (cx, value) => { view.confirm = value; view.actionError = null; cx.notify(); };
+  if (asking) {
+    const yes = (cx) => {
+      set(cx, null);
+      if (asking === "resume") resumeRun(r);
+      else putAway(r, asking === "park" ? "parked" : "closed").catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
+    };
+    return v_flex().gap(6).p(8).rounded(7).bg(t.raised)
+      .child(div().text_size(12).text_color(t.foreground).child(confirmText(r, asking, counts)))
+      .child(h_flex().gap(6)
+        .child(actionButton(t, `yes-${r.key}`, ACTION[asking].label, null, yes, true))
+        .child(actionButton(t, `no-${r.key}`, "Cancel", null, (cx) => set(cx, null))));
+  }
+  return h_flex().gap(6).justify_end()
+    .children(actionsOf(r, orch, closed).map((a) => actionButton(t, `${a}-${r.key}`, ACTION[a].label, ACTION[a].tip,
+      (cx) => set(cx, { key: r.key, action: a }), a === "resume")));
+}
+
+function card(view, t, r, ctx, compact = false) {
   const orch = orchestratorState(r, ctx);
+  const closed = isClosed(r, ctx);
+  const parked = r.away?.how === "parked";
   const need = needsYou(r, orch);
   const reason = needReason(r, orch);
-  const badge = PHASE[r.phase] ?? PHASE.unknown;
+  const badge = (parked ? PHASE.parked : r.away?.how === "closed" ? PHASE.closed : PHASE[r.phase]) ?? PHASE.unknown;
   const counts = taskCounts(r);
   const prs = prsOf(r) ?? r.prs.map((p) => unknownPr(p.url, p.repo));
   const workers = workersOf(r.terminal, ctx);
@@ -92,7 +149,9 @@ function card(t, r, ctx, compact = false) {
         .child(div().text_size(12).text_color(t.foreground).child((reason ?? "").slice(0, 220))))))
     .when(Boolean(r.progress), (el) => el.child(div().text_size(12.5).text_color(t.foreground).child(r.progress)))
     .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts)))
-    .when(orch === "gone" && r.phase !== "finished", (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Orchestrator terminal is gone — ask the captain to resume this run.")))
+    .when(Boolean(r.away), (el) => el.child(div().text_size(11.5).text_color(t.muted)
+      .child(`${parked ? "Parked" : "Closed"} ${ago(r.away.at)}${r.away.was ? ` · was: ${r.away.was}` : ""}`)))
+    .when(!r.away && orch === "gone" && r.phase !== "finished", (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Orchestrator is gone: resume, park, or close this run.")))
     .when(r.waiting.length > 0, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(`Waiting on an answer: ${r.waiting.join(", ")}`)))
     .when(r.unhandled > 0, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(`${plural(r.unhandled, "relayed message")} not read yet`)))
     .when(prs.length > 0 || r.issues.length > 0, (el) => el.child(v_flex().gap(1).text_size(12)
@@ -101,7 +160,8 @@ function card(t, r, ctx, compact = false) {
         .children(r.issues.map((url) => div().id(`is-${r.key}-${url}`).px(6).h(20).flex().items_center().rounded(5).bg(t.raised).text_size(11).text_color(t.muted).cursor_pointer()
           .hover((s) => s.text_color(t.foreground)).tooltip(url)
           .on_click((_e, cx) => { cx.stop_propagation(); openUrl(url); }).child(`◎ ${shortRef(url)}`)))))))
-    .when(prs.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(11).text_color(t.dim).child("No pull request yet")));
+    .when(prs.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(11).text_color(t.dim).child("No pull request yet")))
+    .child(actionRow(view, t, r, orch, closed, counts));
 }
 
 // Adds or removes the runs overview as a pane beside the captain. Shown greyed out,
@@ -172,15 +232,18 @@ export function cards(view, t, runs, errors) {
       .child(totals(t, s)))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
       .child(captainStrip(t, ctx, s))
-      .when(s.shown.length === 0, (el) => el.child(div().p(12).text_size(12).text_color(t.dim).child("No runs in progress. Ask the captain to start one, e.g. “start issue 185 in snelogin”.")))
-      .children(live.map((r) => card(t, r, ctx, narrow)))
-      .children(s.docked.map((r) => card(t, r, ctx, true)))
+      .when(s.shown.length === 0, (el) => el.child(div().p(12).text_size(12).text_color(t.dim).child("No runs in progress. Ask the captain to start one, e.g. “start issue 185 in my-app”.")))
+      .children(live.map((r) => card(view, t, r, ctx, narrow)))
+      .children(s.docked.map((r) => card(view, t, r, ctx, true)))
+      .when(s.parked.length > 0, (el) => el.child(div().pt(6).px(4).text_size(11).font_semibold().text_color(t.dim).child(`Parked · ${s.parked.length}`)))
+      .children(s.parked.map((r) => card(view, t, r, ctx, true)))
       .when(s.closed.length > 0, (el) => el.child(h_flex().id("finished-toggle").pt(6).px(4).gap(6).items_center().text_size(11).text_color(t.dim).cursor_pointer()
         .hover((st) => st.text_color(t.foreground))
         .on_click((_e, cx) => { view.showDone = !view.showDone; cx.notify(); })
         .child(svg(`mods/harbormaster/chevron-${view.showDone ? "down" : "right"}.svg`).size(11))
         .child(`${s.closed.length} closed`)))
-      .when(Boolean(view.showDone), (el) => el.children(s.closed.map((r) => card(t, r, ctx, true))))
+      .when(Boolean(view.showDone), (el) => el.children(s.closed.map((r) => card(view, t, r, ctx, true))))
+      .when(Boolean(view.actionError), (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(view.actionError)))
       .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n")))));
 }
 
@@ -243,10 +306,10 @@ export function crew(view, t) {
   // Adrift: agents outside the crew, on any machine.
   const drifters = adrift([cap.terminal?.address, ...orchestrators.map((o) => o.term.address)], ctx);
   const stray = (a) => h_flex().id(`adrift-${a.address}`).flex_none().gap(8).h(24).px(8).items_center().rounded(6).cursor_pointer()
-    .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(t.hover)).tooltip(a.title || a.address)
+    .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(t.hover)).tooltip([agentName(a), a.title, `${a.space_name} · ${a.tab_name}`].filter((x, i, all) => x && all.indexOf(x) === i).join("\n"))
     .on_click(() => focusAgent(a.address))
     .child(programIcon(a.program, 13, t.muted))
-    .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(`${a.space_name} · ${a.tab_name}`))
+    .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(`${a.space_name} · ${agentName(a)}`))
     .child(statusDot(t, a.status));
   return v_flex().id("crew").size_full().min_h(0).bg(t.chrome).text_size(12.5)
     .child(div().flex_none().px(12).pt(8).pb(4).text_size(11.5).font_semibold().text_color(t.foreground).child("Crew"))

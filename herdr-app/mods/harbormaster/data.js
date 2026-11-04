@@ -9,8 +9,9 @@
 //   <root>/<folder>/<branch>/status.json        {status, progress, tasks:{merged,planned}, issues, prs:[{repo,url}], waiting, updated}
 //   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
 //   <root>/<folder>/<branch>/inbox/*.message    relayed messages not yet handled
+//   <root>/<folder>/<branch>/parked, closed     the person put the run away: "<time>\t<status then>"
 
-import { exec, machines, shared, setShared } from "herdr";
+import { exec, machines, shared, setShared, spaces, panes, run as command } from "herdr";
 import { orchestratorState, workersOf, needsYou } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
@@ -26,6 +27,8 @@ const SCRIPT = [
   '  cat "$d/status.json" 2>/dev/null; printf \'\\037\'',
   '  head -c 60000 "$d/plan.md" 2>/dev/null; printf \'\\037\'',
   '  [ -e "$d/question.md" ] && head -c 4000 "$d/question.md"; printf \'\\037\'',
+  '  [ -e "$d/parked" ] && { printf +; head -c 400 "$d/parked"; }; printf \'\\037\'',
+  '  [ -e "$d/closed" ] && { printf +; head -c 400 "$d/closed"; }; printf \'\\037\'',
   '  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && n=$((n+1)); done; echo "$n"',
   "done",
 ].join("\n");
@@ -56,7 +59,7 @@ function tasksOf(plan) {
 
 function parse(machine, stdout) {
   return stdout.split(RS).filter((s) => s.trim()).map((chunk) => {
-    const [dir, orchFile, statusFile, plan, question, inbox] = chunk.split(US);
+    const [dir, orchFile, statusFile, plan, question, parkedFile, closedFile, inbox] = chunk.split(US);
     const orch = json(orchFile) ?? {};
     const status = json(statusFile) ?? {};
     const statusLine = /^Status:\s*(.*)$/m.exec(plan ?? "")?.[1]?.trim() ?? null;
@@ -72,6 +75,8 @@ function parse(machine, stdout) {
       branch: orch.branch ?? status.branch ?? parts.at(-1),
       terminal: onMachine(orch.terminal),
       tab: onMachine(orch.tab_id),
+      kind: orch.kind ?? null,
+      away: marker("closed", closedFile) ?? marker("parked", parkedFile),
       statusLine,
       phase: runPhase(statusLine ?? status.status),
       progress: status.progress ?? null,
@@ -86,6 +91,13 @@ function parse(machine, stdout) {
       tasks: tasksOf(plan),
     };
   });
+}
+
+// A parked or closed marker, "+" and its first line: { how, at, was }, or null without one.
+function marker(how, text) {
+  if (!text?.startsWith("+")) return null;
+  const [at, was] = text.slice(1).split("\n")[0].split("\t");
+  return { how, at: Date.parse(at) || null, was: was?.trim() || null };
 }
 
 // Every copy asks through one cache, so a layout with several copies reads once.
@@ -211,26 +223,33 @@ export async function refreshPrs(run, closed = false) {
 
 // ---- totals ----
 
-// A run is closed once it is finished and its orchestrator's terminal is gone: the
-// person closed its tab. A finished run whose orchestrator is still there stays open,
-// with its PR up; an unfinished run whose terminal is gone is not closed but crashed.
+// A run is closed when the person closed it for good (a closed marker), or once it is
+// finished and its orchestrator's terminal is gone: they closed its tab. A finished run
+// whose orchestrator is still there stays open, with its PR up. An unfinished run whose
+// terminal is gone is not closed: it is parked if they set it aside, else gone, which
+// the captain asks about and the run's card offers to resume.
 export function isClosed(run, ctx) {
+  if (run.away) return run.away.how === "closed";
   return run.phase === "finished" && orchestratorState(run, ctx) === "gone";
 }
+export const isParked = (run) => run.away?.how === "parked";
 
 // Totals across runs, for the summary bar, the overview header, the Crew block and the harbor.
-// `live`: runs still working (not finished); `docked`: finished but still open;
-// `shown`: both, every run the views and the captain keep; `closed`: the rest.
+// `live`: runs still working (not finished, not put away); `docked`: finished but still
+// open; `parked`: set aside for later; `shown`: live and docked, the runs the captain
+// keeps watching; `closed`: the rest.
 // The run, need-you and task counts are of `live` only: a finished run's tasks are done.
 export function stats(runs, ctx) {
-  const live = runs.filter((r) => r.phase !== "finished");
-  const docked = runs.filter((r) => r.phase === "finished" && !isClosed(r, ctx));
+  const live = runs.filter((r) => r.phase !== "finished" && !r.away);
+  const docked = runs.filter((r) => r.phase === "finished" && !r.away && !isClosed(r, ctx));
+  const parked = runs.filter(isParked);
   const shown = [...live, ...docked];
   const open = shown.flatMap((r) => prsOf(r) ?? []).filter(isOpen);
   const tasks = live.map(taskCounts);
   return {
     live,
     docked,
+    parked,
     shown,
     closed: runs.filter((r) => isClosed(r, ctx)),
     need: live.filter((r) => needsYou(r, orchestratorState(r, ctx))),
@@ -240,4 +259,50 @@ export function stats(runs, ctx) {
     planned: tasks.reduce((n, c) => n + c.planned, 0),
     workers: shown.reduce((n, r) => n + workersOf(r.terminal, ctx).length, 0),
   };
+}
+
+// ---- putting runs away and bringing them back ----
+// The same markers the captain writes (its lib.sh), on the run's machine.
+
+const MARK = 'd=$1 m=$2; { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d "\\n"; printf "\\t"; sed -n "1s/^Status: *//p" "$d/plan.md"; } >"$d/.$m.tmp" && mv "$d/.$m.tmp" "$d/$m"';
+
+// The orchestrator's tab: from orchestrator.json, else the tab holding its terminal.
+function tabOf(run) {
+  return run.tab || (run.terminal && panes().find((p) => p.terminal === run.terminal)?.tab) || null;
+}
+
+// Parks the run (for later) or closes it for good: writes the marker, then closes the
+// orchestrator's tab, which ends it and its agents. The run directory, worktrees,
+// branches, spaces and PRs stay. how: "parked" | "closed". A finished run needs no
+// marker to close: closing its tab does.
+export async function putAway(run, how) {
+  if (how === "parked" || run.phase !== "finished") {
+    const out = await exec("sh", ["-c", MARK, "sh", run.dir, how], { on: run.machine });
+    if (out.code !== 0) throw new Error(out.stderr || `could not write ${how}`);
+  }
+  const tab = tabOf(run);
+  if (tab) command("tab.close", { id: tab, confirmed: true });
+  cache.at = 0;
+}
+
+// Where the run's repository is open: the space whose first terminal is in its folder,
+// the repository's own checkout (never the integration worktree's space).
+function homeSpace(run) {
+  const ps = panes();
+  return spaces().find((s) => (s.machine ?? null) === (run.machine ?? null) && (() => {
+    const tabs = new Set((s.tabs ?? []).map((t) => t.id));
+    return (ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder) === run.folder;
+  })()) ?? null;
+}
+
+// Resumes the run with a new orchestrator of its kind, in the repository's space, or in a
+// new one for it when none is open. The orchestrator's init-run.sh deletes the markers
+// and it reopens the integration worktree under that space.
+export function resumeRun(run) {
+  const kind = run.kind || "claude";
+  const prompt = `${kind === "pi" ? "/skill:" : "/"}herdr-app-orchestrator ${run.dir}/spec.md`;
+  const space = homeSpace(run);
+  if (space) command("tab.new", { space: space.id, folder: run.folder, argv: [kind], task: prompt });
+  else command("space.new", { folder: run.folder, argv: [kind], task: prompt, machine: run.machine ?? "" });
+  cache.at = 0;
 }

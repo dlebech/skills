@@ -8,15 +8,21 @@
 #      progress, tasks, issues, PRs and waiting agents to status.json and labels,
 #      keeping each until changed, and publishes them again without a status and
 #      when init-run.sh resumes the run; refuses a newline, and changes nothing
-#      when status.json is unreadable; warns on "waiting for user" without a
+#      when status.json is unreadable; refuses "waiting for user" without a
 #      question.md;
-#   2b. integration-worktree.sh creates the worktree and its space, keeps the
-#      active space, and does nothing more the second time; reuses a worktree
-#      that already has the branch, and refuses the main checkout's branch;
+#   2b. integration-worktree.sh creates the worktree and opens its space with
+#      space.new, switching back to the active space, and does nothing more the
+#      second time; reuses a worktree that already has the branch, and refuses the
+#      main checkout's branch;
 #   3. runs.sh shows the run, its question, its unhandled message, and its
 #      status.json facts and their age, also once its terminal is gone; keeps a
 #      finished run while its terminal lives, and leaves it out (but not with
 #      --all) once it is gone;
+#   3b. a parked run stays in runs.sh, marked parked, and the watcher says
+#      nothing about it; a closed one is left out (but not with --all), finished
+#      or not; init-run.sh resuming a run deletes its marker; it records no kind
+#      for a program that reports none, and warns in a linked worktree and in a
+#      terminal without a tab;
 #   4. repo-spaces.sh finds the space;
 #   5. watch-runs.sh, in its own terminal, tells this terminal when it exits, and
 #      reports an event once: waiting for user, finished, orchestrator gone; with
@@ -112,12 +118,16 @@ check "dashes for slashes" "${dir##*/}" feature-x
 check "recorded terminal" "$(jq -r .terminal "$dir/orchestrator.json")" "$address"
 check "recorded tab" "$(jq -r .tab_id "$dir/orchestrator.json")" "$tab"
 check "role label" "$(hc get "$fake" --json | jq -r .labels.role)" orchestrator
+check "no kind for a plain program" "$(jq -r '.kind // "none"' "$dir/orchestrator.json")" none
 check "tab name, running" "$(tab_name "$tab")" "🐙 feature/x"
 
 echo "== set-status.sh"
 echo "t1 planned" >>"$dir/plan.md"
-warn=$("$orch/set-status.sh" "$dir" "waiting for user: which db?" 2>&1)
-contains "warns without question.md" "$warn" "without $dir/question.md"
+err=$("$orch/set-status.sh" "$dir" "waiting for user: which db?" 2>&1)
+check "refused without question.md" "$?:$(head -1 "$dir/plan.md")" "2:Status: running"
+contains "says why" "$err" "needs $dir/question.md"
+echo "Which db?" >"$dir/question.md"
+"$orch/set-status.sh" "$dir" "waiting for user: which db?"
 check "plan line" "$(head -1 "$dir/plan.md")" "Status: waiting for user: which db?"
 check "plan body kept" "$(tail -1 "$dir/plan.md")" "t1 planned"
 check "tab name, waiting" "$(tab_name "$tab")" "🐙 ✋ feature/x"
@@ -211,6 +221,27 @@ contains "PR after the terminal ends" "$("$capt/runs.sh")" "pr: acme/web https:/
 check "closed run left out" "$("$capt/runs.sh" | grep -c "run: $dir")" 0
 contains "closed run with --all" "$("$capt/runs.sh" --all)" "plan: finished, closed"
 
+echo "== parked and closed"
+# As herdr-app-captain's SKILL.md writes them.
+mark() { # mark <run-directory> parked|closed
+  local dir=$1 marker=$2
+  { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d '\n'; printf '\t'; sed -n '1s/^Status: *//p' "$dir/plan.md"; } >"$dir/.$marker.tmp" &&
+    mv "$dir/.$marker.tmp" "$dir/$marker"
+}
+"$orch/set-status.sh" "$dir" running
+mark "$dir" parked
+out=$("$capt/runs.sh")
+contains "parked run listed" "$out" "plan: parked 20"
+contains "parked from its status" "$out" "(was: running)"
+start_watcher
+hc wait "$watch" --output nothing --timeout 4 >/dev/null 2>&1
+check "watcher quiet about a parked run" "$(hc get "$watch" --json | jq -r .state)" live
+hc kill "$watch" >/dev/null; hc rm "$watch" >/dev/null 2>&1
+rm "$dir/parked"
+mark "$dir" closed
+check "closed unfinished run left out" "$("$capt/runs.sh" | grep -c "run: $dir")" 0
+contains "closed run with --all, marked" "$("$capt/runs.sh" --all)" "plan: closed 20"
+
 echo "== a run across two repositories"
 multi=$work/hcmulti-$suffix
 for r in api web; do
@@ -232,6 +263,13 @@ check "named after the folder" "$mdir" "$HERDR_ORCHESTRATION_ROOT/hcmulti-$suffi
 check "records the folder" "$(jq -r .folder "$mdir/orchestrator.json")" "$multi"
 contains "runs.sh shows the folder" "$("$capt/runs.sh")" "folder: $multi"
 contains "repo-spaces lists the folder" "$("$capt/repo-spaces.sh" "$multi")" "$multi_space	folder	$multi"
+mark "$mdir" parked
+maddr=$(hc get "$fake-multi" --json | jq -r .address)
+err=$(cd "$multi" && HC_TERMINAL_ID=$maddr "$orch/init-run.sh" feature/y 2>&1 >/dev/null)
+check "resume deletes the marker" "$([ -e "$mdir/parked" ] && echo kept || echo deleted)" deleted
+contains "resume says so" "$err" "was parked"
+err=$(cd "$wt" && HERDR_ORCHESTRATION_ROOT=$work/runs-wt HC_TERMINAL_ID=$maddr "$orch/init-run.sh" feature/w 2>&1 >/dev/null)
+contains "warns in a linked worktree" "$err" "linked worktree"
 # A made-up terminal, so a wrong result cannot label this one.
 mkdir -p "$work/other/hcmulti-$suffix"
 (cd "$work/other/hcmulti-$suffix" && HC_TERMINAL_ID=t0-none "$orch/init-run.sh" feature/y >/dev/null 2>&1)
@@ -244,5 +282,8 @@ hc wait "$watch-2" --timeout 10 >/dev/null
 hc wait "$fake-kid" --output nothing --timeout 2 >/dev/null 2>&1
 check "independent one lives" "$(hc get "$fake-free" --json | jq -r .state)" live
 check "child one ended" "$(hc get "$fake-kid" --json 2>/dev/null | jq -r '.state // "gone"')" finished
+free=$(hc get "$fake-free" --json | jq -r .address)
+err=$(cd "$toy" && HERDR_ORCHESTRATION_ROOT=$work/runs-free HC_TERMINAL_ID=$free "$orch/init-run.sh" feature/v 2>&1 >/dev/null)
+contains "warns without a tab" "$err" "no tab"
 
 exit "$failed"

@@ -5,21 +5,22 @@ Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-capta
 - **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list.
   - The captain's card says whether its watcher is running and how many runs it watches, running and finished. Its pane button pins the runs overview beside the captain, or unpins it.
   - Each orchestrator's card shows its progress, its status when it isn't running, its number of 🦀 workers and its PRs. A run that needs you turns red and says what for. Finished ones come last, with a green edge and their PR numbers.
-  - Each Adrift line shows the agent's space and tab; clicking it focuses the agent.
+  - Each Adrift line shows the agent's space and its name as Herdr's own Agents list gives it: the tab's name when someone named it, otherwise the agent's own title (Claude Code sets one from its session), never a bare tab number like "1". Clicking it focuses the agent.
 - **Runs overview.** The totals across runs on top (running, need you, finished, agents, tasks merged, open PRs and failing checks; clicking "need you" focuses the first run that needs you), then the captain, then one card per run:
   - its branch and repository, a status pill, the progress line, and a task bar from `plan.md` (merged, in progress, blocked);
   - its issues, and every PR with its state, checks and review decision;
   - what the run needs you for, shown first: its open question, the dialog it is blocked on, or the reason in its status;
-  - and, when they apply: relayed messages the orchestrator hasn't read, agents waiting on an answer, "No pull request yet", and a hint to ask the captain to resume a run whose orchestrator is gone.
+  - and, when they apply: relayed messages the orchestrator hasn't read, agents waiting on an answer, "No pull request yet", and a note when the run's orchestrator is gone;
+  - buttons to **Park**, **Resume**, or **Close** the run (see Parked, resumed, and closed runs). Each asks on the card first, naming what is left.
 
-  Clicking a card focuses the orchestrator. Clicking a PR or issue opens it in the browser. Finished runs stay, after the running ones, until you close their orchestrator's tab; closed runs fold away at the bottom.
+  Clicking a card focuses the orchestrator. Clicking a PR or issue opens it in the browser. Finished runs stay, after the running ones, until you close their orchestrator's tab. Parked runs come next, under **Parked**. Closed runs fold away at the bottom.
 - **`harbormaster-main` layout.** Herdr's main layout with the Crew block added.
 - **`harbormaster-sea` layout** (fun):
   - The captain rides a boat on the surface and drops anchor while watching. The captain calls "Ahoy!" when a run needs you, and raises the anchor and naps when nothing is being watched.
-  - Each run is a reef with its branch on a sign. A finished run's reef goes quiet, its octopus asleep and its PR flags up, until you close the orchestrator's tab; then it leaves the harbor. A run that needs you says what for in a bubble. The orchestrator is an octopus and its workers are crabs. Working crabs scuttle, blocked ones jump, and crabs whose turn is done sleep.
+  - Each run is a reef with its branch on a sign. A finished run's reef goes quiet, its octopus asleep and its PR flags up, until you close the orchestrator's tab; then it leaves the harbor. A parked run keeps its reef, dimmed and without its octopus. Clicking a parked reef, or one whose orchestrator is gone, offers to resume it. A run that needs you says what for in a bubble. The orchestrator is an octopus and its workers are crabs. Working crabs scuttle, blocked ones jump, and crabs whose turn is done sleep.
   - Buoys along the bottom are the run's tasks and turn green as they merge.
   - Signal flags on the mast are its PRs. Clicking one opens it.
-  - Agents outside any run drift on the right. The active tab's terminals sit below deck.
+  - Agents outside any run drift on the right, named as in the Crew block. The active tab's terminals sit below deck.
   - While it shows, `alt-up` / `alt-down` step through agents in the harbor's order (captain, each run's octopus and crabs, then drifters), through Herdr's `setAgentOrder`. Other layouts set their own order again.
 
 The skills work the same with or without any of this. Tested with Herdr 0.1.12.
@@ -65,7 +66,7 @@ Harbormaster is built for that:
 
 The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks mods to list those, so here they are:
 
-- **Every 5 seconds, per machine:** one `sh -c` script. For each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json`, `plan.md` and `question.md`, and counts the unhandled `inbox/*.message` files.
+- **Every 5 seconds, per machine:** one `sh -c` script. For each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json`, `plan.md`, `question.md`, and the `parked` and `closed` markers, and counts the unhandled `inbox/*.message` files.
 - **Every minute per open run (running or finished), every 15 minutes per closed one:**
   - `gh pr view <url>` for each PR in `status.json`;
   - `gh pr list --head <branch>` in the run's folder, so a PR shows up before the orchestrator records it.
@@ -73,11 +74,19 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
   The results are kept in Herdr's shared state (`harbormaster.prs`), so every copy of the mod and every layout uses the same ones.
 - **Live from herdr-core:** the terminal labels `role`, `run.status`, `progress` and `run.prs`, and the `captain-watch` terminal.
 
-It never writes to run directories.
+It writes to a run directory only when you press Park or Close: one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes.
 
-## Finished and closed runs
+## Parked, resumed, and closed runs
 
-An orchestrator sets `finished` once its work is done, its PRs are up and their CI is green. The run stays open: in every view, in the captain's `runs.sh`, and on the captain's watch. It is **closed** once its orchestrator's terminal is gone, which is when you close its tab, or ask the captain to close the run. An unfinished run whose orchestrator is gone is not closed but crashed: the views say so, and the captain can resume it.
+An orchestrator sets `finished` once its work is done, its PRs are up and their CI is green. The run stays open: in every view, in the captain's `runs.sh`, and on the captain's watch. It is **closed** once its orchestrator's terminal is gone, which is when you close its tab.
+
+Before that, you can put a run away yourself, with the card's buttons or by asking the captain:
+
+- **Park** sets an unfinished run aside for later. It writes `parked` and closes the orchestrator's tab, which ends it and its agents. The run stays in the overview under **Parked** and as a dimmed reef in the sea, but needs nothing: the captain's watcher stays quiet about it.
+- **Close** ends a run for good, finished or not. It writes `closed` (unless the run is finished) and closes the tab. The run folds away with the other closed runs.
+- **Resume** brings back a parked, closed, or gone run. It starts a new orchestrator of the run's kind with the resume command, in a new tab in the repository's own space, the space on its main checkout, never the integration worktree's. If that space is not open, it opens one for the repository with the orchestrator as its first tab. The orchestrator deletes the marker, restarts unfinished tasks from their worktrees, and opens the integration worktree under the repository's space again.
+
+Parking and closing leave the run directory, worktrees, branches, spaces and PRs in place. An unfinished run whose orchestrator is gone without a marker, because its tab was closed some other way or it crashed, shows as gone. The captain asks you about it, one run at a time: resume it, park it, or close it.
 
 "Needs you" means an open question, a blocker, or a dialog, never a finished run, and the views show which.
 

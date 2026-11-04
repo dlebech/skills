@@ -10,8 +10,9 @@
 #   attention <branch> <reason>    <run-directory>
 # Reasons: the plan's "waiting for user" or "blocked" status, finished, the
 # orchestrator terminal gone or blocked on a dialog, or the orchestrator idle for two
-# minutes while its plan is unfinished. An event is reported once; it can fire again
-# after it clears. Exits 1 if hc stops answering.
+# minutes while its plan is unfinished. Parked and closed runs (their markers) raise
+# nothing. An event is reported once; it can fire again after it clears. Exits 1 if
+# hc stops answering.
 #
 # It checks at once whenever an orchestrator's terminal changes (hc events on the
 # role=orchestrator label: status, labels such as set-status.sh's run.status,
@@ -78,6 +79,8 @@ while :; do
   while IFS= read -r run_info <&3; do
     dir=$(dirname "$run_info")
     IFS=$'\x1f' read -r branch _ terminal _ < <(run_facts "$run_info")
+    # The user put it away; resuming deletes the marker and brings it back.
+    [ -e "$dir/parked" ] || [ -e "$dir/closed" ] && continue
     status=$(plan_status "$dir")
     reasons=()
 
