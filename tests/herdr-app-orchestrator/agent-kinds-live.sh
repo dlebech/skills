@@ -8,7 +8,8 @@
 # A report arrives as input to this terminal. For a plain shell that input is a
 # stray command, so run this from an agent, or ignore what lands at the prompt.
 # Claude also proves the --settings path: a file in --shared and hc send, in
-# default permission mode, with no prompt. Also checks that trust stops the start
+# default permission mode, with no prompt, and that a long slash command as its
+# task runs as a command. Also checks that trust stops the start
 # and that --accept-trust resumes it.
 #
 # Usage: tests/herdr-app-orchestrator/agent-kinds-live.sh [kinds...]
@@ -43,11 +44,19 @@ for kind in "$@"; do
   mkdir -p "$dir/repo" "$dir/shared"
   git -C "$dir/repo" init -q
   task=$dir/shared/task.md
-  cat >"$task" <<TASK
-Do exactly these two steps, in order, then stop:
+  steps="Do exactly these two steps, in order, then stop:
 1. With your file-writing tool, create $dir/shared/result.txt containing only the word ok.
-2. With your shell tool, run: hc send $HC_TERMINAL_ID "done: $name: ok"
-TASK
+2. With your shell tool, run: hc send $HC_TERMINAL_ID \"done: $name: ok\""
+  if [ "$kind" = claude ]; then
+    # A long slash command, as the captain sends /herdr-app-orchestrator: pasted, it
+    # would arrive as <pasted_content> text instead of running the skill.
+    mkdir -p "$dir/repo/.claude/skills/kindtest-run"
+    printf -- '---\nname: kindtest-run\ndescription: kinds test\ndisable-model-invocation: true\n---\n%s\n\nIgnore the arguments: $ARGUMENTS\n' \
+      "$steps" >"$dir/repo/.claude/skills/kindtest-run/SKILL.md"
+    { printf '/kindtest-run'; for i in $(seq 150); do printf ' padding%d' "$i"; done; } >"$task"
+  else
+    printf '%s\n' "$steps" >"$task"
+  fi
   args=(--name "$name" --cwd "$dir/repo" --kind "$kind" --task-file "$task")
   case $kind in
     claude) args+=(--model "$claude_model" --shared "$dir/shared" --arg --permission-mode --arg default) ;;
@@ -77,6 +86,11 @@ TASK
     check "chose the model" "$?" 0
   fi
   check "file in shared written" "$(cat "$dir/shared/result.txt" 2>/dev/null)" ok
+  if [ "$kind" = claude ]; then
+    sessions=~/.claude/projects/$(printf %s "$dir/repo" | sed 's/[^A-Za-z0-9]/-/g')
+    grep -qs 'command-name>/kindtest-run' "$sessions"/*.jsonl
+    check "long slash command ran as a command" "$?" 0
+  fi
   check "agent is a hidden child" \
     "$(hc get "$name" --json | jq -r '[.parent, (.labels["herdr.tab"] // "none")] | join(" ")')" "$HC_TERMINAL_ID none"
 done
