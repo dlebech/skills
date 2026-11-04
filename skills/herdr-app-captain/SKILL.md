@@ -33,6 +33,7 @@ Each run directory holds `spec.md` (the goal), `plan.md` (tasks and their status
 
 Lead with what needs the user, then the rest, one or two lines per run, named by branch:
 
+- **Your decisions:** each open decision of yours from `<skill-dir>/scripts/decisions.sh ls` (Keep track of decisions), oldest first, with how long it has waited.
 - **Needs you:** the orchestrator is there, and `plan.md` says `waiting for user`, or the orchestrator is `blocked`, or it is `idle`/`done` while the plan is not finished. For a blocked one, `runs.sh` shows its dialog; read the whole dialog (`hc read --lines 0 <terminal>`), quote its question and options, or for a permission prompt exactly what it wants to run, and tell the user to answer it in the `🐙 <branch>` tab; it comes before any `question.md`. Otherwise, if `question.md` exists, it holds the full question: give it to the user with its context, options, and recommendation, by whatever way of asking suits you, since text is only a run's route up to you. If an unhandled `inbox/` message already answers it, do not ask again; the orchestrator has yet to read it, so wake it as in Relay instructions if it is idle. Otherwise, for an idle one, read its last output (`hc read --lines 60 <terminal>`) and quote its question. Text shown in its input box may be Claude Code's suggested next prompt, not something the user typed; ignore it.
 - **Gone:** the orchestrator of an unfinished, unparked run is gone: its tab was closed, or it crashed; you cannot tell which. Ask the user about each such run as its own question, with what the run directory shows (its status, tasks merged out of planned, PRs): resume it, park it, or close it, and do what they choose (Park, resume, or close a run). Never resume one without their answer. Ask once per run each time the watcher reports it or you start; a run they leave as it is stays listed as gone.
 - **Stalled:** the orchestrator is idle with no question and no recent change in `plan.md`. Say what the run directory shows; the user can answer it in its tab, or have you relay a nudge.
@@ -52,6 +53,16 @@ When the user gives an instruction for a run:
 4. Check that the orchestrator picked it up (the message is renamed to `.handled`) the next time you look, and report what changed, from `decisions.md` or `plan.md`. A message still unhandled after a few minutes means the wake-up was lost; send it again.
 
 An answer to an orchestrator's question is relayed the same way. An instruction for every run goes to each one as a separate message.
+
+## Keep track of decisions
+
+A question you ask gets buried when alerts and reports follow it, so keep every decision you are waiting on in a file. Harbormaster shows them as **Waiting on you**, beside the runs' own open questions.
+
+- When you ask the user to decide something and wait for it, such as a yes to an action you propose, a choice between options, or what to do with a gone run, record it before you end your turn: `<skill-dir>/scripts/decisions.sh add <id> [--run <run-directory>] <question>`. `<id>` is short and stable (`board-1068`); asking again under the same id rewords it and keeps when it was first asked. The question is one line that makes sense on its own hours later: what you will do on a yes, or the options. Pass `--run` when it is about one run. Pass the question as a quoted heredoc (`"$(cat <<'EOF' ... EOF)"`), as with any of the user's or a run's text.
+- Do not record a run's own question (its `question.md`) or a dialog: Harbormaster already shows those, and the orchestrator clears them when answered. Relaying the user's answer is enough.
+- When the user answers, or it no longer applies (they chose something else, or the run moved on), remove it with `decisions.sh done <id>` before you act on it.
+- While any are open, end every reply with them, oldest first, in one short line each, such as `Still waiting on you: move #1097 to In Progress? (asked 40m ago)`, however much else came in between.
+- When you start, run `decisions.sh ls`. Entries left by an earlier captain session are still the user's to decide: include them in your first report, and drop one only when the user says so.
 
 ## Park, resume, or close a run
 

@@ -143,6 +143,8 @@ export function harbor(view) {
   // then parked ones, set aside for later.
   const runs = [...s.shown, ...s.parked], need = s.need;
   const cap = captainOf(ctx);
+  // What the captain calls out: its own open decisions, then each run that needs you.
+  const calls = [...(view.decisions?.length ? [plural(view.decisions.length, "decision")] : []), ...need.map((r) => r.branch)];
   const inRuns = new Set(runs.flatMap((r) => (r.terminal ? [r.terminal, ...workersOf(r.terminal, ctx).map((term) => term.address)] : [])));
   const drifters = adrift([cap.terminal?.address, ...runs.map((r) => r.terminal)], ctx);
   const crabNames = agentNames(drifters.slice(0, 6));
@@ -162,8 +164,8 @@ export function harbor(view) {
     .when(Boolean(cap.terminal), (el) => el.on_click(() => focusAgent(cap.terminal.address)))
     .child(div().relative().w(150).h(122).id("boat-rock").loop("top", { from: 0, to: 4, period: 2400 })
       .child(image("mods/harbormaster/captain.svg").w(150).h(122).opacity(cap.terminal ? 1 : 0.45)))
-    .when(need.length > 0 && Boolean(cap.terminal), (el) => el.child(div().absolute().top(132).left(4).px(9).py(3).rounded(10).bg(sail).border(2).border_color("#d4553e")
-      .text_size(11.5).font_weight(800).text_color("#a3301f").whitespace_nowrap().child(`Ahoy! ${need[0].branch}${need.length > 1 ? ` +${need.length - 1}` : ""}`)))
+    .when(calls.length > 0 && Boolean(cap.terminal), (el) => el.child(div().absolute().top(132).left(4).px(9).py(3).rounded(10).bg(sail).border(2).border_color("#d4553e")
+      .text_size(11.5).font_weight(800).text_color("#a3301f").whitespace_nowrap().child(`Ahoy! ${calls[0]}${calls.length > 1 ? ` +${calls.length - 1}` : ""}`)))
     .when(Boolean(cap.terminal) && !cap.watching, (el) => el.child(div().absolute().top(10).left(40).text_size(15).font_weight(700).text_color(navy).child("zzz")));
   const chainLen = cap.watching ? Math.max(40, H - SKY - 120) : 26;
   const anchor = v_flex().absolute().left(80).top(SKY + 30).items_center()

@@ -25,6 +25,8 @@
 #       captain (mark_run) or Harbormaster on the user's word; init-run.sh deletes both when an
 #       orchestrator resumes the run. A finished run whose orchestrator's terminal
 #       is gone is closed without a marker.
+#   <root>/.captain-decisions.json              the captain's open decisions for the user,
+#       [{id, question, run, asked}], kept by decisions.sh; Harbormaster shows them
 
 # The same default as herdr-app-orchestrator's scripts/init-run.sh.
 root=${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}

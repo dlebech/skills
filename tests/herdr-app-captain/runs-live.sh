@@ -23,7 +23,8 @@
 #      or not; init-run.sh resuming a run deletes its marker; it records no kind
 #      for a program that reports none, and warns in a linked worktree and in a
 #      terminal without a tab;
-#   4. repo-spaces.sh finds the space;
+#   4. decisions.sh adds, rewords and removes the captain's open decisions;
+#      repo-spaces.sh finds the space;
 #   5. watch-runs.sh, in its own terminal, is waited for by wait-watch.sh, and
 #      reports an event once: waiting for user, finished, orchestrator gone; with
 #      a 10-minute interval, so only hc events can wake it for finished;
@@ -196,6 +197,20 @@ contains "shows progress" "$out" "progress: task 2/2 in review; 1/2 tasks merged
 contains "shows a PR" "$out" "pr: acme/api https://example.com/pr/3"
 contains "shows an issue" "$out" "issue: https://example.com/i/1"
 contains "shows the facts' age" "$out" "facts updated: 20"
+
+echo "== decisions.sh"
+"$capt/decisions.sh" add board --run "$dir" "Move #12 to Test?"
+"$capt/decisions.sh" add merge "Merge #3?"
+"$capt/decisions.sh" add board "Move #12 and #13 to Test?"
+out=$("$capt/decisions.sh" ls)
+check "two open" "$(wc -l <<<"$out")" 2
+check "reworded, first asked kept" "$(head -1 <<<"$out" | cut -f1,3,4)" "board	$dir	Move #12 and #13 to Test?"
+"$capt/decisions.sh" done board unknown
+check "done removes it" "$("$capt/decisions.sh" ls | cut -f1)" merge
+"$capt/decisions.sh" add 'Bad id' x 2>/dev/null
+check "bad id refused" "$?" 2
+"$capt/decisions.sh" done merge
+check "file empties" "$(jq length "$HERDR_ORCHESTRATION_ROOT/.captain-decisions.json")" 0
 
 echo "== repo-spaces.sh"
 out=$("$capt/repo-spaces.sh" "$toy")
