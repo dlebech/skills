@@ -3,8 +3,9 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, runPhase, taskTone, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun } from "./data.js";
-import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, openUrl, replyToCaptain } from "./live.js";
-import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef } from "./ui.js";
+import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, openUrl, replyToCaptain } from "./live.js";
+import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText } from "./ui.js";
+import { tokenText } from "./context.js";
 
 // How each runPhase() reads on a card.
 const PHASE = {
@@ -22,6 +23,15 @@ function pill(t, text, tone, solid = false) {
   return div().flex_none().px(7).h(18).rounded(9).flex().items_center()
     .bg(solid ? c : c + "22").text_size(10.5).font_semibold().text_color(solid ? t.background : c).child(text);
 }
+
+// Adds how full an agent's context is, "144k", with the exact count on hover; nothing
+// when unknown. For .map() on the row it goes in.
+const withContext = (view, t, id, address) => (el) => {
+  const c = view.contexts?.[address];
+  if (!c) return el;
+  return el.child(div().id(`${id}-ctx`).flex_none().text_size(10.5).text_color(t.dim).child(tokenText(c.tokens))
+    .tooltip(`Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`));
+};
 
 function statusDot(t, status) {
   if (status === "working") return svg("mods/harbormaster/spinner.svg").size(11).flex_none().text_color(t.working).spin(900);
@@ -70,7 +80,7 @@ function taskStrip(t, r, counts) {
       .children(r.tasks.map((task) => h_flex().gap(4).items_center()
         .child(div().size(6).rounded(3).bg(t[taskTone(task.state)] ?? t.border))
         .child(div().text_color(task.state === "merged" ? t.dim : t.muted).child(`${task.id} ${task.name}`))
-        .child(div().text_color(t.dim).child(task.state))))));
+        .child(div().text_color(t.dim).child(stateText(task.state)))))));
 }
 
 // What a card offers: Park and Close while its orchestrator runs (Close alone once
@@ -83,17 +93,18 @@ function actionsOf(r, orch, closed) {
 
 const ACTION = {
   park: { label: "Park", tip: "Set this run aside: closes its orchestrator's tab; resume it any time" },
-  close: { label: "Close", tip: "Close this run for good: closes its orchestrator's tab; it can still be resumed" },
+  close: { label: "Close", tip: "Close this run for good: its orchestrator ends its agents, deletes the run's worktrees once their code is pushed, and closes its tab; it can still be resumed" },
   resume: { label: "Resume", tip: "Start a new orchestrator that picks this run up where it stopped" },
 };
 
 // The question a card asks before acting, naming what is left.
 function confirmText(r, action, counts) {
-  const left = [counts.planned ? `${counts.merged} of ${counts.planned} tasks merged` : null,
+  const left = [counts.planned ? `${counts.merged} of ${counts.planned} tasks done` : null,
     r.prs.length ? plural(r.prs.length, "PR") + " stay open" : null].filter(Boolean).join(", ");
   if (action === "park") return `Park ${r.branch}? Its orchestrator and agents end; the run waits here until you resume it.${left ? ` ${left}.` : ""}`;
-  if (action === "close") return r.phase === "finished" ? `Close ${r.branch}? Its PRs stay up.`
-    : `Close ${r.branch} for good, unfinished?${left ? ` ${left}.` : ""}`;
+  const clean = "Its orchestrator pushes what isn't pushed, deletes the worktrees and closes its tab; branches and PRs stay.";
+  if (action === "close") return r.phase === "finished" ? `Close ${r.branch}? ${clean}`
+    : `Close ${r.branch} for good, unfinished?${left ? ` ${left}.` : ""} ${clean}`;
   return `Resume ${r.branch}? A new orchestrator starts in ${r.repo}${r.machine ? ` on ${r.machine}` : ""}, restarting unfinished tasks.`;
 }
 
@@ -110,12 +121,14 @@ function actionButton(t, id, label, tip, onClick, primary = false) {
 // command, not putAway's marker write.
 function actionRow(view, t, r, orch, closed, counts) {
   const asking = view.confirm?.key === r.key ? view.confirm.action : null;
-  const set = (cx, value) => { view.confirm = value; view.actionError = null; cx.notify(); };
+  const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
   if (asking) {
     const yes = (cx) => {
       set(cx, null);
       if (asking === "resume") resumeRun(r);
-      else putAway(r, asking === "park" ? "parked" : "closed", orch).catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
+      else putAway(r, asking === "park" ? "parked" : "closed", orch)
+        .then((note) => { if (note) { view.actionNote = `${r.branch}: ${note}`; cx.notify(); } })
+        .catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
     };
     return v_flex().gap(6).p(8).rounded(7).bg(t.raised)
       .child(div().text_size(12).text_color(t.foreground).child(confirmText(r, asking, counts)))
@@ -159,6 +172,7 @@ function card(view, t, r, ctx, compact = false) {
           .child(div().truncate().font_semibold().text_size(13.5).text_color(t.foreground).child(r.branch))
           .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
         .child(div().truncate().text_size(11.5).text_color(t.dim).child(meta)))
+      .map(withContext(view, t, `run-${r.key}`, r.terminal))
       .child(statusDot(t, orch))
       .child(pill(t, badge.label, need ? "blocked" : badge.tone, need)))
     .when(need, (el) => el.child(h_flex().gap(8).p(8).rounded(7).bg(t.blocked + "1c").items_start()
@@ -200,7 +214,7 @@ function pinButton(t, ctx, labelled = false) {
 // What the captain watches, from stats(): "2 runs, 1 finished".
 const watchedText = (s) => [plural(s.live.length, "run"), s.docked.length ? `${s.docked.length} finished` : null].filter(Boolean).join(", ");
 
-function captainStrip(t, ctx, s) {
+function captainStrip(view, t, ctx, s) {
   const watched = watchedText(s);
   const cap = captainOf(ctx);
   if (!cap.terminal) return h_flex().flex_none().gap(8).p(10).rounded(10).border(1).border_color(t.border).text_size(12).text_color(t.dim)
@@ -214,6 +228,7 @@ function captainStrip(t, ctx, s) {
       .child(div().text_size(11.5).text_color(cap.watching ? t.muted : t.blocked)
         .child(cap.watching ? `Watching ${watched}` : "Watcher is not running — ask the captain to watch")))
     .child(pinButton(t, ctx, true))
+    .map(withContext(view, t, "captain", cap.terminal.address))
     .child(statusDot(t, agentStatus(cap.terminal, ctx)));
 }
 
@@ -300,7 +315,7 @@ function totals(t, s, decisions, ctx) {
     .child(stat("t-need", needCount, "need you", needCount ? "blocked" : null, firstNeed ? () => focusAgent(firstNeed) : null))
     .when(s.docked.length > 0, (el) => el.child(stat("t-done", s.docked.length, "finished", "done")))
     .child(stat("t-agents", s.workers, s.workers === 1 ? "agent" : "agents", s.workers ? "working" : null))
-    .when(s.planned > 0, (el) => el.child(stat("t-tasks", `${s.merged}/${s.planned}`, "tasks merged", null)))
+    .when(s.planned > 0, (el) => el.child(stat("t-tasks", `${s.merged}/${s.planned}`, "tasks done", null)))
     .child(stat("t-prs", s.open.length, s.failing ? `open PRs · ${s.failing} failing` : s.open.length === 1 ? "open PR" : "open PRs", s.failing ? "blocked" : s.open.length ? "done" : null));
 }
 
@@ -320,7 +335,7 @@ export function cards(view, t, runs, errors, decisions = []) {
       .child(totals(t, s, decisions, ctx)))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
       .when(Boolean(waiting), (el) => el.child(waiting))
-      .child(captainStrip(t, ctx, s))
+      .child(captainStrip(view, t, ctx, s))
       .when(s.shown.length === 0, (el) => el.child(div().p(12).text_size(12).text_color(t.dim).child("No runs in progress. Ask the captain to start one, e.g. “start issue 185 in my-app”.")))
       .children(live.map((r) => card(view, t, r, ctx, narrow)))
       .children(s.docked.map((r) => card(view, t, r, ctx, true)))
@@ -332,6 +347,7 @@ export function cards(view, t, runs, errors, decisions = []) {
         .child(svg(`mods/harbormaster/chevron-${view.showDone ? "down" : "right"}.svg`).size(11))
         .child(`${s.closed.length} closed`)))
       .when(Boolean(view.showDone), (el) => el.children(s.closed.map((r) => card(view, t, r, ctx, true))))
+      .when(Boolean(view.actionNote), (el) => el.child(div().px(4).text_size(11).text_color(t.muted).child(view.actionNote)))
       .when(Boolean(view.actionError), (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(view.actionError)))
       .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n")))));
 }
@@ -346,7 +362,7 @@ export function crew(view, t) {
   // The focused agent, as Herdr's own Agents list marks it.
   const current = ctx.agents.find((a) => a.focused)?.address;
   // Unfinished orchestrators first, then finished ones still open.
-  const orchestrators = ctx.terminals.filter((term) => term.state === "live" && term.labels?.role === "orchestrator")
+  const orchestrators = orchestratorsOf(ctx)
     .map((term) => ({ term, r: runOf(term) }))
     .map((o) => ({ ...o, state: o.r?.phase ?? runPhase(o.term.labels?.["run.status"]) }))
     .sort((a, b) => (a.state === "finished") - (b.state === "finished"));
@@ -360,6 +376,7 @@ export function crew(view, t) {
       .child(div().truncate().text_size(12.5).font_semibold().text_color(t.foreground).child(title))
       .child(div().truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail)))
     .when(pin, (el) => el.child(pinButton(t, ctx)))
+    .map(withContext(view, t, id, address))
     .child(statusDot(t, status));
   const rows = [];
   if (cap.terminal) {

@@ -22,7 +22,8 @@
 #   <root>/<folder>/<branch>/closed             the user closed the run for good, finished
 #       or not
 #       Both hold one line, "<time>\t<plan status then>", and are written by the
-#       captain (mark_run) or Harbormaster on the user's word; init-run.sh deletes both when an
+#       captain (mark_run) or Harbormaster on the user's word, or for closed, by the
+#       orchestrator once it has cleaned up (its section 9); init-run.sh deletes both when an
 #       orchestrator resumes the run. A finished run whose orchestrator's terminal
 #       is gone is closed without a marker.
 #   <root>/.captain-decisions.json              the captain's open decisions for the user,

@@ -298,12 +298,38 @@ export function stats(runs, ctx) {
 
 const MARK = 'd=$1 m=$2; { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d "\\n"; printf "\\t"; sed -n "1s/^Status: *//p" "$d/plan.md"; } >"$d/.$m.tmp" && mv "$d/.$m.tmp" "$d/$m"';
 
-// Parks the run (for later) or closes it for good: writes the marker, then closes the
-// orchestrator's tab, which ends it and its agents. The run directory, worktrees,
-// branches, spaces and PRs stay. how: "parked" | "closed"; orch: orchestratorState().
+// A message in the run's inbox, as herdr-app-captain relays them: written beside, then
+// moved in, so the orchestrator never reads half of it.
+const POST = 'd=$1 f=$2; printf "%s\\n" "$3" >"$d/inbox/.$f.tmp" && mv "$d/inbox/.$f.tmp" "$d/inbox/$f"';
+
+// Closing a run whose orchestrator is there asks it to clean up: it ends its agents,
+// pushes what is not on the remote, deletes the run's worktrees and its space, writes
+// the closed marker and closes its own tab (herdr-app-orchestrator's section 9).
+// Resolves to a note for the card. A blocked orchestrator reads it once its dialog is
+// answered.
+async function askToClose(run) {
+  const file = `harbormaster-close-${Math.floor(Date.now() / 1000)}.message`;
+  const text = "The user closed this run in Harbormaster. Clean up and close your tab, as in your skill's section 9 (Close).";
+  const out = await exec("sh", ["-c", POST, "sh", run.dir, file, text], { on: run.machine });
+  if (out.code !== 0) throw new Error(out.stderr || "could not write to its inbox");
+  const sent = await exec("hc", ["send", run.terminal, `Read and act on ${run.dir}/inbox/${file}.`], { on: run.machine }).catch(() => null);
+  if (sent?.code === 9) return "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes";
+  return "its orchestrator is cleaning up, and closes its tab when done";
+}
+
+// Parks the run for later: writes the marker, then closes the orchestrator's tab, which
+// ends it and its agents; everything else stays. Or closes it for good: an orchestrator
+// that is there cleans up and ends itself (askToClose); for one that is gone it writes
+// the marker, and the worktrees stay until the run is resumed and closed again.
+// how: "parked" | "closed"; orch: orchestratorState(). Resolves to a note, or null.
 // A finished run needs no marker to close: closing its tab does. With the orchestrator
-// still there but no tab to close, it refuses, so a marker never hides a live run.
+// still there but no tab to close, parking refuses, so a marker never hides a live run.
 export async function putAway(run, how, orch) {
+  if (how === "closed" && orch !== "gone") {
+    const note = await askToClose(run);
+    cache.at = 0;
+    return note;
+  }
   const tab = tabOf(run);
   if (!tab && orch !== "gone") throw new Error("cannot find the orchestrator's tab; close it by hand");
   if (how === "parked" || run.phase !== "finished") {
@@ -312,6 +338,7 @@ export async function putAway(run, how, orch) {
   }
   if (tab) command("tab.close", { id: tab, confirmed: true });
   cache.at = 0;
+  return null;
 }
 
 // Resumes the run with a new orchestrator of its kind, in the repository's space, or in a

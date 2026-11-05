@@ -2,12 +2,12 @@
 
 Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-captain` and its `herdr-app-orchestrator` runs are doing, so you don't have to read the Agents list row by row. Everything in it is written from scratch: it uses Herdr's mod API and leaves Herdr's own mods and layouts unchanged.
 
-- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list.
+- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list. The captain's and each orchestrator's card shows how full that agent's context is (`144k`), as of its last turn, read from its own session file: Claude Code and pi for now, nothing for other programs.
   - The captain's card says whether its watcher is running and how many runs it watches, running and finished, and turns red with how many decisions it is waiting on you for. Its pane button pins the runs overview beside the captain, or unpins it.
   - Each orchestrator's card shows its progress, its status when it isn't running, its number of 🦀 workers and its PRs. A run that needs you turns red and says what for. Finished ones come last, with a green edge and their PR numbers.
   - Each Adrift line shows the agent's space and its name as Herdr's own Agents list gives it: the tab's name when someone named it, otherwise the agent's own title (Claude Code sets one from its session), never a bare tab number like "1". Clicking it focuses the agent.
-- **Runs overview.** The totals across runs on top (running, need you, finished, agents, tasks merged, open PRs and failing checks; "need you" counts the captain's open decisions and the runs that need you, and clicking it focuses the first of them), then **Waiting on you**, then the captain, then one card per run:
-  - its branch and repository, a status pill, the progress line, and a task bar from `plan.md` (merged, in progress, blocked);
+- **Runs overview.** The totals across runs on top (running, need you, finished, agents, tasks done, open PRs and failing checks; "need you" counts the captain's open decisions and the runs that need you, and clicking it focuses the first of them), then **Waiting on you**, then the captain, then one card per run:
+  - its branch and repository, a status pill, the progress line, and a task bar from `plan.md` (done, in progress, blocked; a task is done once it is merged into the run's integration branch);
   - every PR the run opened, with its state, checks and review decision, and below them its related links: its issues, and the PRs it is about but did not open, such as the PR a review-only run reviews (their icon takes the PR's state color; they don't count as open PRs);
   - what the run needs you for, shown first: its open question, the dialog it is blocked on, or the reason in its status;
   - and, when they apply: relayed messages the orchestrator hasn't read, agents waiting on an answer, "No pull request yet", and a note when the run's orchestrator is gone;
@@ -76,7 +76,7 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
   The results are kept in Herdr's shared state (`harbormaster.prs`), so every copy of the mod and every layout uses the same ones.
 - **Live from herdr-core:** the terminal labels `role`, `run.status`, `progress` and `run.prs`, and the `captain-watch` terminal.
 
-It writes to a run directory only when you press Park or Close: one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes.
+It writes to a run directory only when you press Park or Close: one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them.
 
 ## Parked, resumed, and closed runs
 
@@ -85,10 +85,10 @@ An orchestrator sets `finished` once its work is done, its PRs are up and their 
 Before that, you can put a run away yourself, with the card's buttons or by asking the captain:
 
 - **Park** sets an unfinished run aside for later. It writes `parked` and closes the orchestrator's tab, which ends it and its agents. The run stays in the overview under **Parked** and as a dimmed reef in the sea, but needs nothing: the captain's watcher stays quiet about it.
-- **Close** ends a run for good, finished or not. It writes `closed` (unless the run is finished) and closes the tab. The run folds away with the other closed runs.
+- **Close** ends a run for good, finished or not, and cleans up after it. It asks the orchestrator, with a message in its inbox, to do it: it ends its agents, pushes any code that isn't on the remote yet, deletes the run's worktrees whole (ignored files such as `.env`, dependencies and builds go with them), deletes the task branches whose work is on the integration branch, closes the integration worktree's space, writes `closed` (unless the run is finished), and closes its own tab. The integration branch, branches with work of their own, PRs and the run directory stay. If it can't push something, it asks you rather than delete it. When the orchestrator is gone, Close only writes `closed`; resume the run and close it again to clean up. The run folds away with the other closed runs.
 - **Resume** brings back a parked, closed, or gone run. It starts a new orchestrator of the run's kind with the resume command, in a new tab in the repository's own space, the space on its main checkout, never the integration worktree's. If that space is not open, it opens one for the repository with the orchestrator as its first tab. The orchestrator deletes the marker, restarts unfinished tasks from their worktrees, and opens the integration worktree under the repository's space again.
 
-Parking and closing leave the run directory, worktrees, branches, spaces and PRs in place. An unfinished run whose orchestrator is gone without a marker, because its tab was closed some other way or it crashed, shows as gone. The captain asks you about it, one run at a time: resume it, park it, or close it.
+Parking leaves the run directory, worktrees, branches, spaces and PRs in place; closing keeps the run directory, the branches with work and the PRs. An unfinished run whose orchestrator is gone without a marker, because its tab was closed some other way or it crashed, shows as gone. The captain asks you about it, one run at a time: resume it, park it, or close it.
 
 "Needs you" means an open question, a blocker, or a dialog, never a finished run, and the views show which.
 
@@ -101,6 +101,7 @@ Parking and closing leave the run directory, worktrees, branches, spaces and PRs
 | `herdr-app/mods/harbormaster/live.js` | Live facts from herdr-core (status, workers, captain, panes) and the focus, pin and open-link actions |
 | `herdr-app/mods/harbormaster/ui.js` | Emoji, program icons, zoom, and text formatting |
 | `herdr-app/mods/harbormaster/overview.js` | The runs overview (totals, captain, run cards) and the Crew block |
+| `herdr-app/mods/harbormaster/context.js` | Each crew agent's context size, from its session file |
 | `herdr-app/mods/harbormaster/harbor.js` | The sea, the reefs, the captain's boat, the rail and the pane headers |
 | `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, spinner, chevrons. All original, CC0 like the rest of this repository |
 | `herdr-app/layouts/harbormaster-sea.json` (+ `.svg` preview) | The sea layout. `harbormaster-main` is made by `install.sh` |

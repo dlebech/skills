@@ -66,15 +66,16 @@ A question you ask gets buried when alerts and reports follow it, so keep every 
 
 ## Park, resume, or close a run
 
-Do each only when the user asks for it, for the run they mean. Its run directory, worktrees, branches, integration space, and PRs stay in every case.
+Do each only when the user asks for it, for the run they mean. Its run directory, branches with work, and PRs stay in every case; closing deletes its worktrees.
 
-- **Park** sets an unfinished run aside for later: it stays listed, quietly. **Close** ends a run for good. For an unfinished run, say what is left (tasks, PRs, open question) and close it only if they confirm. Both write a marker, then close the orchestrator's tab if it is open, which ends the orchestrator and its agents:
+- **Park** sets an unfinished run aside for later: it stays listed, quietly. Write the marker, then close the orchestrator's tab if it is open, which ends the orchestrator and its agents:
 
   ```bash
-  (. <skill-dir>/scripts/lib.sh && mark_run <run-directory> parked)    # or closed
+  (. <skill-dir>/scripts/lib.sh && mark_run <run-directory> parked)
   ```
 
-  The tab is `tab_id` in its `orchestrator.json`, or when that is empty, the tab holding its terminal in `herdr-app ls`: `herdr-app do tab.close '{"id":"<tab-id>","confirmed":true}'`. A finished run needs no marker: closing its tab closes it.
+  The tab is `tab_id` in its `orchestrator.json`, or when that is empty, the tab holding its terminal in `herdr-app ls`: `herdr-app do tab.close '{"id":"<tab-id>","confirmed":true}'`.
+- **Close** ends a run for good, finished or not, and cleans up after it. For an unfinished run, say what is left (tasks, PRs, open question) and close it only if they confirm. With its orchestrator there, relay the close to it as in Relay instructions, with the message "The user closed this run. Clean up and close your tab, as in your skill's section 9 (Close)." It ends its agents, pushes code that isn't on the remote, deletes the run's worktrees and its integration space, writes the `closed` marker, and closes its own tab; it asks the user, through you, if something can't be pushed. Do not close its tab yourself. With its orchestrator gone, there is no one to clean up: write the marker (`mark_run <run-directory> closed`, unless the run is finished) and tell the user its worktrees stay until they resume and close it again.
 - **Resume** brings back a gone, parked, or closed run, with a new orchestrator that picks up from the run directory. Its agents ended with the old one, so it restarts unfinished tasks from their worktrees. Start it as in Start a run, steps 3 to 6, with these differences:
   - the repository is the `folder` in its `orchestrator.json`, the repository's own checkout (or the folder holding several); use its `primary` (or `folder`) space, never the integration worktree's space; with none open, the `sp-<name>` id makes Herdr open the repository's space with the orchestrator as its first tab, and the orchestrator then opens the integration worktree under it;
   - the prompt is the resume command: `/herdr-app-orchestrator <run-directory>/spec.md` for Claude Code, `/skill:herdr-app-orchestrator <run-directory>/spec.md` for `pi`;
@@ -112,19 +113,20 @@ hc run --bg --no-notify --name captain-watch --cwd "$HOME" <skill-dir>/scripts/w
 
 Then wait for it with `<skill-dir>/scripts/wait-watch.sh` as a background job that wakes you when it ends (for Claude Code, a background Bash command; not Monitor). Keep one such wait running per watcher. Do not let hc tell you instead: hc types its exit note into your input and presses Enter, and your input is where the user types to you, so a note arriving mid-sentence sends their half-written message with the note stuck on. Only if your harness has no background job that wakes you, start the watcher without `--no-notify` and wait for its note (`<hc>... captain-watch exited ...</hc>`).
 
-The watcher ends with you. It exits as soon as a run newly needs the user, printing one line per event:
+The watcher ends with you. It exits as soon as a run newly needs the user, or a question it reported is no longer open, printing one line per event:
 
 ```
 attention <branch> <reason>	<run-directory>
+cleared <branch> <reason>	<run-directory>
 ```
 
-Its header lists the reasons. It reports each event once, and remembers across restarts, so restart it freely.
+Its header lists the reasons. `cleared` means a question or dialog it reported earlier is gone, usually because the user answered it in the orchestrator's tab. A run that has a new event of its own instead, such as finished or orchestrator gone, gets only that event. It reports each event once, and remembers across restarts, so restart it freely.
 
 When the wait ends:
 
 1. Read its output with `hc read --lines 50 captain-watch`, then remove it with `hc rm captain-watch`.
 2. Look at each run it names, as in Report, so the alert says what is needed and not only that something is.
-3. Tell the user in a few lines, needs-you first. Ending your turn marks your tab, and the app plays its sound and shows a toast if they are looking elsewhere.
+3. Tell the user in a few lines, needs-you first. For a `cleared` run, say in one line that its question was answered and what it is doing now, from `decisions.md` or `plan.md`, so your earlier "needs you" does not stand; if you had already relayed that answer yourself, the line is enough, without a report. Ending your turn marks your tab, and the app plays its sound and shows a toast if they are looking elsewhere.
 4. Start the watcher and its wait again, every time, without asking, even when every run has finished. New runs need it, and stopping is the user's call.
 
 If starting it fails with `name_taken`, a watcher is already running. If it is your child (`parent` in `hc get captain-watch`), make sure a wait for it is running, then carry on. If not, another captain is watching: tell the user, keep answering questions and relaying here, and do not retry. If the wait ends nonzero, the watcher failed (for example, `hc` stopped answering) or is gone (3); the JSON it printed says which. Say so and restart the watcher and its wait once; if it fails again, stop watching and tell the user. It picks up new runs by itself, so keep it running with no unfinished runs, and stop only when the user says so.

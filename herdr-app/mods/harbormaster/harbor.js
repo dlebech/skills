@@ -7,7 +7,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { spaces, panes, run, setAgentOrder } from "herdr";
 import { stats, taskTone, taskCounts, prsOf, PR_TONE, isParked, resumeRun } from "./data.js";
 import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, needReason, adrift, agentNames, focusAgent, openUrl } from "./live.js";
-import { CAPTAIN, OCTOPUS, programIcon, zoom, plural } from "./ui.js";
+import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, stateText } from "./ui.js";
 
 const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
 // PR_TONE's tones as signal-flag colors.
@@ -88,20 +88,20 @@ function reef(view, r, ctx, x, y, w, h, n) {
     .bg(need ? "#f6c28b" : rope).border(3).border_color(need ? "#c1562c" : "#a07a3f").text_color("#4a3418").opacity(docked ? 0.8 : 1)
     .child(div().truncate().text_size(13).font_weight(800).child(`${OCTOPUS} ${r.branch}`))
     .child(div().truncate().text_size(10.5).font_weight(600).child(`${r.repo}${r.machine ? ` · ${r.machine}` : ""} · ${parked ? "PARKED · CLICK TO RESUME" : need ? "NEEDS YOU" : docked ? "FINISHED · PR UP" : orch === "gone" ? "GONE · CLICK TO RESUME" : r.phase.toUpperCase()}`));
-  // Buoys on a line along the bottom of the reef: one per task, lit as it merges.
+  // Buoys on a line along the bottom of the reef: one per task, lit as it is done (merged into the run's branch).
   const buoys = h_flex().absolute().left(14).bottom(8).gap(8).items_end()
     .children(Array.from({ length: planned }, (_, i) => {
       const task = r.tasks[i];
       const st = task?.state ?? (i < merged ? "merged" : "planned");
       const tone = taskTone(st);
       const c = tone === "done" ? "#3fa66b" : tone === "blocked" ? "#e2553f" : tone ? brass : "#c9cfd4";
-      return v_flex().id(`buoy-${r.key}-${i}`).items_center().tooltip(task ? `${task.id} ${task.name}: ${task.state}` : `task ${i + 1}: ${st}`)
+      return v_flex().id(`buoy-${r.key}-${i}`).items_center().tooltip(task ? `${task.id} ${task.name}: ${stateText(task.state)}` : `task ${i + 1}: ${stateText(st)}`)
         .child(div().w(14).h(16).rounded_t(7).rounded_b(3).bg(c).border(1.5).border_color(deepNavy)
           .child(div().mt(5).h(3).bg(sail))
           .when(tone === "working" || tone === "blocked", (el) => el.loop("opacity", { from: 0.45, to: 1, period: 1300 })))
         .child(div().w(2).h(14).bg(deepNavy));
     }))
-    .when(planned > 0, (el) => el.child(div().pl(4).pb(1).px(5).rounded(4).bg("#173450aa").text_size(10.5).font_weight(700).text_color(sail).child(`${merged}/${planned} merged`)));
+    .when(planned > 0, (el) => el.child(div().pl(4).pb(1).px(5).rounded(4).bg("#173450aa").text_size(10.5).font_weight(700).text_color(sail).child(`${merged}/${planned} done`)));
   const flags = h_flex().absolute().right(12).top(8).gap(6)
     .children(prs.map((p, i) => {
       const c = FLAG[PR_TONE[p.state] ?? "dim"];
