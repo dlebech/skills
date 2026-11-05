@@ -2,7 +2,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, runPhase, taskTone, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun } from "./data.js";
+import { stats, runPhase, taskTone, stateText, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun } from "./data.js";
 import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, openUrl, replyToCaptain } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef } from "./ui.js";
 import { tokenText } from "./context.js";
@@ -79,7 +79,7 @@ function taskStrip(t, r, counts) {
       .children(r.tasks.map((task) => h_flex().gap(4).items_center()
         .child(div().size(6).rounded(3).bg(t[taskTone(task.state)] ?? t.border))
         .child(div().text_color(task.state === "merged" ? t.dim : t.muted).child(`${task.id} ${task.name}`))
-        .child(div().text_color(t.dim).child(task.state))))));
+        .child(div().text_color(t.dim).child(stateText(task.state)))))));
 }
 
 // What a card offers: Park and Close while its orchestrator runs (Close alone once
@@ -98,7 +98,7 @@ const ACTION = {
 
 // The question a card asks before acting, naming what is left.
 function confirmText(r, action, counts) {
-  const left = [counts.planned ? `${counts.merged} of ${counts.planned} tasks merged` : null,
+  const left = [counts.planned ? `${counts.merged} of ${counts.planned} tasks done` : null,
     r.prs.length ? plural(r.prs.length, "PR") + " stay open" : null].filter(Boolean).join(", ");
   if (action === "park") return `Park ${r.branch}? Its orchestrator and agents end; the run waits here until you resume it.${left ? ` ${left}.` : ""}`;
   if (action === "close") return r.phase === "finished" ? `Close ${r.branch}? Its PRs stay up.`
@@ -311,7 +311,7 @@ function totals(t, s, decisions, ctx) {
     .child(stat("t-need", needCount, "need you", needCount ? "blocked" : null, firstNeed ? () => focusAgent(firstNeed) : null))
     .when(s.docked.length > 0, (el) => el.child(stat("t-done", s.docked.length, "finished", "done")))
     .child(stat("t-agents", s.workers, s.workers === 1 ? "agent" : "agents", s.workers ? "working" : null))
-    .when(s.planned > 0, (el) => el.child(stat("t-tasks", `${s.merged}/${s.planned}`, "tasks merged", null)))
+    .when(s.planned > 0, (el) => el.child(stat("t-tasks", `${s.merged}/${s.planned}`, "tasks done", null)))
     .child(stat("t-prs", s.open.length, s.failing ? `open PRs · ${s.failing} failing` : s.open.length === 1 ? "open PR" : "open PRs", s.failing ? "blocked" : s.open.length ? "done" : null));
 }
 
