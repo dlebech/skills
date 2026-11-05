@@ -112,14 +112,14 @@ hc run --bg --no-notify --name captain-watch --cwd "$HOME" <skill-dir>/scripts/w
 
 Then wait for it with `<skill-dir>/scripts/wait-watch.sh` as a background job that wakes you when it ends (for Claude Code, a background Bash command; not Monitor). Keep one such wait running per watcher. Do not let hc tell you instead: hc types its exit note into your input and presses Enter, and your input is where the user types to you, so a note arriving mid-sentence sends their half-written message with the note stuck on. Only if your harness has no background job that wakes you, start the watcher without `--no-notify` and wait for its note (`<hc>... captain-watch exited ...</hc>`).
 
-The watcher ends with you. It exits as soon as a run newly needs the user, printing one line per event:
+The watcher ends with you. It exits as soon as a run newly needs the user, or a question it reported is no longer open, printing one line per event:
 
 ```
 attention <branch> <reason>	<run-directory>
 cleared <branch> <reason>	<run-directory>
 ```
 
-Its header lists the reasons. `cleared` means a question or dialog it reported earlier is gone, usually because the user answered it in the orchestrator's tab. It reports each event once, and remembers across restarts, so restart it freely.
+Its header lists the reasons. `cleared` means a question or dialog it reported earlier is gone, usually because the user answered it in the orchestrator's tab. A run that has a new event of its own instead, such as finished or orchestrator gone, gets only that event. It reports each event once, and remembers across restarts, so restart it freely.
 
 When the wait ends:
 

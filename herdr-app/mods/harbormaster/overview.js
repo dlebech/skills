@@ -2,9 +2,9 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, runPhase, taskTone, stateText, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun } from "./data.js";
-import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, openUrl, replyToCaptain } from "./live.js";
-import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef } from "./ui.js";
+import { stats, runPhase, taskTone, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun } from "./data.js";
+import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, openUrl, replyToCaptain } from "./live.js";
+import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText } from "./ui.js";
 import { tokenText } from "./context.js";
 
 // How each runPhase() reads on a card.
@@ -24,13 +24,14 @@ function pill(t, text, tone, solid = false) {
     .bg(solid ? c : c + "22").text_size(10.5).font_semibold().text_color(solid ? t.background : c).child(text);
 }
 
-// How full an agent's context is, "144k", with the exact count on hover; nothing when unknown.
-function contextBadge(view, t, id, address) {
+// Adds how full an agent's context is, "144k", with the exact count on hover; nothing
+// when unknown. For .map() on the row it goes in.
+const withContext = (view, t, id, address) => (el) => {
   const c = view.contexts?.[address];
-  if (!c) return null;
-  return div().id(`${id}-ctx`).flex_none().text_size(10.5).text_color(t.dim).child(tokenText(c.tokens))
-    .tooltip(`Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`);
-}
+  if (!c) return el;
+  return el.child(div().id(`${id}-ctx`).flex_none().text_size(10.5).text_color(t.dim).child(tokenText(c.tokens))
+    .tooltip(`Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`));
+};
 
 function statusDot(t, status) {
   if (status === "working") return svg("mods/harbormaster/spinner.svg").size(11).flex_none().text_color(t.working).spin(900);
@@ -168,7 +169,7 @@ function card(view, t, r, ctx, compact = false) {
           .child(div().truncate().font_semibold().text_size(13.5).text_color(t.foreground).child(r.branch))
           .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
         .child(div().truncate().text_size(11.5).text_color(t.dim).child(meta)))
-      .when(Boolean(view.contexts?.[r.terminal]), (el) => el.child(contextBadge(view, t, `run-${r.key}`, r.terminal)))
+      .map(withContext(view, t, `run-${r.key}`, r.terminal))
       .child(statusDot(t, orch))
       .child(pill(t, badge.label, need ? "blocked" : badge.tone, need)))
     .when(need, (el) => el.child(h_flex().gap(8).p(8).rounded(7).bg(t.blocked + "1c").items_start()
@@ -224,7 +225,7 @@ function captainStrip(view, t, ctx, s) {
       .child(div().text_size(11.5).text_color(cap.watching ? t.muted : t.blocked)
         .child(cap.watching ? `Watching ${watched}` : "Watcher is not running — ask the captain to watch")))
     .child(pinButton(t, ctx, true))
-    .when(Boolean(view.contexts?.[cap.terminal.address]), (el) => el.child(contextBadge(view, t, "captain", cap.terminal.address)))
+    .map(withContext(view, t, "captain", cap.terminal.address))
     .child(statusDot(t, agentStatus(cap.terminal, ctx)));
 }
 
@@ -357,7 +358,7 @@ export function crew(view, t) {
   // The focused agent, as Herdr's own Agents list marks it.
   const current = ctx.agents.find((a) => a.focused)?.address;
   // Unfinished orchestrators first, then finished ones still open.
-  const orchestrators = ctx.terminals.filter((term) => term.state === "live" && term.labels?.role === "orchestrator")
+  const orchestrators = orchestratorsOf(ctx)
     .map((term) => ({ term, r: runOf(term) }))
     .map((o) => ({ ...o, state: o.r?.phase ?? runPhase(o.term.labels?.["run.status"]) }))
     .sort((a, b) => (a.state === "finished") - (b.state === "finished"));
@@ -371,7 +372,7 @@ export function crew(view, t) {
       .child(div().truncate().text_size(12.5).font_semibold().text_color(t.foreground).child(title))
       .child(div().truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail)))
     .when(pin, (el) => el.child(pinButton(t, ctx)))
-    .when(Boolean(view.contexts?.[address]), (el) => el.child(contextBadge(view, t, id, address)))
+    .map(withContext(view, t, id, address))
     .child(statusDot(t, status));
   const rows = [];
   if (cap.terminal) {

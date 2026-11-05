@@ -58,6 +58,12 @@ export function agentNames(list, scope = () => "") {
   return list.map((a, i) => (count.get(key(a, i)) > 1 && a.tab_name && a.tab_name !== names[i] ? `${names[i]} · ${a.tab_name}` : names[i]));
 }
 
+// The live orchestrators' terminals, as the Crew block lists them.
+export const orchestratorsOf = (ctx) => ctx.terminals.filter((t) => t.state === "live" && t.labels?.role === "orchestrator");
+
+// The addresses whose context size the crew and the overview show: the captain and the orchestrators.
+export const crewAddresses = (ctx) => [captainOf(ctx).terminal?.address, ...orchestratorsOf(ctx).map((t) => t.address)].filter(Boolean);
+
 export function captainOf(ctx) {
   const live = ctx.terminals.filter((t) => t.state === "live");
   const terminal = live.find((t) => t.labels?.role === "captain") ?? null;

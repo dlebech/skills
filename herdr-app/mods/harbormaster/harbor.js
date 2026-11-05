@@ -5,9 +5,9 @@
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, panes, run, setAgentOrder } from "herdr";
-import { stats, taskTone, stateText, taskCounts, prsOf, PR_TONE, isParked, resumeRun } from "./data.js";
+import { stats, taskTone, taskCounts, prsOf, PR_TONE, isParked, resumeRun } from "./data.js";
 import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, needReason, adrift, agentNames, focusAgent, openUrl } from "./live.js";
-import { CAPTAIN, OCTOPUS, programIcon, zoom, plural } from "./ui.js";
+import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, stateText } from "./ui.js";
 
 const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
 // PR_TONE's tones as signal-flag colors.
