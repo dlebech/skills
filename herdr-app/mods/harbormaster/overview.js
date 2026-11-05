@@ -93,7 +93,7 @@ function actionsOf(r, orch, closed) {
 
 const ACTION = {
   park: { label: "Park", tip: "Set this run aside: closes its orchestrator's tab; resume it any time" },
-  close: { label: "Close", tip: "Close this run for good: closes its orchestrator's tab and removes its worktrees that hold nothing unsaved; it can still be resumed" },
+  close: { label: "Close", tip: "Close this run for good: its orchestrator ends its agents, deletes the run's worktrees once their code is pushed, and closes its tab; it can still be resumed" },
   resume: { label: "Resume", tip: "Start a new orchestrator that picks this run up where it stopped" },
 };
 
@@ -102,9 +102,9 @@ function confirmText(r, action, counts) {
   const left = [counts.planned ? `${counts.merged} of ${counts.planned} tasks done` : null,
     r.prs.length ? plural(r.prs.length, "PR") + " stay open" : null].filter(Boolean).join(", ");
   if (action === "park") return `Park ${r.branch}? Its orchestrator and agents end; the run waits here until you resume it.${left ? ` ${left}.` : ""}`;
-  const tidy = "Worktrees whose work is pushed or merged go, with the integration space; any other stays.";
-  if (action === "close") return r.phase === "finished" ? `Close ${r.branch}? Its PRs stay up. ${tidy}`
-    : `Close ${r.branch} for good, unfinished?${left ? ` ${left}.` : ""} ${tidy}`;
+  const clean = "Its orchestrator pushes what isn't pushed, deletes the worktrees and closes its tab; branches and PRs stay.";
+  if (action === "close") return r.phase === "finished" ? `Close ${r.branch}? ${clean}`
+    : `Close ${r.branch} for good, unfinished?${left ? ` ${left}.` : ""} ${clean}`;
   return `Resume ${r.branch}? A new orchestrator starts in ${r.repo}${r.machine ? ` on ${r.machine}` : ""}, restarting unfinished tasks.`;
 }
 
@@ -127,7 +127,7 @@ function actionRow(view, t, r, orch, closed, counts) {
       set(cx, null);
       if (asking === "resume") resumeRun(r);
       else putAway(r, asking === "park" ? "parked" : "closed", orch)
-        .then((kept) => { if (kept.length) { view.actionNote = `${r.branch} closed; ${kept.map((k) => (k.startsWith("saved ") ? k : `kept ${k}`)).join("; ")}`; cx.notify(); } })
+        .then((note) => { if (note) { view.actionNote = `${r.branch}: ${note}`; cx.notify(); } })
         .catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
     };
     return v_flex().gap(6).p(8).rounded(7).bg(t.raised)

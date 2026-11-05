@@ -66,16 +66,16 @@ A question you ask gets buried when alerts and reports follow it, so keep every 
 
 ## Park, resume, or close a run
 
-Do each only when the user asks for it, for the run they mean. Its run directory, branches with work, and PRs stay in every case; closing tidies the rest.
+Do each only when the user asks for it, for the run they mean. Its run directory, branches with work, and PRs stay in every case; closing deletes its worktrees.
 
-- **Park** sets an unfinished run aside for later: it stays listed, quietly. **Close** ends a run for good. For an unfinished run, say what is left (tasks, PRs, open question) and close it only if they confirm. Both write a marker, then close the orchestrator's tab if it is open, which ends the orchestrator and its agents:
+- **Park** sets an unfinished run aside for later: it stays listed, quietly. Write the marker, then close the orchestrator's tab if it is open, which ends the orchestrator and its agents:
 
   ```bash
-  (. <skill-dir>/scripts/lib.sh && mark_run <run-directory> parked)    # or closed
+  (. <skill-dir>/scripts/lib.sh && mark_run <run-directory> parked)
   ```
 
-  The tab is `tab_id` in its `orchestrator.json`, or when that is empty, the tab holding its terminal in `herdr-app ls`: `herdr-app do tab.close '{"id":"<tab-id>","confirmed":true}'`. A finished run needs no marker: closing its tab closes it.
-- After a **close**, tidy the run's worktrees with `<skill-dir>/scripts/tidy-run.sh <run-directory>`. It removes only what holds nothing found elsewhere: the integration worktree once a remote branch has its every commit, task worktrees whose work is merged or squashed into the integration branch, and such task branches; it keeps anything with uncommitted, unpushed or unmerged work, and moves ignored files that can't be rebuilt, such as `.env`, to `saved/` in the run directory first. For each `removed integration` worktree, close its space, the one `herdr-app ls` shows on that folder: `herdr-app do space.close '{"id":"<space-id>","confirmed":true}'`. Tell the user in a line what it kept and why, and what it saved where. Harbormaster's Close does the same by itself.
+  The tab is `tab_id` in its `orchestrator.json`, or when that is empty, the tab holding its terminal in `herdr-app ls`: `herdr-app do tab.close '{"id":"<tab-id>","confirmed":true}'`.
+- **Close** ends a run for good, finished or not, and cleans up after it. For an unfinished run, say what is left (tasks, PRs, open question) and close it only if they confirm. With its orchestrator there, relay the close to it as in Relay instructions, with the message "The user closed this run. Clean up and close your tab, as in your skill's section 9 (Close)." It ends its agents, pushes code that isn't on the remote, deletes the run's worktrees and its integration space, writes the `closed` marker, and closes its own tab; it asks the user, through you, if something can't be pushed. Do not close its tab yourself. With its orchestrator gone, there is no one to clean up: write the marker (`mark_run <run-directory> closed`, unless the run is finished) and tell the user its worktrees stay until they resume and close it again.
 - **Resume** brings back a gone, parked, or closed run, with a new orchestrator that picks up from the run directory. Its agents ended with the old one, so it restarts unfinished tasks from their worktrees. Start it as in Start a run, steps 3 to 6, with these differences:
   - the repository is the `folder` in its `orchestrator.json`, the repository's own checkout (or the folder holding several); use its `primary` (or `folder`) space, never the integration worktree's space; with none open, the `sp-<name>` id makes Herdr open the repository's space with the orchestrator as its first tab, and the orchestrator then opens the integration worktree under it;
   - the prompt is the resume command: `/herdr-app-orchestrator <run-directory>/spec.md` for Claude Code, `/skill:herdr-app-orchestrator <run-directory>/spec.md` for `pi`;

@@ -116,17 +116,13 @@ export function tabOf(run) {
 // Where the run's repository is open: the space on the run's machine whose first tab's
 // first pane is in its folder, the repository's own checkout (never the integration
 // worktree's space). The space's creation folder counts only when no pane reports one.
-export const homeSpace = (run) => spaceOn(run.folder, run.machine);
-
-// The space on that machine open on that folder, by the same rule: the sidebar's and
-// the worktree mod's. Null when there is none.
-export function spaceOn(folder, machine) {
+export function homeSpace(run) {
   const ps = panes();
   return spaces().find((s) => {
-    if ((s.machine ?? null) !== (machine ?? null)) return false;
+    if ((s.machine ?? null) !== (run.machine ?? null)) return false;
     const first = s.tabs?.[0]?.id;
     const cwd = first ? ps.find((p) => p.tab === first)?.cwd : null;
-    return (cwd || s.folder) === folder;
+    return (cwd || s.folder) === run.folder;
   }) ?? null;
 }
 
