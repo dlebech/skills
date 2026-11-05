@@ -5,6 +5,7 @@ import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, runPhase, taskTone, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun } from "./data.js";
 import { facts, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, openUrl, replyToCaptain } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef } from "./ui.js";
+import { tokenText } from "./context.js";
 
 // How each runPhase() reads on a card.
 const PHASE = {
@@ -21,6 +22,14 @@ function pill(t, text, tone, solid = false) {
   const c = t[tone] ?? t.dim;
   return div().flex_none().px(7).h(18).rounded(9).flex().items_center()
     .bg(solid ? c : c + "22").text_size(10.5).font_semibold().text_color(solid ? t.background : c).child(text);
+}
+
+// How full an agent's context is, "144k", with the exact count on hover; nothing when unknown.
+function contextBadge(view, t, id, address) {
+  const c = view.contexts?.[address];
+  if (!c) return null;
+  return div().id(`${id}-ctx`).flex_none().text_size(10.5).text_color(t.dim).child(tokenText(c.tokens))
+    .tooltip(`Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`);
 }
 
 function statusDot(t, status) {
@@ -159,6 +168,7 @@ function card(view, t, r, ctx, compact = false) {
           .child(div().truncate().font_semibold().text_size(13.5).text_color(t.foreground).child(r.branch))
           .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
         .child(div().truncate().text_size(11.5).text_color(t.dim).child(meta)))
+      .when(Boolean(view.contexts?.[r.terminal]), (el) => el.child(contextBadge(view, t, `run-${r.key}`, r.terminal)))
       .child(statusDot(t, orch))
       .child(pill(t, badge.label, need ? "blocked" : badge.tone, need)))
     .when(need, (el) => el.child(h_flex().gap(8).p(8).rounded(7).bg(t.blocked + "1c").items_start()
@@ -200,7 +210,7 @@ function pinButton(t, ctx, labelled = false) {
 // What the captain watches, from stats(): "2 runs, 1 finished".
 const watchedText = (s) => [plural(s.live.length, "run"), s.docked.length ? `${s.docked.length} finished` : null].filter(Boolean).join(", ");
 
-function captainStrip(t, ctx, s) {
+function captainStrip(view, t, ctx, s) {
   const watched = watchedText(s);
   const cap = captainOf(ctx);
   if (!cap.terminal) return h_flex().flex_none().gap(8).p(10).rounded(10).border(1).border_color(t.border).text_size(12).text_color(t.dim)
@@ -214,6 +224,7 @@ function captainStrip(t, ctx, s) {
       .child(div().text_size(11.5).text_color(cap.watching ? t.muted : t.blocked)
         .child(cap.watching ? `Watching ${watched}` : "Watcher is not running — ask the captain to watch")))
     .child(pinButton(t, ctx, true))
+    .when(Boolean(view.contexts?.[cap.terminal.address]), (el) => el.child(contextBadge(view, t, "captain", cap.terminal.address)))
     .child(statusDot(t, agentStatus(cap.terminal, ctx)));
 }
 
@@ -320,7 +331,7 @@ export function cards(view, t, runs, errors, decisions = []) {
       .child(totals(t, s, decisions, ctx)))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
       .when(Boolean(waiting), (el) => el.child(waiting))
-      .child(captainStrip(t, ctx, s))
+      .child(captainStrip(view, t, ctx, s))
       .when(s.shown.length === 0, (el) => el.child(div().p(12).text_size(12).text_color(t.dim).child("No runs in progress. Ask the captain to start one, e.g. “start issue 185 in my-app”.")))
       .children(live.map((r) => card(view, t, r, ctx, narrow)))
       .children(s.docked.map((r) => card(view, t, r, ctx, true)))
@@ -360,6 +371,7 @@ export function crew(view, t) {
       .child(div().truncate().text_size(12.5).font_semibold().text_color(t.foreground).child(title))
       .child(div().truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail)))
     .when(pin, (el) => el.child(pinButton(t, ctx)))
+    .when(Boolean(view.contexts?.[address]), (el) => el.child(contextBadge(view, t, id, address)))
     .child(statusDot(t, status));
   const rows = [];
   if (cap.terminal) {

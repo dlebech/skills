@@ -10,11 +10,14 @@
 # captain reads its output and starts it again. Prints one line per new event, then
 # exits:
 #   attention <branch> <reason>    <run-directory>
+#   cleared <branch> <reason>      <run-directory>
 # Reasons: the plan's "waiting for user" or "blocked" status, finished, the
 # orchestrator terminal gone or blocked on a dialog, or the orchestrator idle for two
 # minutes while its plan is unfinished. Parked and closed runs (their markers) raise
-# nothing. An event is reported once; it can fire again after it clears. Exits 1 if
-# hc stops answering.
+# nothing. An event is reported once; it can fire again after it clears. A reported
+# "waiting for user", "blocked" or dialog event that clears is reported as cleared,
+# since the user may have answered it in the orchestrator's tab. Exits 1 if hc stops
+# answering.
 #
 # It checks at once whenever an orchestrator's terminal changes (hc events on the
 # role=orchestrator label: status, labels such as set-status.sh's run.status,
@@ -110,6 +113,19 @@ while :; do
   for line in ${current[@]+"${current[@]}"}; do
     grep -qxF -- "$line" "$seen_file" || new+=("$line")
   done
+  # A question or dialog reported earlier that is gone now, typically answered in the
+  # orchestrator's own tab, so the captain can say it no longer needs the user.
+  # Parked and closed runs drop out of current too; those are not answers.
+  while IFS= read -r line; do
+    case $line in
+      "attention "*" waiting for user"* | "attention "*" blocked"* | "attention "*" orchestrator blocked on a dialog"*) ;;
+      *) continue ;;
+    esac
+    printf '%s\n' ${current[@]+"${current[@]}"} | grep -qxF -- "$line" && continue
+    dir=${line##*	}
+    [ -d "$dir" ] && [ -z "$(run_marker "$dir")" ] || continue
+    new+=("cleared ${line#attention }")
+  done <"$seen_file"
   printf '%s\n' ${current[@]+"${current[@]}"} | sed '/^$/d' >"$seen_file"
   if [ ${#new[@]} -gt 0 ]; then
     printf '%s\n' "${new[@]}"

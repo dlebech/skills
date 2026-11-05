@@ -3,13 +3,15 @@
 //   (none) / "cards"  the runs overview: totals, what's waiting on you, the captain, run cards with progress, tasks, PRs
 //   "crew"            the captain, orchestrators and agents adrift, above Herdr's own Agents list
 //   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
-// Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute.
+// Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute;
+// the crew and the overview also read each crew agent's context size (context.js).
 
 import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
 import { props, theme } from "herdr";
 import { loadRuns, cachedRuns, refreshPrs, isClosed } from "./data.js";
-import { facts } from "./live.js";
+import { facts, captainOf } from "./live.js";
+import { loadContexts } from "./context.js";
 import { cards, crew, submitReply } from "./overview.js";
 import { harbor, rail, paneHeader } from "./harbor.js";
 
@@ -23,6 +25,7 @@ export default class Harbormaster extends View {
     this.errors = [];
     this.step = 0;
     this.showDone = false;
+    this.contexts = {}; // { [address]: { tokens, model } } for the crew
     this.replying = null; // the key of the decision being answered inline
     this.reply = InputState.new({ placeholder: "Your answer…" });
     this.reply.on("submit", (_e, cx) => submitReply(this, cx));
@@ -42,6 +45,14 @@ export default class Harbormaster extends View {
       this.decisions = decisions;
       this.errors = errors;
       if (changed) cx.notify();
+      // The crew and the overview show each crew agent's context size; the harbor does not.
+      if (props()?.role !== "harbor") {
+        const ctx = facts();
+        const crew = [captainOf(ctx).terminal?.address,
+          ...ctx.terminals.filter((t) => t.state === "live" && t.labels?.role === "orchestrator").map((t) => t.address)].filter(Boolean);
+        const contexts = await loadContexts(crew);
+        if (JSON.stringify(contexts) !== JSON.stringify(this.contexts)) { this.contexts = contexts; cx.notify(); }
+      }
       // PRs land in shared state, which re-renders every copy by itself.
       const ctx = facts();
       for (const r of runs) await refreshPrs(r, isClosed(r, ctx)).catch(() => {});

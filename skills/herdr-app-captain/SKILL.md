@@ -116,15 +116,16 @@ The watcher ends with you. It exits as soon as a run newly needs the user, print
 
 ```
 attention <branch> <reason>	<run-directory>
+cleared <branch> <reason>	<run-directory>
 ```
 
-Its header lists the reasons. It reports each event once, and remembers across restarts, so restart it freely.
+Its header lists the reasons. `cleared` means a question or dialog it reported earlier is gone, usually because the user answered it in the orchestrator's tab. It reports each event once, and remembers across restarts, so restart it freely.
 
 When the wait ends:
 
 1. Read its output with `hc read --lines 50 captain-watch`, then remove it with `hc rm captain-watch`.
 2. Look at each run it names, as in Report, so the alert says what is needed and not only that something is.
-3. Tell the user in a few lines, needs-you first. Ending your turn marks your tab, and the app plays its sound and shows a toast if they are looking elsewhere.
+3. Tell the user in a few lines, needs-you first. For a `cleared` run, say in one line that its question was answered and what it is doing now, from `decisions.md` or `plan.md`, so your earlier "needs you" does not stand; if you had already relayed that answer yourself, the line is enough, without a report. Ending your turn marks your tab, and the app plays its sound and shows a toast if they are looking elsewhere.
 4. Start the watcher and its wait again, every time, without asking, even when every run has finished. New runs need it, and stopping is the user's call.
 
 If starting it fails with `name_taken`, a watcher is already running. If it is your child (`parent` in `hc get captain-watch`), make sure a wait for it is running, then carry on. If not, another captain is watching: tell the user, keep answering questions and relaying here, and do not retry. If the wait ends nonzero, the watcher failed (for example, `hc` stopped answering) or is gone (3); the JSON it printed says which. Say so and restart the watcher and its wait once; if it fails again, stop watching and tell the user. It picks up new runs by itself, so keep it running with no unfinished runs, and stop only when the user says so.

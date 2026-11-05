@@ -26,7 +26,7 @@
 #   4. decisions.sh adds, rewords and removes the captain's open decisions;
 #      repo-spaces.sh finds the space;
 #   5. watch-runs.sh, in its own terminal, is waited for by wait-watch.sh, and
-#      reports an event once: waiting for user, finished, orchestrator gone; with
+#      reports an event once: waiting for user, its clearing, finished, orchestrator gone; with
 #      a 10-minute interval, so only hc events can wake it for finished;
 #   6. a second watcher is refused by name;
 #   7. a run started in a folder holding two repositories: init-run.sh names it
@@ -220,6 +220,13 @@ contains "primary" "$out" primary
 echo "== watcher"
 out=$(watch_once)
 contains "waiting for user" "$out" "attention feature/x waiting for user: which db?"
+# Answered in the orchestrator's own tab: the question clears, and the watcher says so.
+"$orch/set-status.sh" "$dir" running
+out=$(watch_once)
+contains "answered elsewhere" "$out" "cleared feature/x waiting for user: which db?"
+"$orch/set-status.sh" "$dir" "waiting for user: which db?"
+out=$(watch_once)
+contains "asked again" "$out" "attention feature/x waiting for user: which db?"
 start_watcher 600
 hc wait "$watch" --output nothing --timeout 3 >/dev/null 2>&1
 check "reported once" "$(hc get "$watch" --json | jq -r .state)" live

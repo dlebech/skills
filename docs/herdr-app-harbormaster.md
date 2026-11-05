@@ -2,7 +2,7 @@
 
 Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-captain` and its `herdr-app-orchestrator` runs are doing, so you don't have to read the Agents list row by row. Everything in it is written from scratch: it uses Herdr's mod API and leaves Herdr's own mods and layouts unchanged.
 
-- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list.
+- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list. Each card shows how full that agent's context is (`144k`), as of its last turn, read from its own session file: Claude Code and pi for now, nothing for other programs.
   - The captain's card says whether its watcher is running and how many runs it watches, running and finished, and turns red with how many decisions it is waiting on you for. Its pane button pins the runs overview beside the captain, or unpins it.
   - Each orchestrator's card shows its progress, its status when it isn't running, its number of 🦀 workers and its PRs. A run that needs you turns red and says what for. Finished ones come last, with a green edge and their PR numbers.
   - Each Adrift line shows the agent's space and its name as Herdr's own Agents list gives it: the tab's name when someone named it, otherwise the agent's own title (Claude Code sets one from its session), never a bare tab number like "1". Clicking it focuses the agent.
@@ -101,6 +101,7 @@ Parking and closing leave the run directory, worktrees, branches, spaces and PRs
 | `herdr-app/mods/harbormaster/live.js` | Live facts from herdr-core (status, workers, captain, panes) and the focus, pin and open-link actions |
 | `herdr-app/mods/harbormaster/ui.js` | Emoji, program icons, zoom, and text formatting |
 | `herdr-app/mods/harbormaster/overview.js` | The runs overview (totals, captain, run cards) and the Crew block |
+| `herdr-app/mods/harbormaster/context.js` | Each crew agent's context size, from its session file |
 | `herdr-app/mods/harbormaster/harbor.js` | The sea, the reefs, the captain's boat, the rail and the pane headers |
 | `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, spinner, chevrons. All original, CC0 like the rest of this repository |
 | `herdr-app/layouts/harbormaster-sea.json` (+ `.svg` preview) | The sea layout. `harbormaster-main` is made by `install.sh` |
