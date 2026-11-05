@@ -11,7 +11,7 @@ Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-capta
   - every PR the run opened, with its state, checks and review decision, and below them its related links: its issues, and the PRs it is about but did not open, such as the PR a review-only run reviews (their icon takes the PR's state color; they don't count as open PRs);
   - what the run needs you for, shown first: its open question, the dialog it is blocked on, or the reason in its status;
   - and, when they apply: relayed messages the orchestrator hasn't read, agents waiting on an answer, "No pull request yet", and a note when the run's orchestrator is gone;
-  - buttons to **Park**, **Resume**, or **Close** the run (see Parked, resumed, and closed runs). Each asks on the card first, naming what is left.
+  - buttons to **Park**, **Resume**, **Close**, or, once closed, **Delete** the run (see Parked, resumed, and closed runs). Each asks on the card first, naming what is left.
 
   **Waiting on you** lists everything you have yet to decide, so a question doesn't get lost when alerts and reports pile up after it: first each decision the captain asked you and is still waiting on, oldest first, with its run and how long it has waited, then each run that needs you, with its question, dialog or reason. The captain records its own decisions with `decisions.sh` and removes them when you answer; a run's question goes away when its orchestrator gets the answer. Clicking a decision focuses the captain, a run its orchestrator. **Reply** on a decision opens a text box under it: Enter types your answer into the captain's input as `Re decision "<id>" (<question>): <answer>` and shows the captain, so you needn't say which decision you mean. The list is hidden while nothing is waiting.
 
@@ -76,7 +76,7 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
   The results are kept in Herdr's shared state (`harbormaster.prs`), so every copy of the mod and every layout uses the same ones.
 - **Live from herdr-core:** the terminal labels `role`, `run.status`, `progress` and `run.prs`, and the `captain-watch` terminal.
 
-It writes to a run directory only when you press Park or Close: one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them.
+It writes to a run directory only when you press Park, Close or Delete: one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. Delete removes the run directory.
 
 ## Parked, resumed, and closed runs
 
@@ -87,6 +87,8 @@ Before that, you can put a run away yourself, with the card's buttons or by aski
 - **Park** sets an unfinished run aside for later. It writes `parked` and closes the orchestrator's tab, which ends it and its agents. The run stays in the overview under **Parked** and as a dimmed reef in the sea, but needs nothing: the captain's watcher stays quiet about it.
 - **Close** ends a run for good, finished or not, and cleans up after it. It asks the orchestrator, with a message in its inbox, to do it: it ends its agents, pushes any code that isn't on the remote yet, deletes the run's worktrees whole (ignored files such as `.env`, dependencies and builds go with them), deletes the task branches whose work is on the integration branch, closes the integration worktree's space, writes `closed` (unless the run is finished), and closes its own tab. The integration branch, branches with work of their own, PRs and the run directory stay. If it can't push something, it asks you rather than delete it. When the orchestrator is gone, Close only writes `closed`; resume the run and close it again to clean up. The run folds away with the other closed runs.
 - **Resume** brings back a parked, closed, or gone run. It starts a new orchestrator of the run's kind with the resume command, in a new tab in the repository's own space, the space on its main checkout, never the integration worktree's. If that space is not open, it opens one for the repository with the orchestrator as its first tab. The orchestrator deletes the marker, restarts unfinished tasks from their worktrees, and opens the integration worktree under the repository's space again.
+
+- **Delete** removes a closed run for good: its run directory, with its spec, plan, decisions and status, goes, so it leaves every view and the captain's lists and can't be resumed. Branches and PRs stay. It refuses while a worktree still has the integration branch checked out, as when the run was closed with its orchestrator gone: resume it and close it again to clean up, then delete it.
 
 Parking leaves the run directory, worktrees, branches, spaces and PRs in place; closing keeps the run directory, the branches with work and the PRs. An unfinished run whose orchestrator is gone without a marker, because its tab was closed some other way or it crashed, shows as gone. The captain asks you about it, one run at a time: resume it, park it, or close it.
 

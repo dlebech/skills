@@ -341,6 +341,35 @@ export async function putAway(run, how, orch) {
   return null;
 }
 
+// Deletes a closed run for good: its run directory, so it leaves every view and the
+// captain's lists and can no longer be resumed. Branches and PRs are git's and GitHub's,
+// and stay. It refuses while a worktree still has the integration branch checked out,
+// in the run's repository or any repository in its folder, since that means the run
+// was closed without cleaning up: resume it and close it again first. The rm is guarded
+// so it only ever removes a run directory under the runs root.
+const DELETE = [
+  'd=$1 folder=$2 branch=$3',
+  'root="${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}"',
+  'case "$d" in "$root"/*/*) ;; *) echo "not a run directory: $d" >&2; exit 2;; esac',
+  '[ -f "$d/orchestrator.json" ] || { echo "not a run directory: $d" >&2; exit 2; }',
+  'for r in "$folder" "$folder"/*/; do',
+  '  [ -e "$r/.git" ] || continue',
+  '  if git -C "$r" worktree list --porcelain 2>/dev/null | grep -qxF "branch refs/heads/$branch"; then',
+  '    echo "its worktrees are still there: resume it and close it again to clean them up, then delete it" >&2; exit 3',
+  '  fi',
+  'done',
+  'rm -rf -- "$d" && rmdir -- "${d%/*}" 2>/dev/null; exit 0',
+].join("\n");
+
+export async function deleteRun(run) {
+  const out = await exec("sh", ["-c", DELETE, "sh", run.dir, run.folder ?? "", run.branch], { on: run.machine });
+  if (out.code !== 0) throw new Error((out.stderr || "could not delete the run directory").trim());
+  const prs = { ...(shared("harbormaster.prs") ?? {}) };
+  delete prs[run.key];
+  setShared("harbormaster.prs", prs);
+  cache.at = 0;
+}
+
 // Resumes the run with a new orchestrator of its kind, in the repository's space, or in a
 // new one for it when none is open. The orchestrator's init-run.sh deletes the markers
 // and it reopens the integration worktree under that space.
