@@ -66,7 +66,7 @@ A question you ask gets buried when alerts and reports follow it, so keep every 
 
 ## Park, resume, or close a run
 
-Do each only when the user asks for it, for the run they mean. Its run directory, worktrees, branches, integration space, and PRs stay in every case.
+Do each only when the user asks for it, for the run they mean. Its run directory, branches with work, and PRs stay in every case; closing tidies the rest.
 
 - **Park** sets an unfinished run aside for later: it stays listed, quietly. **Close** ends a run for good. For an unfinished run, say what is left (tasks, PRs, open question) and close it only if they confirm. Both write a marker, then close the orchestrator's tab if it is open, which ends the orchestrator and its agents:
 
@@ -75,6 +75,7 @@ Do each only when the user asks for it, for the run they mean. Its run directory
   ```
 
   The tab is `tab_id` in its `orchestrator.json`, or when that is empty, the tab holding its terminal in `herdr-app ls`: `herdr-app do tab.close '{"id":"<tab-id>","confirmed":true}'`. A finished run needs no marker: closing its tab closes it.
+- After a **close**, tidy the run's worktrees with `<skill-dir>/scripts/tidy-run.sh <run-directory>`. It removes only what holds nothing found elsewhere: the integration worktree once its upstream has every commit, task worktrees merged into the integration branch, and merged task branches; it keeps anything with uncommitted, unpushed or unmerged work. For each `removed` integration worktree, close its space, the one `herdr-app ls` shows on that folder: `herdr-app do space.close '{"id":"<space-id>","confirmed":true}'`. Tell the user in a line what it kept and why. Harbormaster's Close does the same by itself.
 - **Resume** brings back a gone, parked, or closed run, with a new orchestrator that picks up from the run directory. Its agents ended with the old one, so it restarts unfinished tasks from their worktrees. Start it as in Start a run, steps 3 to 6, with these differences:
   - the repository is the `folder` in its `orchestrator.json`, the repository's own checkout (or the folder holding several); use its `primary` (or `folder`) space, never the integration worktree's space; with none open, the `sp-<name>` id makes Herdr open the repository's space with the orchestrator as its first tab, and the orchestrator then opens the integration worktree under it;
   - the prompt is the resume command: `/herdr-app-orchestrator <run-directory>/spec.md` for Claude Code, `/skill:herdr-app-orchestrator <run-directory>/spec.md` for `pi`;

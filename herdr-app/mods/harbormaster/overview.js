@@ -93,7 +93,7 @@ function actionsOf(r, orch, closed) {
 
 const ACTION = {
   park: { label: "Park", tip: "Set this run aside: closes its orchestrator's tab; resume it any time" },
-  close: { label: "Close", tip: "Close this run for good: closes its orchestrator's tab; it can still be resumed" },
+  close: { label: "Close", tip: "Close this run for good: closes its orchestrator's tab and removes its worktrees that hold nothing unsaved; it can still be resumed" },
   resume: { label: "Resume", tip: "Start a new orchestrator that picks this run up where it stopped" },
 };
 
@@ -102,8 +102,9 @@ function confirmText(r, action, counts) {
   const left = [counts.planned ? `${counts.merged} of ${counts.planned} tasks done` : null,
     r.prs.length ? plural(r.prs.length, "PR") + " stay open" : null].filter(Boolean).join(", ");
   if (action === "park") return `Park ${r.branch}? Its orchestrator and agents end; the run waits here until you resume it.${left ? ` ${left}.` : ""}`;
-  if (action === "close") return r.phase === "finished" ? `Close ${r.branch}? Its PRs stay up.`
-    : `Close ${r.branch} for good, unfinished?${left ? ` ${left}.` : ""}`;
+  const tidy = "Worktrees whose work is pushed or merged go, with the integration space; any other stays.";
+  if (action === "close") return r.phase === "finished" ? `Close ${r.branch}? Its PRs stay up. ${tidy}`
+    : `Close ${r.branch} for good, unfinished?${left ? ` ${left}.` : ""} ${tidy}`;
   return `Resume ${r.branch}? A new orchestrator starts in ${r.repo}${r.machine ? ` on ${r.machine}` : ""}, restarting unfinished tasks.`;
 }
 
@@ -120,12 +121,14 @@ function actionButton(t, id, label, tip, onClick, primary = false) {
 // command, not putAway's marker write.
 function actionRow(view, t, r, orch, closed, counts) {
   const asking = view.confirm?.key === r.key ? view.confirm.action : null;
-  const set = (cx, value) => { view.confirm = value; view.actionError = null; cx.notify(); };
+  const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
   if (asking) {
     const yes = (cx) => {
       set(cx, null);
       if (asking === "resume") resumeRun(r);
-      else putAway(r, asking === "park" ? "parked" : "closed", orch).catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
+      else putAway(r, asking === "park" ? "parked" : "closed", orch)
+        .then((kept) => { if (kept.length) { view.actionNote = `${r.branch} closed; kept ${kept.join("; ")}`; cx.notify(); } })
+        .catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
     };
     return v_flex().gap(6).p(8).rounded(7).bg(t.raised)
       .child(div().text_size(12).text_color(t.foreground).child(confirmText(r, asking, counts)))
@@ -344,6 +347,7 @@ export function cards(view, t, runs, errors, decisions = []) {
         .child(svg(`mods/harbormaster/chevron-${view.showDone ? "down" : "right"}.svg`).size(11))
         .child(`${s.closed.length} closed`)))
       .when(Boolean(view.showDone), (el) => el.children(s.closed.map((r) => card(view, t, r, ctx, true))))
+      .when(Boolean(view.actionNote), (el) => el.child(div().px(4).text_size(11).text_color(t.muted).child(view.actionNote)))
       .when(Boolean(view.actionError), (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(view.actionError)))
       .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n")))));
 }

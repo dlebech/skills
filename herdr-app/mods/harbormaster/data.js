@@ -13,7 +13,7 @@
 //   <root>/.captain-decisions.json              the captain's open decisions: [{id, question, run, asked}]
 
 import { exec, machines, shared, setShared, run as command } from "herdr";
-import { orchestratorState, workersOf, needsYou, tabOf, homeSpace } from "./live.js";
+import { orchestratorState, workersOf, needsYou, tabOf, homeSpace, spaceOn } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
 
@@ -298,11 +298,58 @@ export function stats(runs, ctx) {
 
 const MARK = 'd=$1 m=$2; { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d "\\n"; printf "\\t"; sed -n "1s/^Status: *//p" "$d/plan.md"; } >"$d/.$m.tmp" && mv "$d/.$m.tmp" "$d/$m"';
 
+// herdr-app-captain's scripts/tidy-run.sh from "d=$1" on, run after a close: removes the
+// run's worktrees that hold nothing found nowhere else, and its merged task branches.
+// Change both together; runs-live.sh checks they match.
+const TIDY = String.raw`d=$1
+branch=$(jq -r '.branch // empty' "$d/orchestrator.json" 2>/dev/null)
+[ -n "$branch" ] || { echo "no branch in $d/orchestrator.json" >&2; exit 2; }
+prefix=$(sed -n 's/^Prefix: *//p' "$d/plan.md" 2>/dev/null | head -1)
+repos=$(sed -n 's/^Repos: *//p' "$d/plan.md" 2>/dev/null | head -1 | tr ',' '\n' | sed 's/^ *[^ ]* *//; s/ *$//')
+[ -n "$repos" ] || repos=$(jq -r '.folder // empty' "$d/orchestrator.json")
+trees=$HOME/.herdr/worktrees/
+printf '%s\n' "$repos" | while IFS= read -r r; do
+  case $r in "~/"*) r=$HOME/$(printf '%s' "$r" | cut -c3-) ;; esac
+  git -C "$r" rev-parse --git-dir >/dev/null 2>&1 || continue
+  git -C "$r" worktree list --porcelain |
+    awk '/^worktree /{w=substr($0,10)} /^branch refs\/heads\//{print substr($0,19) "\t" w}' |
+    while IFS="	" read -r b w; do
+      case $w in "$trees"*) ;; *) continue ;; esac
+      if [ "$b" = "$branch" ]; then
+        git -C "$w" merge-base --is-ancestor HEAD '@{u}' 2>/dev/null ||
+          { echo "kept $w: not pushed"; continue; }
+      elif [ -n "$prefix" ] && case $b in "$prefix"-*) true ;; *) false ;; esac; then
+        git -C "$r" merge-base --is-ancestor "$b" "$branch" 2>/dev/null ||
+          { echo "kept $w: not merged into $branch"; continue; }
+      else
+        continue
+      fi
+      if err=$(git -C "$r" worktree remove "$w" 2>&1); then
+        echo "removed $w"
+      else
+        case $err in
+          *"modified or untracked"*) echo "kept $w: uncommitted changes" ;;
+          *) echo "kept $w: $(printf '%s' "$err" | tail -1 | sed 's/^fatal: //')" ;;
+        esac
+      fi
+    done
+  [ -n "$prefix" ] || continue
+  git -C "$r" for-each-ref --format='%(refname:short)' "refs/heads/$prefix-*" | while IFS= read -r b; do
+    [ "$b" != "$branch" ] || continue
+    git -C "$r" merge-base --is-ancestor "$b" "$branch" 2>/dev/null || continue
+    git -C "$r" branch -D "$b" >/dev/null 2>&1 && echo "deleted $b"
+  done
+done
+`;
+
 // Parks the run (for later) or closes it for good: writes the marker, then closes the
-// orchestrator's tab, which ends it and its agents. The run directory, worktrees,
-// branches, spaces and PRs stay. how: "parked" | "closed"; orch: orchestratorState().
-// A finished run needs no marker to close: closing its tab does. With the orchestrator
-// still there but no tab to close, it refuses, so a marker never hides a live run.
+// orchestrator's tab, which ends it and its agents. Parking leaves everything else.
+// Closing then tidies the worktrees (TIDY) and closes the integration worktree's space
+// once its worktree is gone; the run directory, branches with work and PRs stay.
+// how: "parked" | "closed"; orch: orchestratorState(). Resolves to what closing kept,
+// "<worktree>: <why>" each. A finished run needs no marker to close: closing its tab
+// does. With the orchestrator still there but no tab to close, it refuses, so a marker
+// never hides a live run.
 export async function putAway(run, how, orch) {
   const tab = tabOf(run);
   if (!tab && orch !== "gone") throw new Error("cannot find the orchestrator's tab; close it by hand");
@@ -312,6 +359,15 @@ export async function putAway(run, how, orch) {
   }
   if (tab) command("tab.close", { id: tab, confirmed: true });
   cache.at = 0;
+  if (how !== "closed") return [];
+  const out = await exec("sh", ["-c", TIDY, "sh", run.dir], { on: run.machine });
+  const lines = (out.stdout ?? "").split("\n");
+  for (const line of lines) {
+    const space = line.startsWith("removed ") ? spaceOn(line.slice(8), run.machine) : null;
+    if (space) command("space.close", { id: space.id, confirmed: true });
+  }
+  if (out.code !== 0) throw new Error(`closed, but tidying failed: ${out.stderr || out.code}`);
+  return lines.filter((l) => l.startsWith("kept ")).map((l) => l.slice(5).replace(/^.*\/(?=[^/]+:)/, ""));
 }
 
 // Resumes the run with a new orchestrator of its kind, in the repository's space, or in a

@@ -40,6 +40,8 @@ Run the `herdr-app` tests from an agent in a Herdr app tab, with the window open
 - `tests/herdr-app-orchestrator/agent-kinds-live.sh` starts a hidden agent of each kind, delivers a task, and receives its report, including Claude's trust prompt and default permission mode. It uses Haiku, and `ollama/ornith-1.5:9b` for `pi` and `opencode`.
 - `tests/herdr-app-captain/runs-live.sh` checks run directories, tab names, parked and closed runs and their resume, the integration worktree's space, the watcher and its `hc events` wake-up, and `--no-parent`, with plain programs in a throwaway space. It costs no model turns.
 
+`tests/herdr-app-captain/tidy-run.sh` checks the worktree tidying after a close, Harbormaster's copy of it included, against a throwaway repository. It needs only git, jq and node.
+
 `tests/herdr-orchestrator/wait-agents-live.sh` checks `herdr-orchestrator`'s waiting against a real Claude Code sub-agent (Haiku) in a new Herdr pane. Run it from inside Herdr; it takes about a minute and closes its pane afterwards.
 
 `tests/herdr-captain/answer-dialog-live.sh` checks `herdr-captain`'s answering of open dialogs against two Claude Code agents (Haiku) in new Herdr panes, the same way.
