@@ -308,6 +308,59 @@ prefix=$(sed -n 's/^Prefix: *//p' "$d/plan.md" 2>/dev/null | head -1)
 repos=$(sed -n 's/^Repos: *//p' "$d/plan.md" 2>/dev/null | head -1 | tr ',' '\n' | sed 's/^ *[^ ]* *//; s/ *$//')
 [ -n "$repos" ] || repos=$(jq -r '.folder // empty' "$d/orchestrator.json")
 trees=$HOME/.herdr/worktrees/
+
+# task <repo> <branch>: one of this run's task branches.
+task() {
+  [ -n "$prefix" ] && [ "$2" != "$branch" ] || return 1
+  case $2 in "$prefix"-*) ;; *) return 1 ;; esac
+  [ "$(git -C "$1" reflog show --format=%gs "refs/heads/$2" 2>/dev/null | tail -1)" = "branch: Created from $branch" ]
+}
+
+# landed <repo> <task-branch>: its work is on the integration branch, merged (an
+# ancestor) or squashed (one commit there has the same patch as the task's whole diff,
+# by git patch-id). A squash the orchestrator had to adjust does not count, nor do
+# commits that change nothing, since they are nowhere else.
+landed() {
+  git -C "$1" merge-base --is-ancestor "$2" "$branch" 2>/dev/null && return 0
+  mb=$(git -C "$1" merge-base "$branch" "$2" 2>/dev/null) || return 1
+  p=$(git -C "$1" diff "$mb" "$2" | git patch-id --stable | cut -d' ' -f1)
+  [ -n "$p" ] || return 1
+  git -C "$1" log -p --no-merges "$mb..$branch" | git patch-id --stable | cut -d' ' -f1 | grep -qxF "$p"
+}
+
+# save <worktree>: moves its ignored entries that are not rebuildable to the run's
+# saved/ folder, keeping their paths, and says which.
+save() {
+  dest=$d/saved/$(basename "$1")
+  list=
+  git -C "$1" status --porcelain --ignored -z | tr '\0' '\n' | sed -n 's/^!! //p' | sed 's|/$||' >"$d/.tidy-ignored"
+  while IFS= read -r e; do
+    case /$e in
+      */node_modules | */vendor | */.venv | */venv | */__pycache__ | */.mypy_cache | */.ruff_cache | \
+      */.pytest_cache | */.tox | */.cache | */.svelte-kit | */.next | */.nuxt | */.turbo | \
+      */.parcel-cache | */.gradle | */build | */dist | */target | */coverage) continue ;;
+    esac
+    mkdir -p "$dest/$(dirname "$e")" && mv "$1/$e" "$dest/$e" && list="$list $e"
+  done <"$d/.tidy-ignored"
+  rm -f "$d/.tidy-ignored"
+  [ -z "$list" ] || echo "saved $dest:$list"
+}
+
+# remove <repo> <worktree> <kind>
+remove() {
+  if [ -n "$(git -C "$2" status --porcelain 2>/dev/null)" ]; then
+    echo "kept $2: uncommitted changes"
+    return 1
+  fi
+  save "$2"
+  if err=$(git -C "$1" worktree remove "$2" 2>&1); then
+    echo "removed $3 $2"
+  else
+    echo "kept $2: $(printf '%s' "$err" | tail -1 | sed 's/^fatal: //')"
+    return 1
+  fi
+}
+
 printf '%s\n' "$repos" | while IFS= read -r r; do
   case $r in "~/"*) r=$HOME/$(printf '%s' "$r" | cut -c3-) ;; esac
   git -C "$r" rev-parse --git-dir >/dev/null 2>&1 || continue
@@ -316,38 +369,31 @@ printf '%s\n' "$repos" | while IFS= read -r r; do
     while IFS="	" read -r b w; do
       case $w in "$trees"*) ;; *) continue ;; esac
       if [ "$b" = "$branch" ]; then
-        git -C "$w" merge-base --is-ancestor HEAD '@{u}' 2>/dev/null ||
-          { echo "kept $w: not pushed"; continue; }
-      elif [ -n "$prefix" ] && case $b in "$prefix"-*) true ;; *) false ;; esac; then
-        git -C "$r" merge-base --is-ancestor "$b" "$branch" 2>/dev/null ||
-          { echo "kept $w: not merged into $branch"; continue; }
-      else
-        continue
-      fi
-      if err=$(git -C "$r" worktree remove "$w" 2>&1); then
-        echo "removed $w"
-      else
-        case $err in
-          *"modified or untracked"*) echo "kept $w: uncommitted changes" ;;
-          *) echo "kept $w: $(printf '%s' "$err" | tail -1 | sed 's/^fatal: //')" ;;
-        esac
+        if [ -z "$(git -C "$r" for-each-ref --contains "$b" --format=x refs/remotes)" ]; then
+          echo "kept $w: not pushed"
+          continue
+        fi
+        remove "$r" "$w" integration
+      elif task "$r" "$b"; then
+        landed "$r" "$b" || { echo "kept $w: not merged into $branch"; continue; }
+        remove "$r" "$w" task
       fi
     done
   [ -n "$prefix" ] || continue
   git -C "$r" for-each-ref --format='%(refname:short)' "refs/heads/$prefix-*" | while IFS= read -r b; do
-    [ "$b" != "$branch" ] || continue
-    git -C "$r" merge-base --is-ancestor "$b" "$branch" 2>/dev/null || continue
-    git -C "$r" branch -D "$b" >/dev/null 2>&1 && echo "deleted $b"
+    task "$r" "$b" && landed "$r" "$b" || continue
+    if git -C "$r" branch -D "$b" >/dev/null 2>&1; then echo "deleted $b"; fi
   done
 done
+exit 0
 `;
 
 // Parks the run (for later) or closes it for good: writes the marker, then closes the
 // orchestrator's tab, which ends it and its agents. Parking leaves everything else.
 // Closing then tidies the worktrees (TIDY) and closes the integration worktree's space
 // once its worktree is gone; the run directory, branches with work and PRs stay.
-// how: "parked" | "closed"; orch: orchestratorState(). Resolves to what closing kept,
-// "<worktree>: <why>" each. A finished run needs no marker to close: closing its tab
+// how: "parked" | "closed"; orch: orchestratorState(). Resolves to notes on what
+// closing kept ("<worktree>: <why>") and where it saved ignored files. A finished run needs no marker to close: closing its tab
 // does. With the orchestrator still there but no tab to close, it refuses, so a marker
 // never hides a live run.
 export async function putAway(run, how, orch) {
@@ -360,14 +406,19 @@ export async function putAway(run, how, orch) {
   if (tab) command("tab.close", { id: tab, confirmed: true });
   cache.at = 0;
   if (how !== "closed") return [];
+  // Give the orchestrator's agents a moment to end before their worktrees go.
+  if (tab) await exec("sleep", ["3"], { on: run.machine }).catch(() => {});
   const out = await exec("sh", ["-c", TIDY, "sh", run.dir], { on: run.machine });
   const lines = (out.stdout ?? "").split("\n");
+  // Only the integration worktree's space: one on a task worktree is the user's own.
   for (const line of lines) {
-    const space = line.startsWith("removed ") ? spaceOn(line.slice(8), run.machine) : null;
+    const space = line.startsWith("removed integration ") ? spaceOn(line.slice(20), run.machine) : null;
     if (space) command("space.close", { id: space.id, confirmed: true });
   }
   if (out.code !== 0) throw new Error(`closed, but tidying failed: ${out.stderr || out.code}`);
-  return lines.filter((l) => l.startsWith("kept ")).map((l) => l.slice(5).replace(/^.*\/(?=[^/]+:)/, ""));
+  // "kept 9-c: not merged into issue-9", "saved ignored files to <run>/saved/issue-9: .env data"
+  return lines.filter((l) => l.startsWith("kept ") || l.startsWith("saved "))
+    .map((l) => l.startsWith("kept ") ? l.slice(5).replace(/^.*\/(?=[^/]+:)/, "") : `saved ignored files to ${l.slice(6)}`);
 }
 
 // Resumes the run with a new orchestrator of its kind, in the repository's space, or in a

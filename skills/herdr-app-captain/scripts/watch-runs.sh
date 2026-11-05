@@ -119,7 +119,8 @@ while :; do
   # Parked and closed runs drop out of current too; those are not answers. Nor is a
   # dialog that went with its orchestrator: a run with a new event of its own, such as
   # orchestrator gone or finished, is reported by that event instead.
-  reported=$(printf '%s\n' ${new[@]+"${new[@]}"} | sed -n 's/^[^\t]*\t//p')
+  reported=
+  for line in ${new[@]+"${new[@]}"}; do reported+=${line#*$'\t'}$'\n'; done
   while IFS= read -r line; do
     case $line in
       "attention "*" waiting for user"* | "attention "*" blocked"* | "attention "*" orchestrator blocked on a dialog"*) ;;

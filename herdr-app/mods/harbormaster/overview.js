@@ -127,7 +127,7 @@ function actionRow(view, t, r, orch, closed, counts) {
       set(cx, null);
       if (asking === "resume") resumeRun(r);
       else putAway(r, asking === "park" ? "parked" : "closed", orch)
-        .then((kept) => { if (kept.length) { view.actionNote = `${r.branch} closed; kept ${kept.join("; ")}`; cx.notify(); } })
+        .then((kept) => { if (kept.length) { view.actionNote = `${r.branch} closed; ${kept.map((k) => (k.startsWith("saved ") ? k : `kept ${k}`)).join("; ")}`; cx.notify(); } })
         .catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
     };
     return v_flex().gap(6).p(8).rounded(7).bg(t.raised)
