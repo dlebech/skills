@@ -130,12 +130,17 @@ function actionRow(view, t, r, orch, closed, counts) {
     const yes = (cx) => {
       set(cx, null);
       if (asking === "resume") resumeRun(r);
-      else if (asking === "delete") deleteRun(r)
-        .then(() => cx.notify())
-        .catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
-      else putAway(r, asking === "park" ? "parked" : "closed", orch)
-        .then((note) => { if (note) { view.actionNote = `${r.branch}: ${note}`; cx.notify(); } })
-        .catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
+      // The click's cx dies with the click; the awaited work notifies through cx.spawn's.
+      else cx.spawn(async (cx) => {
+        try {
+          if (asking === "delete") await deleteRun(r);
+          else {
+            const note = await putAway(r, asking === "park" ? "parked" : "closed", orch);
+            if (note) view.actionNote = `${r.branch}: ${note}`;
+          }
+        } catch (e) { view.actionError = `${r.branch}: ${e?.message ?? e}`; }
+        cx.notify();
+      });
     };
     return v_flex().gap(6).p(8).rounded(7).bg(t.raised)
       .child(div().text_size(12).text_color(t.foreground).child(confirmText(r, asking, counts)))
