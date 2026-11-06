@@ -112,7 +112,9 @@ mark_run() {
 # integration_spaces <folder> <branch>: the id of each space that shows one of the
 # run's integration worktrees (a linked worktree with <branch> checked out, in <folder>
 # or a repository in it), matched as herdr-app-orchestrator's integration-worktree.sh
-# does: its first terminal's folder now, else the folder it was made in. One per line.
+# does: its first terminal's folder now, else the folder it was made in. Only a space
+# made on a worktree (or with no folder of its own) counts, so a repository's own space
+# whose first terminal was cd'd into a worktree is left alone. One per line.
 integration_spaces() {
   local r paths=() id made first at p
   for r in "$1" "$1"/*/; do
@@ -121,13 +123,19 @@ integration_spaces() {
       awk -v b="branch refs/heads/$2" '/^worktree /{p=substr($0,10); n++} $0==b && n>1{print p}')
   done
   [ ${#paths[@]} -gt 0 ] || return 0
+  # in_worktree <dir>: whether it is one of the worktrees or under one.
+  in_worktree() {
+    for p in "${paths[@]}"; do
+      case $1 in "$p" | "$p"/*) return 0 ;; esac
+    done
+    return 1
+  }
   while IFS=$'\t' read -r id made first; do
+    [ -z "$made" ] || in_worktree "$made" || continue
     at=
     [ -z "$first" ] || at=$(hc get "$first" --json 2>/dev/null | jq -r '.foreground.cwd // .cwd // empty')
     at=${at:-$made}
-    for p in "${paths[@]}"; do
-      case $at in "$p" | "$p"/*) echo "$id"; break ;; esac
-    done
+    [ -z "$at" ] || ! in_worktree "$at" || echo "$id"
   done < <(herdr-app ls 2>/dev/null | jq -r '.spaces[] | select(.machine == null)
     | [.id, .folder // "", ([.tabs[].terminals[].terminal | select(.)] | first // "")] | @tsv')
 }

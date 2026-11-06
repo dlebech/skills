@@ -144,14 +144,17 @@ export function homeSpace(run) {
 // The spaces on the run's machine that show one of `paths`, its integration worktrees:
 // the first pane of the space's first tab is in one, or with no pane reporting a
 // folder, the space was made on one, as herdr-app-orchestrator's
-// integration-worktree.sh matches them.
+// integration-worktree.sh matches them. Only a space made on a worktree (or with no
+// folder of its own) counts, so a repository's own space whose first terminal was cd'd
+// into a worktree is left alone.
 export function worktreeSpaces(run, paths) {
   const ps = panes();
+  const inside = (dir) => !!dir && paths.some((p) => dir === p || dir.startsWith(`${p}/`));
   return spaces().filter((s) => {
     if ((s.machine ?? null) !== (run.machine ?? null)) return false;
+    if (s.folder && !inside(s.folder)) return false;
     const first = s.tabs?.[0]?.id;
-    const at = (first ? ps.find((p) => p.tab === first)?.cwd : null) || s.folder;
-    return !!at && paths.some((p) => at === p || at.startsWith(`${p}/`));
+    return inside((first ? ps.find((p) => p.tab === first)?.cwd : null) || s.folder);
   });
 }
 
