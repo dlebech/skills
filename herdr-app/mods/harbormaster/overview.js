@@ -2,7 +2,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, runPhase, taskTone, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun } from "./data.js";
+import { stats, runPhase, taskTone, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun } from "./data.js";
 import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, openUrl, replyToCaptain } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText } from "./ui.js";
 import { tokenText } from "./context.js";
@@ -84,9 +84,9 @@ function taskStrip(t, r, counts) {
 }
 
 // What a card offers: Park and Close while its orchestrator runs (Close alone once
-// finished), Resume and Close once it is gone or parked, Resume once closed.
+// finished), Resume and Close once it is gone or parked, Resume and Delete once closed.
 function actionsOf(r, orch, closed) {
-  if (closed) return ["resume"];
+  if (closed) return ["resume", "delete"];
   if (isParked(r) || orch === "gone") return ["resume", "close"];
   return r.phase === "finished" ? ["close"] : ["park", "close"];
 }
@@ -94,6 +94,7 @@ function actionsOf(r, orch, closed) {
 const ACTION = {
   park: { label: "Park", tip: "Set this run aside: closes its orchestrator's tab; resume it any time" },
   close: { label: "Close", tip: "Close this run for good: its orchestrator ends its agents, deletes the run's worktrees once their code is pushed, and closes its tab; it can still be resumed" },
+  delete: { label: "Delete", tip: "Delete this run for good: its run directory goes, so it leaves Harbormaster and can't be resumed; branches and PRs stay" },
   resume: { label: "Resume", tip: "Start a new orchestrator that picks this run up where it stopped" },
 };
 
@@ -105,6 +106,7 @@ function confirmText(r, action, counts) {
   const clean = "Its orchestrator pushes what isn't pushed, deletes the worktrees and closes its tab; branches and PRs stay.";
   if (action === "close") return r.phase === "finished" ? `Close ${r.branch}? ${clean}`
     : `Close ${r.branch} for good, unfinished?${left ? ` ${left}.` : ""} ${clean}`;
+  if (action === "delete") return `Delete ${r.branch} for good? Its run directory goes: spec, plan, decisions and status, so it can't be resumed. This can't be undone. Branches and PRs stay on git and GitHub.`;
   return `Resume ${r.branch}? A new orchestrator starts in ${r.repo}${r.machine ? ` on ${r.machine}` : ""}, restarting unfinished tasks.`;
 }
 
@@ -126,6 +128,9 @@ function actionRow(view, t, r, orch, closed, counts) {
     const yes = (cx) => {
       set(cx, null);
       if (asking === "resume") resumeRun(r);
+      else if (asking === "delete") deleteRun(r)
+        .then(() => cx.notify())
+        .catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
       else putAway(r, asking === "park" ? "parked" : "closed", orch)
         .then((note) => { if (note) { view.actionNote = `${r.branch}: ${note}`; cx.notify(); } })
         .catch((e) => { view.actionError = `${r.branch}: ${e?.message ?? e}`; cx.notify(); });
