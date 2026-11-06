@@ -83,16 +83,18 @@ function taskStrip(t, r, counts) {
         .child(div().text_color(t.dim).child(stateText(task.state)))))));
 }
 
-// What a card offers: Park and Close while its orchestrator runs (Close alone once
-// finished), Resume and Close once it is gone or parked, Resume and Delete once closed.
+// What a card offers: Park and Close while its orchestrator runs, finished or not (a
+// finished run may still wait on review or QA), Resume, Park and Close once it is gone,
+// Resume and Close once parked, Resume and Delete once closed.
 function actionsOf(r, orch, closed) {
   if (closed) return ["resume", "delete"];
-  if (isParked(r) || orch === "gone") return ["resume", "close"];
-  return r.phase === "finished" ? ["close"] : ["park", "close"];
+  if (isParked(r)) return ["resume", "close"];
+  if (orch === "gone") return ["resume", "park", "close"];
+  return ["park", "close"];
 }
 
 const ACTION = {
-  park: { label: "Park", tip: "Set this run aside: closes its orchestrator's tab; resume it any time" },
+  park: { label: "Park", tip: "Set this run aside: closes its orchestrator's tab and its integration worktree's space, keeping the worktree; resume it any time" },
   close: { label: "Close", tip: "Close this run for good: its orchestrator ends its agents, deletes the run's worktrees once their code is pushed, and closes its tab; it can still be resumed" },
   delete: { label: "Delete", tip: "Delete this run for good: its run directory goes, so it leaves Harbormaster and can't be resumed; branches and PRs stay" },
   resume: { label: "Resume", tip: "Start a new orchestrator that picks this run up where it stopped" },
@@ -102,7 +104,7 @@ const ACTION = {
 function confirmText(r, action, counts) {
   const left = [counts.planned ? `${counts.merged} of ${counts.planned} tasks done` : null,
     r.prs.length ? plural(r.prs.length, "PR") + " stay open" : null].filter(Boolean).join(", ");
-  if (action === "park") return `Park ${r.branch}? Its orchestrator and agents end; the run waits here until you resume it.${left ? ` ${left}.` : ""}`;
+  if (action === "park") return `Park ${r.branch}? Its orchestrator and agents end and its integration worktree's space closes (the worktree stays); the run waits here until you resume it.${left ? ` ${left}.` : ""}`;
   const clean = "Its orchestrator pushes what isn't pushed, deletes the worktrees and closes its tab; branches and PRs stay.";
   if (action === "close") return r.phase === "finished" ? `Close ${r.branch}? ${clean}`
     : `Close ${r.branch} for good, unfinished?${left ? ` ${left}.` : ""} ${clean}`;
@@ -189,7 +191,8 @@ function card(view, t, r, ctx, compact = false) {
     .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts)))
     .when(Boolean(r.away), (el) => el.child(div().text_size(11.5).text_color(t.muted)
       .child(`${parked ? "Parked" : "Closed"} ${ago(r.away.at)}${r.away.was ? ` · was: ${r.away.was}` : ""}`)))
-    .when(!r.away && orch === "gone" && r.phase !== "finished", (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Orchestrator is gone: resume or close this run.")))
+    .when(!r.away && orch === "gone" && r.phase !== "finished", (el) => el.child(div().text_size(11.5).text_color(t.blocked).child("Orchestrator is gone: resume, park or close this run.")))
+    .when(!r.away && orch === "gone" && r.phase === "finished", (el) => el.child(div().text_size(11.5).text_color(t.muted).child("Orchestrator is gone, only a shell is left in its tab: resume it if the PR needs more work, or park or close the run.")))
     .when(r.waiting.length > 0, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(`Waiting on an answer: ${r.waiting.join(", ")}`)))
     .when(r.unhandled > 0, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(`${plural(r.unhandled, "relayed message")} not read yet`)))
     .when(prs.length > 0 || links.length > 0, (el) => el.child(v_flex().gap(1).text_size(12)

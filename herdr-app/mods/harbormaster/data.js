@@ -13,7 +13,7 @@
 //   <root>/.captain-decisions.json              the captain's open decisions: [{id, question, run, asked}]
 
 import { exec, machines, shared, setShared, run as command } from "herdr";
-import { orchestratorState, workersOf, needsYou, tabOf, homeSpace } from "./live.js";
+import { orchestratorState, orchestratorLost, workersOf, needsYou, tabOf, homeSpace, worktreeSpaces, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
 
@@ -255,13 +255,14 @@ export async function refreshPrs(run, closed = false) {
 // ---- totals ----
 
 // A run is closed when the person closed it for good (a closed marker), or once it is
-// finished and its orchestrator's terminal is gone: they closed its tab. A finished run
+// finished and its orchestrator's terminal is gone: they closed its tab. A lost
+// orchestrator (only a shell left in its terminal) still has its tab, so is not closed. A finished run
 // whose orchestrator is still there stays open, with its PR up. An unfinished run whose
 // terminal is gone is not closed: it is parked if they set it aside, else gone, which
 // the captain asks about and the run's card offers to resume.
 export function isClosed(run, ctx) {
   if (run.away) return run.away.how === "closed";
-  return run.phase === "finished" && orchestratorState(run, ctx) === "gone";
+  return run.phase === "finished" && orchestratorState(run, ctx) === "gone" && !orchestratorLost(run, ctx);
 }
 export const isParked = (run) => run.away?.how === "parked";
 
@@ -317,8 +318,29 @@ async function askToClose(run) {
   return "its orchestrator is cleaning up, and closes its tab when done";
 }
 
-// Parks the run for later: writes the marker, then closes the orchestrator's tab, which
-// ends it and its agents; everything else stays. Or closes it for good: an orchestrator
+// The run's integration worktrees: each linked worktree with the run's branch checked
+// out, in the run's repository or any repository in its folder. One path per line.
+const WORKTREES = [
+  'folder=$1 branch=$2',
+  'for r in "$folder" "$folder"/*/; do',
+  '  [ -e "$r/.git" ] || continue',
+  '  git -C "$r" worktree list --porcelain 2>/dev/null | awk -v b="branch refs/heads/$branch" \'/^worktree /{p=substr($0,10); n++} $0==b && n>1{print p}\'',
+  'done',
+].join("\n");
+
+// Closes the spaces that show the run's integration worktrees, to declutter the sidebar
+// while the run is parked. The worktrees stay; the resumed orchestrator's
+// integration-worktree.sh opens their spaces again. Best effort: parking never fails on it.
+async function closeWorktreeSpaces(run) {
+  if (!run.folder) return;
+  const out = await exec("sh", ["-c", WORKTREES, "sh", run.folder, run.branch], { on: run.machine }).catch(() => null);
+  const paths = (out?.code === 0 ? out.stdout : "").split("\n").filter(Boolean);
+  if (paths.length) for (const s of worktreeSpaces(run, paths)) command("space.close", { id: s.id, confirmed: true });
+}
+
+// Parks the run for later: writes the marker, closes the spaces of its integration
+// worktrees, then closes the orchestrator's tab, which ends it and its agents; the
+// worktrees, branches and everything else stay. Or closes it for good: an orchestrator
 // that is there cleans up and ends itself (askToClose); for one that is gone it writes
 // the marker, and the worktrees stay until the run is resumed and closed again.
 // how: "parked" | "closed"; orch: orchestratorState(). Resolves to a note, or null.
@@ -336,6 +358,7 @@ export async function putAway(run, how, orch) {
     const out = await exec("sh", ["-c", MARK, "sh", run.dir, how], { on: run.machine });
     if (out.code !== 0) throw new Error(out.stderr || `could not write ${how}`);
   }
+  if (how === "parked") await closeWorktreeSpaces(run);
   if (tab) command("tab.close", { id: tab, confirmed: true });
   cache.at = 0;
   return null;
@@ -372,12 +395,15 @@ export async function deleteRun(run) {
 
 // Resumes the run with a new orchestrator of its kind, in the repository's space, or in a
 // new one for it when none is open. The orchestrator's init-run.sh deletes the markers
-// and it reopens the integration worktree under that space.
+// and it reopens the integration worktree under that space. A lost orchestrator's tab,
+// only a shell now, is closed once the new one is started, so it does not linger.
 export function resumeRun(run) {
   const kind = run.kind || "claude";
   const prompt = `${kind === "pi" ? "/skill:" : "/"}herdr-app-orchestrator ${run.dir}/spec.md`;
+  const lostTab = orchestratorLost(run, facts()) ? tabOf(run) : null;
   const space = homeSpace(run);
   if (space) command("tab.new", { space: space.id, folder: run.folder, argv: [kind], task: prompt });
   else command("space.new", { folder: run.folder, argv: [kind], task: prompt, machine: run.machine ?? "" });
+  if (lostTab) command("tab.close", { id: lostTab, confirmed: true });
   cache.at = 0;
 }

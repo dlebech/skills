@@ -96,7 +96,7 @@ while :; do
     esac
     if [ "$status" != finished ]; then
       case $(terminal_state "$terminals" "$terminal") in
-        "") reasons+=("orchestrator gone") ;;
+        "" | lost) reasons+=("orchestrator gone") ;;
         blocked) reasons+=("orchestrator blocked on a dialog") ;;
         idle | done)
           since=$(awk -F '\t' -v d="$dir" '$2 == d { print $1; exit }' "$idle_file")

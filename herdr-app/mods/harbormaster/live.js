@@ -12,10 +12,25 @@ export function agentStatus(term, ctx) {
   return s === "error" ? "blocked" : s ?? "idle";
 }
 
-// The orchestrator's status, or "gone" when its terminal has ended.
+// Whether the orchestrator is lost: its terminal is live but only a shell runs in it
+// (its program now, not the command it started with), with no agent status.
+// herdr-core keeps terminals across a restart but replaces their lost programs with a
+// shell (hc keep), so after a reboot the orchestrator's terminal and tab come back
+// without it; so does a terminal whose agent exited.
+export function orchestratorLost(run, ctx) {
+  const term = run.terminal && ctx.terminals.find((t) => t.address === run.terminal);
+  if (!term || term.state !== "live" || term.status) return false;
+  const a = ctx.agents.find((x) => x.address === run.terminal);
+  if (a?.status && a.status !== "idle") return false;
+  const pane = panes().find((p) => p.terminal === run.terminal);
+  return (term.program ?? pane?.program)?.shell === true;
+}
+
+// The orchestrator's status, or "gone" when its terminal has ended or is lost.
 export function orchestratorState(run, ctx) {
   const term = run.terminal && ctx.terminals.find((t) => t.address === run.terminal);
   if (!ctx.agents.some((a) => a.address === run.terminal) && (!term || term.state !== "live")) return "gone";
+  if (orchestratorLost(run, ctx)) return "gone";
   return agentStatus(term ?? { address: run.terminal }, ctx);
 }
 
@@ -124,6 +139,23 @@ export function homeSpace(run) {
     const cwd = first ? ps.find((p) => p.tab === first)?.cwd : null;
     return (cwd || s.folder) === run.folder;
   }) ?? null;
+}
+
+// The spaces on the run's machine that show one of `paths`, its integration worktrees:
+// the first pane of the space's first tab is in one, or with no pane reporting a
+// folder, the space was made on one, as herdr-app-orchestrator's
+// integration-worktree.sh matches them. Only a space made on a worktree (or with no
+// folder of its own) counts, so a repository's own space whose first terminal was cd'd
+// into a worktree is left alone.
+export function worktreeSpaces(run, paths) {
+  const ps = panes();
+  const inside = (dir) => !!dir && paths.some((p) => dir === p || dir.startsWith(`${p}/`));
+  return spaces().filter((s) => {
+    if ((s.machine ?? null) !== (run.machine ?? null)) return false;
+    if (s.folder && !inside(s.folder)) return false;
+    const first = s.tabs?.[0]?.id;
+    return inside((first ? ps.find((p) => p.tab === first)?.cwd : null) || s.folder);
+  });
 }
 
 export function focusAgent(address) {
