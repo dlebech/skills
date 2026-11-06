@@ -52,6 +52,8 @@ while IFS= read -r run_info <&3; do
   else
     if [ -z "$state" ]; then
       orchestrator="$terminal gone (no live terminal)"
+    elif [ "$state" = lost ]; then
+      orchestrator="$terminal gone (lost: only a shell is left in its terminal, as after a restart; its tab is still open)"
     else
       orchestrator="$terminal $state"
       [ "$state" != blocked ] || dialog=$(hc get "$terminal" --json 2>/dev/null | jq -r '.status.msg // empty')
@@ -66,7 +68,8 @@ while IFS= read -r run_info <&3; do
   marker=$(run_marker "$dir")
   if [ -n "$marker" ]; then plan="$marker $(marker_text "$dir/$marker")"
   elif [ "$status" = finished ]; then
-    if [ -n "$state" ]; then plan="finished, PR open until its tab is closed"
+    if [ "$state" = lost ]; then plan="finished, PR open; its orchestrator is lost, its tab still open"
+    elif [ -n "$state" ]; then plan="finished, PR open until its tab is closed"
     elif [ -n "$terminals" ]; then plan="finished, closed"; fi
   fi
   echo "  plan: $plan"

@@ -18,6 +18,8 @@
 #      status.json facts and their age, also once its terminal is gone; keeps a
 #      finished run while its terminal lives, and leaves it out (but not with
 #      --all) once it is gone;
+#   3a. an orchestrator whose terminal is live with only a shell in it, as after a
+#      restart, shows as lost: a finished run stays open, and the watcher reports it gone;
 #   3b. a parked run stays in runs.sh, marked parked, and the watcher says
 #      nothing about it; a closed one is left out (but not with --all), finished
 #      or not; init-run.sh resuming a run deletes its marker; it records no kind
@@ -57,7 +59,7 @@ other_space=
 multi_space=
 active_space() { herdr-app ls | jq -r 'first(.spaces[] | select(.active) | .id) // empty'; }
 cleanup() {
-  for n in "$fake" "$fake-multi" "$watch" "$watch-2" "$fake-free" "$fake-kid"; do hc kill "$n" >/dev/null 2>&1; hc rm "$n" >/dev/null 2>&1; done
+  for n in "$fake" "$fake-multi" "$fake-lost" "$watch" "$watch-2" "$fake-free" "$fake-kid"; do hc kill "$n" >/dev/null 2>&1; hc rm "$n" >/dev/null 2>&1; done
   for space in $wt_space $other_space $space $multi_space; do
     # Closing a space leaves its finished shells behind.
     shells=$(hc ls --all --label "herdr.space=$space" --json | jq -r '.terminals[].address')
@@ -254,6 +256,25 @@ contains "PR after the terminal ends" "$("$capt/runs.sh")" "pr: acme/web https:/
 "$orch/set-status.sh" "$dir" finished 2>/dev/null
 check "closed run left out" "$("$capt/runs.sh" | grep -c "run: $dir")" 0
 contains "closed run with --all" "$("$capt/runs.sh" --all)" "plan: finished, closed"
+
+echo "== a lost orchestrator"
+# As herdr-core leaves an agent's terminal after a restart: live, with only a shell in
+# it. A hand-made run directory names it as its orchestrator.
+hc run --bg --name "$fake-lost" --no-notify --cwd "$toy" bash >/dev/null
+hc wait "$fake-lost" --output nothing --timeout 1 >/dev/null 2>&1
+ldir=$HERDR_ORCHESTRATION_ROOT/hclost-$suffix/feature-z
+mkdir -p "$ldir/inbox"
+jq -n --arg t "$(hc get "$fake-lost" --json | jq -r .address)" --arg f "$toy" \
+  '{terminal: $t, tab_id: "", folder: $f, branch: "feature/z", kind: "claude"}' >"$ldir/orchestrator.json"
+echo "Status: finished" >"$ldir/plan.md"
+out=$("$capt/runs.sh")
+contains "lost finished run stays open" "$out" "plan: finished, PR open; its orchestrator is lost, its tab still open"
+contains "lost orchestrator shown gone" "$out" "gone (lost: only a shell is left in its terminal"
+echo "Status: running" >"$ldir/plan.md"
+out=$(watch_once)
+contains "lost orchestrator reported gone" "$out" "attention feature/z orchestrator gone"
+hc kill "$fake-lost" >/dev/null; hc rm "$fake-lost" >/dev/null 2>&1
+rm -rf "${ldir%/*}"
 
 echo "== parked and closed"
 # With lib.sh's mark_run, as herdr-app-captain writes them.

@@ -52,9 +52,26 @@ plan_status() {
 }
 
 # terminal_state <hc-ls-json> <address>: its status; "starting" for a live terminal
-# that has not reported one; empty when gone. hc ls lists live terminals only.
+# that has not reported one; "lost" for one with no status and only a shell in its
+# foreground, as herdr-core leaves an agent's terminal after a restart (hc keep
+# replaces lost programs with a shell) or after the agent exited; empty when gone.
+# hc ls lists live terminals only, and names the command a terminal started with, not
+# what runs in it now, so the foreground comes from hc get.
 terminal_state() {
-  jq -r --arg t "$2" '.terminals[] | select(.address == $t) | .status // "starting"' <<<"$1" | head -1
+  local state
+  state=$(jq -r --arg t "$2" '.terminals[] | select(.address == $t) | .status // "starting"' <<<"$1" | head -1)
+  if [ "$state" = starting ] && is_shell "$(hc get "$2" --json 2>/dev/null | jq -r '.foreground.name // empty')"; then
+    state=lost
+  fi
+  echo "$state"
+}
+
+# is_shell <program name>: whether it is an interactive shell.
+is_shell() {
+  case ${1##*/} in
+    bash | zsh | sh | dash | fish | nu | ksh | tcsh | csh | pwsh | powershell | cmd | -bash | -zsh) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # unhandled_messages <run-dir>: one inbox message path per line.
@@ -90,6 +107,29 @@ away_state() {
 mark_run() {
   { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d '\n'; printf '\t'; plan_status "$1"; } >"$1/.$2.tmp" &&
     mv "$1/.$2.tmp" "$1/$2"
+}
+
+# integration_spaces <folder> <branch>: the id of each space that shows one of the
+# run's integration worktrees (a linked worktree with <branch> checked out, in <folder>
+# or a repository in it), matched as herdr-app-orchestrator's integration-worktree.sh
+# does: its first terminal's folder now, else the folder it was made in. One per line.
+integration_spaces() {
+  local r paths=() id made first at p
+  for r in "$1" "$1"/*/; do
+    [ -e "$r/.git" ] || continue
+    while IFS= read -r p; do paths+=("$p"); done < <(git -C "$r" worktree list --porcelain 2>/dev/null |
+      awk -v b="branch refs/heads/$2" '/^worktree /{p=substr($0,10); n++} $0==b && n>1{print p}')
+  done
+  [ ${#paths[@]} -gt 0 ] || return 0
+  while IFS=$'\t' read -r id made first; do
+    at=
+    [ -z "$first" ] || at=$(hc get "$first" --json 2>/dev/null | jq -r '.foreground.cwd // .cwd // empty')
+    at=${at:-$made}
+    for p in "${paths[@]}"; do
+      case $at in "$p" | "$p"/*) echo "$id"; break ;; esac
+    done
+  done < <(herdr-app ls 2>/dev/null | jq -r '.spaces[] | select(.machine == null)
+    | [.id, .folder // "", ([.tabs[].terminals[].terminal | select(.)] | first // "")] | @tsv')
 }
 
 # marker_text <file>: "<time> (was: <status>)" from a parked or closed marker.
