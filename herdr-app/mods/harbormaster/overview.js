@@ -113,32 +113,48 @@ function confirmText(r, action, counts) {
 }
 
 function actionButton(t, id, label, tip, onClick, primary = false) {
-  return div().id(id).flex_none().px(9).h(22).rounded(5).flex().items_center().cursor_pointer().text_size(11.5).font_medium()
-    .bg(primary ? t.accent : t.raised).text_color(primary ? t.background : t.muted).tooltip(tip ?? label)
+  const b = div().id(id).flex_none().px(9).h(22).rounded(5).flex().items_center().text_size(11.5).font_medium()
+    .bg(primary ? t.accent : t.raised).text_color(primary ? t.background : t.muted);
+  // No click: an action is already under way on this card.
+  if (!onClick) return b.opacity(0.45).child(label);
+  return b.cursor_pointer().tooltip(tip ?? label)
     .hover((s) => s.opacity(0.85).text_color(primary ? t.background : t.foreground))
     .on_click((_e, cx) => { cx.stop_propagation(); onClick(cx); })
     .child(label);
 }
 
-// The card's buttons, or, after one is clicked, its question with a confirm and Cancel.
+const BUSY = { delete: "Deleting…", park: "Parking…", close: "Closing…" };
+
+// The card's buttons, or, after one is clicked, its question with a confirm and Cancel,
+// or, while the confirmed action runs, what it is doing with the buttons dimmed.
 // It asks on the card, not in the app's confirm dialog, which can only run a Herdr
 // command, not putAway's marker write.
 function actionRow(view, t, r, orch, closed, counts) {
+  const busy = view.busy?.[r.key];
   const asking = view.confirm?.key === r.key ? view.confirm.action : null;
   const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
+  if (busy) {
+    return h_flex().gap(6).justify_end().items_center()
+      .child(div().flex_1().text_size(11.5).text_color(t.muted).child(busy))
+      .children(actionsOf(r, orch, closed).map((a) => actionButton(t, `${a}-${r.key}`, ACTION[a].label, null, null, a === "resume")));
+  }
   if (asking) {
     const yes = (cx) => {
       set(cx, null);
-      if (asking === "resume") resumeRun(r);
+      if (asking === "resume") return resumeRun(r);
+      view.busy[r.key] = BUSY[asking];
       // The click's cx dies with the click; the awaited work notifies through cx.spawn's.
-      else cx.spawn(async (cx) => {
+      cx.spawn(async (cx) => {
         try {
           if (asking === "delete") await deleteRun(r);
           else {
             const note = await putAway(r, asking === "park" ? "parked" : "closed", orch);
             if (note) view.actionNote = `${r.branch}: ${note}`;
           }
+          // Show the outcome now rather than at the next 5 s refresh.
+          await view.load(cx).catch(() => {});
         } catch (e) { view.actionError = `${r.branch}: ${e?.message ?? e}`; }
+        delete view.busy[r.key];
         cx.notify();
       });
     };
