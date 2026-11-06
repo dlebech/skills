@@ -13,7 +13,7 @@
 //   <root>/.captain-decisions.json              the captain's open decisions: [{id, question, run, asked}]
 
 import { exec, machines, shared, setShared, run as command } from "herdr";
-import { orchestratorState, orchestratorLost, workersOf, needsYou, tabOf, homeSpace, worktreeSpaces, facts } from "./live.js";
+import { orchestratorState, orchestratorLost, workersOf, needsYou, tabOf, liveTabOf, homeSpace, worktreeSpaces, leftoverSpaces, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
 
@@ -145,6 +145,8 @@ export function loadRuns() {
     runs.sort((a, b) => (a.machine ?? "").localeCompare(b.machine ?? "") || a.dir.localeCompare(b.dir));
     decisions.sort((a, b) => (a.asked ?? 0) - (b.asked ?? 0));
     cache = { at: Date.now(), runs, decisions, errors, pending: null };
+    const ctx = facts();
+    for (const r of runs) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
     return cache;
   })().catch((e) => {
     cache = { ...cache, pending: null, errors: [String(e)] };
@@ -304,10 +306,9 @@ const MARK = 'd=$1 m=$2; { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d "\\n"; printf "\\
 const POST = 'd=$1 f=$2; printf "%s\\n" "$3" >"$d/inbox/.$f.tmp" && mv "$d/inbox/.$f.tmp" "$d/inbox/$f"';
 
 // Closing a run whose orchestrator is there asks it to clean up: it ends its agents,
-// pushes what is not on the remote, deletes the run's worktrees and its space, writes
-// the closed marker and closes its own tab (herdr-app-orchestrator's section 9).
-// Resolves to a note for the card. A blocked orchestrator reads it once its dialog is
-// answered.
+// pushes what is not on the remote, deletes the run's worktrees, writes the closed
+// marker and closes its own tab (herdr-app-orchestrator's section 9). Resolves to a note
+// for the card. A blocked orchestrator reads it once its dialog is answered.
 async function askToClose(run) {
   const file = `harbormaster-close-${Math.floor(Date.now() / 1000)}.message`;
   const text = "The user closed this run in Harbormaster. Clean up and close your tab, as in your skill's section 9 (Close).";
@@ -315,7 +316,7 @@ async function askToClose(run) {
   if (out.code !== 0) throw new Error(out.stderr || "could not write to its inbox");
   const sent = await exec("hc", ["send", run.terminal, `Read and act on ${run.dir}/inbox/${file}.`], { on: run.machine }).catch(() => null);
   if (sent?.code === 9) return "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes";
-  return "its orchestrator is cleaning up, and closes its tab when done";
+  return "its orchestrator is cleaning up, and its tab closes when done";
 }
 
 // The run's integration worktrees: each linked worktree with the run's branch checked
@@ -328,40 +329,91 @@ const WORKTREES = [
   'done',
 ].join("\n");
 
-// Closes the spaces that show the run's integration worktrees, to declutter the sidebar
-// while the run is parked. The worktrees stay; the resumed orchestrator's
-// integration-worktree.sh opens their spaces again. Best effort: parking never fails on it.
-async function closeWorktreeSpaces(run) {
-  if (!run.folder) return;
+// The integration worktrees' paths, or null when git could not be asked.
+async function integrationWorktrees(run) {
+  if (!run.folder) return [];
   const out = await exec("sh", ["-c", WORKTREES, "sh", run.folder, run.branch], { on: run.machine }).catch(() => null);
-  const paths = (out?.code === 0 ? out.stdout : "").split("\n").filter(Boolean);
+  return out?.code === 0 ? out.stdout.split("\n").filter(Boolean) : null;
+}
+
+// Closes the spaces that show the run's integration worktrees: to declutter the
+// sidebar while the run is parked (the worktrees stay, and the resumed orchestrator's
+// integration-worktree.sh opens their spaces again), or before its orchestrator
+// deletes them on Close, since a space whose folder is gone can no longer be placed
+// under its repository and shows as a space of its own. Best effort: never fails.
+async function closeWorktreeSpaces(run, paths) {
+  paths ??= (await integrationWorktrees(run)) ?? [];
   if (paths.length) for (const s of worktreeSpaces(run, paths)) command("space.close", { id: s.id, confirmed: true });
+}
+
+// The window commands Harbormaster sends for a closed run on its own, at most once a
+// minute per tab or space, so the 5 s refresh does not repeat them while they land.
+const sent = new Map();
+function once(id, fn) {
+  if (Date.now() - (sent.get(id) ?? 0) < 60000) return;
+  sent.set(id, Date.now());
+  fn();
+}
+
+// Prints those of the given paths that no longer exist.
+const MISSING = 'for p; do [ -e "$p" ] || printf "%s\\n" "$p"; done';
+
+// Finishes closing a closed run in the window. Its orchestrator closes its own
+// worktree space and tab through herdr-app, which only reaches a window on its own
+// computer: when Herdr runs on another one, connected over ssh, it cannot, and leaves
+// them. Harbormaster draws in the window, so it closes what is left: spaces still on
+// a worktree folder of the run that is gone, and, once the orchestrator has ended its
+// turn, its tab, which ends it. Never while it is working or blocked, so it can still
+// report or ask; and only the tab its terminal is in now, so a resumed run, whose
+// orchestrator.json still names the old terminal until init-run.sh runs, is safe.
+async function tidyClosed(run, ctx) {
+  const spaces = leftoverSpaces(run);
+  if (spaces.length) {
+    const out = await exec("sh", ["-c", MISSING, "sh", ...new Set(spaces.map((s) => s.path))], { on: run.machine }).catch(() => null);
+    const gone = new Set(out?.code === 0 ? out.stdout.split("\n").filter(Boolean) : []);
+    for (const s of spaces) if (gone.has(s.path)) once(s.id, () => command("space.close", { id: s.id, confirmed: true }));
+  }
+  const tab = liveTabOf(run);
+  const state = orchestratorState(run, ctx);
+  if (tab && state !== "working" && state !== "blocked") once(tab, () => command("tab.close", { id: tab, confirmed: true }));
 }
 
 // Parks the run for later: writes the marker, closes the spaces of its integration
 // worktrees, then closes the orchestrator's tab, which ends it and its agents; the
 // worktrees, branches and everything else stay. Or closes it for good: an orchestrator
-// that is there cleans up and ends itself (askToClose); for one that is gone it writes
-// the marker, and the worktrees stay until the run is resumed and closed again.
+// that is there cleans up and ends itself (askToClose), after Harbormaster closes the
+// worktrees' spaces; one that is finished, idle and has no worktree left has nothing to
+// clean up, so the run is marked closed and its tab closed here; for one that is gone
+// it writes the marker, and the worktrees stay until the run is resumed and closed again.
 // how: "parked" | "closed"; orch: orchestratorState(). Resolves to a note, or null.
 // A finished run needs no marker to close: closing its tab does. With the orchestrator
 // still there but no tab to close, parking refuses, so a marker never hides a live run.
 export async function putAway(run, how, orch) {
   if (how === "closed" && orch !== "gone") {
+    const paths = await integrationWorktrees(run);
+    if (run.phase === "finished" && (orch === "done" || orch === "idle") && paths?.length === 0) {
+      await mark(run, "closed");
+      await tidyClosed(run, facts());
+      cache.at = 0;
+      return null;
+    }
+    await closeWorktreeSpaces(run, paths ?? []);
     const note = await askToClose(run);
     cache.at = 0;
     return note;
   }
   const tab = tabOf(run);
   if (!tab && orch !== "gone") throw new Error("cannot find the orchestrator's tab; close it by hand");
-  if (how === "parked" || run.phase !== "finished") {
-    const out = await exec("sh", ["-c", MARK, "sh", run.dir, how], { on: run.machine });
-    if (out.code !== 0) throw new Error(out.stderr || `could not write ${how}`);
-  }
+  if (how === "parked" || run.phase !== "finished") await mark(run, how);
   if (how === "parked") await closeWorktreeSpaces(run);
   if (tab) command("tab.close", { id: tab, confirmed: true });
   cache.at = 0;
   return null;
+}
+
+async function mark(run, how) {
+  const out = await exec("sh", ["-c", MARK, "sh", run.dir, how], { on: run.machine });
+  if (out.code !== 0) throw new Error(out.stderr || `could not write ${how}`);
 }
 
 // Deletes a closed run for good: its run directory, so it leaves every view and the
