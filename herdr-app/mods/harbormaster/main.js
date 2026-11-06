@@ -27,6 +27,7 @@ export default class Harbormaster extends View {
     this.showDone = false;
     this.contexts = {}; // { [address]: { tokens, model } } for the crew
     this.replying = null; // the key of the decision being answered inline
+    this.busy = {}; // { [run key]: "Deleting…" } while a card's action is under way
     this.reply = InputState.new({ placeholder: "Your answer…" });
     this.reply.on("submit", (_e, cx) => submitReply(this, cx));
     if (!DATA_ROLES.has(role)) return;
@@ -36,15 +37,21 @@ export default class Harbormaster extends View {
     if (role === "harbor") cx.timer.every(2000, (cx) => { this.step++; cx.notify(); });
   }
 
+  // Reads the runs and the captain's decisions again; redraws when they changed.
+  async load(cx) {
+    const { runs, decisions, errors } = await loadRuns();
+    const changed = JSON.stringify(runs) !== JSON.stringify(this.runs) || JSON.stringify(decisions) !== JSON.stringify(this.decisions)
+      || errors.join() !== this.errors.join();
+    this.runs = runs;
+    this.decisions = decisions;
+    this.errors = errors;
+    if (changed) cx.notify();
+    return runs;
+  }
+
   refresh(cx) {
     cx.spawn(async (cx) => {
-      const { runs, decisions, errors } = await loadRuns();
-      const changed = JSON.stringify(runs) !== JSON.stringify(this.runs) || JSON.stringify(decisions) !== JSON.stringify(this.decisions)
-        || errors.join() !== this.errors.join();
-      this.runs = runs;
-      this.decisions = decisions;
-      this.errors = errors;
-      if (changed) cx.notify();
+      const runs = await this.load(cx);
       // The crew and the overview show each crew agent's context size; the harbor does not.
       if (props()?.role !== "harbor") {
         const contexts = await loadContexts(crewAddresses(facts()));
