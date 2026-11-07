@@ -12,7 +12,7 @@
 //   <root>/<folder>/<branch>/parked, closed     the person put the run away: "<time>\t<status then>"
 //   <root>/.captain-decisions.json              the captain's open decisions: [{id, question, run, asked}]
 
-import { exec, machines, shared, setShared, run as command } from "herdr";
+import { exec, machines, spaces, shared, setShared, run as command } from "herdr";
 import { orchestratorState, orchestratorLost, workersOf, needsYou, tabOf, liveTabOf, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
@@ -151,6 +151,7 @@ export function loadRuns() {
     const ctx = facts();
     for (const r of runs) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
     for (const r of runs) if (r.machine && !r.away) nameTab(r);
+    showWorktrees(runs, ctx).catch(() => {});
     return cache;
   })().catch((e) => {
     cache = { ...cache, pending: null, errors: [String(e)] };
@@ -403,6 +404,50 @@ function nameTab(run) {
   if (!tab || (tab.named && !tab.name.startsWith("🐙"))) return;
   const name = orchestratorTabName(run.branch, run.phase);
   if (tab.name !== name) once(`${tab.id}\u001f${name}`, () => command("tab.rename", { id: tab.id, name }));
+}
+
+// Shows the integration worktrees of runs on other machines as spaces in the window.
+// The orchestrator's integration-worktree.sh opens the space through herdr-app, which
+// only reaches a window on its own computer: when Herdr runs on another one, connected
+// over ssh, it cannot, and the worktree has no space. So Harbormaster opens it, as the
+// script does: space.new on the worktree's folder on the run's machine, unnamed, so the
+// sidebar nests it under the repository's space, then shows the space that was showing
+// again. Only for an open run whose orchestrator is there and not closing.
+// A worktree gets a space once: the ones Harbormaster opened or saw open are kept in
+// shared state (harbormaster.worktrees, {[run key]: [path]}, persisted), so a space
+// the person closes stays closed. A parked or closed run's entry is dropped, since
+// parking closes its spaces, and the resumed orchestrator, which cannot open them
+// either, needs them opened again. Asks git on the run's machine at most every 30 s.
+const WORKTREES_KEY = "harbormaster.worktrees";
+const asked = new Map();
+let showing = false; // one pass at a time, so a slow git does not open a space twice
+async function showWorktrees(runs, ctx) {
+  if (showing) return;
+  showing = true;
+  try { await showWorktreesOnce(runs, ctx); } finally { showing = false; }
+}
+async function showWorktreesOnce(runs, ctx) {
+  const seen = { ...(shared(WORKTREES_KEY) ?? {}) };
+  let changed = false;
+  for (const r of runs) if (seen[r.key] && (r.away || isClosed(r, ctx))) { delete seen[r.key]; changed = true; }
+  const open = runs.filter((r) => r.machine && !r.away && !isClosed(r, ctx) && r.progress !== "closing"
+    && orchestratorState(r, ctx) !== "gone" && Date.now() - (asked.get(r.key) ?? 0) >= 30000);
+  for (const r of open) {
+    asked.set(r.key, Date.now());
+    const paths = await integrationWorktrees(r);
+    if (!paths?.length) continue;
+    const known = new Set(seen[r.key] ?? []);
+    for (const path of paths) {
+      if (known.has(path)) continue;
+      known.add(path);
+      if (worktreeSpaces(r, [path]).length) continue;
+      const before = spaces().find((sp) => sp.active)?.id;
+      command("space.new", { folder: path, machine: r.machine });
+      if (before) command("space.select", { id: before });
+    }
+    if (known.size !== (seen[r.key] ?? []).length) { seen[r.key] = [...known]; changed = true; }
+  }
+  if (changed) setShared(WORKTREES_KEY, seen);
 }
 
 // Parks the run for later: writes the marker, closes the spaces of its integration
