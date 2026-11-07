@@ -64,6 +64,7 @@ Harbormaster is built for that:
 - It opens links on the computer you are looking at (`open` on macOS, `xdg-open` on Linux).
 - `gh` must be logged in on the machine where the runs live, not where the window is.
 - The orchestrators and the captain run `herdr-app` to open and close spaces and tabs, and it reaches only a window on their own computer. On the machine where the runs live, there is none, so after a Close they leave the integration worktree's space and their own tab. Harbormaster closes both in your window once the run has its `closed` marker, and closes the space before the orchestrator deletes the worktree. Without Harbormaster in the window, close them by hand.
+- For the same reason, an orchestrator on another computer cannot rename its tab when its status changes (`🐙`, `🐙 ✋` or `🐙 ✓` and its branch). Harbormaster renames it in your window from the run's `plan.md`, unless you gave the tab a name of your own. Without Harbormaster, the tab keeps its old name.
 
 ## What it reads
 
@@ -81,7 +82,7 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 
 It writes to a run directory only when you press Park, Close or Delete: one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. Delete removes the run directory.
 
-It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended. It sends each at most once a minute.
+It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended; and for an open run on another machine: it renames the orchestrator's tab after the run's status, when the tab is unnamed or has one of the orchestrator's own `🐙` names. It sends each at most once a minute.
 
 ## Parked, resumed, and closed runs
 

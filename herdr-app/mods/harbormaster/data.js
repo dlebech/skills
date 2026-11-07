@@ -13,7 +13,7 @@
 //   <root>/.captain-decisions.json              the captain's open decisions: [{id, question, run, asked}]
 
 import { exec, machines, shared, setShared, run as command } from "herdr";
-import { orchestratorState, orchestratorLost, workersOf, needsYou, tabOf, liveTabOf, homeSpace, worktreeSpaces, leftoverSpaces, facts } from "./live.js";
+import { orchestratorState, orchestratorLost, workersOf, needsYou, tabOf, liveTabOf, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
 
@@ -150,6 +150,7 @@ export function loadRuns() {
     cache = { at: Date.now(), runs, decisions, errors, pending: null };
     const ctx = facts();
     for (const r of runs) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
+    for (const r of runs) if (r.machine && !r.away) nameTab(r);
     return cache;
   })().catch((e) => {
     cache = { ...cache, pending: null, errors: [String(e)] };
@@ -351,8 +352,9 @@ async function closeWorktreeSpaces(run, paths) {
   if (paths.length) for (const s of worktreeSpaces(run, paths)) command("space.close", { id: s.id, confirmed: true });
 }
 
-// The window commands Harbormaster sends for a closed run on its own, at most once a
-// minute per tab or space, so the 5 s refresh does not repeat them while they land.
+// The window commands Harbormaster sends on its own, for a closed run or to name a
+// remote orchestrator's tab, at most once a minute per tab or space (per name, for a
+// rename), so the 5 s refresh does not repeat them while they land.
 const sent = new Map();
 function once(id, fn) {
   if (Date.now() - (sent.get(id) ?? 0) < 60000) return;
@@ -381,6 +383,26 @@ async function tidyClosed(run, ctx) {
   const tab = liveTabOf(run);
   const state = orchestratorState(run, ctx);
   if (tab && state !== "working" && state !== "blocked") once(tab, () => command("tab.close", { id: tab, confirmed: true }));
+}
+
+// The orchestrator's tab name for a run phase, as set-status.sh names it.
+const TAB_MARK = { waiting: "✋ ", blocked: "✋ ", finished: "✓ " };
+export const orchestratorTabName = (branch, phase) => `🐙 ${TAB_MARK[phase] ?? ""}${branch}`;
+
+// Names an orchestrator's tab after its run's status, for a run on another machine.
+// Its set-status.sh renames its own tab through herdr-app, which only reaches a window
+// on its own computer: when Herdr runs on another one, connected over ssh, it cannot,
+// and the tab keeps its old name. Harbormaster draws in the window, so it renames the
+// tab from plan.md's status, which set-status.sh writes first. Only the tab its terminal
+// is in now, as in tidyClosed, and only while the tab is unnamed or carries one of the
+// orchestrator's own names (🐙 ...), so a name the person gave it stays. Each name is
+// sent at most once a minute, so a rename that does not land is not repeated every 5 s.
+function nameTab(run) {
+  if (run.phase === "unknown") return;
+  const tab = tabInfo(liveTabOf(run));
+  if (!tab || (tab.named && !tab.name.startsWith("🐙"))) return;
+  const name = orchestratorTabName(run.branch, run.phase);
+  if (tab.name !== name) once(`${tab.id}\u001f${name}`, () => command("tab.rename", { id: tab.id, name }));
 }
 
 // Parks the run for later: writes the marker, closes the spaces of its integration
