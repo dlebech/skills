@@ -188,7 +188,10 @@ export const tabInfo = (id) => (id && spaces().flatMap((s) => s.tabs ?? []).find
 
 // The tab holding the orchestrator's terminal now, or null when no pane shows it.
 // Unlike tabOf, never orchestrator.json's tab, which may be a tab long gone.
-export const liveTabOf = (run) => (run.terminal && panes().find((p) => p.terminal === run.terminal)?.tab) || null;
+export const liveTabOf = (run) => tabOfTerminal(run.terminal);
+
+// The tab holding a terminal now, or null when no pane shows it.
+export const tabOfTerminal = (address) => (address && panes().find((p) => p.terminal === address)?.tab) || null;
 
 export function focusAgent(address) {
   if (address) run("agent.focus", { terminal: address });

@@ -66,6 +66,7 @@ Harbormaster is built for that:
 - The orchestrators and the captain run `herdr-app` to open and close spaces and tabs, and it reaches only a window on their own computer. On the machine where the runs live, there is none, so after a Close they leave the integration worktree's space and their own tab. Harbormaster closes both in your window once the run has its `closed` marker, and closes the space before the orchestrator deletes the worktree. Without Harbormaster in the window, close them by hand.
 - For the same reason, an orchestrator on another computer cannot rename its tab when its status changes (`🐙`, `🐙 ✋` or `🐙 ✓` and its branch). Harbormaster renames it in your window from the run's `plan.md`, unless you gave the tab a name of your own. Without Harbormaster, the tab keeps its old name.
 - Nor can it open its integration worktree's space. Harbormaster opens it in your window, nested under the repository's space, and switches back to the space you were on. It opens each worktree's space once, so one you close stays closed, until the run is parked or closed and resumed. Without Harbormaster, open it with the worktree menu's Open worktree.
+- A captain on another computer has the same limits. Harbormaster names its tab `⚓ captain` (unless the tab has a name already), and when the captain parks a run there, which writes the `parked` marker but cannot reach your window, Harbormaster closes the run's integration worktree spaces and the orchestrator's tab, as its own Park does. It does that only for a run it saw open with its orchestrator there, so runs parked before stay as they are.
 
 ## What it reads
 
@@ -84,7 +85,7 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 
 It writes to a run directory only when you press Park, Close or Delete: one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. Delete removes the run directory.
 
-It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended; and for an open run on another machine: it renames the orchestrator's tab after the run's status, when the tab is unnamed or has one of the orchestrator's own `🐙` names, at most once a minute, and opens a space for each integration worktree that has never had one.
+It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended; and for an open run on another machine: it renames the orchestrator's tab after the run's status, when the tab is unnamed or has one of the orchestrator's own `🐙` names, at most once a minute, opens a space for each integration worktree that has never had one, and finishes parking a run the captain parked there; and names a captain's tab on another machine `⚓ captain`.
 
 ## Parked, resumed, and closed runs
 

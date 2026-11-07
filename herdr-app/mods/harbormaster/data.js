@@ -13,7 +13,7 @@
 //   <root>/.captain-decisions.json              the captain's open decisions: [{id, question, run, asked}]
 
 import { exec, machines, spaces, shared, setShared, run as command } from "herdr";
-import { orchestratorState, orchestratorLost, workersOf, needsYou, tabOf, liveTabOf, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, facts } from "./live.js";
+import { orchestratorState, orchestratorLost, workersOf, needsYou, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
 
@@ -135,12 +135,13 @@ export function loadRuns() {
   cache.pending = (async () => {
     const names = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
     if (!names.includes(null)) names.unshift(null);
-    const runs = [], decisions = [], errors = [];
+    const runs = [], decisions = [], errors = [], answered = new Set();
     await Promise.all(names.map(async (on) => {
       try {
         const out = await exec("sh", ["-c", SCRIPT], { on });
         decisions.push(...parseDecisions(on, out.stdout.split(RS)[0]));
         runs.push(...parse(on, out.stdout));
+        answered.add(on ?? "");
       } catch (e) {
         errors.push(`${on ?? "this machine"}: ${e?.message ?? e}`);
       }
@@ -151,7 +152,8 @@ export function loadRuns() {
     const ctx = facts();
     for (const r of runs) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
     for (const r of runs) if (r.machine && !r.away) nameTab(r);
-    showWorktrees(runs, ctx).catch(() => {});
+    nameCaptainTab(ctx);
+    showWorktrees(runs, ctx, answered).catch(() => {});
     return cache;
   })().catch((e) => {
     cache = { ...cache, pending: null, errors: [String(e)] };
@@ -406,6 +408,30 @@ function nameTab(run) {
   if (tab.name !== name) once(`${tab.id}\u001f${name}`, () => command("tab.rename", { id: tab.id, name }));
 }
 
+// Names the captain's tab "⚓ captain" when the captain runs on another machine and the
+// tab has no name yet. herdr-app-captain names its own tab through herdr-app, which
+// cannot reach a window on another computer, so the tab kept its number. A name
+// anyone gave the tab stays.
+function nameCaptainTab(ctx) {
+  const address = captainOf(ctx).terminal?.address;
+  if (!address?.includes("/")) return; // on this computer, the captain names it itself
+  const tab = tabInfo(tabOfTerminal(address));
+  if (tab && !tab.named) once(`${tab.id}\u001f⚓`, () => command("tab.rename", { id: tab.id, name: "⚓ captain" }));
+}
+
+// Finishes parking a run on another machine that herdr-app-captain parked there: the
+// captain writes the parked marker, but cannot reach the window to close the run's
+// integration worktree spaces and the orchestrator's tab, as Park does. Only for a run
+// this window had seen open, with its orchestrator there (it has a harbormaster.worktrees
+// entry, `paths` its worktrees), so that runs parked long ago, whose spaces the person
+// may have opened again on purpose, are left alone. Harbormaster's own Park has closed
+// both already. Closing the tab ends the orchestrator and its agents, as Park does.
+function tidyParked(run, paths) {
+  if (paths.length) for (const sp of worktreeSpaces(run, paths)) command("space.close", { id: sp.id, confirmed: true });
+  const tab = liveTabOf(run);
+  if (tab) command("tab.close", { id: tab, confirmed: true });
+}
+
 // Shows the integration worktrees of runs on other machines as spaces in the window.
 // The orchestrator's integration-worktree.sh opens the space through herdr-app, which
 // only reaches a window on its own computer: when Herdr runs on another one, connected
@@ -413,30 +439,47 @@ function nameTab(run) {
 // script does: space.new on the worktree's folder on the run's machine, unnamed, so the
 // sidebar nests it under the repository's space, then shows the space that was showing
 // again. Only for an open run whose orchestrator is there and not closing.
-// A worktree gets a space once: the ones Harbormaster opened or saw open are kept in
-// shared state (harbormaster.worktrees, {[run key]: [path]}, persisted), so a space
-// the person closes stays closed. A parked or closed run's entry is dropped, since
-// parking closes its spaces, and the resumed orchestrator, which cannot open them
-// either, needs them opened again. Asks git on the run's machine at most every 30 s.
+// A worktree gets a space once per orchestrator: the ones Harbormaster opened or saw
+// open are kept in shared state (harbormaster.worktrees, {[run key]: {terminal, paths}},
+// persisted), so a space the person closes stays closed. Every such run has an entry, with or without
+// worktrees. A parked or closed run's entry is dropped, since parking closes its
+// spaces, and the resumed orchestrator, which cannot open them either, needs them
+// opened again; a parked one is first tidied (tidyParked). Asks git on the run's
+// machine at most every 30 s.
 const WORKTREES_KEY = "harbormaster.worktrees";
 const asked = new Map();
 let showing = false; // one pass at a time, so a slow git does not open a space twice
-async function showWorktrees(runs, ctx) {
+async function showWorktrees(runs, ctx, answered) {
   if (showing) return;
   showing = true;
-  try { await showWorktreesOnce(runs, ctx); } finally { showing = false; }
+  try { await showWorktreesOnce(runs, ctx, answered); } finally { showing = false; }
 }
-async function showWorktreesOnce(runs, ctx) {
+async function showWorktreesOnce(runs, ctx, answered) {
   const seen = { ...(shared(WORKTREES_KEY) ?? {}) };
   let changed = false;
-  for (const r of runs) if (seen[r.key] && (r.away || isClosed(r, ctx))) { delete seen[r.key]; changed = true; }
+  // A run directory that is gone, deleted or moved, from a machine that answered (one
+  // that did not may only be offline): a new run there must get its space again.
+  const listed = new Set(runs.map((r) => r.key));
+  for (const key of Object.keys(seen)) {
+    if (!listed.has(key) && answered.has(key.slice(0, key.indexOf(":")))) { delete seen[key]; changed = true; }
+  }
+  for (const r of runs) {
+    if (!seen[r.key] || !(r.away || isClosed(r, ctx))) continue;
+    if (r.machine && r.away?.how === "parked") tidyParked(r, seen[r.key].paths ?? []);
+    delete seen[r.key];
+    changed = true;
+  }
   const open = runs.filter((r) => r.machine && !r.away && !isClosed(r, ctx) && r.progress !== "closing"
     && orchestratorState(r, ctx) !== "gone" && Date.now() - (asked.get(r.key) ?? 0) >= 30000);
   for (const r of open) {
     asked.set(r.key, Date.now());
     const paths = await integrationWorktrees(r);
-    if (!paths?.length) continue;
-    const known = new Set(seen[r.key] ?? []);
+    if (!paths) continue;
+    // Each orchestrator gets the spaces once, as integration-worktree.sh runs once when
+    // one starts or resumes: a new orchestrator, of a resumed run or a new run under the
+    // same name, gets them again.
+    const entry = seen[r.key]?.terminal === r.terminal ? seen[r.key] : null;
+    const known = new Set(entry?.paths ?? []);
     for (const path of paths) {
       if (known.has(path)) continue;
       known.add(path);
@@ -445,7 +488,7 @@ async function showWorktreesOnce(runs, ctx) {
       command("space.new", { folder: path, machine: r.machine });
       if (before) command("space.select", { id: before });
     }
-    if (known.size !== (seen[r.key] ?? []).length) { seen[r.key] = [...known]; changed = true; }
+    if (!entry || known.size !== entry.paths.length) { seen[r.key] = { terminal: r.terminal, paths: [...known] }; changed = true; }
   }
   if (changed) setShared(WORKTREES_KEY, seen);
 }
@@ -517,6 +560,8 @@ export async function deleteRun(run) {
   const prs = { ...(shared("harbormaster.prs") ?? {}) };
   delete prs[run.key];
   setShared("harbormaster.prs", prs);
+  const seen = { ...(shared(WORKTREES_KEY) ?? {}) };
+  if (seen[run.key]) { delete seen[run.key]; setShared(WORKTREES_KEY, seen); }
   cache.at = 0;
 }
 
