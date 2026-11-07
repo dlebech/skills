@@ -53,7 +53,7 @@ export function adrift(roots, ctx) {
 // the program, a path, or user@host. Never a bare tab number when anything else will do.
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
 export function agentName(a) {
-  const tab = spaces().flatMap((s) => s.tabs ?? []).find((t) => t.id === a.tab);
+  const tab = tabInfo(a.tab);
   const prog = a.program?.name;
   const live = clean(a.title);
   const telling = live && live !== prog && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== a.program?.key;
@@ -183,9 +183,15 @@ export function leftoverSpaces(run) {
   });
 }
 
+// A tab in the window by its id ({id, name, named, ...}), or null.
+export const tabInfo = (id) => (id && spaces().flatMap((s) => s.tabs ?? []).find((t) => t.id === id)) || null;
+
 // The tab holding the orchestrator's terminal now, or null when no pane shows it.
 // Unlike tabOf, never orchestrator.json's tab, which may be a tab long gone.
-export const liveTabOf = (run) => (run.terminal && panes().find((p) => p.terminal === run.terminal)?.tab) || null;
+export const liveTabOf = (run) => tabOfTerminal(run.terminal);
+
+// The tab holding a terminal now, or null when no pane shows it.
+export const tabOfTerminal = (address) => (address && panes().find((p) => p.terminal === address)?.tab) || null;
 
 export function focusAgent(address) {
   if (address) run("agent.focus", { terminal: address });

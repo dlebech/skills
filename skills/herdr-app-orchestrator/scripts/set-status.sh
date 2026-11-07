@@ -30,7 +30,8 @@
 # record of a finished run. The labels, for live lists such as Herdr's Agents list:
 # run.status (the state), progress, and run.prs (the PR URLs, space-separated).
 # The tab becomes "🐙 <branch>", "🐙 ✋ <branch>" or "🐙 ✓ <branch>".
-# plan.md and status.json are what count: a closed window, or an orchestrator with
+# plan.md and status.json are what count: a closed window, a window on another
+# computer (where Harbormaster renames the tab from plan.md), or an orchestrator with
 # no tab, only prints a warning, since the run goes on without one. An unreadable
 # status.json fails the call before anything changes.
 set -u
@@ -129,6 +130,6 @@ if [ -n "$terminal" ]; then
 fi
 if [ -n "$tab" ]; then
   herdr-app do tab.rename --id "$tab" --name "$name" >/dev/null 2>&1 ||
-    echo "warning: could not rename tab $tab (is the Herdr window open?)" >&2
+    echo "warning: could not rename tab $tab: no Herdr window on this computer; with the window on another computer, Harbormaster there renames it" >&2
 fi
 exit 0

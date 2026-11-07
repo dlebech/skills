@@ -29,7 +29,8 @@
 # shows it; that gets a warning, a new space is opened, and the old one is left for
 # the user. Never start an orchestrator in this space: it starts in the
 # repository's own checkout. A window that cannot be reached only prints a warning:
-# the run needs the worktree, not the space. Prints the worktree path.
+# the run needs the worktree, not the space. When the window is on another computer,
+# connected over ssh, Harbormaster there opens the space. Prints the worktree path.
 set -u
 . "$(dirname "$0")/lib.sh"
 
@@ -62,7 +63,7 @@ live_folder() {
 }
 
 if ! spaces=$(herdr-app ls 2>/dev/null); then
-  echo "warning: could not reach the Herdr window; the worktree has no space" >&2
+  echo "warning: could not reach the Herdr window; the worktree has no space (with the window on another computer, Harbormaster there opens it)" >&2
 else
   shown= drifted=
   while IFS=$'\t' read -r id made first; do

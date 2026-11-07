@@ -64,6 +64,9 @@ Harbormaster is built for that:
 - It opens links on the computer you are looking at (`open` on macOS, `xdg-open` on Linux).
 - `gh` must be logged in on the machine where the runs live, not where the window is.
 - The orchestrators and the captain run `herdr-app` to open and close spaces and tabs, and it reaches only a window on their own computer. On the machine where the runs live, there is none, so after a Close they leave the integration worktree's space and their own tab. Harbormaster closes both in your window once the run has its `closed` marker, and closes the space before the orchestrator deletes the worktree. Without Harbormaster in the window, close them by hand.
+- For the same reason, an orchestrator on another computer cannot rename its tab when its status changes (`🐙`, `🐙 ✋` or `🐙 ✓` and its branch). Harbormaster renames it in your window from the run's `plan.md`, unless you gave the tab a name of your own. Without Harbormaster, the tab keeps its old name.
+- Nor can it open its integration worktree's space. Harbormaster opens it in your window, nested under the repository's space, and switches back to the space you were on. It opens each worktree's space once, so one you close stays closed, until the run is parked or closed and resumed. Without Harbormaster, open it with the worktree menu's Open worktree.
+- A captain on another computer has the same limits. Harbormaster names its tab `⚓ captain` (unless the tab has a name already), and when the captain parks a run there, which writes the `parked` marker but cannot reach your window, Harbormaster closes the run's integration worktree spaces and the orchestrator's tab, as its own Park does. It does that only for a run it saw open with its orchestrator there, so runs parked before stay as they are.
 
 ## What it reads
 
@@ -76,12 +79,13 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 
   The results are kept in Herdr's shared state (`harbormaster.prs`), so every copy of the mod and every layout uses the same ones.
 - **When you press Park or Close:** `git worktree list` in the run's folder, to find the integration worktrees whose spaces to close.
+- **Every 30 seconds per open run on another machine, with its orchestrator there:** the same `git worktree list`, to find the integration worktrees to open spaces for. The worktrees it has opened or seen open are kept in Herdr's shared state (`harbormaster.worktrees`).
 - **Every 5 seconds per closed run with a space still on one of its worktree folders:** one `sh -c` that checks whether those folders still exist, so it closes only the spaces whose folder is gone.
 - **Live from herdr-core:** the terminal labels `role`, `run.status`, `progress` and `run.prs`, and the `captain-watch` terminal.
 
 It writes to a run directory only when you press Park, Close or Delete: one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. Delete removes the run directory.
 
-It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended. It sends each at most once a minute.
+It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended; and for an open run on another machine: it renames the orchestrator's tab after the run's status, when the tab is unnamed or has one of the orchestrator's own `🐙` names, at most once a minute, opens a space for each integration worktree that has never had one, and finishes parking a run the captain parked there; and names a captain's tab on another machine `⚓ captain`.
 
 ## Parked, resumed, and closed runs
 

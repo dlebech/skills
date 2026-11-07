@@ -11,16 +11,36 @@
 # repository, where an orchestrator for both starts.
 #
 # Asks git about each terminal's working directory. Uses the foreground program's,
-# since the terminal's own stays where its shell began. Exits 1 if no window is open.
+# since the terminal's own stays where its shell began.
+#
+# Without a Herdr window on this computer, as when the user's window is on another
+# computer connected over ssh, it finds the spaces from this machine's terminals
+# instead: each live terminal's herdr.space label, which the window sets. Space names
+# are then unknown, so <name> is empty, and a space with no live terminal is missed.
+# Exits 1 if neither is available.
 set -u
 
 [ $# -le 1 ] || { echo "usage: repo-spaces.sh [repository or folder name or path]" >&2; exit 2; }
 repo=${1:-}
 path=$repo
 [ -z "$repo" ] || [ ! -d "$repo" ] || path=$(cd "$repo" && pwd -P)
-layout=$(herdr-app ls) || exit 1
+# One "<space-id>\t<terminal>\t<space name>" line per terminal in a space on this machine.
+terminals_by_space() {
+  local layout address
+  if layout=$(herdr-app ls 2>/dev/null); then
+    jq -r '.spaces[] | select(.machine == null) | . as $s | .tabs[].terminals[] | "\($s.id)\t\(.terminal)\t\($s.name // "")"' <<<"$layout"
+    return
+  fi
+  layout=$(hc ls --json) || { echo "no Herdr window, and hc ls failed" >&2; return 1; }
+  jq -r '.terminals[] | select(.state == "live") | .address | select(contains("/") | not)' <<<"$layout" |
+    while read -r address; do
+      hc get "$address" --json 2>/dev/null | jq -r --arg t "$address" '.labels["herdr.space"] // empty | "\(.)\t\($t)\t"'
+    done
+}
 
-jq -r '.spaces[] | select(.machine == null) | . as $s | .tabs[].terminals[] | "\($s.id)\t\(.terminal)\t\($s.name // "")"' <<<"$layout" |
+spaces=$(terminals_by_space) || exit 1
+[ -n "$spaces" ] || exit 0
+printf '%s\n' "$spaces" |
   while IFS=$'\t' read -r space terminal name; do
     cwd=$(hc get "$terminal" --json 2>/dev/null | jq -r '.foreground.cwd // .cwd // empty')
     [ -n "$cwd" ] || continue
