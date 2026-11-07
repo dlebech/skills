@@ -308,15 +308,15 @@ const POST = 'd=$1 f=$2; printf "%s\\n" "$3" >"$d/inbox/.$f.tmp" && mv "$d/inbox
 // Closing a run whose orchestrator is there asks it to clean up: it ends its agents,
 // pushes what is not on the remote, deletes the run's worktrees, writes the closed
 // marker and closes its own tab (herdr-app-orchestrator's section 9). Resolves to a note
-// for the card. A blocked orchestrator reads it once its dialog is answered.
+// for the card, and whether it is blocked. A blocked orchestrator reads it once its dialog is answered.
 async function askToClose(run) {
   const file = `harbormaster-close-${Math.floor(Date.now() / 1000)}.message`;
   const text = "The user closed this run in Harbormaster. Clean up and close your tab, as in your skill's section 9 (Close).";
   const out = await exec("sh", ["-c", POST, "sh", run.dir, file, text], { on: run.machine });
   if (out.code !== 0) throw new Error(out.stderr || "could not write to its inbox");
   const sent = await exec("hc", ["send", run.terminal, `Read and act on ${run.dir}/inbox/${file}.`], { on: run.machine }).catch(() => null);
-  if (sent?.code === 9) return "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes";
-  return "its orchestrator is cleaning up, and its tab closes when done";
+  if (sent?.code === 9) return { blocked: true, note: "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes" };
+  return { blocked: false, note: "its orchestrator is cleaning up, and its tab closes when done" };
 }
 
 // The run's integration worktrees: each linked worktree with the run's branch checked
@@ -329,9 +329,10 @@ const WORKTREES = [
   'done',
 ].join("\n");
 
-// The integration worktrees' paths, or null when git could not be asked.
+// The integration worktrees' paths, or null when git could not be asked (or the run
+// has no folder to ask in).
 async function integrationWorktrees(run) {
-  if (!run.folder) return [];
+  if (!run.folder) return null;
   const out = await exec("sh", ["-c", WORKTREES, "sh", run.folder, run.branch], { on: run.machine }).catch(() => null);
   return out?.code === 0 ? out.stdout.split("\n").filter(Boolean) : null;
 }
@@ -381,13 +382,16 @@ async function tidyClosed(run, ctx) {
 // Parks the run for later: writes the marker, closes the spaces of its integration
 // worktrees, then closes the orchestrator's tab, which ends it and its agents; the
 // worktrees, branches and everything else stay. Or closes it for good: an orchestrator
-// that is there cleans up and ends itself (askToClose), after Harbormaster closes the
-// worktrees' spaces; one that is finished, idle and has no worktree left has nothing to
+// that is there cleans up and ends itself (askToClose), and once it has the message and
+// is not blocked, Harbormaster closes the worktrees' spaces before it deletes them (a
+// blocked one may yet stop short, so its spaces stay; tidyClosed closes them once the
+// run is closed and their folders are gone); one that is finished, idle and has no worktree left has nothing to
 // clean up, so the run is marked closed and its tab closed here; for one that is gone
 // it writes the marker, and the worktrees stay until the run is resumed and closed again.
 // how: "parked" | "closed"; orch: orchestratorState(). Resolves to a note, or null.
-// A finished run needs no marker to close: closing its tab does. With the orchestrator
-// still there but no tab to close, parking refuses, so a marker never hides a live run.
+// A finished run with its orchestrator gone needs no marker to close: closing its tab
+// does. With the orchestrator still there but no tab to close, parking refuses, so a
+// marker never hides a live run.
 export async function putAway(run, how, orch) {
   if (how === "closed" && orch !== "gone") {
     const paths = await integrationWorktrees(run);
@@ -397,8 +401,8 @@ export async function putAway(run, how, orch) {
       cache.at = 0;
       return null;
     }
-    await closeWorktreeSpaces(run, paths ?? []);
-    const note = await askToClose(run);
+    const { note, blocked } = await askToClose(run);
+    if (!blocked) await closeWorktreeSpaces(run, paths ?? []);
     cache.at = 0;
     return note;
   }
