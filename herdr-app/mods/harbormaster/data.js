@@ -91,6 +91,9 @@ function parse(machine, stdout) {
       folder,
       branch: orch.branch ?? status.branch ?? parts.at(-1),
       terminal: onMachine(orch.terminal),
+      // The terminal as its own machine names it, for hc run there (`on: machine`),
+      // which does not know the window's name for itself.
+      localTerminal: orch.terminal ?? null,
       tab: onMachine(orch.tab_id),
       kind: orch.kind ?? null,
       away: marker("closed", closedFile) ?? marker("parked", parkedFile),
@@ -314,8 +317,9 @@ async function askToClose(run) {
   const text = "The user closed this run in Harbormaster. Clean up and close your tab, as in your skill's section 9 (Close).";
   const out = await exec("sh", ["-c", POST, "sh", run.dir, file, text], { on: run.machine });
   if (out.code !== 0) throw new Error(out.stderr || "could not write to its inbox");
-  const sent = await exec("hc", ["send", run.terminal, `Read and act on ${run.dir}/inbox/${file}.`], { on: run.machine }).catch(() => null);
-  if (sent?.code === 9) return { blocked: true, note: "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes" };
+  const sent = await exec("hc", ["send", run.localTerminal, `Read and act on ${run.dir}/inbox/${file}.`], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  if (sent.code === 9) return { blocked: true, note: "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes" };
+  if (sent.code !== 0) throw new Error(`the message is in its inbox, but its orchestrator could not be told: ${(sent.stderr || sent.stdout || "hc send failed").trim()}`);
   return { blocked: false, note: "its orchestrator is cleaning up, and its tab closes when done" };
 }
 
