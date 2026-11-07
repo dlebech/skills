@@ -125,7 +125,7 @@ export function togglePin(captain) {
 
 // The orchestrator's tab: the tab holding its terminal now, else orchestrator.json's.
 export function tabOf(run) {
-  return (run.terminal && panes().find((p) => p.terminal === run.terminal)?.tab) || run.tab || null;
+  return liveTabOf(run) ?? run.tab ?? null;
 }
 
 // Where the run's repository is open: the space on the run's machine whose first tab's
@@ -157,6 +157,35 @@ export function worktreeSpaces(run, paths) {
     return inside((first ? ps.find((p) => p.tab === first)?.cwd : null) || s.folder);
   });
 }
+
+// The spaces on the run's machine that were on its integration worktree by its
+// default path, ~/.herdr/worktrees/<repo>/<run-directory name> (integration-worktree.sh
+// names both after the branch the same way), as {id, path}: the space's folder or its
+// first pane's. For spaces left behind once the worktree is gone, when git no longer
+// lists it; the caller checks the path is gone before closing one. The repository
+// segment is any, as a run over a folder of several repositories has worktrees under
+// each. As in worktreeSpaces, only a space made on such a folder (or with no folder of
+// its own) counts, so a repository's own space whose first terminal was cd'd into the
+// worktree is left alone.
+export function leftoverSpaces(run) {
+  const slug = run.dir.split("/").at(-1);
+  const re = new RegExp(`^(.*/\\.herdr/worktrees/[^/]+/${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?:/|$)`);
+  const ps = panes();
+  return spaces().flatMap((s) => {
+    if ((s.machine ?? null) !== (run.machine ?? null)) return [];
+    if (s.folder) {
+      const path = re.exec(s.folder)?.[1];
+      return path ? [{ id: s.id, path }] : [];
+    }
+    const first = s.tabs?.[0]?.id;
+    const path = re.exec((first ? ps.find((p) => p.tab === first)?.cwd : null) || "")?.[1];
+    return path ? [{ id: s.id, path }] : [];
+  });
+}
+
+// The tab holding the orchestrator's terminal now, or null when no pane shows it.
+// Unlike tabOf, never orchestrator.json's tab, which may be a tab long gone.
+export const liveTabOf = (run) => (run.terminal && panes().find((p) => p.terminal === run.terminal)?.tab) || null;
 
 export function focusAgent(address) {
   if (address) run("agent.focus", { terminal: address });
