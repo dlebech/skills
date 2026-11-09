@@ -50,12 +50,62 @@ export function runPhase(text) {
   return s ? "running" : "unknown";
 }
 
-// "### t1 pin-spread (Del 2) — merged (45e5) (branch ...)" → {id, name, state}
+// plan.md's tasks, as {id, name, state, about}. The orchestrator writes them freely, so
+// three shapes are read:
+//   a heading, "### t1 pin-spread — merged (45e5)", or with "status: merged" in it or in
+//     a "- Status: merged (595a5bd1)" line below it; else the words after its first dash;
+//   a table under a header row naming an `id` and a `status` column, such as
+//     "| id | repo | scope | ... | status |" and "| api | snevagten-api | ... | merged d3c8862d |";
+//     its `scope`, `task` or `name` column is what the task is about;
+//   a list item under "## Tasks" with a "Status:", "1. ui — what it does. Status: merged (9eefaf1)".
+const cells = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+// "merged (9eefaf1); worktree removed" → "merged"; "**done** here" → "done"; "merged d3c8862d" → "merged".
+const stateWords = (s) => s.replace(/[*_`]/g, "").replace(/[(;,.].*$/, "").replace(/\s+[0-9a-f]{6,}\b.*$/i, "").trim().toLowerCase();
+const statusIn = (text) => /\bstatus:\s*([^\n]+)/i.exec(text)?.[1] ?? null;
+const DASH = /\s[—–-]\s+/;
 function tasksOf(plan) {
   const out = [];
+  let head = null; // the current table's columns, until the next ## heading
+  let inTasks = false; // under a "## Tasks" heading
+  let open = null; // the heading task still looking for a Status line below it
   for (const line of (plan ?? "").split("\n")) {
-    const m = /^###\s+(\S+)\s+(\S+)[^\n]*?\s[—–-]\s+([A-Za-z][^()\n]*?)\s*(?:\(|$)/.exec(line);
-    if (m) out.push({ id: m[1], name: m[2], state: m[3].toLowerCase() });
+    const h = /^###\s+(\S+)\s+(.*)$/.exec(line);
+    if (h) {
+      const [first, ...rest] = h[2].split(DASH);
+      const word = first.trim().split(/\s+/)[0] ?? "";
+      const after = rest.join(" — ").replace(/\s*\(.*$/, "").trim();
+      const status = statusIn(h[2]);
+      // Without a Status, words after the dash are the state ("merged") or, with a Status
+      // line to come, what the task is about ("pending-approval notifications").
+      const task = { id: h[1], name: /^[\w-]+$/.test(word) ? word : "", state: status ? stateWords(status) : stateWords(after), about: null };
+      out.push(task);
+      open = status ? null : { task, after };
+      continue;
+    }
+    if (/^##\s/.test(line)) { head = null; open = null; inTasks = /^##\s+tasks\b/i.test(line); continue; }
+    if (open && /^\s*[-*]\s+status:/i.test(line)) {
+      open.task.state = stateWords(statusIn(line));
+      open.task.about = open.after || null;
+      open = null;
+      continue;
+    }
+    if (line.trim().startsWith("|")) {
+      const row = cells(line);
+      if (row.every((c) => /^:?-+:?$/.test(c))) continue;
+      const lower = row.map((c) => c.toLowerCase());
+      if (lower.includes("id") && lower.includes("status")) {
+        head = { id: lower.indexOf("id"), status: lower.indexOf("status"), about: ["scope", "task", "name", "what"].map((n) => lower.indexOf(n)).find((i) => i >= 0) ?? -1 };
+      } else if (head && row[head.id]) {
+        out.push({ id: row[head.id], name: "", state: stateWords(row[head.status] ?? ""), about: row[head.about] || null });
+      }
+      continue;
+    }
+    const li = inTasks && !open ? /^(?:\d+\.|[-*])\s+(\S+)\s+(.*)$/.exec(line) : null;
+    const status = li && statusIn(li[2]);
+    if (status) {
+      const about = li[2].slice(0, li[2].search(/\bstatus:/i)).split(DASH).slice(1).join(" — ").replace(/[\s.;,]+$/, "");
+      out.push({ id: li[1].replace(/[:—–-]+$/, ""), name: "", state: stateWords(status), about: about || null });
+    }
   }
   return out;
 }

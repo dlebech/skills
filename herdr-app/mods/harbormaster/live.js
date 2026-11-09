@@ -1,6 +1,6 @@
 // Live facts from herdr-core (terminals, agents, panes) and the few actions the views take.
 
-import { exec, terminals, agents, panes, spaces, run, window } from "herdr";
+import { exec, terminals, agents, panes, spaces, run, window, focused } from "herdr";
 
 // The terminal and agent lists every helper below reads, taken once per render.
 export const facts = () => ({ terminals: terminals(), agents: agents() });
@@ -105,22 +105,39 @@ export function needReason(run, orchState) {
   return why || (run.phase === "blocked" ? "blocked" : "waiting for you");
 }
 
-// Where the runs pane can go: null without a captain; { pane: null } when the captain's
+// The focused agent, as Herdr's own Agents list marks it. While a mod pane has focus, such
+// as the Harbormaster pane pinned beside the captain or an orchestrator, no agent does:
+// then the one of `crew` (addresses) whose terminal is in that pane's tab.
+export function currentAgent(ctx, crew) {
+  const a = ctx.agents.find((x) => x.focused)?.address;
+  if (a) return a;
+  const f = focused();
+  if (!f?.pane || f.terminal) return null;
+  const tab = panes().find((p) => p.pane === f.pane)?.tab ?? f.tab;
+  return crew.find((addr) => tabOfTerminal(addr) === tab) ?? null;
+}
+
+// Where a Harbormaster pane can go beside an agent's terminal: { pane: null } when that
 // terminal is not on screen (parked); else its pane and the Harbormaster pane pinned
 // beside it in the same tab, if any.
-export function captainPane(ctx) {
-  const cap = captainOf(ctx).terminal;
-  if (!cap) return null;
+export function paneBeside(address) {
   const all = panes();
-  const own = all.find((p) => p.terminal === cap.address);
+  const own = all.find((p) => p.terminal === address);
   if (!own) return { pane: null, pinned: null };
   return { pane: own.pane, pinned: all.find((p) => p.tab === own.tab && p.mod === "harbormaster")?.pane ?? null };
 }
 
-// Shows the runs overview as a pane right of the captain, or closes it again.
-export function togglePin(captain) {
-  if (captain.pinned) run("pane.close", { pane: captain.pinned });
-  else if (captain.pane) run("pane.split", { pane: captain.pane, direction: "right", mod: "harbormaster" });
+// Where the runs pane can go: null without a captain, else paneBeside() the captain.
+export function captainPane(ctx) {
+  const cap = captainOf(ctx).terminal;
+  return cap ? paneBeside(cap.address) : null;
+}
+
+// Shows a Harbormaster pane right of an agent (the runs overview, or with `props` another
+// view, such as one run's card), or closes it again.
+export function togglePin(spot, props = undefined) {
+  if (spot.pinned) run("pane.close", { pane: spot.pinned });
+  else if (spot.pane) run("pane.split", { pane: spot.pane, direction: "right", mod: "harbormaster", ...(props ? { props } : {}) });
 }
 
 // The orchestrator's tab: the tab holding its terminal now, else orchestrator.json's.

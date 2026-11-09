@@ -4,13 +4,14 @@ Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-capta
 
 - **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list. The captain's and each orchestrator's card shows how full that agent's context is (`144k`), as of its last turn, read from its own session file: Claude Code and pi for now, nothing for other programs.
   - The captain's card says whether its watcher is running and how many runs it watches, running and finished, and turns red with how many decisions it is waiting on you for. Its pane button pins the runs overview beside the captain, or unpins it.
-  - Each orchestrator's card shows its progress, its status when it isn't running, its number of 🦀 workers and its PRs. A run that needs you turns red and says what for. Finished ones come last, with a green edge and their PR numbers.
+  - Each orchestrator's card shows its progress, its status when it isn't running, its number of 🦀 workers and its PRs. A run that needs you turns red and says what for. Finished ones come last, with a green edge and their PR numbers. Its pane button pins that run's card beside the orchestrator (see below), or unpins it.
   - Each Adrift line shows the agent's space and its name as Herdr's own Agents list gives it: the tab's name when someone named it, otherwise the agent's own title (Claude Code sets one from its session), never a bare tab number like "1". Clicking it focuses the agent.
 - **Runs overview.** The totals across runs on top (running, need you, finished, agents, tasks done, open PRs and failing checks; "need you" counts the captain's open decisions and the runs that need you, and clicking it focuses the first of them), then **Waiting on you**, then the captain, then one card per run:
-  - its branch and repository, a status pill, the progress line, and a task bar from `plan.md` (done, in progress, blocked; a task is done once it is merged into the run's integration branch);
+  - its branch and repository, a status pill, the progress line, and a task bar from `plan.md` (done, in progress, blocked; a task is done once it is merged into the run's integration branch). Tasks are read from `### <id> <name> — <state>` headings (or with a `Status:` in or below them), from a table with `id` and `status` columns, or from list items under `## Tasks` with a `Status:`;
   - every PR the run opened, with its state, checks and review decision, and below them its related links: its issues, and the PRs it is about but did not open, such as the PR a review-only run reviews (their icon takes the PR's state color; they don't count as open PRs);
   - what the run needs you for, shown first: its open question, the dialog it is blocked on, or the reason in its status;
   - and, when they apply: relayed messages the orchestrator hasn't read, agents waiting on an answer, "No pull request yet", and a note when the run's orchestrator is gone;
+  - a pin, while its orchestrator is there, that keeps this card open as a pane beside the orchestrator;
   - buttons to **Park**, **Resume**, **Close**, or, once closed, **Delete** the run (see Parked, resumed, and closed runs). Each asks on the card first, naming what is left.
 
   **Waiting on you** lists everything you have yet to decide, so a question doesn't get lost when alerts and reports pile up after it: first each decision the captain asked you and is still waiting on, oldest first, with its run and how long it has waited, then each run that needs you, with its question, dialog or reason. The captain records its own decisions with `decisions.sh` and removes them when you answer; a run's question goes away when its orchestrator gets the answer. Clicking a decision focuses the captain, a run its orchestrator. **Reply** on a decision opens a text box under it: Enter types your answer into the captain's input as `Re decision "<id>" (<question>): <answer>` and shows the captain, so you needn't say which decision you mean. The list is hidden while nothing is waiting.
@@ -52,6 +53,8 @@ To switch layouts, press `ctrl-shift-l`. You can also run `herdr-app do layout.s
 To glance at the runs from anywhere, press `ctrl-shift-h`. It opens the overview as a popup over the window, and pressing it again, or Esc, closes it.
 
 To keep the overview open beside the captain, click **Pin beside captain** on the captain's card in the overview (or the pane icon on the captain's Crew card). It opens a `harbormaster` pane to the right of the captain's terminal, in the captain's tab, and is saved with that tab. The same button then says **Unpin** and closes it. While the captain's terminal isn't on screen (for example, parked), the button is greyed out and its tooltip says why. You can also close the pane like any pane: its header, or `ctrl-shift-x` while it has focus.
+
+To see a run's PRs, related PRs, issues and tasks while you work in its orchestrator, click the pin on the run's card in the overview, or on the orchestrator's Crew card. It opens a `harbormaster` pane right of the orchestrator's terminal, in its tab, showing only that run, laid out for the room: its PRs with their whole titles, repository, checks and review; its issues and related PRs one per row; every task with its state and what it is about (hover for all of it); the agents working on it; and the same buttons. While that pane has focus, the orchestrator's Crew card stays highlighted. Pressing the pin again (it is on the pinned card too) closes it. Like the captain's, it is saved with the tab, and greyed out while the orchestrator's terminal isn't on screen. A resumed run gets a new orchestrator tab, so pin it again there.
 
 To use the Crew block in a layout of your own, add a block with `{ "mod": "harbormaster", "props": { "role": "crew" } }`.
 
@@ -107,7 +110,7 @@ Parking leaves the run directory, worktrees, branches and PRs in place, and the 
 
 | Path | What |
 | --- | --- |
-| `herdr-app/mods/harbormaster/main.js` | Picks the view by `props().role`: none (the runs overview), `crew`, `harbor`, `harbor-rail`, `harbor-pane` |
+| `herdr-app/mods/harbormaster/main.js` | Picks the view by `props().role`: none (the runs overview), `run` (one run's card, `props().run` its key), `crew`, `harbor`, `harbor-rail`, `harbor-pane` |
 | `herdr-app/mods/harbormaster/data.js` | Run directories, tasks, PRs from `gh`, and the totals the views share |
 | `herdr-app/mods/harbormaster/live.js` | Live facts from herdr-core (status, workers, captain, panes) and the focus, pin and open-link actions |
 | `herdr-app/mods/harbormaster/ui.js` | Emoji, program icons, zoom, and text formatting |
