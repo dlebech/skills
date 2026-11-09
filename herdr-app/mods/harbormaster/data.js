@@ -295,25 +295,19 @@ export async function refreshPrs(run, closed = false) {
   const started = Date.now();
   prBusy.set(run.key, started);
   try {
-    const seen = new Set(run.related.map((p) => p.url));
     const view = async (recorded) => {
       const out = [];
       for (const pr of recorded) {
         if (!pr.url) continue;
         const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch(() => null);
         const p = res?.code === 0 ? json(res.stdout) : null;
-        if (p) { out.push(prSummary(p, pr.repo)); seen.add(p.url); }
+        if (p) out.push(prSummary(p, pr.repo));
         else out.push(unknownPr(pr.url, pr.repo));
       }
       return out;
     };
     const related = await view(run.related);
     const list = await view(run.prs);
-    // Before the orchestrator records one: a PR from the run's branch.
-    if (run.folder && run.branch) {
-      const out = await exec("gh", ["pr", "list", "--head", run.branch, "--state", "all", "--limit", "3", "--json", PR_FIELDS], { cwd: run.folder, on: run.machine }).catch(() => null);
-      for (const p of (out?.code === 0 ? json(out.stdout) : null) ?? []) if (!seen.has(p.url)) list.push(prSummary(p));
-    }
     const next = { ...(shared("harbormaster.prs") ?? {}) };
     next[run.key] = { at: Date.now(), list, related };
     // Forget runs that are gone.
