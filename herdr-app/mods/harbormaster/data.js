@@ -173,7 +173,12 @@ function marker(how, text) {
 }
 
 // Every copy asks through one cache, so a layout with several copies reads once.
-let cache = { at: 0, runs: [], decisions: [], errors: [], pending: null };
+// The cache is module state, so it outlives every copy. A read whose task is cancelled
+// (its view closed) never settles, so a read pending longer than STALE_READ is given up
+// and a new one started; the abandoned one, should it ever settle, is ignored.
+let cache = { at: 0, runs: [], decisions: [], errors: [], pending: null, pendingAt: 0 };
+const STALE_READ = 45000;
+let reads = 0;
 
 export function cachedRuns() {
   return cache;
@@ -181,7 +186,9 @@ export function cachedRuns() {
 
 export function loadRuns() {
   if (Date.now() - cache.at < 2500) return Promise.resolve(cache);
-  if (cache.pending) return cache.pending;
+  if (cache.pending && Date.now() - cache.pendingAt < STALE_READ) return cache.pending;
+  const read = ++reads;
+  cache.pendingAt = Date.now();
   cache.pending = (async () => {
     const names = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
     if (!names.includes(null)) names.unshift(null);
@@ -198,7 +205,8 @@ export function loadRuns() {
     }));
     runs.sort((a, b) => (a.machine ?? "").localeCompare(b.machine ?? "") || a.dir.localeCompare(b.dir));
     decisions.sort((a, b) => (a.asked ?? 0) - (b.asked ?? 0));
-    cache = { at: Date.now(), runs, decisions, errors, pending: null };
+    if (read !== reads) return cache;
+    cache = { at: Date.now(), runs, decisions, errors, pending: null, pendingAt: 0 };
     const ctx = facts();
     for (const r of runs) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
     for (const r of runs) if (r.machine && !r.away) nameTab(r);
@@ -206,7 +214,8 @@ export function loadRuns() {
     showWorktrees(runs, ctx, answered).catch(() => {});
     return cache;
   })().catch((e) => {
-    cache = { ...cache, pending: null, errors: [String(e)] };
+    if (read !== reads) return cache;
+    cache = { ...cache, pending: null, pendingAt: 0, errors: [String(e)] };
     return cache;
   });
   return cache.pending;
@@ -234,7 +243,10 @@ export function taskCounts(run) {
 // ---- pull requests (gh), cached in shared state so every copy and layout reuses them ----
 
 const PR_FIELDS = "number,title,state,isDraft,reviewDecision,statusCheckRollup,url,headRefName";
-const prBusy = new Set();
+// Run key → when its refresh started. Like a run read, a refresh whose task is cancelled
+// never ends, so one older than PR_STALE no longer holds the run back.
+const prBusy = new Map();
+const PR_STALE = 5 * 60000;
 
 // A PR's state → a theme tone; the harbor maps the same tones to its own colors.
 export const PR_TONE = { OPEN: "working", DRAFT: "dim", MERGED: "done", CLOSED: "blocked" };
@@ -279,8 +291,9 @@ export function relatedOf(run) {
 export async function refreshPrs(run, closed = false) {
   const have = (shared("harbormaster.prs") ?? {})[run.key];
   const ttl = closed ? 15 * 60000 : 60000;
-  if (prBusy.has(run.key) || (have && Date.now() - have.at < ttl)) return;
-  prBusy.add(run.key);
+  if (Date.now() - (prBusy.get(run.key) ?? 0) < PR_STALE || (have && Date.now() - have.at < ttl)) return;
+  const started = Date.now();
+  prBusy.set(run.key, started);
   try {
     const seen = new Set(run.related.map((p) => p.url));
     const view = async (recorded) => {
@@ -307,7 +320,7 @@ export async function refreshPrs(run, closed = false) {
     for (const key of Object.keys(next)) if (cache.runs.length && !cache.runs.some((r) => r.key === key)) delete next[key];
     setShared("harbormaster.prs", next);
   } finally {
-    prBusy.delete(run.key);
+    if (prBusy.get(run.key) === started) prBusy.delete(run.key);
   }
 }
 
