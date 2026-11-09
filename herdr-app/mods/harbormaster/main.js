@@ -16,6 +16,7 @@ import { loadContexts } from "./context.js";
 import { cards, crew, runPane, submitReply } from "./overview.js";
 import { harbor, rail, paneHeader } from "./harbor.js";
 
+const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
 const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor"]);
 
 export default class Harbormaster extends View {
@@ -28,7 +29,8 @@ export default class Harbormaster extends View {
     this.showDone = false;
     this.contexts = {}; // { [address]: { tokens, model } } for the crew
     this.replying = null; // the key of the decision being answered inline
-    this.busy = {}; // { [run key]: "Deleting…" } while a card's action is under way
+    this.busy = {}; // { [run key]: { label: "Deleting…", at, branch } } while a card's action is under way
+    this.redraw = false; // an action ended in a task that could not redraw this view
     this.reply = InputState.new({ placeholder: "Your answer…" });
     this.reply.on("submit", (_e, cx) => submitReply(this, cx));
     if (!DATA_ROLES.has(role)) return;
@@ -50,7 +52,22 @@ export default class Harbormaster extends View {
     return runs;
   }
 
+  // A card's action that has not ended after BUSY_LIMIT never will (its task was
+  // cancelled): stop showing it as under way, so the card can be used again.
+  expireBusy() {
+    let changed = this.redraw;
+    this.redraw = false;
+    for (const [key, b] of Object.entries(this.busy)) {
+      if (Date.now() - b.at < BUSY_LIMIT) continue;
+      delete this.busy[key];
+      this.actionError = `${b.branch}: ${b.label.replace("…", "").toLowerCase()} didn't finish; the list shows what happened, try again if it is still there`;
+      changed = true;
+    }
+    return changed;
+  }
+
   refresh(cx) {
+    if (this.expireBusy()) cx.notify();
     cx.spawn(async (cx) => {
       const runs = await this.load(cx);
       // The crew and the overview show each crew agent's context size; the harbor does not.

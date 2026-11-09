@@ -135,28 +135,36 @@ function actionRow(view, t, r, orch, closed, counts) {
   const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
   if (busy) {
     return h_flex().gap(6).justify_end().items_center()
-      .child(div().flex_1().text_size(11.5).text_color(t.muted).child(busy))
+      .child(div().flex_1().text_size(11.5).text_color(t.muted).child(busy.label))
       .children(actionsOf(r, orch, closed).map((a) => actionButton(t, `${a}-${r.key}`, ACTION[a].label, null, null, a === "resume")));
   }
   if (asking) {
     const yes = (cx) => {
       set(cx, null);
       if (asking === "resume") return resumeRun(r);
-      view.busy[r.key] = BUSY[asking];
+      const busy = { label: BUSY[asking], at: Date.now(), branch: r.branch };
+      view.busy[r.key] = busy;
       // The click's cx dies with the click; the awaited work notifies through cx.spawn's.
+      // Owned by no view, so closing or reloading a copy can't cancel it halfway; the
+      // label clears once the action ends, and the view's timer gives up on it after
+      // BUSY_LIMIT should the task never end at all.
       cx.spawn(async (cx) => {
+        const done = () => {
+          if (view.busy[r.key] === busy) delete view.busy[r.key];
+          view.redraw = true;
+          try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+        };
         try {
           if (asking === "delete") await deleteRun(r);
           else {
             const note = await putAway(r, asking === "park" ? "parked" : "closed", orch);
             if (note) view.actionNote = `${r.branch}: ${note}`;
           }
-          // Show the outcome now rather than at the next 5 s refresh.
-          await view.load(cx).catch(() => {});
         } catch (e) { view.actionError = `${r.branch}: ${e?.message ?? e}`; }
-        delete view.busy[r.key];
-        cx.notify();
-      });
+        done();
+        // Show the outcome now rather than at the next 5 s refresh.
+        try { await view.load(cx); } catch { /* the next refresh shows it */ }
+      }, { owner: null });
     };
     return v_flex().gap(6).p(8).rounded(7).bg(t.raised)
       .child(div().text_size(12).text_color(t.foreground).child(confirmText(r, asking, counts)))
