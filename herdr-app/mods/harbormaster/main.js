@@ -1,6 +1,7 @@
 // Harbormaster: an overview of herdr-app-orchestrator runs and the captain watching them.
 // props().role picks the view:
 //   (none) / "cards"  the runs overview: totals, what's waiting on you, the captain, run cards with progress, tasks, PRs
+//   "run"             one run's card (props().run: its key), pinned beside its orchestrator
 //   "crew"            the captain, orchestrators and agents adrift, above Herdr's own Agents list
 //   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
 // Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute;
@@ -12,10 +13,10 @@ import { props, theme } from "herdr";
 import { loadRuns, cachedRuns, refreshPrs, isClosed } from "./data.js";
 import { facts, crewAddresses } from "./live.js";
 import { loadContexts } from "./context.js";
-import { cards, crew, submitReply } from "./overview.js";
+import { cards, crew, runPane, submitReply } from "./overview.js";
 import { harbor, rail, paneHeader } from "./harbor.js";
 
-const DATA_ROLES = new Set([undefined, "cards", "crew", "harbor"]);
+const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor"]);
 
 export default class Harbormaster extends View {
   init(_props, cx) {
@@ -68,6 +69,7 @@ export default class Harbormaster extends View {
     const t = theme();
     switch (p.role) {
       case "crew": return crew(this, t);
+      case "run": return runPane(this, t, p.run);
       case "harbor": return harbor(this);
       case "harbor-rail": return rail(this);
       case "harbor-pane": return paneHeader(p);
