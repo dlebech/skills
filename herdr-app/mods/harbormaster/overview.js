@@ -41,12 +41,21 @@ function statusDot(t, status) {
   return div().size(8).flex_none().rounded(4).bg(t[status] ?? t.dim);
 }
 
+// A PR's review as [text, tone]: who approved or asked for changes, when we know.
+function reviewText(pr) {
+  const who = (list) => (list?.length ? ` by ${list.join(", ")}` : "");
+  if (pr.review === "CHANGES_REQUESTED") return [`Changes requested${who(pr.changesBy)}`, "blocked"];
+  if (pr.review === "APPROVED") return [`Approved${who(pr.approvedBy)}`, "done"];
+  if (pr.review === "REVIEW_REQUIRED") return ["Review needed", "dim"];
+  return null;
+}
+
 function prRow(t, pr, i) {
   const tone = PR_TONE[pr.state] ?? "dim";
   const c = pr.checks;
   const checkText = c.fail ? `✗ ${c.fail} failing` : c.pending ? `… ${c.pending} running` : c.pass ? `✓ ${c.pass}` : "";
   const checkTone = c.fail ? "blocked" : c.pending ? "working" : "done";
-  const review = { APPROVED: ["Approved", "done"], CHANGES_REQUESTED: ["Changes requested", "blocked"], REVIEW_REQUIRED: ["Review needed", "dim"] }[pr.review];
+  const review = reviewText(pr);
   return h_flex().id(`pr-${i}-${pr.url}`).gap(7).items_center().h(24).px(6).rounded(6).cursor_pointer()
     .hover((s) => s.bg(t.hover)).tooltip(pr.url).on_click((_e, cx) => { cx.stop_propagation(); openUrl(pr.url); })
     .child(svg("mods/harbormaster/pr.svg").size(13).flex_none().text_color(t[tone] ?? t.dim))
@@ -269,7 +278,7 @@ function prDetail(t, pr, i, related = false) {
   const c = pr.checks ?? {};
   const checkText = c.fail ? `✗ ${c.fail} failing` : c.pending ? `… ${c.pending} running` : c.pass ? `✓ ${c.pass} checks` : null;
   const checkTone = c.fail ? "blocked" : c.pending ? "working" : "done";
-  const review = { APPROVED: ["Approved", "done"], CHANGES_REQUESTED: ["Changes requested", "blocked"], REVIEW_REQUIRED: ["Review needed", "dim"] }[pr.review];
+  const review = reviewText(pr);
   const state = prStateText(pr);
   return h_flex().id(`prd-${related ? "rel" : "own"}-${i}-${pr.url}`).gap(8).items_start().p(8).rounded(7).bg(t.raised + "88").cursor_pointer()
     .hover((s) => s.bg(t.hover)).tooltip(pr.url).on_click((_e, cx) => { cx.stop_propagation(); openUrl(pr.url); })
