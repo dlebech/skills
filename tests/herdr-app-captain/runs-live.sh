@@ -160,15 +160,15 @@ out=$(cd "$toy" && HC_TERMINAL_ID=$address "$orch/init-run.sh" feature/x)
 check "init-run on a resume" "$out" "existing $dir"
 check "labels after a resume" "$(labels)" '["task 2/2 in review","https://example.com/pr/3 https://example.com/pr/2"]'
 check "role after a resume" "$(hc get "$fake" --json | jq -r .labels.role)" orchestrator
-"$orch/set-status.sh" "$dir" --topic "Road-following routes"
+"$orch/set-status.sh" "$dir" --topic "Road routes"
 check "topic" "$(jq -r .topic "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.topic"]')" \
-  "Road-following routes:Road-following routes"
+  "Road routes:Road routes"
 check "tab name keeps the branch" "$(tab_name "$tab")" "🐙 ✋ feature/x"
 "$orch/set-status.sh" "$dir" --progress "task 2/2 in review"
-check "topic kept" "$(jq -r .topic "$dir/status.json")" "Road-following routes"
-contains "runs.sh prints the topic" "$("$capt/runs.sh")" "topic: Road-following routes"
+check "topic kept" "$(jq -r .topic "$dir/status.json")" "Road routes"
+contains "runs.sh prints the topic" "$("$capt/runs.sh")" "topic: Road routes"
 "$orch/set-status.sh" "$dir" --topic ""
-check "topic cleared" "$(jq -r '.topic // "none"' "$dir/status.json")" none
+check "topic cleared" "$(jq -r '.topic // "none"' "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.topic"] // ""')" none:
 "$orch/set-status.sh" "$dir" --waiting $'impl-x\t rev-y\n'
 check "waiting split on any space" "$(jq -c .waiting "$dir/status.json")" '["impl-x","rev-y"]'
 "$orch/set-status.sh" "$dir" --waiting ""

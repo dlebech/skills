@@ -4,7 +4,7 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, runPhase, taskTone, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun } from "./data.js";
 import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, currentAgent, openUrl, replyToCaptain } from "./live.js";
-import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runTitle } from "./ui.js";
+import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip } from "./ui.js";
 import { tokenText } from "./context.js";
 
 // How each runPhase() reads on a card.
@@ -199,8 +199,7 @@ function cardHeader(view, t, r, f, meta) {
     .child(div().flex_none().text_size(15).child(OCTOPUS))
     .child(v_flex().flex_1().min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)
-        .child(div().id(`title-${r.key}`).truncate().font_semibold().text_size(13.5).text_color(t.foreground).child(runTitle(r.branch, r.topic))
-          .when(Boolean(r.topic), (el) => el.tooltip(r.branch)))
+        .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(13.5).text_color(t.foreground), runName(r.branch, r.topic)))
         .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
       .child(div().truncate().text_size(11.5).text_color(t.dim).child(meta)))
     .map(withContext(view, t, `run-${r.key}`, r.terminal))
@@ -520,12 +519,6 @@ export function runPane(view, t, key) {
 // The Crew block: the captain and every orchestrator as cards, from their role labels,
 // then "Adrift": every other agent that isn't one of their workers.
 // Sits above Herdr's own Agents list in the harbormaster-main layout, so that list stays stock.
-// A crew row's title and, when it is not just the branch, the branch as its tooltip.
-function crewTitle(branch, topic) {
-  const title = runTitle(branch, topic);
-  return { title, tip: title === branch ? null : branch };
-}
-
 export function crew(view, t) {
   const ctx = facts();
   const cap = captainOf(ctx);
@@ -544,8 +537,7 @@ export function crew(view, t) {
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
     .child(div().flex_none().text_size(15).child(emoji))
     .child(v_flex().flex_1().min_w(0)
-      .child(div().id(`${id}-title`).truncate().text_size(12.5).font_semibold().text_color(t.foreground).child(title)
-        .when(Boolean(tip), (el) => el.tooltip(tip)))
+      .child(withTip(div().id(`${id}-title`).truncate().text_size(12.5).font_semibold().text_color(t.foreground), { title, tip }))
       .child(div().truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail)))
     .when(Boolean(pin), (el) => el.child(pin))
     .map(withContext(view, t, id, address))
@@ -579,7 +571,7 @@ export function crew(view, t) {
     rows.push(row({
       id: `crew-${term.address}`, emoji: OCTOPUS, detail: detail || "orchestrator",
       // The run's number and topic; without a topic, its branch.
-      ...crewTitle(r?.branch ?? term.name ?? term.address, r?.topic ?? labels["run.topic"]),
+      ...runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic),
       tone: need ? "blocked" : "muted", status, address: term.address,
       pin: r ? runPin(t, `crew-pin-${term.address}`, r, orchestratorState(r, ctx)) : null,
       edge: (need ? t.blocked : state === "finished" ? t.done : t.working) ?? t.border,

@@ -32,14 +32,17 @@ export function ago(ms) {
 
 // A run's name for scanning: the issue or PR number from its branch and the topic
 // its orchestrator published, "#985 · Road routes" or "PR 368 · Review",
-// else the topic alone, else the branch.
-export function runTitle(branch, topic) {
-  if (!topic) return branch ?? "";
-  const pr = /(?:^|[-_/])pr-?(\d+)(?=$|[-_/])/i.exec(branch ?? "");
-  const issue = /(?:^|[-_/])issue-?(\d+)(?=$|[-_/])/i.exec(branch ?? "");
-  const ref = pr ? `PR ${pr[1]}` : issue ? `#${issue[1]}` : null;
-  return ref ? `${ref} · ${topic}` : topic;
+// else the topic alone, else the branch. `tip` is the branch when the title isn't it.
+const branchNumber = (word, branch) => new RegExp(`(?:^|[\\s_/-])${word}[-_]?(\\d+)(?=$|[\\s_/-])`, "i").exec(branch ?? "")?.[1];
+export function runName(branch, topic) {
+  if (!topic) return { title: branch ?? "", tip: null };
+  const pr = branchNumber("pr", branch), issue = branchNumber("issue", branch);
+  const ref = pr ? `PR ${pr}` : issue ? `#${issue}` : null;
+  return { title: ref ? `${ref} · ${topic}` : topic, tip: branch ?? null };
 }
+
+// Puts a runName() on an element: the title as its text, the tip, if any, as its tooltip.
+export const withTip = (el, { title, tip }, prefix = "") => el.child(`${prefix}${title}`).when(Boolean(tip), (e) => e.tooltip(tip));
 
 // "https://github.com/o/repo/issues/12" → "repo#12".
 export const shortRef = (url) => {
