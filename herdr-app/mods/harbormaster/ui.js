@@ -30,6 +30,17 @@ export function ago(ms) {
   return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
 }
 
+// A run's name for scanning: the issue or PR number from its branch and the topic
+// its orchestrator published, "#985 · Road routes" or "PR 368 · Review",
+// else the topic alone, else the branch.
+export function runTitle(branch, topic) {
+  if (!topic) return branch ?? "";
+  const pr = /(?:^|[-_/])pr-?(\d+)(?=$|[-_/])/i.exec(branch ?? "");
+  const issue = /(?:^|[-_/])issue-?(\d+)(?=$|[-_/])/i.exec(branch ?? "");
+  const ref = pr ? `PR ${pr[1]}` : issue ? `#${issue[1]}` : null;
+  return ref ? `${ref} · ${topic}` : topic;
+}
+
 // "https://github.com/o/repo/issues/12" → "repo#12".
 export const shortRef = (url) => {
   const m = /github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/.exec(url ?? "");

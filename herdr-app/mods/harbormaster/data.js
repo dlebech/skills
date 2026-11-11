@@ -6,7 +6,7 @@
 // Run directory protocol (herdr-app-captain's lib.sh):
 //   <root>/<folder>/<branch>/orchestrator.json  {terminal, tab_id, folder, branch}
 //   <root>/<folder>/<branch>/plan.md            "Status: <status>" first, then "### t1 name ... — <state>" tasks
-//   <root>/<folder>/<branch>/status.json        {status, progress, tasks:{merged,planned}, issues, prs:[{repo,url}], related:[{repo,url}], waiting, updated}
+//   <root>/<folder>/<branch>/status.json        {status, topic, progress, tasks:{merged,planned}, issues, prs:[{repo,url}], related:[{repo,url}], waiting, updated}
 //   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
 //   <root>/<folder>/<branch>/inbox/*.message    relayed messages not yet handled
 //   <root>/<folder>/<branch>/parked, closed     the person put the run away: "<time>\t<status then>"
@@ -149,6 +149,7 @@ function parse(machine, stdout) {
       away: marker("closed", closedFile) ?? marker("parked", parkedFile),
       statusLine,
       phase: runPhase(statusLine ?? status.status),
+      topic: status.topic ?? null,
       progress: status.progress ?? null,
       merged: status.tasks?.merged ?? null,
       planned: status.tasks?.planned ?? null,
