@@ -243,7 +243,7 @@ export function taskCounts(run) {
 
 // ---- pull requests (gh), cached in shared state so every copy and layout reuses them ----
 
-const PR_FIELDS = "number,title,state,isDraft,reviewDecision,statusCheckRollup,url,headRefName";
+const PR_FIELDS = "number,title,state,isDraft,reviewDecision,reviews,author,statusCheckRollup,url,headRefName";
 // Run key → when its refresh started. Like a run read, a refresh whose task is cancelled
 // never ends, so one older than PR_STALE no longer holds the run back.
 const prBusy = new Map();
@@ -264,16 +264,37 @@ function checks(rollup) {
   return c;
 }
 
-// What the views need from `gh pr view --json` output.
-const prSummary = (p, repo) => ({
-  number: p.number,
-  title: p.title,
-  state: p.isDraft && p.state === "OPEN" ? "DRAFT" : p.state,
-  review: p.reviewDecision || null,
-  checks: checks(p.statusCheckRollup),
-  url: p.url,
-  repo: repo ?? (/github\.com\/([^/]+\/[^/]+)\//.exec(p.url ?? "")?.[1] ?? null),
-});
+// Each reviewer's standing review, as the GH mod reads it: a later comment doesn't
+// undo an approval or a change request. Leaves out the PR's author and bots.
+function standing(p) {
+  const by = {};
+  for (const r of p.reviews ?? []) {
+    const who = r.author?.login;
+    if (!who || who === p.author?.login || who.endsWith("[bot]") || who === "coderabbitai") continue;
+    if (r.state === "PENDING" || (r.state === "COMMENTED" && by[who] && by[who] !== "COMMENTED")) continue;
+    by[who] = r.state;
+  }
+  const with_ = (state) => Object.keys(by).filter((who) => by[who] === state);
+  return { approvedBy: with_("APPROVED"), changesBy: with_("CHANGES_REQUESTED") };
+}
+
+// What the views need from `gh pr view --json` output. GitHub only sets reviewDecision
+// where the repo requires a review, so the review comes from the reviews themselves,
+// falling back to reviewDecision ("Review needed") when nobody has approved or objected.
+function prSummary(p, repo) {
+  const { approvedBy, changesBy } = standing(p);
+  return {
+    number: p.number,
+    title: p.title,
+    state: p.isDraft && p.state === "OPEN" ? "DRAFT" : p.state,
+    review: changesBy.length ? "CHANGES_REQUESTED" : approvedBy.length ? "APPROVED" : p.reviewDecision || null,
+    approvedBy,
+    changesBy,
+    checks: checks(p.statusCheckRollup),
+    url: p.url,
+    repo: repo ?? (/github\.com\/([^/]+\/[^/]+)\//.exec(p.url ?? "")?.[1] ?? null),
+  };
+}
 
 // A PR recorded in status.json that gh hasn't described (yet).
 export const unknownPr = (url, repo = null) =>
