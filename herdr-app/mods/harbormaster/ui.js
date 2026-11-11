@@ -30,6 +30,20 @@ export function ago(ms) {
   return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
 }
 
+// A run's name for scanning: the issue or PR number from its branch and the topic
+// its orchestrator published, "#985 · Road routes" or "PR 368 · Review",
+// else the topic alone, else the branch. `tip` is the branch when the title isn't it.
+const branchNumber = (word, branch) => new RegExp(`(?:^|[\\s_/-])${word}[-_]?(\\d+)(?=$|[\\s_/-])`, "i").exec(branch ?? "")?.[1];
+export function runName(branch, topic) {
+  if (!topic) return { title: branch ?? "", tip: null };
+  const pr = branchNumber("pr", branch), issue = branchNumber("issue", branch);
+  const ref = pr ? `PR ${pr}` : issue ? `#${issue}` : null;
+  return { title: ref ? `${ref} · ${topic}` : topic, tip: branch ?? null };
+}
+
+// Puts a runName() on an element: the title as its text, the tip, if any, as its tooltip.
+export const withTip = (el, { title, tip }, prefix = "") => el.child(`${prefix}${title}`).when(Boolean(tip), (e) => e.tooltip(tip));
+
 // "https://github.com/o/repo/issues/12" → "repo#12".
 export const shortRef = (url) => {
   const m = /github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/.exec(url ?? "");

@@ -5,7 +5,7 @@
 # plain programs as stand-in orchestrators, so it costs no model turns. Checks:
 #   1. a labelled terminal gets a tab; init-run.sh records it and names it 🐙;
 #   2. set-status.sh changes plan.md, the tab, and the run.status label; publishes
-#      progress, tasks, issues, PRs and waiting agents to status.json and labels,
+#      topic, progress, tasks, issues, PRs and waiting agents to status.json and labels,
 #      keeping each until changed, and publishes them again without a status and
 #      when init-run.sh resumes the run; refuses a newline, and changes nothing
 #      when status.json is unreadable; refuses "waiting for user" without a
@@ -160,6 +160,15 @@ out=$(cd "$toy" && HC_TERMINAL_ID=$address "$orch/init-run.sh" feature/x)
 check "init-run on a resume" "$out" "existing $dir"
 check "labels after a resume" "$(labels)" '["task 2/2 in review","https://example.com/pr/3 https://example.com/pr/2"]'
 check "role after a resume" "$(hc get "$fake" --json | jq -r .labels.role)" orchestrator
+"$orch/set-status.sh" "$dir" --topic "Road routes"
+check "topic" "$(jq -r .topic "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.topic"]')" \
+  "Road routes:Road routes"
+check "tab name keeps the branch" "$(tab_name "$tab")" "🐙 ✋ feature/x"
+"$orch/set-status.sh" "$dir" --progress "task 2/2 in review"
+check "topic kept" "$(jq -r .topic "$dir/status.json")" "Road routes"
+contains "runs.sh prints the topic" "$("$capt/runs.sh")" "topic: Road routes"
+"$orch/set-status.sh" "$dir" --topic ""
+check "topic cleared" "$(jq -r '.topic // "none"' "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.topic"] // ""')" none:
 "$orch/set-status.sh" "$dir" --waiting $'impl-x\t rev-y\n'
 check "waiting split on any space" "$(jq -c .waiting "$dir/status.json")" '["impl-x","rev-y"]'
 "$orch/set-status.sh" "$dir" --waiting ""

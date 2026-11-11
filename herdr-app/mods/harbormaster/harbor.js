@@ -7,7 +7,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { spaces, panes, run, setAgentOrder } from "herdr";
 import { stats, taskTone, taskCounts, prsOf, PR_TONE, isParked, resumeRun } from "./data.js";
 import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, needReason, adrift, agentNames, focusAgent, openUrl } from "./live.js";
-import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, stateText } from "./ui.js";
+import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, stateText, runName, withTip } from "./ui.js";
 
 const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
 // PR_TONE's tones as signal-flag colors.
@@ -86,7 +86,7 @@ function reef(view, r, ctx, x, y, w, h, n) {
   }));
   const sign = v_flex().absolute().left(12).top(10).max_w(w - 24 - Math.min(prs.length, 4) * 46).px(10).py(4).rounded(5)
     .bg(need ? "#f6c28b" : rope).border(3).border_color(need ? "#c1562c" : "#a07a3f").text_color("#4a3418").opacity(docked ? 0.8 : 1)
-    .child(div().truncate().text_size(13).font_weight(800).child(`${OCTOPUS} ${r.branch}`))
+    .child(withTip(div().id(`sign-${r.key}`).truncate().text_size(13).font_weight(800), runName(r.branch, r.topic), `${OCTOPUS} `))
     .child(div().truncate().text_size(10.5).font_weight(600).child(`${r.repo}${r.machine ? ` · ${r.machine}` : ""} · ${parked ? "PARKED · CLICK TO RESUME" : need ? "NEEDS YOU" : docked ? "FINISHED · PR UP" : orch === "gone" ? "GONE · CLICK TO RESUME" : r.phase.toUpperCase()}`));
   // Buoys on a line along the bottom of the reef: one per task, lit as it is done (merged into the run's branch).
   const buoys = h_flex().absolute().left(14).bottom(8).gap(8).items_end()
