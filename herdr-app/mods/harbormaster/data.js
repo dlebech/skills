@@ -56,7 +56,9 @@ export function runPhase(text) {
 //     a "- Status: merged (595a5bd1)" line below it; else the words after its first dash;
 //   a table under a header row naming an `id` and a `status` column, such as
 //     "| id | repo | scope | ... | status |" and "| api | snevagten-api | ... | merged d3c8862d |";
-//     its `scope`, `task` or `name` column is what the task is about;
+//     its `scope`, `task` or `name` column is what the task is about. Without an `id`
+//     column, a `#` column is the id ("| # | task | ... | status |"; a "deal-assoc: what"
+//     task cell gives the name), else a `task` column is id and name ("| t14 dashboard + nav |");
 //   a list item under "## Tasks" with a "Status:", "1. ui — what it does. Status: merged (9eefaf1)".
 const cells = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
 // "merged (9eefaf1); worktree removed" → "merged"; "**done** here" → "done"; "merged d3c8862d" → "merged".
@@ -93,10 +95,16 @@ function tasksOf(plan) {
       const row = cells(line);
       if (row.every((c) => /^:?-+:?$/.test(c))) continue;
       const lower = row.map((c) => c.toLowerCase());
-      if (lower.includes("id") && lower.includes("status")) {
-        head = { id: lower.indexOf("id"), status: lower.indexOf("status"), about: ["scope", "task", "name", "what"].map((n) => lower.indexOf(n)).find((i) => i >= 0) ?? -1 };
+      const idAt = ["id", "#", "task"].map((n) => lower.indexOf(n)).find((i) => i >= 0) ?? -1;
+      if (idAt >= 0 && lower.includes("status")) {
+        const about = ["scope", "task", "name", "what"].map((n) => lower.indexOf(n)).find((i) => i >= 0 && i !== idAt) ?? -1;
+        head = { id: idAt, status: lower.indexOf("status"), about, named: lower[idAt] === "task" };
       } else if (head && row[head.id]) {
-        out.push({ id: row[head.id], name: "", state: stateWords(row[head.status] ?? ""), about: row[head.about] || null });
+        let id = row[head.id], name = "", about = row[head.about] || null;
+        if (head.named) [, id, name] = /^(\S+)\s*(.*)$/.exec(id);
+        const slug = !head.named && about && /^([\w-]+):\s+(.*)$/.exec(about);
+        if (slug) [, name, about] = slug;
+        out.push({ id, name, state: stateWords(row[head.status] ?? ""), about });
       }
       continue;
     }
@@ -162,6 +170,8 @@ function parse(machine, stdout) {
       question: question?.trim() || null,
       unhandled: Number(inbox?.trim() || 0),
       tasks: tasksOf(plan),
+      // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
+      prefix: /^Prefix:\s*`?([\w-]+)/m.exec(plan ?? "")?.[1]?.toLowerCase() ?? null,
     };
   });
 }
@@ -231,6 +241,49 @@ export function taskTone(state) {
   if (/block|fail|stuck/.test(s)) return "blocked";
   if (/^(planned|todo|pending|queued|not started|waiting to start)/.test(s) || !s) return null;
   return "working";
+}
+
+// Where a task is in its life cycle, from its state words: "planned" | "implement" |
+// "review" | "fix" | "done" | "blocked", or null for a state that names no stage
+// ("validating"). Agrees with taskTone on done, blocked and not started.
+export function taskStage(state) {
+  const tone = taskTone(state);
+  if (tone === "done" || tone === "blocked") return tone;
+  if (!tone) return "planned";
+  if (/\bfix/.test(state)) return "fix";
+  if (/review/.test(state)) return "review";
+  if (/implement|in progress|working|started|coding|building/.test(state)) return "implement";
+  return null;
+}
+
+// The stage an agent works on, from its role in its name: impl-, rev-, fix-.
+const ROLE_STAGE = { impl: "implement", rev: "review", fix: "fix" };
+
+// A task's live agents among the orchestrator's own (not their helpers, such as a dev
+// server), by name: <role>-<prefix>-<task id or name>, with an optional -<round>. Without
+// a prefix in plan.md, a name ending in the task's id or name; a number alone is too
+// loose for that ("rev-1088-final-1"). As [{agent, stage}], reviewers first.
+export function taskAgents(task, run, ctx) {
+  if (!run.terminal) return [];
+  const keys = [task.id, task.name].map((k) => (k ?? "").toLowerCase()).filter((k) => /^[\w-]+$/.test(k));
+  const fits = (rest) => keys.some((k) => (run.prefix
+    ? rest === `${run.prefix}-${k}` || new RegExp(`^${run.prefix}-${k}-\\d+$`).test(rest)
+    : !/^\d+$/.test(k) && (rest.endsWith(`-${k}`) || new RegExp(`-${k}-\\d+$`).test(rest))));
+  const order = ["review", "fix", "implement"];
+  return ctx.terminals
+    .filter((t) => t.parent === run.terminal && t.state === "live" && t.name)
+    .map((t) => ({ agent: t, m: /^(impl|rev|fix)-(.+)$/.exec(t.name.toLowerCase()) }))
+    .filter(({ m }) => m && fits(m[2]))
+    .map(({ agent, m }) => ({ agent, stage: ROLE_STAGE[m[1]] }))
+    .sort((a, b) => order.indexOf(a.stage) - order.indexOf(b.stage));
+}
+
+// The stage a task shows: plan.md's, else, when plan.md names none or not yet, what its
+// live agents do (a reviewer at work means review). Never a live agent's over a done task.
+export function shownStage(task, agents) {
+  const stage = taskStage(task.state);
+  if (stage && stage !== "planned") return stage;
+  return agents[0]?.stage ?? stage;
 }
 
 // How many tasks a run has merged and planned, from status.json, else plan.md.

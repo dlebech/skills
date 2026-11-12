@@ -210,8 +210,15 @@ export const liveTabOf = (run) => tabOfTerminal(run.terminal);
 // The tab holding a terminal now, or null when no pane shows it.
 export const tabOfTerminal = (address) => (address && panes().find((p) => p.terminal === address)?.tab) || null;
 
+// Shows an agent: focuses its pane, or, for a sub-agent no pane shows (a run's hidden
+// implementers and reviewers), peeks at it over the tab, since agent.focus leaves the
+// window as it was for those.
 export function focusAgent(address) {
-  if (address) run("agent.focus", { terminal: address });
+  if (!address) return;
+  const term = terminals().find((t) => t.address === address);
+  const shown = panes().some((p) => p.terminal === address);
+  if (term?.parent && !shown) run("terminal.peek", { terminal: address });
+  else run("agent.focus", { terminal: address });
 }
 
 // Types an answer into the captain's input as a reply to one decision, naming the decision
