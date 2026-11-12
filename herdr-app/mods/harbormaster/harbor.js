@@ -86,7 +86,7 @@ function reef(view, r, ctx, x, y, w, h, n) {
   }));
   const sign = v_flex().absolute().left(12).top(10).max_w(w - 24 - Math.min(prs.length, 4) * 46).px(10).py(4).rounded(5)
     .bg(need ? "#f6c28b" : rope).border(3).border_color(need ? "#c1562c" : "#a07a3f").text_color("#4a3418").opacity(docked ? 0.8 : 1)
-    .child(withTip(div().id(`sign-${r.key}`).truncate().text_size(13).font_weight(800), runName(r.branch, r.topic), `${OCTOPUS} `))
+    .child(withTip(div().id(`sign-${r.key}`).truncate().text_size(13).font_weight(800), runName(r.branch, r.topic), `${OCTOPUS} ${r.type ? `${r.type} · ` : ""}`))
     .child(div().truncate().text_size(10.5).font_weight(600).child(`${r.repo}${r.machine ? ` · ${r.machine}` : ""} · ${parked ? "PARKED · CLICK TO RESUME" : need ? "NEEDS YOU" : docked ? "FINISHED · PR UP" : orch === "gone" ? "GONE · CLICK TO RESUME" : r.phase.toUpperCase()}`));
   // Buoys on a line along the bottom of the reef: one per task, lit as it is done (merged into the run's branch).
   const buoys = h_flex().absolute().left(14).bottom(8).gap(8).items_end()
