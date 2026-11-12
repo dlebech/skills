@@ -5,7 +5,8 @@
 # plain programs as stand-in orchestrators, so it costs no model turns. Checks:
 #   1. a labelled terminal gets a tab; init-run.sh records it and names it 🐙;
 #   2. set-status.sh changes plan.md, the tab, and the run.status label; publishes
-#      topic, progress, tasks, issues, PRs and waiting agents to status.json and labels,
+#      type, topic, progress, tasks, issues, PRs and waiting agents to status.json and labels,
+#      names the tab for the type and topic (the branch without a topic), refuses an unknown type,
 #      keeping each until changed, and publishes them again without a status and
 #      when init-run.sh resumes the run; refuses a newline, and changes nothing
 #      when status.json is unreadable; refuses "waiting for user" without a
@@ -163,12 +164,21 @@ check "role after a resume" "$(hc get "$fake" --json | jq -r .labels.role)" orch
 "$orch/set-status.sh" "$dir" --topic "Road routes"
 check "topic" "$(jq -r .topic "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.topic"]')" \
   "Road routes:Road routes"
-check "tab name keeps the branch" "$(tab_name "$tab")" "🐙 ✋ feature/x"
+check "tab name takes the topic" "$(tab_name "$tab")" "🐙 ✋ Road routes"
+"$orch/set-status.sh" "$dir" --type rev
+check "type" "$(jq -r .type "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.type"]')" rev:rev
+check "tab name with type and topic" "$(tab_name "$tab")" "🐙 ✋ rev · Road routes"
+"$orch/set-status.sh" "$dir" --type review 2>/dev/null
+check "unknown type refused" "$?:$(jq -r .type "$dir/status.json")" 2:rev
 "$orch/set-status.sh" "$dir" --progress "task 2/2 in review"
 check "topic kept" "$(jq -r .topic "$dir/status.json")" "Road routes"
 contains "runs.sh prints the topic" "$("$capt/runs.sh")" "topic: Road routes"
+contains "runs.sh prints the type" "$("$capt/runs.sh")" "type: rev"
 "$orch/set-status.sh" "$dir" --topic ""
 check "topic cleared" "$(jq -r '.topic // "none"' "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.topic"] // ""')" none:
+check "tab name, type and branch" "$(tab_name "$tab")" "🐙 ✋ rev · feature/x"
+"$orch/set-status.sh" "$dir" --type ""
+check "type cleared" "$(jq -r '.type // "none"' "$dir/status.json"):$(tab_name "$tab")" "none:🐙 ✋ feature/x"
 "$orch/set-status.sh" "$dir" --waiting $'impl-x\t rev-y\n'
 check "waiting split on any space" "$(jq -c .waiting "$dir/status.json")" '["impl-x","rev-y"]'
 "$orch/set-status.sh" "$dir" --waiting ""

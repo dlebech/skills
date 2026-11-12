@@ -41,6 +41,11 @@ export function runName(branch, topic) {
   return { title: ref ? `${ref} · ${topic}` : topic, tip: branch ?? null };
 }
 
+// A run's type (set-status.sh --type) as a small tag before its name: what kind of
+// run it is, so a review reads apart from a feature at a glance.
+export const typeTag = (t, type) => div().flex_none().text_size(10).font_semibold().px(5).rounded(4)
+  .bg(t.raised).text_color(t.muted).child(String(type));
+
 // Puts a runName() on an element: the title as its text, the tip, if any, as its tooltip.
 export const withTip = (el, { title, tip }, prefix = "") => el.child(`${prefix}${title}`).when(Boolean(tip), (e) => e.tooltip(tip));
 

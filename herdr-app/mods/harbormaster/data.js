@@ -6,7 +6,7 @@
 // Run directory protocol (herdr-app-captain's lib.sh):
 //   <root>/<folder>/<branch>/orchestrator.json  {terminal, tab_id, folder, branch}
 //   <root>/<folder>/<branch>/plan.md            "Status: <status>" first, then "### t1 name ... — <state>" tasks
-//   <root>/<folder>/<branch>/status.json        {status, topic, progress, tasks:{merged,planned}, issues, prs:[{repo,url}], related:[{repo,url}], waiting, updated}
+//   <root>/<folder>/<branch>/status.json        {status, type, topic, progress, tasks:{merged,planned}, issues, prs:[{repo,url}], related:[{repo,url}], waiting, updated}
 //   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
 //   <root>/<folder>/<branch>/inbox/*.message    relayed messages not yet handled
 //   <root>/<folder>/<branch>/parked, closed     the person put the run away: "<time>\t<status then>"
@@ -157,6 +157,8 @@ function parse(machine, stdout) {
       away: marker("closed", closedFile) ?? marker("parked", parkedFile),
       statusLine,
       phase: runPhase(statusLine ?? status.status),
+      // What kind of run: feat, fix, rev or expl (set-status.sh --type).
+      type: status.type ?? null,
       topic: status.topic ?? null,
       progress: status.progress ?? null,
       merged: status.tasks?.merged ?? null,
@@ -520,9 +522,11 @@ async function tidyClosed(run, ctx) {
   if (tab && state !== "working" && state !== "blocked") once(tab, () => command("tab.close", { id: tab, confirmed: true }));
 }
 
-// The orchestrator's tab name for a run phase, as set-status.sh names it.
+// The orchestrator's tab name for a run, as set-status.sh names it: its phase's mark,
+// then its type and topic, or its branch without a topic ("🐙 ✋ rev · Triage decision").
 const TAB_MARK = { waiting: "✋ ", blocked: "✋ ", finished: "✓ " };
-export const orchestratorTabName = (branch, phase) => `🐙 ${TAB_MARK[phase] ?? ""}${branch}`;
+export const orchestratorTabName = (run) =>
+  `🐙 ${TAB_MARK[run.phase] ?? ""}${[run.type, run.topic || run.branch].filter(Boolean).join(" · ")}`;
 
 // Names an orchestrator's tab after its run's status, for a run on another machine.
 // Its set-status.sh renames its own tab through herdr-app, which only reaches a window
@@ -536,7 +540,7 @@ function nameTab(run) {
   if (run.phase === "unknown") return;
   const tab = tabInfo(liveTabOf(run));
   if (!tab || (tab.named && !tab.name.startsWith("🐙"))) return;
-  const name = orchestratorTabName(run.branch, run.phase);
+  const name = orchestratorTabName(run);
   if (tab.name !== name) once(`${tab.id}\u001f${name}`, () => command("tab.rename", { id: tab.id, name }));
 }
 

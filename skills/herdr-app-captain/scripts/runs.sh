@@ -11,7 +11,7 @@
 # (was: <status>)". For each prints
 # its directory, branch, start folder (its repository, or the folder holding
 # several), the Status line of its plan.md, its orchestrator terminal's state, the
-# dialog it is blocked on, its status.json's topic, progress, tasks, waiting agents, issues,
+# dialog it is blocked on, its status.json's type, topic, progress, tasks, waiting agents, issues,
 # PRs, related PRs (ones the run is about but did not open) and when they were last
 # published, its open question to the user, and unhandled messages. Then lists orchestrator terminals (role=orchestrator) that no
 # run directory claims, and "🐙" tabs that none claims, when the Herdr window is open.
@@ -76,6 +76,7 @@ while IFS= read -r run_info <&3; do
   echo "  orchestrator: $orchestrator"
   [ -z "$dialog" ] || echo "  dialog: $dialog"
   [ ! -e "$dir/status.json" ] || jq -r '
+    (.type // empty | "  type: \(.)"),
     (.topic // empty | "  topic: \(.)"),
     (if .progress or .tasks then "  progress: \([.progress // empty,
       (.tasks // empty | "\(.merged)/\(.planned) tasks merged")] | join("; "))" else empty end),
