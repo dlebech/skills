@@ -2,7 +2,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, runPhase, taskTone, taskCounts, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun } from "./data.js";
+import { stats, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun } from "./data.js";
 import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, currentAgent, openUrl, replyToCaptain } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip } from "./ui.js";
 import { tokenText } from "./context.js";
@@ -76,20 +76,54 @@ function linkChip(t, id, url, icon, tip) {
 }
 const prStateText = (pr) => (pr.state === "UNKNOWN" ? null : pr.state === "DRAFT" ? "Draft" : pr.state[0] + pr.state.slice(1).toLowerCase());
 
-// One segment per planned task; only for runs that plan at least one.
-function taskStrip(t, r, counts, names = true) {
+// A task's life-cycle stages (data.js taskStage) as they read and color, and which
+// pulse because an agent is at it. Review takes the accent, fixing the implementer's
+// second pass a color of its own, so implementing and reviewing tasks tell apart.
+const STAGE = {
+  planned: { label: "Planned", color: (t) => t.border },
+  implement: { label: "Implementing", color: (t) => t.working, active: true },
+  review: { label: "In review", color: (t) => t.accent, active: true },
+  fix: { label: "Fixing", color: (t) => t.ansi5 ?? t.working, active: true },
+  done: { label: "Done", color: (t) => t.done },
+  blocked: { label: "Blocked", color: (t) => t.blocked },
+};
+// A task's color: its stage's, else its tone's (a state that names no stage).
+const taskColor = (t, task, stage) => (stage ? STAGE[stage].color(t) : t[taskTone(task.state)] ?? t.border);
+const pulse = (stage, task) => (stage ? STAGE[stage].active : taskTone(task.state) === "working");
+const stageText = (task, stage) => (stage ? STAGE[stage].label : stateText(task.state));
+
+// Each task's stage and live agents, in plan.md's order. A done task shows none: they
+// are leftovers, or another round's ("final review" and "final review 2" share an id).
+const stagesOf = (r, ctx) => r.tasks.map((task) => {
+  const agents = taskAgents(task, r, ctx);
+  const stage = shownStage(task, agents);
+  return { agents: stage === "done" ? [] : agents, stage };
+});
+
+// "1 implementing · 4 in review": the tasks under way, by stage.
+function stageSummary(stages) {
+  return ["implement", "review", "fix"].map((s) => [s, stages.filter((x) => x.stage === s).length])
+    .filter(([, n]) => n > 0).map(([s, n]) => `${n} ${STAGE[s].label.toLowerCase()}`).join(" · ");
+}
+
+// One segment per planned task, hover for its name and stage, and how many are done
+// and under way below it; only for runs that plan at least one.
+function taskStrip(t, r, counts, stages, names = true) {
   return v_flex().gap(5)
     .child(h_flex().gap(3).h(6).children(Array.from({ length: counts.planned }, (_, i) => {
       const task = r.tasks[i];
-      const tone = task ? taskTone(task.state) : i < counts.merged ? "done" : null;
-      return div().flex_1().h_full().rounded(3).bg(tone ? t[tone] : t.border)
-        .when(tone === "working", (el) => el.loop("opacity", { from: 0.45, to: 1, period: 1400 }));
+      const color = task ? taskColor(t, task, stages[i].stage) : i < counts.merged ? t.done : t.border;
+      return div().id(`seg-${r.key}-${i}`).flex_1().h_full().rounded(3).bg(color)
+        .when(Boolean(task), (el) => el.tooltip([[task.id, task.name].filter(Boolean).join(" "), stageText(task, stages[i].stage)].filter(Boolean).join(" · ")))
+        .when(Boolean(task) && pulse(stages[i].stage, task), (el) => el.loop("opacity", { from: 0.45, to: 1, period: 1400 }));
     })))
-    .when(names && r.tasks.length > 0, (el) => el.child(h_flex().flex_wrap().gap_x(10).text_size(11).text_color(t.dim)
-      .children(r.tasks.map((task) => h_flex().gap(4).items_center()
-        .child(div().size(6).rounded(3).bg(t[taskTone(task.state)] ?? t.border))
-        .child(div().text_color(task.state === "merged" ? t.dim : t.muted).child([task.id, task.name].filter(Boolean).join(" ")))
-        .child(div().text_color(t.dim).child(stateText(task.state)))))));
+    .when(names, (el) => el.child(div().text_size(11).text_color(t.dim).child(tasksText(r, counts, stages))));
+}
+
+// "21/22 done · 1 in review": the tasks done, then those under way by stage.
+function tasksText(r, counts, stages) {
+  const done = r.tasks.length ? r.tasks.filter((task) => taskTone(task.state) === "done").length : counts.merged;
+  return [`${done}/${counts.planned} done`, stageSummary(stages)].filter(Boolean).join(" · ");
 }
 
 // What a card offers: Park and Close while its orchestrator runs, finished or not (a
@@ -200,6 +234,7 @@ function runFacts(r, ctx) {
     prs: prsOf(r) ?? r.prs.map((p) => unknownPr(p.url, p.repo)),
     related: relatedOf(r),
     workers: workersOf(r.terminal, ctx),
+    stages: stagesOf(r, ctx),
   };
 }
 
@@ -257,7 +292,7 @@ function card(view, t, r, ctx, compact = false) {
     .child(cardHeader(view, t, r, f, runMeta(r, f)))
     .when(need, (el) => el.child(needBox(t, r, f)))
     .when(Boolean(r.progress), (el) => el.child(div().text_size(12.5).text_color(t.foreground).child(r.progress)))
-    .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts)))
+    .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts, f.stages)))
     .children(cardNotes(t, r, f))
     .when(prs.length > 0 || links.length > 0, (el) => el.child(v_flex().gap(1).text_size(12)
       .children(prs.map((p, i) => prRow(t, p, i)))
@@ -299,35 +334,31 @@ function issueRow(t, url) {
     .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).child(shortRef(url)));
 }
 
-function taskRow(t, task, i) {
-  const tone = taskTone(task.state);
-  const done = tone === "done";
-  const title = [task.id, task.name].filter(Boolean).join(" ");
-  return h_flex().id(`task-${i}-${task.id}`).gap(8).items_center().h(24).px(8).rounded(6)
-    .when(Boolean(task.about), (el) => el.tooltip(task.about))
-    .child(div().size(7).flex_none().rounded(4).bg(t[tone] ?? t.border)
-      .when(tone === "working", (el) => el.loop("opacity", { from: 0.45, to: 1, period: 1400 })))
-    .child(div().flex_none().text_size(12).font_medium().text_color(done ? t.muted : t.foreground).child(title))
-    .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(task.about ?? ""))
-    .child(div().flex_none().text_size(11).text_color(tone ? t[tone] : t.dim).child(stateText(task.state)));
-}
-
-function workerRow(t, w, ctx) {
+// One of the run's agents: its name, the task it works on and that task's stage, when
+// its name says (impl-<prefix>-<task>); a helper it started (a dev server) indented below it.
+function workerRow(t, w, ctx, work, nested) {
   const status = agentStatus(w, ctx);
+  const color = work?.stage ? STAGE[work.stage].color(t) : null;
   return h_flex().id(`wk-${w.address}`).gap(8).items_center().h(24).px(8).rounded(6).cursor_pointer()
+    .when(nested, (el) => el.pl(28))
     .hover((s) => s.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); focusAgent(w.address); })
-    .child(div().flex_none().text_size(13).child(CRAB))
-    .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).child(w.name ?? w.address))
+    .tooltip(work?.task.about ? `${w.name ?? w.address}: ${work.task.about}` : "Show this agent")
+    .child(div().flex_none().text_size(nested ? 11 : 13).child(CRAB))
+    .child(div().flex_none().text_size(12).text_color(nested ? t.muted : t.foreground).child(w.name ?? w.address))
+    .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim)
+      .child(work ? [work.task.id, work.task.name].filter(Boolean).join(" ") : ""))
+    .when(Boolean(color), (el) => el.child(div().flex_none().text_size(11).text_color(color).child(STAGE[work.stage].label)))
     .child(statusDot(t, status));
 }
 
 // The run's card laid out for a pane of its own: the same header, need, progress and
 // buttons, then its PRs with their whole titles, issues and related PRs one per row,
-// every task with its state and what it is about, and the agents working on it.
+// the tasks as a bar, counted by stage, and the agents working on it.
 function runDetail(view, t, r, ctx) {
   const f = runFacts(r, ctx);
-  const { orch, closed, need, counts, prs, related, workers } = f;
-  const done = r.tasks.filter((task) => taskTone(task.state) === "done").length;
+  const { orch, closed, need, counts, prs, related, workers, stages } = f;
+  // Each agent's task and that task's stage, by address.
+  const workOf = new Map(stages.flatMap(({ agents, stage }, i) => agents.map((a) => [a.agent.address, { task: r.tasks[i], stage }])));
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(14).p(14).pl(18).rounded(10).bg(t.surface)
     .border(1).border_color(need ? t.blocked + "88" : t.border)
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
@@ -343,10 +374,10 @@ function runDetail(view, t, r, ctx) {
     .when(r.issues.length + related.length > 0, (el) => el.child(section(t, "Issues and related PRs")
       .children(r.issues.map((url) => issueRow(t, url)))
       .children(related.map((p, i) => prDetail(t, p, i, true)))))
-    .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", `${r.tasks.length ? done : counts.merged}/${counts.planned} done`)
-      .child(div().px(2).pb(2).child(taskStrip(t, r, counts, false)))
-      .children(r.tasks.map((task, i) => taskRow(t, task, i)))))
-    .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`).children(workers.map((w) => workerRow(t, w, ctx)))))
+    .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
+      .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
+    .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
+      .children(workers.map((w) => workerRow(t, w, ctx, workOf.get(w.address), w.parent !== r.terminal)))))
     .child(actionRow(view, t, r, orch, closed, counts));
 }
 
