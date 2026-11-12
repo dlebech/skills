@@ -20,7 +20,7 @@ Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-capta
 - **`harbormaster-main` layout.** Herdr's main layout with the Crew block added.
 - **`harbormaster-sea` layout** (fun):
   - The captain rides a boat on the surface and drops anchor while watching. The captain calls "Ahoy!" when it has a decision for you or a run needs you, and raises the anchor and naps when nothing is being watched.
-  - Each run is a reef with its branch on a sign. A finished run's reef goes quiet, its octopus asleep and its PR flags up, until you close the orchestrator's tab; then it leaves the harbor. A parked run keeps its reef, dimmed and without its octopus. Clicking a parked reef, or one whose orchestrator is gone, offers to resume it. A run that needs you says what for in a bubble. The orchestrator is an octopus and its workers are crabs. Working crabs scuttle, blocked ones jump, and crabs whose turn is done sleep.
+  - Each run is a reef with its type and name on a sign. A finished run's reef goes quiet, its octopus asleep and its PR flags up, until you close the orchestrator's tab; then it leaves the harbor. A parked run keeps its reef, dimmed and without its octopus. Clicking a parked reef, or one whose orchestrator is gone, offers to resume it. A run that needs you says what for in a bubble. The orchestrator is an octopus and its workers are crabs. Working crabs scuttle, blocked ones jump, and crabs whose turn is done sleep.
   - Buoys along the bottom are the run's tasks and turn green as they merge.
   - Signal flags on the mast are its PRs. Clicking one opens it.
   - Agents outside any run drift on the right, named as in the Crew block. The active tab's terminals sit below deck.

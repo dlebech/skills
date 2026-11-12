@@ -532,7 +532,7 @@ export const orchestratorTabName = (run) =>
 // Its set-status.sh renames its own tab through herdr-app, which only reaches a window
 // on its own computer: when Herdr runs on another one, connected over ssh, it cannot,
 // and the tab keeps its old name. Harbormaster draws in the window, so it renames the
-// tab from plan.md's status, which set-status.sh writes first. Only the tab its terminal
+// tab from plan.md's status and status.json's type and topic, which set-status.sh writes first. Only the tab its terminal
 // is in now, as in tidyClosed, and only while the tab is unnamed or carries one of the
 // orchestrator's own names (🐙 ...), so a name the person gave it stays. Each name is
 // sent at most once a minute, so a rename that does not land is not repeated every 5 s.

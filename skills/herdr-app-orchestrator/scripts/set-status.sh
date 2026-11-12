@@ -39,7 +39,7 @@
 # "<type> · <topic>", with the branch for a missing topic and no type part without one,
 # e.g. "🐙 rev · Triage decision", as Harbormaster's orchestratorTabName() names it.
 # plan.md and status.json are what count: a closed window, a window on another
-# computer (where Harbormaster renames the tab from plan.md), or an orchestrator with
+# computer (where Harbormaster renames the tab from plan.md and status.json), or an orchestrator with
 # no tab, only prints a warning, since the run goes on without one. An unreadable
 # status.json fails the call before anything changes.
 set -u

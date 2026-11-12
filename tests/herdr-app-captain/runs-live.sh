@@ -178,7 +178,8 @@ contains "runs.sh prints the type" "$("$capt/runs.sh")" "type: rev"
 check "topic cleared" "$(jq -r '.topic // "none"' "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.topic"] // ""')" none:
 check "tab name, type and branch" "$(tab_name "$tab")" "🐙 ✋ rev · feature/x"
 "$orch/set-status.sh" "$dir" --type ""
-check "type cleared" "$(jq -r '.type // "none"' "$dir/status.json"):$(tab_name "$tab")" "none:🐙 ✋ feature/x"
+check "type cleared" "$(jq -r '.type // "none"' "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.type"] // ""'):$(tab_name "$tab")" \
+  "none::🐙 ✋ feature/x"
 "$orch/set-status.sh" "$dir" --waiting $'impl-x\t rev-y\n'
 check "waiting split on any space" "$(jq -c .waiting "$dir/status.json")" '["impl-x","rev-y"]'
 "$orch/set-status.sh" "$dir" --waiting ""
