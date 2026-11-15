@@ -571,17 +571,21 @@ export function crew(view, t) {
     .sort((a, b) => (a.state === "finished") - (b.state === "finished"));
   // The focused agent, or the crew agent beside a focused Harbormaster pane.
   const current = currentAgent(ctx, [cap.terminal?.address, ...orchestrators.map((o) => o.term.address)].filter(Boolean));
-  const row = ({ id, emoji, type = null, title, tip = null, detail, tone, status, address, edge, pin = null }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
+  const row = ({ id, emoji, type = null, title, tip = null, detail, tone, status, address, edge, pin = null, crabs = 0 }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
     .rounded(7).bg(address === current ? edge + "33" : edge + "14").cursor_pointer().hover((st) => st.bg(address === current ? edge + "40" : edge + "26"))
     .when(address === current, (el) => el.border(1).border_color(edge + "aa"))
     .on_click(() => focusAgent(address))
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
     .child(div().flex_none().text_size(15).child(emoji))
     .child(v_flex().flex_1().min_w(0)
+      // The title gets the whole first line; the type tag and worker count lead the second,
+      // so a narrow sidebar truncates the detail before them.
+      .child(withTip(div().id(`${id}-title`).min_w(0).truncate().text_size(12.5).font_semibold().text_color(t.foreground), { title, tip }))
       .child(h_flex().gap(6).items_center().min_w(0)
         .when(Boolean(type), (el) => el.child(typeTag(t, type)))
-        .child(withTip(div().id(`${id}-title`).flex_1().min_w(0).truncate().text_size(12.5).font_semibold().text_color(t.foreground), { title, tip })))
-      .child(div().truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail)))
+        .when(crabs > 0, (el) => el.child(h_flex().flex_none().gap(3).items_center().text_size(11).text_color(t.muted)
+          .child(div().text_size(11).child(CRAB)).child(String(crabs))))
+        .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail))))
     .when(Boolean(pin), (el) => el.child(pin))
     .map(withContext(view, t, id, address))
     .child(statusDot(t, status));
@@ -609,14 +613,14 @@ export function crew(view, t) {
     const workers = workersOf(term.address, ctx).length;
     const detail = (need ? [`needs you: ${reason}`]
       : state === "finished" ? ["finished", prText]
-      : [state !== "running" ? (PHASE[state] ?? PHASE.unknown).label.toLowerCase() : null, labels.progress ?? r?.progress, workers ? `${CRAB} ${workers}` : null, prText]
+      : [state !== "running" ? (PHASE[state] ?? PHASE.unknown).label.toLowerCase() : null, labels.progress ?? r?.progress, prText]
     ).filter(Boolean).join(" · ");
     rows.push(row({
       id: `crew-${term.address}`, emoji: OCTOPUS, detail: detail || "orchestrator",
       // The run's type, then its number and topic; without a topic, its branch.
       type: labels["run.type"] || r?.type || null,
       ...runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic),
-      tone: need ? "blocked" : "muted", status, address: term.address,
+      tone: need ? "blocked" : "muted", status, address: term.address, crabs: state === "finished" ? 0 : workers,
       pin: r ? runPin(t, `crew-pin-${term.address}`, r, orchestratorState(r, ctx)) : null,
       edge: (need ? t.blocked : state === "finished" ? t.done : t.working) ?? t.border,
     }));
