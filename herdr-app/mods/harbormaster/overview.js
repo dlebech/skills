@@ -401,8 +401,11 @@ function pinButton(t, id, spot, { run = null, labelled = false } = {}) {
     .when(labelled, (el) => el.child(spot.pinned ? "Unpin" : `Pin beside ${who}`));
 }
 
+// Whether a run's card can open beside its orchestrator: the orchestrator is there.
+const cardBesideOrchestrator = (r, orch) => Boolean(r?.terminal) && orch !== "gone" && !r.away;
+
 // The pin for a run's card beside its orchestrator, while the orchestrator is there.
-const runPin = (t, id, r, orch) => (r.terminal && orch !== "gone" && !r.away ? pinButton(t, id, paneBeside(r.terminal), { run: r }) : div());
+const runPin = (t, id, r, orch) => (cardBesideOrchestrator(r, orch) ? pinButton(t, id, paneBeside(r.terminal), { run: r }) : div());
 
 // What the captain watches, from stats(): "2 runs, 1 finished".
 const watchedText = (s) => [plural(s.live.length, "run"), s.docked.length ? `${s.docked.length} finished` : null].filter(Boolean).join(", ");
@@ -623,7 +626,7 @@ export function crew(view, t) {
       ...runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic),
       tone: need ? "blocked" : "muted", status, address: term.address, crabs: state === "finished" ? 0 : workers,
       // Clicking a run's orchestrator also opens that run's card beside it, while it's there.
-      open: () => (r && r.terminal && orchestratorState(r, ctx) !== "gone" && !r.away ? focusWithPane(term.address, { role: "run", run: r.key }) : focusAgent(term.address)),
+      open: () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(term.address, { role: "run", run: r.key }) : focusAgent(term.address)),
       edge: (need ? t.blocked : state === "finished" ? t.done : t.working) ?? t.border,
     }));
   }

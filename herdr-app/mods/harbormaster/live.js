@@ -148,7 +148,8 @@ export function focusWithPane(address, props = undefined) {
   const spot = paneBeside(address);
   if (spot.pinned || !spot.pane) return;
   run("pane.split", { pane: spot.pane, direction: "right", mod: "harbormaster", ...(props ? { props } : {}) });
-  run("pane.focus", { terminal: address });
+  // By pane id: pane.focus {terminal} would prefer a layout block showing the same terminal.
+  run("pane.focus", { pane: spot.pane });
 }
 
 // The orchestrator's tab: the tab holding its terminal now, else orchestrator.json's.
