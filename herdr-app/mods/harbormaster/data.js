@@ -686,13 +686,19 @@ async function mark(run, how) {
 // captain's lists and can no longer be resumed. Branches and PRs are git's and GitHub's,
 // and stay. It refuses while a worktree still has the integration branch checked out,
 // in the run's repository or any repository in its folder, since that means the run
-// was closed without cleaning up: resume it and close it again first. The rm is guarded
-// so it only ever removes a run directory under the runs root.
+// was closed without cleaning up: resume it and close it again first. It also refuses
+// once the run was resumed since it was read (its orchestrator.json names another
+// terminal, or its closed marker is gone), so a delete confirmed earlier, as a bulk one
+// working through a machine's runs, never takes a run that is active again. The rm is
+// guarded so it only ever removes a run directory under the runs root.
 const DELETE = [
-  'd=$1 folder=$2 branch=$3',
+  'd=$1 folder=$2 branch=$3 terminal=$4 marked=$5',
   'root="${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}"',
   'case "$d" in "$root"/*/*) ;; *) echo "not a run directory: $d" >&2; exit 2;; esac',
   '[ -f "$d/orchestrator.json" ] || { echo "not a run directory: $d" >&2; exit 2; }',
+  'resumed() { echo "it was resumed since; it is no longer closed" >&2; exit 4; }',
+  '[ -z "$marked" ] || [ -e "$d/closed" ] || resumed',
+  '[ -z "$terminal" ] || [ "$(jq -r ".terminal // empty" "$d/orchestrator.json" 2>/dev/null)" = "$terminal" ] || resumed',
   'for r in "$folder" "$folder"/*/; do',
   '  [ -e "$r/.git" ] || continue',
   '  if git -C "$r" worktree list --porcelain 2>/dev/null | grep -qxF "branch refs/heads/$branch"; then',
@@ -703,7 +709,8 @@ const DELETE = [
 ].join("\n");
 
 export async function deleteRun(run) {
-  const out = await exec("sh", ["-c", DELETE, "sh", run.dir, run.folder ?? "", run.branch], { on: run.machine });
+  const out = await exec("sh", ["-c", DELETE, "sh", run.dir, run.folder ?? "", run.branch,
+    run.localTerminal ?? "", run.away?.how === "closed" ? "1" : ""], { on: run.machine });
   if (out.code !== 0) throw new Error((out.stderr || "could not delete the run directory").trim());
   const prs = { ...(shared("harbormaster.prs") ?? {}) };
   delete prs[run.key];

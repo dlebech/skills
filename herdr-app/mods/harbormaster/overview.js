@@ -553,6 +553,8 @@ function closedHeader(view, t, closed) {
   const busy = view.busy?.[BULK_KEY];
   if (busy) return head.child(div().flex_1()).child(div().flex_none().text_color(t.muted).child(busy.label));
   if (!view.showDone) return head;
+  // Runs a card's action is already deleting (or putting away) are left to it.
+  closed = closed.filter((r) => !view.busy[r.key]);
   const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
   const asking = view.confirm?.key === BULK_KEY ? BULK_AGES.find((a) => a.id === view.confirm.action) : null;
   if (!asking) {
