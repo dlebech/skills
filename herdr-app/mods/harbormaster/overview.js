@@ -3,7 +3,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun } from "./data.js";
-import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, currentAgent, openUrl, replyToCaptain } from "./live.js";
+import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText } from "./context.js";
 
@@ -401,8 +401,11 @@ function pinButton(t, id, spot, { run = null, labelled = false } = {}) {
     .when(labelled, (el) => el.child(spot.pinned ? "Unpin" : `Pin beside ${who}`));
 }
 
+// Whether a run's card can open beside its orchestrator: the orchestrator is there.
+const cardBesideOrchestrator = (r, orch) => Boolean(r?.terminal) && orch !== "gone" && !r.away;
+
 // The pin for a run's card beside its orchestrator, while the orchestrator is there.
-const runPin = (t, id, r, orch) => (r.terminal && orch !== "gone" && !r.away ? pinButton(t, id, paneBeside(r.terminal), { run: r }) : div());
+const runPin = (t, id, r, orch) => (cardBesideOrchestrator(r, orch) ? pinButton(t, id, paneBeside(r.terminal), { run: r }) : div());
 
 // What the captain watches, from stats(): "2 runs, 1 finished".
 const watchedText = (s) => [plural(s.live.length, "run"), s.docked.length ? `${s.docked.length} finished` : null].filter(Boolean).join(", ");
@@ -571,10 +574,10 @@ export function crew(view, t) {
     .sort((a, b) => (a.state === "finished") - (b.state === "finished"));
   // The focused agent, or the crew agent beside a focused Harbormaster pane.
   const current = currentAgent(ctx, [cap.terminal?.address, ...orchestrators.map((o) => o.term.address)].filter(Boolean));
-  const row = ({ id, emoji, type = null, title, tip = null, detail, tone, status, address, edge, pin = null, crabs = 0 }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
+  const row = ({ id, emoji, type = null, title, tip = null, detail, tone, status, address, edge, open = () => focusAgent(address), crabs = 0 }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
     .rounded(7).bg(address === current ? edge + "33" : edge + "14").cursor_pointer().hover((st) => st.bg(address === current ? edge + "40" : edge + "26"))
     .when(address === current, (el) => el.border(1).border_color(edge + "aa"))
-    .on_click(() => focusAgent(address))
+    .on_click(open)
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
     .child(div().flex_none().text_size(15).child(emoji))
     .child(v_flex().flex_1().min_w(0)
@@ -586,7 +589,6 @@ export function crew(view, t) {
         .when(crabs > 0, (el) => el.child(h_flex().flex_none().gap(3).items_center().text_size(11).text_color(t.muted)
           .child(div().text_size(11).child(CRAB)).child(String(crabs))))
         .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail))))
-    .when(Boolean(pin), (el) => el.child(pin))
     .map(withContext(view, t, id, address))
     .child(statusDot(t, status));
   const rows = [];
@@ -595,7 +597,9 @@ export function crew(view, t) {
     const watched = watchedText(stats(view.runs, ctx));
     const asks = view.decisions?.length ?? 0;
     rows.push(row({
-      id: "crew-captain", emoji: CAPTAIN, title: "Captain", pin: pinButton(t, "crew-pin-captain", captainPane(ctx)),
+      id: "crew-captain", emoji: CAPTAIN, title: "Captain",
+      // Clicking the captain also opens the runs overview beside it.
+      open: () => focusWithPane(cap.terminal.address),
       detail: [asks ? `asks you: ${plural(asks, "decision")}` : null, cap.watching ? `on watch · ${watched}` : "not watching runs"].filter(Boolean).join(" · "),
       tone: asks || !cap.watching ? "blocked" : "muted", status: agentStatus(cap.terminal, ctx), address: cap.terminal.address, edge: t.accent,
     }));
@@ -621,7 +625,8 @@ export function crew(view, t) {
       type: labels["run.type"] || r?.type || null,
       ...runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic),
       tone: need ? "blocked" : "muted", status, address: term.address, crabs: state === "finished" ? 0 : workers,
-      pin: r ? runPin(t, `crew-pin-${term.address}`, r, orchestratorState(r, ctx)) : null,
+      // Clicking a run's orchestrator also opens that run's card beside it, while it's there.
+      open: () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(term.address, { role: "run", run: r.key }) : focusAgent(term.address)),
       edge: (need ? t.blocked : state === "finished" ? t.done : t.working) ?? t.border,
     }));
   }
