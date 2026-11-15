@@ -140,6 +140,17 @@ export function togglePin(spot, props = undefined) {
   else if (spot.pane) run("pane.split", { pane: spot.pane, direction: "right", mod: "harbormaster", ...(props ? { props } : {}) });
 }
 
+// Focuses an agent and makes sure a Harbormaster pane is open beside it (the runs
+// overview, or with `props` another view, such as one run's card). Never closes one, so
+// clicking again only focuses; close the pane with Herdr's own pane close.
+export function focusWithPane(address, props = undefined) {
+  focusAgent(address);
+  const spot = paneBeside(address);
+  if (spot.pinned || !spot.pane) return;
+  run("pane.split", { pane: spot.pane, direction: "right", mod: "harbormaster", ...(props ? { props } : {}) });
+  run("pane.focus", { terminal: address });
+}
+
 // The orchestrator's tab: the tab holding its terminal now, else orchestrator.json's.
 export function tabOf(run) {
   return liveTabOf(run) ?? run.tab ?? null;
