@@ -3,7 +3,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
-import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain } from "./live.js";
+import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText } from "./context.js";
 
@@ -396,7 +396,7 @@ function pinButton(t, id, spot, { run = null, labelled = false } = {}) {
   return h_flex().id(id).flex_none().gap(5).items_center().px(labelled ? 8 : 4).h(22).rounded(5).tooltip(tip)
     .text_size(11).text_color(spot.pinned ? t.accent : t.dim).opacity(usable ? 1 : 0.45)
     .when(usable, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)))
-    .on_click((_e, cx) => { cx.stop_propagation(); togglePin(spot, run ? { role: "run", run: run.key } : undefined); })
+    .on_click((_e, cx) => { cx.stop_propagation(); togglePin(spot, run ? runProps(run) : undefined); })
     .child(svg("mods/harbormaster/pin.svg").size(13))
     .when(labelled, (el) => el.child(spot.pinned ? "Unpin" : `Pin beside ${who}`));
 }
@@ -632,14 +632,36 @@ export function cards(view, t, runs, errors, decisions = []) {
       .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n")))));
 }
 
-// One run's card, as a pane pinned beside its orchestrator (props().run is the run's key).
-export function runPane(view, t, key) {
+// The props of a run's own pane. Herdr stores pane props as given and shows them on every
+// screen of the run's machine, while a run's key and terminal address carry this screen's
+// name for that machine ("local-ssh:" here, none on the machine itself). So the pane names
+// the run by what every screen reads the same: its directory and its orchestrator's
+// terminal as its own machine names it.
+export const runProps = (r) => ({ role: "run", dir: r.dir, terminal: r.localTerminal });
+
+// The run a run pane's props name. Panes saved before runProps() carry `run`, a run key
+// ("<machine>:<dir>"), whose machine may be another screen's name: only its dir counts.
+// The orchestrator's terminal comes first: an orchestrator can move its run to another
+// directory (a new integration branch), and its pane should follow it there.
+export function runOfProps(runs, p) {
+  const byTerminal = p.terminal ? runs.filter((x) => x.localTerminal === p.terminal) : [];
+  if (byTerminal.length) return byTerminal.find((x) => x.dir === p.dir) ?? byTerminal.find((x) => !x.away) ?? byTerminal[0];
+  const dir = p.dir ?? (typeof p.run === "string" ? p.run.slice(p.run.indexOf(":") + 1) : null);
+  return runs.find((x) => x.dir === dir) ?? null;
+}
+
+
+// One run's card, as a pane pinned beside its orchestrator (props() as runProps() gives them).
+export function runPane(view, t, p) {
   const ctx = facts();
-  const r = view.runs.find((x) => x.key === key);
+  const r = runOfProps(view.runs, p);
   return v_flex().id("run-pane").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .child(v_flex().id("run-pane-list").flex_1().min_h(0).p(10).gap(8).overflow_y_scrollbar()
-      .child(r ? runDetail(view, t, r, ctx) : div().p(12).text_size(12).text_color(t.dim)
-        .child(view.runs.length ? "This run is no longer in the harbor. Close this pane." : "Reading the run…"))
+      .child(r ? runDetail(view, t, r, ctx) : view.runs.length
+        ? v_flex().p(12).gap(8).items_start().text_size(12).text_color(t.dim)
+          .child("This run is no longer in the harbor. Pin its card again from the overview or the Crew block.")
+          .child(actionButton(t, "close-pane", "Close this pane", null, () => closeOwnPane()))
+        : div().p(12).text_size(12).text_color(t.dim).child("Reading the run…"))
       .when(Boolean(view.actionNote), (el) => el.child(div().px(4).text_size(11).text_color(t.muted).child(view.actionNote)))
       .when(Boolean(view.actionError), (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(view.actionError))));
 }
@@ -710,7 +732,7 @@ export function crew(view, t) {
       ...runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic),
       tone: need ? "blocked" : "muted", status, address: term.address, crabs: state === "finished" ? 0 : workers,
       // Clicking a run's orchestrator also opens that run's card beside it, while it's there.
-      open: () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(term.address, { role: "run", run: r.key }) : focusAgent(term.address)),
+      open: () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(term.address, runProps(r)) : focusAgent(term.address)),
       edge: (need ? t.blocked : state === "finished" ? t.done : t.working) ?? t.border,
     }));
   }

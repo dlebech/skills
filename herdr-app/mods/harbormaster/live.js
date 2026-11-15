@@ -247,3 +247,10 @@ export function openUrl(url) {
   const cmd = platform === "macos" ? "open" : platform === "windows" ? "explorer" : "xdg-open";
   exec(cmd, [url]).catch(() => {});
 }
+
+// Closes this pane. A mod doesn't know its own pane, but clicking it gives it focus, so
+// the button closes the focused pane, and only when that is a Harbormaster pane.
+export function closeOwnPane() {
+  const f = focused();
+  if (f?.pane && panes().find((x) => x.pane === f.pane)?.mod === "harbormaster") run("pane.close", { pane: f.pane });
+}
