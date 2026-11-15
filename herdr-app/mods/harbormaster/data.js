@@ -169,6 +169,8 @@ function parse(machine, stdout) {
       related: (status.related ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
       waiting: status.waiting ?? [],
       updated: status.updated ? Date.parse(status.updated) : null,
+      // When the run was created (init-run.sh); null for runs from before it recorded that.
+      started: Date.parse(orch.started ?? "") || null,
       question: question?.trim() || null,
       unhandled: Number(inbox?.trim() || 0),
       tasks: tasksOf(plan),
@@ -408,6 +410,16 @@ export function isClosed(run, ctx) {
   return run.phase === "finished" && orchestratorState(run, ctx) === "gone" && !orchestratorLost(run, ctx);
 }
 export const isParked = (run) => run.away?.how === "parked";
+
+// The time a run sorts by in its section, newest first: when it was parked or closed,
+// else for an unfinished run when it started, which stays put while it works (its last
+// update would reorder the cards under the pointer), else its last update.
+export function runTime(run) {
+  if (run.away?.at) return run.away.at;
+  if (run.phase !== "finished" && run.started) return run.started;
+  return run.updated ?? run.started ?? 0;
+}
+export const newestFirst = (a, b) => runTime(b) - runTime(a);
 
 // Totals across runs, for the summary bar, the overview header, the Crew block and the harbor.
 // `live`: runs still working (not finished, not put away); `docked`: finished but still
@@ -699,6 +711,20 @@ export async function deleteRun(run) {
   const seen = { ...(shared(WORKTREES_KEY) ?? {}) };
   if (seen[run.key]) { delete seen[run.key]; setShared(WORKTREES_KEY, seen); }
   cache.at = 0;
+}
+
+// Deletes several closed runs, one at a time per machine and the machines at once, each as
+// deleteRun does, guards and all. Returns the runs it could not delete, each with why.
+export async function deleteRuns(runs) {
+  const byMachine = new Map();
+  for (const r of runs) byMachine.set(r.machine ?? "", [...(byMachine.get(r.machine ?? "") ?? []), r]);
+  const failed = [];
+  await Promise.all([...byMachine.values()].map(async (list) => {
+    for (const run of list) {
+      try { await deleteRun(run); } catch (e) { failed.push({ run, error: e?.message ?? String(e) }); }
+    }
+  }));
+  return failed;
 }
 
 // Resumes the run with a new orchestrator of its kind, in the repository's space, or in a

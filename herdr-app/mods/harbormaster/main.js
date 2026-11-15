@@ -52,13 +52,13 @@ export default class Harbormaster extends View {
     return runs;
   }
 
-  // A card's action that has not ended after BUSY_LIMIT never will (its task was
+  // A card's action that has not ended after BUSY_LIMIT (or its own limit) never will (its task was
   // cancelled): stop showing it as under way, so the card can be used again.
   expireBusy() {
     let changed = this.redraw;
     this.redraw = false;
     for (const [key, b] of Object.entries(this.busy)) {
-      if (Date.now() - b.at < BUSY_LIMIT) continue;
+      if (Date.now() - b.at < (b.limit ?? BUSY_LIMIT)) continue;
       delete this.busy[key];
       this.actionError = `${b.branch}: ${b.label.replace("…", "").toLowerCase()} didn't finish; the list shows what happened, try again if it is still there`;
       changed = true;

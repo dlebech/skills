@@ -8,8 +8,9 @@
 # <folder> is the last part of the repository's path, or of the start folder's for a
 # run across several, and <branch> is the branch as branch_slug in lib.sh writes it,
 # since herdr-app-captain scans one level deep; keeps the runs root private, and
-# writes orchestrator.json ({terminal, tab_id, folder, branch, kind}), which is how
-# herdr-app-captain finds the run and resumes it with the same kind of agent. A new
+# writes orchestrator.json ({terminal, tab_id, folder, branch, kind, started}), which is how
+# herdr-app-captain finds the run and resumes it with the same kind of agent; started is
+# when the run was created, kept on a resume (absent for runs from before it). A new
 # run also gets plan.md; either way set-status.sh then publishes the run's
 # status.json, labels, and tab name, so a resumed run's new terminal carries them too.
 # A resumed run is active again: its parked and closed markers are deleted.
@@ -35,7 +36,9 @@ fi
 root=${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}
 dir=$root/${folder##*/}/$(branch_slug "$branch")
 
+started=
 if [ -e "$dir/orchestrator.json" ]; then
+  started=$(jq -r '.started // empty' "$dir/orchestrator.json")
   owner=$(jq -r '.folder // empty' "$dir/orchestrator.json")
   if [ -n "$owner" ] && [ "$owner" != "$folder" ]; then
     echo "$dir belongs to a run started in $owner; choose another branch name" >&2
@@ -44,6 +47,7 @@ if [ -e "$dir/orchestrator.json" ]; then
 fi
 state=existing
 [ -e "$dir/plan.md" ] || state=new
+[ "$state" = existing ] || [ -n "$started" ] || started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 mkdir -p "$dir/inbox" "$dir/shared"
 chmod 700 "$root"
 me=$(hc get "$HC_TERMINAL_ID" --json)
@@ -53,8 +57,9 @@ tab=$(jq -r '.labels["herdr.tab"] // empty' <<<"$me")
 # The agent kind start-agent.sh takes: claude-code reports itself as claude-code.
 kind=$(jq -r '.status.app // empty | if . == "claude-code" then "claude" else . end' <<<"$me")
 jq -n --arg terminal "$HC_TERMINAL_ID" --arg tab "$tab" --arg folder "$folder" --arg branch "$branch" \
-  --arg kind "$kind" '{terminal: $terminal, tab_id: $tab, folder: $folder, branch: $branch}
-  + (if $kind == "" then {} else {kind: $kind} end)' >"$dir/orchestrator.json"
+  --arg kind "$kind" --arg started "$started" '{terminal: $terminal, tab_id: $tab, folder: $folder, branch: $branch}
+  + (if $kind == "" then {} else {kind: $kind} end)
+  + (if $started == "" then {} else {started: $started} end)' >"$dir/orchestrator.json"
 hc label "$HC_TERMINAL_ID" role=orchestrator >/dev/null
 for marker in parked closed; do
   [ ! -e "$dir/$marker" ] || { rm -f "$dir/$marker"; echo "note: the run was $marker; it is active again" >&2; }
