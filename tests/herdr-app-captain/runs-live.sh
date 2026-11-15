@@ -3,7 +3,8 @@
 #
 # Uses a throwaway runs root, git repo, and Herdr space (closed afterwards), with
 # plain programs as stand-in orchestrators, so it costs no model turns. Checks:
-#   1. a labelled terminal gets a tab; init-run.sh records it and names it 🐙;
+#   1. a labelled terminal gets a tab; init-run.sh records it and names it 🐙, and
+#      records when the run started, keeping that time on a resume;
 #   2. set-status.sh changes plan.md, the tab, and the run.status label; publishes
 #      type, topic, progress, tasks, issues, PRs and waiting agents to status.json and labels,
 #      names the tab for the type and topic (the branch without a topic), refuses an unknown type,
@@ -126,6 +127,8 @@ check "recorded terminal" "$(jq -r .terminal "$dir/orchestrator.json")" "$addres
 check "recorded tab" "$(jq -r .tab_id "$dir/orchestrator.json")" "$tab"
 check "role label" "$(hc get "$fake" --json | jq -r .labels.role)" orchestrator
 check "no kind for a plain program" "$(jq -r '.kind // "none"' "$dir/orchestrator.json")" none
+started=$(jq -r .started "$dir/orchestrator.json")
+contains "records the start" "$started" "$(date -u +%Y-%m-%d)T"
 check "tab name, running" "$(tab_name "$tab")" "🐙 feature/x"
 
 echo "== set-status.sh"
@@ -159,6 +162,7 @@ check "labels published again" "$(labels)" '["task 2/2 in review","https://examp
 hc label "$fake" progress= run.prs= role= >/dev/null
 out=$(cd "$toy" && HC_TERMINAL_ID=$address "$orch/init-run.sh" feature/x)
 check "init-run on a resume" "$out" "existing $dir"
+check "start kept on a resume" "$(jq -r .started "$dir/orchestrator.json")" "$started"
 check "labels after a resume" "$(labels)" '["task 2/2 in review","https://example.com/pr/3 https://example.com/pr/2"]'
 check "role after a resume" "$(hc get "$fake" --json | jq -r .labels.role)" orchestrator
 "$orch/set-status.sh" "$dir" --topic "Road routes"

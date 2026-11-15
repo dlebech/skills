@@ -2,7 +2,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun } from "./data.js";
+import { stats, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText } from "./context.js";
@@ -515,13 +515,101 @@ function totals(t, s, decisions, ctx) {
     .child(stat("t-prs", s.open.length, s.failing ? `open PRs · ${s.failing} failing` : s.open.length === 1 ? "open PR" : "open PRs", s.failing ? "blocked" : s.open.length ? "done" : null));
 }
 
+// Deleting closed runs by age, from the closed runs' header: each preset's cutoff in days
+// (null: all of them).
+const BULK_KEY = "closed:bulk";
+const BULK_AGES = [{ id: "week", label: "1 week", days: 7 }, { id: "month", label: "30 days", days: 30 }, { id: "all", label: "all", days: null }];
+const DAY = 86400000;
+
+// The closed runs a preset deletes: closed longer ago than its cutoff (by the closed
+// marker's time, else the last update); a run with neither only goes with "all".
+function bulkRuns(closed, days) {
+  if (days == null) return closed;
+  const cutoff = Date.now() - days * DAY;
+  return closed.filter((r) => { const at = runTime(r); return at > 0 && at < cutoff; });
+}
+
+// "Delete 3 runs closed more than 30 days ago", "Delete all 5 closed runs".
+const bulkText = (n, age) => (age.days ? `Delete ${plural(n, "run")} closed more than ${age.label} ago`
+  : n === 1 ? "Delete the closed run" : `Delete all ${n} closed runs`);
+
+// "4 on local-ssh, 3 here", or nothing when they are all on this machine.
+function machinesText(runs) {
+  const counts = new Map();
+  for (const r of runs) counts.set(r.machine ?? null, (counts.get(r.machine ?? null) ?? 0) + 1);
+  if (counts.size === 1 && counts.has(null)) return "";
+  return [...counts].map(([m, n]) => `${n} ${m ? `on ${m}` : "here"}`).join(", ");
+}
+
+// The closed runs' header: the fold toggle and, while unfolded, Delete older than a preset;
+// after a preset is clicked, its question with a confirm and Cancel; while deleting, how many.
+function closedHeader(view, t, closed) {
+  const toggle = h_flex().id("finished-toggle").gap(6).items_center().cursor_pointer()
+    .hover((st) => st.text_color(t.foreground))
+    .on_click((_e, cx) => { view.showDone = !view.showDone; view.confirm = view.confirm?.key === BULK_KEY ? null : view.confirm; cx.notify(); })
+    .child(svg(`mods/harbormaster/chevron-${view.showDone ? "down" : "right"}.svg`).size(11))
+    .child(`${closed.length} closed`);
+  const head = h_flex().flex_wrap().pt(6).px(4).gap(6).items_center().text_size(11).text_color(t.dim).child(toggle);
+  const busy = view.busy?.[BULK_KEY];
+  if (busy) return head.child(div().flex_1()).child(div().flex_none().text_color(t.muted).child(busy.label));
+  if (!view.showDone) return head;
+  // Runs a card's action is already deleting (or putting away) are left to it.
+  closed = closed.filter((r) => !view.busy[r.key]);
+  const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
+  const asking = view.confirm?.key === BULK_KEY ? BULK_AGES.find((a) => a.id === view.confirm.action) : null;
+  if (!asking) {
+    return head.child(div().flex_1())
+      .child(div().flex_none().child("Delete older than"))
+      .children(BULK_AGES.map((a) => {
+        const n = bulkRuns(closed, a.days).length;
+        return actionButton(t, `bulk-${a.id}`, a.label, n ? bulkText(n, a) : null,
+          n ? (cx) => set(cx, { key: BULK_KEY, action: a.id }) : null);
+      }));
+  }
+  const runs = bulkRuns(closed, asking.days);
+  const where = machinesText(runs);
+  const yes = (cx) => {
+    set(cx, null);
+    if (!runs.length) return;
+    const label = `Deleting ${plural(runs.length, "closed run")}…`;
+    const at = Date.now();
+    // Each delete is one sh on its machine; give the whole batch room on the busiest one.
+    const most = Math.max(...[...new Set(runs.map((r) => r.machine ?? ""))].map((m) => runs.filter((r) => (r.machine ?? "") === m).length));
+    const batch = { label, at, branch: "closed runs", limit: 2 * 60000 + most * 30000 };
+    view.busy[BULK_KEY] = batch;
+    for (const r of runs) view.busy[r.key] = { label: "Deleting…", at, branch: r.branch, limit: batch.limit };
+    // As a card's action: owned by no view, notifying through cx.spawn's cx.
+    cx.spawn(async (cx) => {
+      let failed = [];
+      try { failed = await deleteRuns(runs); } catch (e) { failed = runs.map((run) => ({ run, error: e?.message ?? String(e) })); }
+      for (const key of [BULK_KEY, ...runs.map((r) => r.key)]) if (view.busy[key]?.at === at) delete view.busy[key];
+      const done = runs.length - failed.length;
+      if (done) view.actionNote = `Deleted ${plural(done, "closed run")}.`;
+      if (failed.length) view.actionError = `${failed.length} not deleted: ${failed.map((f) => `${f.run.branch}${f.run.machine ? ` on ${f.run.machine}` : ""} (${f.error})`).join("; ")}`;
+      view.redraw = true;
+      try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+      try { await view.load(cx); } catch { /* the next refresh shows it */ }
+    }, { owner: null });
+  };
+  return v_flex().gap(4)
+    .child(head)
+    .child(v_flex().gap(6).p(8).rounded(7).bg(t.raised)
+      .child(div().text_size(12).text_color(t.foreground)
+        .child(`${bulkText(runs.length, asking)}${where ? ` (${where})` : ""} for good? ${runs.length === 1 ? "Its run directory goes" : "Their run directories go"}: spec, plan, decisions and status, so ${runs.length === 1 ? "it" : "they"} can't be resumed. This can't be undone. Branches and PRs stay on git and GitHub.`))
+      .child(h_flex().gap(6)
+        .child(actionButton(t, "bulk-yes", `Delete ${runs.length}`, null, yes, true))
+        .child(actionButton(t, "bulk-no", "Cancel", null, (cx) => set(cx, null)))));
+}
+
 // The cards list: what's waiting on you, captain, runs that need you, the others, finished
-// runs still open, then closed runs folded.
+// runs still open, then closed runs folded; each group newest first (runTime).
 export function cards(view, t, runs, errors, decisions = []) {
   const ctx = facts();
   const s = stats(runs, ctx);
   const needing = new Set(s.need);
-  const live = [...s.need, ...s.live.filter((r) => !needing.has(r))];
+  const sorted = (list) => [...list].sort(newestFirst);
+  const live = [...sorted(s.need), ...sorted(s.live.filter((r) => !needing.has(r)))];
+  const closed = sorted(s.closed);
   const narrow = (view.size?.width ?? 600) / zoom() < 360;
   const waiting = waitingOnYou(view, t, s, decisions, runs, ctx);
   return v_flex().id("root").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
@@ -534,15 +622,11 @@ export function cards(view, t, runs, errors, decisions = []) {
       .child(captainStrip(view, t, ctx, s))
       .when(s.shown.length === 0, (el) => el.child(div().p(12).text_size(12).text_color(t.dim).child("No runs in progress. Ask the captain to start one, e.g. “start issue 185 in my-app”.")))
       .children(live.map((r) => card(view, t, r, ctx, narrow)))
-      .children(s.docked.map((r) => card(view, t, r, ctx, true)))
+      .children(sorted(s.docked).map((r) => card(view, t, r, ctx, true)))
       .when(s.parked.length > 0, (el) => el.child(div().pt(6).px(4).text_size(11).font_semibold().text_color(t.dim).child(`Parked · ${s.parked.length}`)))
-      .children(s.parked.map((r) => card(view, t, r, ctx, true)))
-      .when(s.closed.length > 0, (el) => el.child(h_flex().id("finished-toggle").pt(6).px(4).gap(6).items_center().text_size(11).text_color(t.dim).cursor_pointer()
-        .hover((st) => st.text_color(t.foreground))
-        .on_click((_e, cx) => { view.showDone = !view.showDone; cx.notify(); })
-        .child(svg(`mods/harbormaster/chevron-${view.showDone ? "down" : "right"}.svg`).size(11))
-        .child(`${s.closed.length} closed`)))
-      .when(Boolean(view.showDone), (el) => el.children(s.closed.map((r) => card(view, t, r, ctx, true))))
+      .children(sorted(s.parked).map((r) => card(view, t, r, ctx, true)))
+      .when(closed.length > 0, (el) => el.child(closedHeader(view, t, closed)))
+      .when(Boolean(view.showDone), (el) => el.children(closed.map((r) => card(view, t, r, ctx, true))))
       .when(Boolean(view.actionNote), (el) => el.child(div().px(4).text_size(11).text_color(t.muted).child(view.actionNote)))
       .when(Boolean(view.actionError), (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(view.actionError)))
       .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n")))));
