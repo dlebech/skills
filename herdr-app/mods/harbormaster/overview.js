@@ -269,7 +269,10 @@ function actionRow(view, t, r, orch, closed, counts) {
 // A Crew row's edge colour from its name (crewrows.js rowEdge): a review wait is cyan, a calm
 // colour apart from Done's blue, the grey of can't tell and the amber of work and stalls; a
 // run with nothing going on takes the border's.
-const edgeColor = (t, edge) => (edge === "amber" ? AMBER(t) : edge === "review" ? t.ansi6 ?? t.accent : edge === "neutral" ? t.border : t[edge] ?? t.border);
+// Rows add their own alpha to the edge colour ("…14"), so it must be opaque: theme colours
+// such as border can carry alpha (#ffffff18), which would make "#ffffff1814", not a colour.
+const opaque = (c) => (typeof c === "string" && /^#[0-9a-f]{8}$/i.test(c) ? c.slice(0, 7) : c);
+const edgeColor = (t, edge) => opaque(edge === "amber" ? AMBER(t) : edge === "review" ? t.ansi6 ?? t.accent : edge === "neutral" ? t.border : t[edge] ?? t.border);
 
 // ---- ask what's blocking, the review flow, close all merged ----
 
