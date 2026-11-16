@@ -58,6 +58,8 @@ To see a run's PRs, related PRs, issues and tasks while you work in its orchestr
 
 To use the Crew block in a layout of your own, add a block with `{ "mod": "harbormaster", "props": { "role": "crew" } }`.
 
+To see where time, tokens and CPU go, click **Stats** at the top of the overview. It opens the stats view in a tab of its own named Stats (or shows the one already open). To put it in a layout or pane of your own, use `{ "mod": "harbormaster", "props": { "role": "stats" } }`. See [Stats](#stats).
+
 ## Another computer, connected over ssh
 
 Layouts and mods belong to the window, not to the machine the agents run on. Say a laptop adds this machine with Add machine (`hc machine add`). It sees this machine's spaces and terminals, but draws them with the laptop's own `~/.config/herdr-app`. So **install on every computer whose window you use**: clone this repository there and run `herdr-app/install.sh`.
@@ -184,6 +186,35 @@ call gets one category: of the commands in a shell call, the first that is not g
 it in the repository and run `install.sh` again (an edit in the installed copy is overwritten on the
 next install).
 
+## Stats
+
+The stats view (`props.role` `stats`) gathers the figures above for every run on every machine:
+open runs from their logs (`timing.sh`), `.resources.json` and `status.json`, and past runs from
+`.history.jsonl`, newest first. A closed run that is in the history shows its history line once; an open
+one (or one resumed after it was recorded) shows its live figures. It adds nothing to run cards. Each
+section folds with a click on its title.
+
+- **Where the time goes.** The runs' `critical_path` summed: where the orchestrators' wall time went, by
+  category (model, test, lint/typecheck, build, install, CI wait, agent wait, review, git, user wait,
+  other) plus idle, as one stacked bar with each category's share and time. **By repo** and **By type**
+  give a bar per repository or run type instead, as long as its total. Hover a segment for its time.
+- **CPU and memory now.** Every agent terminal from the last 5-second sample, under its orchestrator (and
+  the captain), with CPU % (100% is one core), memory, and its busiest commands; then the terminals in no
+  run, then **Other processes**: the busiest processes outside every agent (a browser, Docker, Herdr
+  itself), so fan noise can be explained. Hover a row for the agent's own share and each program.
+- **Runs.** Per run: its wall time, a bar of where it went, its tokens (a bar as wide as its share of
+  the largest run's: fresh tokens, that is input, output and cache writes, in blue, cache reads in green;
+  exact numbers on hover), and its CPU time and memory peak (all its agents together). Click a run for
+  the categories with shares, the effort (all agents' time, more than the wall time as they work in
+  parallel), CPU by program, and its tasks: each with its effort by category, CPU and memory peak; click
+  a task for its agents, each with its role, time, CPU and peak. An agent's CPU includes the commands it
+  started with `hc run`; its memory peak is its largest terminal's. A task's peak is its largest agent's.
+
+Timing is read in the background, one run at a time: an open run's at most every 90 seconds, a parked
+or closed run's once, and a run the history already has not at all. A big run's first read can take a
+minute or more (its later reads are quick, from `timing.sh`'s cache); until then it shows "reading…".
+The history is read again every minute, the live table with each 5-second poll.
+
 ## Proof
 
 A run's pane has a Proof section. Its title is the run's tier, `Proof · T2` (`(set by user)` when
@@ -216,7 +247,7 @@ Parking leaves the run directory, worktrees, branches and PRs in place, and the 
 
 | Path | What |
 | --- | --- |
-| `herdr-app/mods/harbormaster/main.js` | Picks the view by `props().role`: none (the runs overview), `run` (one run's card, `props().run` its key), `crew`, `harbor`, `harbor-rail`, `harbor-pane` |
+| `herdr-app/mods/harbormaster/main.js` | Picks the view by `props().role`: none (the runs overview), `run` (one run's card, `props().run` its key), `crew`, `harbor`, `harbor-rail`, `harbor-pane`, `stats` |
 | `herdr-app/mods/harbormaster/data.js` | Run directories, tasks, PRs from `gh`, and the totals the views share |
 | `herdr-app/mods/harbormaster/live.js` | Live facts from herdr-core (status, workers, captain, panes) and the focus, pin and open-link actions |
 | `herdr-app/mods/harbormaster/ui.js` | Emoji, program icons, zoom, and text formatting |
@@ -226,6 +257,7 @@ Parking leaves the run directory, worktrees, branches and PRs in place, and the 
 | `herdr-app/mods/harbormaster/timing.sh`, `categories.tsv` | Where a run's time went, from its session logs, and the table that sorts tool calls into categories |
 | `herdr-app/mods/harbormaster/timing.js` | Runs `timing.sh` on the run's machine (`loadTiming(run)`), cached per run; category labels and `durationText` |
 | `herdr-app/mods/harbormaster/history.js` | Appends a closed run's summary to `.history.jsonl` (`writeHistory`, once per closing; `writeHistoryBeforeDelete`) |
+| `herdr-app/mods/harbormaster/stats.js`, `statsdata.js` | The stats view, and its figures: open and past runs in one shape, the sums across runs, the live table's groups |
 | `herdr-app/mods/harbormaster/harbor.js` | The sea, the reefs, the captain's boat, the rail and the pane headers |
 | `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, spinner, chevrons. All original, CC0 like the rest of this repository |
 | `herdr-app/layouts/harbormaster-sea.json` (+ `.svg` preview) | The sea layout. `harbormaster-main` is made by `install.sh` |

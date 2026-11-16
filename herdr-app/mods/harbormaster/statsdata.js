@@ -104,6 +104,8 @@ export function summaryOf(run, timing, res) {
     const t = terms[name];
     if (!t || depth > 20) return null;
     if (!t.parent) return orch;
+    // A terminal right under the orchestrator that timing does not know is an agent of its own.
+    if (!terms[t.parent] || !terms[t.parent].parent) return null;
     return ownerOf(t.parent, depth + 1);
   };
   const extra = new Map();
