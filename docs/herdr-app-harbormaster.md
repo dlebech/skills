@@ -133,6 +133,24 @@ three buttons from Harbormaster itself. **Compact** types `/compact` into the or
 enabled only while it is idle or done, waits for the compaction to end, and wakes it to read the answer in its inbox; the other two answer through the
 inbox. Nothing stops by itself. Details: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
+## Where the time went
+
+`herdr-app/mods/harbormaster/timing.sh` works out where a run's time went, after the fact, from
+logs that already exist: the orchestrator's and every agent's Claude Code, pi or opencode session,
+found as `tokens.sh` finds them (so after the agents and their worktrees are gone too). The
+orchestrator spends nothing on it. Each tool call is sorted into a category (test, lint/typecheck,
+build, install, CI wait, agent wait, review, git, other), the time between tool calls is model
+time, and the orchestrator waiting for an answer to its `question.md` is user wait. It gives the
+run's wall time and its time per category, per agent (with its role: impl, rev, fix) and per task,
+as JSON (the format is at the top of the script); agents work in parallel, so their sums exceed
+the wall time. Each session's result is cached in the run's `.timing/` folder, so an unchanged run
+is read again in well under a second. `timing.js` runs it on the run's own machine.
+
+The rules that sort tool calls are a small table, `herdr-app/mods/harbormaster/categories.tsv`:
+one rule a line, a category, a tool name pattern and a command pattern, the first match wins. Edit
+it in the repository and run `install.sh` again (an edit in the installed copy is overwritten on the
+next install).
+
 ## Proof
 
 A run's pane has a Proof section. Its title is the run's tier, `Proof · T2` (`(set by user)` when
@@ -171,6 +189,8 @@ Parking leaves the run directory, worktrees, branches and PRs in place, and the 
 | `herdr-app/mods/harbormaster/ui.js` | Emoji, program icons, zoom, and text formatting |
 | `herdr-app/mods/harbormaster/overview.js` | The runs overview (totals, captain, run cards) and the Crew block |
 | `herdr-app/mods/harbormaster/context.js` | Each crew agent's context size, from its session file, and `tokenText` (`1.2M`) |
+| `herdr-app/mods/harbormaster/timing.sh`, `categories.tsv` | Where a run's time went, from its session logs, and the table that sorts tool calls into categories |
+| `herdr-app/mods/harbormaster/timing.js` | Runs `timing.sh` on the run's machine (`loadTiming(run)`), cached per run; category labels and `durationText` |
 | `herdr-app/mods/harbormaster/harbor.js` | The sea, the reefs, the captain's boat, the rail and the pane headers |
 | `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, spinner, chevrons. All original, CC0 like the rest of this repository |
 | `herdr-app/layouts/harbormaster-sea.json` (+ `.svg` preview) | The sea layout. `harbormaster-main` is made by `install.sh` |
