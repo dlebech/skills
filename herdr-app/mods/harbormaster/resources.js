@@ -62,6 +62,7 @@ function tid(p, d) {
 }
 function out(p, t, args) {
   t = tid(p, 0)
+  if (t == "-" && rss[p] == 0) return
   if (t == "-" && own[p] + kid[p] < ${OTHER_MIN.cpuSeconds * 1000} && rss[p] < ${OTHER_MIN.rssMb * 1024}) return
   printf "P %s %s %d %d %d %d %s %s %s\\t%s\\n", p, t, (p in term), own[p], kid[p], rss[p], st[p], pc[p], nm[p], args
 }`;
