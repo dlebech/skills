@@ -190,6 +190,33 @@ check "autonomy" "$(jq -r .autonomy "$dir/status.json"):$(hc get "$fake" --json 
 check "autonomy L3 refused" "$?:$(jq -r .autonomy "$dir/status.json")" 2:L1
 "$orch/set-status.sh" "$dir" --progress "task 2/2 in review"
 check "autonomy kept" "$(jq -r .autonomy "$dir/status.json")" L1
+for v in 2M:2000000 500k:500000 1.5M:1500000 750000:750000; do
+  "$orch/set-status.sh" "$dir" --budget "${v%%:*}"
+  check "budget ${v%%:*}" "$(jq -r .budget "$dir/status.json")" "${v##*:}"
+done
+"$orch/set-status.sh" "$dir" --budget lots 2>/dev/null
+check "budget junk refused" "$?:$(jq -r .budget "$dir/status.json")" 2:750000
+"$orch/set-status.sh" "$dir" --budget 0 2>/dev/null
+check "budget 0 refused" "$?:$(jq -r .budget "$dir/status.json")" 2:750000
+out=$("$orch/set-status.sh" "$dir" --budget 1M)
+check "under budget prints nothing" "$out:$(jq -r '.budget_asked // "none"' "$dir/status.json")" ":none"
+# The token count comes from session files a toy run does not have: write one in.
+jq '.tokens = {total: 1200000}' "$dir/status.json" >"$dir/s.tmp" && mv "$dir/s.tmp" "$dir/status.json"
+out=$("$orch/set-status.sh" "$dir" --progress "over")
+check "crossing prints the line" "$out" "over budget: 1200000 of 1000000 tokens; ask the budget question (run-files.md)"
+check "budget_asked recorded" "$(jq -r .budget_asked "$dir/status.json")" 1000000
+check "crossing prints once" "$("$orch/set-status.sh" "$dir" --progress "again")" ""
+out=$("$orch/set-status.sh" "$dir" --budget 1.1M)
+contains "a new budget arms it again" "$out" "over budget: 1200000 of 1100000"
+check "raised above the total: quiet" "$("$orch/set-status.sh" "$dir" --budget 3M):$(jq -r .budget "$dir/status.json")" ":3000000"
+"$orch/set-status.sh" "$dir" --budget-answered
+check "budget answered for this budget" "$(jq -r .budget_answered "$dir/status.json")" 3000000
+"$orch/set-status.sh" "$dir" --budget 4M
+check "answered stays the old budget" "$(jq -r '[.budget, .budget_answered] | join(",")' "$dir/status.json")" 4000000,3000000
+"$orch/set-status.sh" "$dir" --budget ""
+check "budget cleared" "$(jq -r '[.budget, .budget_asked, .budget_answered] | map(. // "none") | join(",")' "$dir/status.json")" none,none,none
+jq 'del(.tokens)' "$dir/status.json" >"$dir/s.tmp" && mv "$dir/s.tmp" "$dir/status.json"
+"$orch/set-status.sh" "$dir" --progress "task 2/2 in review"
 "$orch/set-status.sh" "$dir" --waiting $'impl-x\t rev-y\n'
 check "waiting split on any space" "$(jq -c .waiting "$dir/status.json")" '["impl-x","rev-y"]'
 "$orch/set-status.sh" "$dir" --waiting ""

@@ -3,7 +3,7 @@
 # the orchestrator's tab name, and labels on its terminal.
 #
 # Usage: set-status.sh <run-directory> [<status>] [--type TYPE] [--topic TEXT] [--progress TEXT] [--tasks MERGED/PLANNED]
-#          [--autonomy L0|L1|L2] [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]
+#          [--autonomy L0|L1|L2] [--budget TOKENS] [--budget-answered] [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]
 #
 # <status> is running, "waiting for user: <question>", "blocked: <reason>", or
 # finished, the vocabulary herdr-app-captain's scripts/lib.sh documents. Without
@@ -25,6 +25,13 @@
 #   --autonomy  how much the orchestrator decides itself: L0 (default, the user approves
 #               decisions), L1 (small things on its own) or L2 (to a merge-ready PR);
 #               run-files.md describes them; L3 (auto-merge) is not built and is refused
+#   --budget    a soft token budget for the run: 500k, 2M, 1.5M or a plain number, compared with
+#               tokens.total (cache reads included); "" clears it. Crossing it prints one line
+#               ("over budget: ...") once per budget value and records budget_asked; the
+#               orchestrator then asks the budget question (run-files.md). Never a hard stop
+#   --budget-answered  the budget question was answered (any answer): records budget_answered, the
+#               budget it was for, so Harbormaster stops offering the question; raising the
+#               budget makes the next crossing a new question
 #   --issue     an issue the run works on; added once
 #   --pr        a repository's PR, e.g. --pr acme/api https://github.com/acme/api/pull/9;
 #               replaces that repository's earlier one
@@ -34,7 +41,7 @@
 #               the earlier list; "" clears it
 #
 # status.json: {branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy,
-# issues: [url], prs: [{repo, url}], related: [{repo, url}], waiting: [name], updated}, where state is
+# budget, budget_asked, budget_answered, issues: [url], prs: [{repo, url}], related: [{repo, url}], waiting: [name], updated}, where state is
 # running, waiting, blocked, or finished, and tokens, which each call counts with tokens.sh
 # (never lowering it; a failed count keeps the last one). Fields other scripts write are
 # kept. It outlives the terminal, so it is the record of a finished run. The labels, for live lists such as Herdr's Agents list:
@@ -50,7 +57,7 @@ set -u
 . "$(dirname "$0")/lib.sh"
 
 usage() {
-  echo 'usage: set-status.sh <run-directory> [<status>] [--type feat|fix|rev|expl] [--topic TEXT] [--progress TEXT] [--tasks M/N] [--autonomy L0|L1|L2] [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]' >&2
+  echo 'usage: set-status.sh <run-directory> [<status>] [--type feat|fix|rev|expl] [--topic TEXT] [--progress TEXT] [--tasks M/N] [--autonomy L0|L1|L2] [--budget TOKENS] [--budget-answered] [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]' >&2
   exit 2
 }
 [ $# -ge 1 ] || usage
@@ -61,7 +68,7 @@ if [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then
   status=$1
   shift
 fi
-autonomy= type= type_set= topic= topic_set= progress= progress_set= tasks= waiting= waiting_set= issues=() prs=() related=()
+autonomy= budget= budget_set= budget_answered= type= type_set= topic= topic_set= progress= progress_set= tasks= waiting= waiting_set= issues=() prs=() related=()
 while [ $# -gt 0 ]; do
   case $1 in
     --type)
@@ -81,6 +88,19 @@ while [ $# -gt 0 ]; do
         *) echo "--autonomy is L0, L1 or L2, not: $2" >&2; exit 2 ;;
       esac
       autonomy=$2; shift 2 ;;
+    --budget)
+      [ $# -ge 2 ] || usage
+      if [ -z "$2" ]; then budget=
+      elif [[ $2 =~ ^([0-9]+)(\.[0-9]+)?([kKmM]?)$ ]]; then
+        # 1.5M is 1500000: awk does the fraction, rounded to a whole token.
+        budget=$(awk -v n="${BASH_REMATCH[1]}${BASH_REMATCH[2]}" -v u="${BASH_REMATCH[3]}" \
+          'BEGIN { m = (u ~ /[kK]/) ? 1e3 : (u ~ /[mM]/) ? 1e6 : 1; printf "%.0f", n * m }')
+        [ "$budget" -gt 0 ] || { echo "--budget must be above 0: $2" >&2; exit 2; }
+      else
+        echo "--budget is a number of tokens like 500k, 2M, 1.5M or 750000, not: $2" >&2; exit 2
+      fi
+      budget_set=1; shift 2 ;;
+    --budget-answered) budget_answered=1; shift ;;
     --issue) [ $# -ge 2 ] || usage; issues+=("$2"); shift 2 ;;
     --pr) [ $# -ge 3 ] || usage; prs+=("$2" "$3"); shift 3 ;;
     --related) [ $# -ge 3 ] || usage; related+=("$2" "$3"); shift 3 ;;
@@ -137,6 +157,8 @@ status_update "$dir" "$STATUS_TOKENS_FILTER | $(cat <<'JQ'
   | if $progress_set != "" then .progress = (if $progress == "" then null else $progress end) else . end
   | if $tasks != "" then .tasks = ($tasks | split("/") | {merged: (.[0] | tonumber), planned: (.[1] | tonumber)}) else . end
   | if $autonomy != "" then .autonomy = $autonomy else . end
+  | if $budget_set != "" then (if $budget == "" then del(.budget, .budget_asked, .budget_answered) else .budget = ($budget | tonumber) end) else . end
+  | if $budget_answered != "" and .budget then .budget_answered = .budget else . end
   | .issues = reduce $issues[] as $u (.issues; if index([$u]) then . else . + [$u] end)
   | .prs = reduce $prs[] as $p (.prs;
       if any(.[]; .repo == $p.repo) then map(if .repo == $p.repo then $p else . end) else . + [$p] end)
@@ -146,8 +168,19 @@ status_update "$dir" "$STATUS_TOKENS_FILTER | $(cat <<'JQ'
 JQ
 )" --argjson tokens "$tokens" --argjson issues "$issues_json" --argjson prs "$prs_json" --argjson related "$related_json" \
   --arg branch "$branch" --arg folder "$folder" --arg status "$status" --arg state "$state" \
-  --arg type "$type" --arg type_set "$type_set" --arg topic "$topic" --arg topic_set "$topic_set" --arg progress "$progress" --arg progress_set "$progress_set" --arg tasks "$tasks" --arg autonomy "$autonomy" \
+  --arg type "$type" --arg type_set "$type_set" --arg topic "$topic" --arg topic_set "$topic_set" --arg progress "$progress" --arg progress_set "$progress_set" --arg tasks "$tasks" --arg autonomy "$autonomy" --arg budget "$budget" --arg budget_set "$budget_set" --arg budget_answered "$budget_answered" \
   --arg waiting "$waiting" --arg waiting_set "$waiting_set" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" || exit 1
+
+# Crossing the soft budget is noticed here, where the numbers are, once per budget value:
+# budget_asked remembers which one was announced, so raising the budget re-arms it. This
+# only prints; the orchestrator writes the question (a question.md may already be open).
+over=$(jq -r 'if (.budget // 0) > 0 and (.tokens.total // 0) >= .budget and .budget_asked != .budget
+  then "\(.tokens.total) \(.budget)" else empty end' "$dir/status.json")
+if [ -n "$over" ]; then
+  read -r total limit <<<"$over"
+  status_update "$dir" '.budget_asked = .budget' &&
+    echo "over budget: $total of $limit tokens; ask the budget question (run-files.md)"
+fi
 
 # A label change is an hc event, which wakes herdr-app-captain's watcher at once.
 if [ -n "$terminal" ]; then

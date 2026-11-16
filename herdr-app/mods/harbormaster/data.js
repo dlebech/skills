@@ -13,8 +13,9 @@
 import { exec, machines, spaces, shared, setShared, run as command } from "herdr";
 import { parseQuestion, answerMessage } from "./question.js";
 import { parseDecidedLines } from "./decided.js";
+import { tokenText } from "./context.js";
 import { proofOf, runTier, parseProofMd } from "./proof.js";
-import { orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
+import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
 
@@ -204,6 +205,10 @@ function parse(machine, stdout) {
       related: (status.related ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
       waiting: status.waiting ?? [],
       tokens: tokensOf(status.tokens),
+      // The soft token budget (set-status.sh --budget), or null; `over` once tokens.total reaches it.
+      budget: Number(status.budget) > 0 ? Number(status.budget) : null,
+      // The budget the question was answered for (set-status.sh --budget-answered).
+      budgetAnswered: Number(status.budget_answered) || null,
       updated: status.updated ? Date.parse(status.updated) : null,
       // When the run was created (init-run.sh); null for runs from before it recorded that.
       started: Date.parse(orch.started ?? "") || null,
@@ -234,6 +239,38 @@ function tokensOf(x) {
     total: n(x.total), input: n(x.input), output: n(x.output), cacheRead: n(x.cache_read), cacheWrite: n(x.cache_write),
     byAgent: (Array.isArray(x.by_agent) ? x.by_agent : []).filter((a) => a?.name && n(a.total) > 0).map((a) => ({ name: String(a.name), total: n(a.total) })),
     updated: Date.parse(x.updated ?? "") || null,
+  };
+}
+
+// Whether a run has used its soft budget, from status.json alone (so also for a run whose
+// orchestrator is gone, or on another machine).
+export const overBudget = (r) => Boolean(r.budget && r.tokens && r.tokens.total >= r.budget);
+
+// The budget question's options, as run-files.md's template words them. Compact is the one
+// button that does more than write the answer: compactRun sends /compact first.
+export const BUDGET_OPTIONS = [
+  { label: "Continue", text: "raise the budget (the answer may carry a new number, else it doubles) and carry on" },
+  { label: "Compact", text: "compact the orchestrator's context, then carry on" },
+  { label: "Stop", text: "finish the current step, commit and push everything, then park the run" },
+];
+export const isCompact = (label) => /^compact$/i.test(label ?? "");
+// Whether a queue item is the budget question, by kind or by the template's title (run-files.md).
+// Narrow on purpose: Compact types /compact, so a question about some other "budget" must not match.
+export const isBudgetQuestion = (it) => it.kind === "budget" || /^Over the token budget/i.test(it.title ?? "");
+
+// A budget item for the queue, for a run over budget with no question.md (the orchestrator
+// is gone, or has not asked yet): the same three options, recommended the way the
+// orchestrator's own question is: Continue when most tasks are merged, else Compact.
+function budgetItem(r, tokenText) {
+  const mostlyDone = r.planned > 0 && (r.merged ?? 0) / r.planned >= 0.5;
+  const top = r.tokens.byAgent.slice(0, 3).map((a) => `${a.name} ${tokenText(a.total)}`).join(", ");
+  return {
+    id: `need-${r.key}`, kind: "budget", title: `Over budget: ${tokenText(r.tokens.total)} of ${tokenText(r.budget)} tokens`,
+    options: BUDGET_OPTIONS, recommended: mostlyDone ? 0 : 1,
+    why: mostlyDone ? "most tasks are merged" : "much work is left; a smaller context is cheaper",
+    evidence: `${tokenText(r.tokens.total)} used${r.planned ? `, ${r.merged ?? 0}/${r.planned} tasks done` : ""}${top ? `; largest: ${top}` : ""}`,
+    risk: "Continue keeps spending; Stop parks the run until you resume it; Compact drops the orchestrator's context, which it re-reads from the run files.",
+    blocks: "nothing is blocked: it is a soft budget", since: r.updated ?? r.started, run: r, answered: r.unhandled > 0,
   };
 }
 
@@ -530,6 +567,15 @@ export function decisionQueue(runs, decisions, ctx) {
   const items = [];
   for (const r of runs) {
     const orch = orchestratorState(r, ctx);
+    // Over budget without an open question: its own item, answered through the inbox. With a
+    // question.md that question is the item (the orchestrator asked it), never both.
+    // It waits for the orchestrator to be gone, or idle or done: a working one may be about to ask
+    // its own question, and one that needsYou for another reason (a dialog, a waiting or blocked
+    // status, `blocked: stopped at budget` among them) shows that reason instead. Answered or not
+    // is the orchestrator's `set-status.sh --budget-answered`.
+    const settled = orch === "gone" || exactStatus(r.terminal, ctx) === "idle" || exactStatus(r.terminal, ctx) === "done";
+    if (overBudget(r) && r.askedAt === null && !r.question && !r.away && r.phase !== "finished" && r.budgetAnswered !== r.budget
+      && settled && !needsYou(r, orch)) { items.push(budgetItem(r, tokenText)); continue; }
     if (!needsYou(r, orch)) continue;
     const q = r.ask;
     items.push(q ? {
@@ -567,11 +613,21 @@ const POST = 'd=$1 f=$2; mkdir -p "$d/inbox" && printf "%s\\n" "$3" >"$d/inbox/.
 // once that is answered. Throws when the message could not be written, or the wake failed
 // (the message then still waits in the inbox).
 async function tellOrchestrator(run, source, text) {
+  return wakeOrchestrator(run, await writeInbox(run, source, text));
+}
+
+// Writes the message to the run's inbox and returns its file name.
+async function writeInbox(run, source, text) {
   // Milliseconds after the seconds, so two answers in one second are two files.
   const now = new Date().toISOString();
   const file = `${now.replace(/[-:]|\.\d+/g, "")}-${now.slice(20, 23)}-${source}.message`;
   const out = await exec("sh", ["-c", POST, "sh", run.dir, file, text], { on: run.machine });
   if (out.code !== 0) throw new Error(out.stderr || "could not write to its inbox");
+  return file;
+}
+
+// Tells the orchestrator to read an inbox message (see tellOrchestrator for what it resolves to).
+async function wakeOrchestrator(run, file) {
   const sent = await exec("hc", ["send", run.localTerminal, `Read and act on ${run.dir}/inbox/${file}.`], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
   if (sent.code === 9) return { blocked: true };
   if (sent.code !== 0) throw new Error(`the message is in its inbox, but its orchestrator could not be told: ${(sent.stderr || sent.stdout || "hc send failed").trim()}`);
@@ -587,6 +643,30 @@ export const dropDecision = (d) => exec("sh", ["-c", DROP, "sh", d.id], { on: d.
 // `answer` is an option's label or the person's own words.
 export function answerRun(run, title, answer, free = "") {
   return tellOrchestrator(run, "harbormaster", answerMessage(title, answer, free));
+}
+
+// Compacts the orchestrator's context: the answer goes into its inbox first, then /compact is
+// typed into its terminal (Claude Code and pi both take it as input), and only once the
+// compaction is over (the terminal idle or done again) is it woken to read the answer: text
+// typed while it compacts may be queued, left in the prompt or dropped. /compact goes in only
+// while the orchestrator reports idle or done, checked here again just before sending, since
+// the click may be seconds after the screen was drawn; an unknown status is not idle. Throws
+// when it is not, or when the send fails; the answer then waits in the inbox, to be read as
+// any other when the orchestrator is next woken.
+export async function compactRun(run, title, answer) {
+  const ok = () => ["idle", "done"].includes(exactStatus(run.terminal, facts()));
+  if (!ok()) throw new Error("not compacted: its orchestrator is not idle or done");
+  const file = await writeInbox(run, "harbormaster", answerMessage(title, answer));
+  const sent = await exec("hc", ["send", run.localTerminal, "/compact"], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  if (sent.code === 9) throw new Error("not compacted: its orchestrator is blocked on a dialog; the answer is in its inbox");
+  if (sent.code !== 0) throw new Error(`could not send /compact (the answer is in its inbox): ${(sent.stderr || sent.stdout || "hc send failed").trim()}`);
+  // Compaction starts working, then ends: wait for working (up to 20 s; a very quick one may be
+  // over before we look), then for idle or done again, for at most 10 minutes.
+  const sleep = (s) => exec("sleep", [String(s)]).catch(() => {});
+  for (let i = 0; i < 10 && ok(); i++) await sleep(2);
+  for (let i = 0; i < 300 && !ok(); i++) await sleep(2);
+  if (!ok()) throw new Error("compaction is still running after 10 minutes; the answer waits in its inbox");
+  return wakeOrchestrator(run, file);
 }
 
 // Closing a run whose orchestrator is there asks it to clean up: it ends its agents,
