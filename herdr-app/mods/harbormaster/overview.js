@@ -1412,6 +1412,8 @@ export function runOfProps(runs, p) {
 export function runPane(view, t, p) {
   const ctx = facts();
   const r = runOfProps(view.runs, p);
+  // A popup opened with "details" (show-run) starts with the question's Details unfolded, once.
+  if (p.details && r && !view.detailsShown) { view.folds ??= new Map(); view.folds.set(`q-${r.key}`, true); view.detailsShown = true; }
   return v_flex().id("run-pane").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .child(v_flex().id("run-pane-list").flex_1().min_h(0).p(10).gap(8).overflow_y_scrollbar()
       .child(r ? runDetail(view, t, r, ctx) : view.runs.length
