@@ -1,0 +1,159 @@
+// What a Needs-you box asks the user to do: one short line per reason a run needs them, saying
+// what to do and why (with names and ages where known), and the buttons that do it. Pure, so
+// the tests drive every reason; overview.js draws the lines on the card, in the pane and in the
+// Crew row's hover, and wires each action kind to its click.
+//
+// "Open the orchestrator" is never the headline: the box offers it as a small link of its own,
+// since most reasons are done elsewhere (on GitHub, in the proof, with Close).
+
+import { ageText, ciState } from "./attention.js";
+import { hasComments, commentsText } from "./comments.js";
+
+// "#1, #2 and #3"
+const andList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] ?? "");
+const numOf = (p) => (p?.number ? `#${p.number}` : null);
+// "#1799 and #1372", or "the PR" / "its 2 PRs" when GitHub gave no numbers.
+function prsText(prs) {
+  const nums = prs.map(numOf).filter(Boolean);
+  if (nums.length === prs.length && nums.length) return andList(nums);
+  return prs.length > 1 ? `its ${prs.length} PRs` : "the PR";
+}
+const ago = (at, now) => (at ? ` ${ageText(now - at)} ago` : "");
+
+// The most PRs a reason offers an Open button for; past it, the PR list in the pane has them.
+export const MAX_OPEN = 3;
+
+// An Open button per PR with a URL: "Open #1799", "Open the PR" without a number.
+const openPrs = (prs) => prs.filter((p) => p?.url).slice(0, MAX_OPEN)
+  .map((p) => ({ kind: "open", label: `Open ${numOf(p) ?? "the PR"}`, url: p.url }));
+
+// The first failing check of a PR's statusCheckRollup as data.js keeps it ({name, url}), and
+// where its Open button goes: the check's own page, else the PR's checks tab.
+const checksUrl = (pr) => pr?.failed?.url || (pr?.url ? `${pr.url.replace(/\/+$/, "")}/checks` : null);
+
+// The order the lines come in: what blocks a run outright first (a question or dialog, a gone
+// orchestrator), then a broken build, then the PR steps, most urgent first, then a stall, then
+// the cleanup of a finished run.
+const ORDER = ["question", "gone", "red-ci", "changes requested", "approved — merge", "review proof → merge", "request review", "stalled", "finished"];
+
+// "T2 · 5/10 pass" from {tier, pass, total}, or null with no proof to read.
+export function proofText(proof) {
+  if (!proof) return null;
+  const parts = [proof.tier != null ? `T${proof.tier}` : null, proof.total ? `${proof.pass ?? 0}/${proof.total} pass` : null].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
+
+// The reports about a whole run among shared/'s file names (or paths), the final one first:
+// report.md, final-report.md, review*.md (a review run's) and the like. A task's own report
+// (t3-report.md, t11-review-1.md) is never one: a run leaves one per task, and the orchestrator
+// gives its final report in its terminal.
+const TASK_FILE = /^t\d+[-_.]/i;
+export function runReports(paths) {
+  const base = (p) => p.split("/").pop();
+  return (paths ?? []).filter((p) => { const b = base(p); return /\.md$/i.test(b) && !TASK_FILE.test(b) && (/report/i.test(b) || /^review/i.test(b)); })
+    .sort((x, y) => Number(/final/i.test(base(y))) - Number(/final/i.test(base(x))));
+}
+
+// One reason's {key, line, tip, actions}. Action kinds (overview.js clicks them):
+//   open {url}          opens a PR or check on GitHub
+//   proof               unfolds the run's proof
+//   ask-ci {pr, check}  asks the orchestrator to see to the red CI (an inbox message)
+//   ask-blocking        a stalled run's Ask what's blocking
+//   report {path}       opens the run's report
+//   close               the run's Close, with its confirm
+//   resume              the run's Resume, with its confirm
+//   focus {address}     shows an agent's terminal (a dialog waits in it)
+function reasonItem(r, a, ctx) {
+  const { run, now, proof, reports = [], blocked = null } = ctx;
+  const next = a.next;
+  const same = next?.prs ?? [];
+  switch (r.key) {
+    case "question": {
+      // A question.md has its own box (overview.js needBox); this is a dialog or a plan that waits.
+      if (r.text === "blocked on a dialog") {
+        const who = blocked?.name ?? "The orchestrator";
+        return { line: `${who} is waiting on a prompt`, tip: "A dialog or permission prompt waits in its terminal; answer it there",
+          actions: blocked?.address || run?.terminal ? [{ kind: "focus", label: `Open ${blocked?.name ?? "the orchestrator"}`, address: blocked?.address ?? run.terminal }] : [] };
+      }
+      return { line: `Waiting for you: ${r.text}`, tip: "Its plan's status waits on you without a question.md; its orchestrator says what it needs",
+        actions: run?.terminal ? [{ kind: "focus", label: "Open the orchestrator", address: run.terminal }] : [] };
+    }
+    case "gone":
+      return { line: "Its orchestrator is gone: resume it to carry on, or park or close the run", actions: [{ kind: "resume", label: "Resume" }] };
+    case "red-ci": {
+      const red = ciState(ctx.prs ?? []);
+      const pr = red.state === "red" ? red.pr : null;
+      const check = pr?.failed?.name ?? null;
+      const n = pr?.checks?.fail ?? 0;
+      const on = numOf(pr) ? ` on ${numOf(pr)}` : "";
+      const line = `CI failed${on}${check ? `: ${check}` : ""}${n > 1 ? ` (+${n - 1} more)` : ""}`;
+      const url = checksUrl(pr);
+      return { line, actions: [
+        ...(url ? [{ kind: "open", label: "Open the failing check", url }] : []),
+        { kind: "ask-ci", label: "Ask the orchestrator", pr, check },
+      ] };
+    }
+    case "changes requested": {
+      const who = [...new Set(same.flatMap((p) => p.changesBy ?? []))];
+      const said = commentsText(next?.comments);
+      const at = Math.max(0, ...same.map((p) => p.reviewedAt ?? 0)) || null;
+      return { line: `${andList(who) || "A reviewer"} asked for changes on ${prsText(same)}${said ? ` · ${said}` : ""}${at ? ` ·${ago(at, now)}` : ""}`, actions: openPrs(same) };
+    }
+    case "approved — merge": {
+      const who = [...new Set(same.flatMap((p) => p.approvedBy ?? []))];
+      const at = Math.max(0, ...same.map((p) => p.reviewedAt ?? 0)) || null;
+      const by = who.length ? ` by ${andList(who)}` : "";
+      const line = hasComments(next?.comments)
+        ? `Approved${by} with ${commentsText(next.comments)} on ${prsText(same)}: address them or merge`
+        : `Merge ${prsText(same)} · approved${by}${ago(at, now)}`;
+      return { line, actions: openPrs(same) };
+    }
+    case "review proof → merge": {
+      const p = proofText(proof);
+      // No "then merge" while CI is red (its own line above says so), and a draft is marked ready first.
+      const red = a.reasons.some((x) => x.key === "red-ci");
+      const draft = same.some((x) => x.state === "DRAFT");
+      const it = same.length > 1 ? "them" : "it";
+      const merge = (what) => (red ? "" : draft ? `, then mark ${what} ready and merge` : `, then merge ${what}`);
+      return { line: p ? `Read the proof (${p})${merge(prsText(same))}` : `Review ${prsText(same)}${merge(it)}`,
+        actions: [...(p ? [{ kind: "proof", label: "Proof" }] : []), ...openPrs(same)] };
+    }
+    case "request review": {
+      const drafts = same.filter((p) => p.state === "DRAFT").length;
+      const why = drafts === same.length ? (same.length > 1 ? "drafts" : "a draft") : drafts ? "drafts, or nobody requested" : "nobody requested";
+      return { line: `Ask for a review on ${prsText(same)} (${why})`, actions: openPrs(same) };
+    }
+    case "stalled":
+      return { line: `${r.text[0].toUpperCase()}${r.text.slice(1)}${a.step?.text ? ` at ${a.step.text}` : ""}: ask what's blocking it`, actions: [{ kind: "ask-blocking", label: "Ask what's blocking" }] };
+    case "finished": {
+      // Only a report about the whole run; without one the orchestrator gave its final report
+      // in its terminal.
+      const path = runReports(reports)[0] ?? null;
+      if (path) return { line: "Finished: read its report, then close the run", actions: [{ kind: "report", label: "Report", path }, { kind: "close", label: "Close" }] };
+      return { line: "Finished: read its final report in the orchestrator, then close the run",
+        actions: [...(run?.terminal ? [{ kind: "focus", label: "Open the orchestrator", address: run.terminal }] : []), { kind: "close", label: "Close" }] };
+    }
+    default:
+      return { line: r.text, actions: [] };
+  }
+}
+
+// What a Needs-you run asks of the user: [{key, line, tip?, actions}], most urgent first, one per
+// reason (attention.js assess's `reasons`); [] for a run not in Needs you. `a` is its assess
+// result. `ctx`:
+//   run      the run (data.js), for its orchestrator's terminal
+//   prs      its PR summaries as read (data.js prSummary), for which PR's CI is red
+//   now
+//   proof    {tier, pass, total} of its proof, or null
+//   reports  its report files in shared/, paths to open (runReports picks the run's own)
+//   blocked  {name, address} of the agent a dialog waits in, when known
+export function needActions(a, ctx = {}) {
+  if (a?.group !== "needs") return [];
+  const now = ctx.now ?? Date.now();
+  const rank = (k) => { const i = ORDER.indexOf(k); return i < 0 ? ORDER.length : i; };
+  return [...a.reasons].sort((x, y) => rank(x.key) - rank(y.key))
+    .map((r) => ({ key: r.key, tip: null, ...reasonItem(r, a, { ...ctx, now }) }));
+}
+
+// The line a Crew row's hover ends with: "Do: Merge #42 · approved by anna 1h ago", or null.
+export const doLine = (items) => (items?.length ? `Do: ${items[0].line}` : null);

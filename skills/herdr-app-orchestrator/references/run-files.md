@@ -214,6 +214,13 @@ what is blocking? Harbormaster sees this run quiet for 34m (step: CI on #42 · 5
 Asked from Harbormaster: if you need me, write question.md and ask; else carry on and update your progress line.
 ```
 
+A red CI's **Ask the orchestrator** (in a Needs-you box) sends the same kind of message about the CI:
+
+```
+what is blocking? Harbormaster sees CI red on #42 (failing: lint): https://github.com/o/r/actions/runs/1.
+Asked from Harbormaster: fix it if it is the run's to fix (as a task, reviewed as usual) and update your progress line; if you need me, write question.md and ask.
+```
+
 The orchestrator looks at what its run waits on. If it needs the user, it asks with `question.md`
 (section 6); otherwise it unsticks what it can (a stuck agent, a CI watch that hung) and updates
 its progress line with `set-status.sh --progress`, so the user sees it move. Either way it renames

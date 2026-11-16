@@ -30,6 +30,14 @@
 #                                                                         -> Waiting on others, "review from BagToad"
 #   asks-you      waiting for user, no PR                                -> Needs you, red, with its wait age
 #   gone-run      running, its orchestrator terminal killed              -> Needs you, "orchestrator gone", a row of its own
+# For the Needs-you box's lines and buttons (t11), read-only gh views of real PRs:
+#   approved-merge  finished, folder "snevagten" (peer), snevagten/snelogin#1308 and #1372,
+#                   approved by a colleague                               -> approved — merge
+#   red-ci        finished, cli/cli#14927 (a public PR with a failing check) -> red CI, then
+#                 review proof → merge
+#   review-proof  finished, dlebech/wapi-beatbox#1, proof.md T2 1/2 pass  -> review proof → merge
+#   report-run    finished, no PR, shared/final-report.md (+ t1-report.md) -> finished — read and close
+#   asks-question running, question.md with Options, Recommended and Blocks -> a question box
 # Hide a run from the Crew with `hc label <t> role=` and bring it back with role=orchestrator.
 #
 # Needs xvfb-run, ImageMagick's import (root only), jq, gh, python3 and libXtst. The window lands
@@ -80,7 +88,7 @@ make_runs() {
   # branch status type topic started-UTC tasks t1-state t2-state [set-status args...]
   local first=1
   mkrun() {
-    local branch=$1 status=$2 type=$3 topic=$4 started=$5 tasks=$6 s1=$7 s2=$8 out term tab d=$S/runs/skills/$1 state=${ORCH_STATE:-}
+    local branch=$1 status=$2 type=$3 topic=$4 started=$5 tasks=$6 s1=$7 s2=$8 out term tab d=$S/runs/skills/$1 f=${RUN_FOLDER:-$folder} state=${ORCH_STATE:-}
     shift 8
     if [ $first = 1 ]; then
       first=0
@@ -92,7 +100,7 @@ make_runs() {
     fi
     tab=$(hc get "$term" --json | jq -r '.labels["herdr.tab"]')
     mkdir -p "$d/inbox" "$d/shared"
-    jq -n --arg t "$term" --arg tab "$tab" --arg f "$folder" --arg b "$branch" --arg s "$started" \
+    jq -n --arg t "$term" --arg tab "$tab" --arg f "$f" --arg b "$branch" --arg s "$started" \
       '{terminal: $t, tab_id: $tab, folder: $f, branch: $b, kind: "claude", started: $s}' >"$d/orchestrator.json"
     echo "# $topic" >"$d/spec.md"
     printf 'Status: %s\nPrefix: `x`\n\n## Tasks\n\n### t1 build — %s\n- Proof: T1 — tests\n\n### t2 polish — %s\n- Proof: T1 — tests\n' "$status" "$s1" "$s2" >"$d/plan.md"
@@ -111,18 +119,49 @@ make_runs() {
   mkrun quiet-run running feat "Quiet run" "${day}T10:30:00Z" 1/2 merged implementing --progress "t2 implementing"
   ORCH_STATE=working mkrun busy-run running feat "Busy run" "${day}T07:00:00Z" 0/2 implementing implementing --progress "both tasks under way"
   # Dated back, so the first sight of its tasks (seeded by status.json's updated) shows an age.
-  local f=$S/runs/skills/busy-run/status.json
-  jq --arg u "$(date -u -d '75 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" '.updated = $u' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
-  folder=$S/work/snevagten
-  mkdir -p "$folder" && git -C "$folder" init -q
-  mkrun review-wait finished fix "Review wait" "${day}T05:00:00Z" 2/2 merged merged --progress "PR up for review" \
+  local sj=$S/runs/skills/busy-run/status.json
+  jq --arg u "$(date -u -d '75 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" '.updated = $u' "$sj" >"$sj.tmp" && mv "$sj.tmp" "$sj"
+  mkdir -p "$S/work/snevagten" && git -C "$S/work/snevagten" init -q
+  RUN_FOLDER=$S/work/snevagten mkrun review-wait finished fix "Review wait" "${day}T05:00:00Z" 2/2 merged merged --progress "PR up for review" \
     --pr cli/cli https://github.com/cli/cli/pull/14846
-  folder=$S/work/skills
   mkdir -p "$S/runs/skills/asks-you"
   printf '# Which database should t2 use?\n\n## Question\nPostgres or SQLite?\n\n## Options\n1. Postgres\n2. SQLite\n\n## Recommended\n1, it is what production runs.\n' >"$S/runs/skills/asks-you/question.md"
   mkrun asks-you "waiting for user: which database?" feat "Asks you" "${day}T09:40:00Z" 1/2 merged planned --progress "t2 waits on a choice"
   mkrun gone-run running feat "Gone run" "${day}T04:00:00Z" 1/2 merged implementing --progress "t2 implementing"
   hc kill "$(jq -r .terminal "$S/runs/skills/gone-run/orchestrator.json")" >/dev/null
+  RUN_FOLDER=$S/work/snevagten mkrun approved-merge finished feat "Approved merge" "${day}T07:00:00Z" 2/2 merged merged --progress "PRs approved" \
+    --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1308 --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1372
+  mkrun red-ci finished fix "Red CI" "${day}T07:30:00Z" 2/2 merged merged --progress "PR up, CI red" \
+    --pr cli/cli https://github.com/cli/cli/pull/14927
+  mkrun review-proof finished feat "Review proof" "${day}T08:00:00Z" 2/2 merged merged --progress "PR up with proof" \
+    --pr dlebech/wapi-beatbox https://github.com/dlebech/wapi-beatbox/pull/1
+  printf '# Proof: review-proof\nTier: T2\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\n\n## t2 polish\nTier: T1\nChecked: tests\nResult: fail — 1 of 9 fails\n' >"$S/runs/skills/review-proof/proof.md"
+  mkrun report-run finished rev "Report run" "${day}T05:00:00Z" 2/2 merged merged --progress "review written"
+  printf '# Review report\n\nAll good.\n' >"$S/runs/skills/report-run/shared/final-report.md"
+  printf '# t1 report\n\nA task'"'"'s own report: never the run'"'"'s.\n' >"$S/runs/skills/report-run/shared/t1-report.md"
+  mkrun asks-question running feat "Asks question" "${day}T09:30:00Z" 1/2 merged implementing --progress "waiting on a decision"
+  cat >"$S/runs/skills/asks-question/question.md" <<'Q'
+# Which groups should Crew use instead of "Everything else"?
+
+## Question
+"Everything else" says nothing about what the runs in it are doing.
+
+## Options
+1. **Working / Waiting on others**: split by whether a person is awaited
+2. **Keep it**: no change
+
+## Recommended
+Working / Waiting on others: split by whether a person is awaited
+
+## Evidence
+The user's feedback 3 tonight.
+
+## Risk
+Low; labels only.
+
+## Blocks
+t4 shots, t5 docs
+Q
 }
 
 case $cmd in
