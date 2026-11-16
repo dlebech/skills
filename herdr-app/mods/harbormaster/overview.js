@@ -8,7 +8,7 @@ import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, state
 import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
 import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, proofCounts, proofRowParts, needsLook, resultLine } from "./proof.js";
-import { oneLine, needHead, questionSections } from "./question.js";
+import { oneLine, needHead, questionSections, paragraphs, plain } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf } from "./attend.js";
@@ -474,15 +474,15 @@ function needBox(view, t, r, f, ctx, where) {
     .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
     .child(div().flex_none().font_semibold().child("Details"))
     .child(div().truncate().text_color(t.dim).child([count, it.since ? `asked ${ago(it.since)}` : null].filter(Boolean).join(" · ")));
-  // A section's text whole, line by line (a blank line is a gap), under its small label.
-  const part = (label, text, color) => v_flex().gap(1)
+  // A section's text whole, as paragraphs (question.js), under its small label.
+  const part = (label, text, color) => v_flex().gap(2)
     .child(div().text_size(10.5).font_semibold().text_color(color ?? t.dim).child(label))
-    .children(text.split("\n").map((l) => div().text_size(11.5).text_color(t.foreground).child(l.trim() ? l : " ")));
+    .children(paragraphs(text).map((l) => div().text_size(11.5).text_color(t.foreground).child(l)));
   const options = it.options.length > 0 && v_flex().gap(4)
     .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("Options"))
     .children(it.options.map((o, i) => h_flex().gap(8).items_start()
       .child(a.optionButton(i))
-      .child(div().flex_1().min_w(0).pt(3).text_size(11.5).text_color(t.muted).child(o.text))));
+      .child(div().flex_1().min_w(0).pt(3).text_size(11.5).text_color(t.muted).child(plain(o.text)))));
   const tone = { Recommended: t.accent, Risk: t.blocked };
   const details = open && v_flex().id(`qdetail-${where}-${r.key}`).gap(8).pt(4)
     // Clicks in here answer or type; they never fall through to the card's open-the-orchestrator.

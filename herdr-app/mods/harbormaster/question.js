@@ -110,6 +110,26 @@ export function questionSections(q, raw) {
   ].filter((s) => s.text);
 }
 
+// A section's text as the lines to show: the file's hard-wrapped lines joined into
+// paragraphs (a blank line ends one), a list item on a line of its own, and Markdown's bold
+// markers dropped, since the box shows plain text.
+export function paragraphs(text) {
+  const out = [];
+  let joining = false;
+  for (const raw of (text ?? "").replace(/\r\n?/g, "\n").split("\n")) {
+    const line = plain(raw.trim());
+    if (!line) { joining = false; continue; }
+    const item = /^(?:\d+[.)]|[-*])\s/.test(raw.trim());
+    if (joining && !item) out[out.length - 1] += ` ${line}`;
+    else out.push(line);
+    joining = true;
+  }
+  return out;
+}
+
+// Markdown's bold pairs (**x**, __x__) dropped from text shown as is.
+export const plain = (s) => (s ?? "").replace(/(\*\*|__)(.+?)\1/g, "$2");
+
 // The message an answer writes to a run's inbox (run-files.md): the answer to the question
 // by its title, then any free text. `answer` is an option's label or the person's own words.
 export function answerMessage(title, answer, free = "") {

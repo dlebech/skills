@@ -3,7 +3,7 @@
 // Run: node --import ./loader.mjs --test question.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseQuestion, needHead, questionSections } from "../../herdr-app/mods/harbormaster/question.js";
+import { parseQuestion, needHead, questionSections, paragraphs, plain } from "../../herdr-app/mods/harbormaster/question.js";
 
 const STRUCTURED = `# Merge #42 now or wait for t5?
 
@@ -80,4 +80,20 @@ test("a free-form question of one line has no details beyond its title", () => {
 test("no question, no head or details", () => {
   assert.equal(needHead(null), null);
   assert.deepEqual(questionSections(null, ""), []);
+});
+
+test("hard-wrapped lines read as paragraphs; list items and blank lines break them", () => {
+  const text = "Everything else says nothing. What sits there:\nruns whose agents\nare working.\n\nSecond **para**.\n- one\n- two\n  continued\n1. three";
+  assert.deepEqual(paragraphs(text), [
+    "Everything else says nothing. What sits there: runs whose agents are working.",
+    "Second para.",
+    "- one",
+    "- two continued",
+    "1. three",
+  ]);
+  assert.deepEqual(paragraphs(""), []);
+});
+
+test("bold markers are dropped from shown text, other marks kept", () => {
+  assert.equal(plain("then **Working** (agents) and __Done__, `a*b`"), "then Working (agents) and Done, `a*b`");
 });
