@@ -229,13 +229,14 @@ unhandled_messages() {
 # answer_messages <run-dir>: the unhandled inbox messages that may answer a question, one
 # path per line: all but level requests ("set autonomy to L2", "set proof tier to T3" as
 # their first line, from Harbormaster's level tags), asks to prove ("prove t23 to T2: …",
-# from its Proof rows) and asks what is blocking ("what is blocking? …", from a stalled run's
-# Crew row or pane; run-files.md), which answer nothing. Harbormaster's data.js
+# from its Proof rows), asks what is blocking ("what is blocking? …", from a stalled run's
+# Crew row or pane) and asks to address review comments ("address comments on <PR url>: ask",
+# from a run's card or pane; run-files.md), which answer nothing. Harbormaster's data.js
 # (NOT_ANSWERS) uses the same pattern.
 answer_messages() {
   local f
   unhandled_messages "$1" | while IFS= read -r f; do
-    head -n 1 "$f" | grep -qE '^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\?)' || echo "$f"
+    head -n 1 "$f" | grep -qE '^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\?|address comments on )' || echo "$f"
   done
 }
 

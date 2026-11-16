@@ -3,6 +3,7 @@
 // their colour, and its hover. Pure, so the tests drive it; overview.js crew() draws it.
 
 import { byWait, nextStepText, stepText, ageText, reviewWaitText, FINISHED_LABEL } from "./attention.js";
+import { commentLines } from "./comments.js";
 
 // The groups, in the order the Crew shows them: what you must act on, what is at work, what
 // waits on someone else (a reviewer), what can't be read (grey, so it is never mixed into
@@ -74,9 +75,20 @@ export function rowTip(a, now = Date.now()) {
   if (a.group === "needs") lines.push(...a.reasons.map((r) => `Needs you: ${r.text}${since(r.since, now)}`));
   else if (a.group === "done") lines.push(a.next ? `Done: every pull request merged or closed (${nextStepText(a.next)})` : "Done: the run is closed");
   else lines.push(...a.reasons.filter((r) => r.key !== "cant-tell").map((r) => `${(r.key === "waiting-for" && reviewWaitText(a.next)) || cap(r.text)}${since(r.since, now)}`));
+  // Who said what on its approved or changes-requested PRs, one line each.
+  if (a.group !== "done" && a.next?.comments && (a.next.comments.count > 0 || a.next.comments.unknown)) lines.push(...reviewCommentLines(a.next));
   if (a.cantTell) lines.push(`Can't tell${a.group === "needs" ? " its pull requests" : ""}: ${a.why ?? "its state could not be read"}`);
   if (a.step?.text && a.group !== "done") lines.push(`Current step: ${a.step.text}${a.step.since ? `, for ${ageText(now - a.step.since)}` : ""}`);
   return lines;
+}
+
+// The review comments of a next step, for a hover: a heading, then who said what ("mfalkenbrink
+// on src/x.ts:42: …"), or [] without any.
+export function reviewCommentLines(next) {
+  const c = next?.comments;
+  if (!c || (!c.count && !c.unknown)) return [];
+  const head = c.unknown && !c.count ? "Review comments: could not be read" : `Review comments (${c.count}${c.unknown ? ", some could not be read" : ""}):`;
+  return [head, ...commentLines(c.prs).map((l) => `  ${l}`)];
 }
 
 // A run card's pill when it should say what comes next, as the Crew does: {label, tone} for
@@ -88,7 +100,9 @@ export function badgeOf(a, finished = false) {
   if (!a?.next && a?.group === "needs" && a.reasons.some((r) => r.key === "finished")) return { label: FINISHED_LABEL, tone: "blocked" };
   if (!a?.next) return null;
   const tone = a.group === "needs" ? "blocked" : a.group === "done" ? "done" : finished ? "muted" : null;
-  return tone ? { label: nextStepText(a.next), tone } : null;
+  // With review comments, a `tip` saying who said what.
+  const tip = reviewCommentLines(a.next).join("\n");
+  return tone ? { label: nextStepText(a.next), tone, ...(tip ? { tip } : {}) } : null;
 }
 
 // Why a run is in Needs you, in one line ("red CI on #42 · review proof → merge"), or null.

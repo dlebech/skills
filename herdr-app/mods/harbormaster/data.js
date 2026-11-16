@@ -22,15 +22,17 @@ import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
 import { checkKind, ciTimes, prTtl } from "./attention.js";
 import { blockingRequest, blockingPending } from "./blocking.js";
+import { commentsArgs, commentSummary, commentsRequest, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f", GS = "\u001d";
 
 // The first lines of inbox messages that answer no question: level requests ("set autonomy to
-// L2"), asks to prove ("prove t23 to T2: …") and asks what is blocking ("what is blocking? …").
+// L2"), asks to prove ("prove t23 to T2: …"), asks what is blocking ("what is blocking? …") and
+// asks to address review comments ("address comments on <PR url>: ask").
 // Kept equal to answer_messages in skills/herdr-app-captain/scripts/lib.sh.
-const NOT_ANSWERS = "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?)";
+const NOT_ANSWERS = "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?|address comments on )";
 
 // One sh script per machine: the captain's decisions, then every run, its files
 // separated by \x1f, runs by \x1e; then, after a \x1d, the process snapshot.
@@ -49,7 +51,7 @@ const SCRIPT = [
   '  [ -e "$d/question.md" ] && { stat -c %Y "$d/question.md" 2>/dev/null || stat -f %m "$d/question.md" 2>/dev/null; }; printf \'\\037\'',
   '  [ -e "$d/parked" ] && { printf +; head -c 400 "$d/parked"; }; printf \'\\037\'',
   '  [ -e "$d/closed" ] && { printf +; head -c 400 "$d/closed"; }; printf \'\\037\'',
-  // Unhandled messages, but for level requests, asks to prove and asks what is blocking (below),
+  // Unhandled messages, but for level requests, asks to prove, asks what is blocking and asks to address comments (below),
   // which the tags, the Proof rows and "asked…" show instead: one must not make a queued question read as answered.
   `  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && ! head -n 1 "$m" | grep -qE '${NOT_ANSWERS}' && n=$((n+1)); done; printf "%s\\037" "$n"`,
   // proof.md (a "+" before it when there is one, "!" when it was cut at 64 kB), then the names of the files in shared/proof/, capped.
@@ -57,7 +59,8 @@ const SCRIPT = [
   '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
   // decisions.md: the last 60 lines of its own decisions and the user's, capped.
   '  grep -a -E "^- \\[(decided|user)\\] " "$d/decisions.md" 2>/dev/null | tail -n 60 | tail -c 20000; printf \'\\037\'',
-  // Level requests (levels.js), asks to prove (proof.js) and asks what is blocking (blocking.js) in the inbox's unhandled messages,
+  // Level requests (levels.js), asks to prove (proof.js), asks what is blocking (blocking.js) and
+  // asks to address comments (comments.js) in the inbox's unhandled messages,
   // oldest first: what is pending. Only a message's first line, so an answer's free text that
   // reads like one is not one.
   `  for m in "$d"/inbox/*.message; do [ -e "$m" ] && head -n 1 "$m"; done | grep -a -E '${NOT_ANSWERS}' | tail -c 8000; printf '\\037'`,
@@ -268,6 +271,8 @@ function parseRun(machine, chunk) {
     unhandled: Number(inbox?.trim() || 0),
     // An ask what is blocking (blocking.js) still unread in the inbox.
     blockingAsked: blockingPending(requests),
+    // The PRs an Address comments (comments.js) is still unread for, by URL.
+    commentsAsked: pendingComments(requests),
     tasks,
     // The run's proof: its tier, proof.md's results by task id, and the file names in shared/proof/.
     proof: {
@@ -606,13 +611,13 @@ export async function refreshPrs(run, closed = false) {
   prBusy.set(run.key, started);
   try {
     let error = null;
-    const view = async (recorded, before) => {
+    const view = async (recorded, before, own = false) => {
       const out = [];
       for (const pr of recorded) {
         if (!pr.url) continue;
         const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
         const p = res?.code === 0 ? json(res.stdout) : null;
-        if (p) { out.push(prSummary(p, pr.repo)); continue; }
+        if (p) { out.push(own ? await withComments(prSummary(p, pr.repo), run) : prSummary(p, pr.repo)); continue; }
         error ??= `gh could not read ${pr.url}: ${(res?.stderr || res?.stdout || `exit ${res?.code}`).trim().split("\n")[0].slice(0, 200)}`;
         const old = before?.find((x) => x.url === pr.url && x.state !== "UNKNOWN");
         out.push(old ? { ...old, stale: true } : unknownPr(pr.url, pr.repo));
@@ -622,7 +627,7 @@ export async function refreshPrs(run, closed = false) {
     const related = await view(run.related, have?.related);
     const relatedError = error;
     error = null;
-    const list = await view(run.prs, have?.list);
+    const list = await view(run.prs, have?.list, true);
     const stored = shared("harbormaster.prs") ?? {};
     const next = { ...stored };
     const at = Date.now();
@@ -639,6 +644,20 @@ export async function refreshPrs(run, closed = false) {
   } finally {
     if (prBusy.get(run.key) === started) prBusy.delete(run.key);
   }
+}
+
+// An approved or changes-requested open PR with its review comments read (comments.js
+// commentSummary) as `comments`; {error} when gh could not read them, so they show as unknown,
+// never as none. One gh call per such PR per refresh; other PRs are returned as they are.
+export async function withComments(pr, run) {
+  if (pr.state !== "OPEN" && pr.state !== "DRAFT") return pr;
+  if (pr.review !== "APPROVED" && pr.review !== "CHANGES_REQUESTED") return pr;
+  const args = commentsArgs(pr.url);
+  if (!args) return pr;
+  const res = await exec("gh", args, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  const summary = res?.code === 0 ? commentSummary(json(res.stdout)) : null;
+  const error = summary ? null : (res?.code === 0 ? "gh gave no pull request" : (res?.stderr || res?.stdout || `exit ${res?.code}`).trim().split("\n")[0].slice(0, 200));
+  return { ...pr, comments: summary ?? { error } };
 }
 
 // ---- totals ----
@@ -822,6 +841,13 @@ export function askProof(run, row) {
 // …)", the way an ask to prove is sent. `quiet` and `step` are the texts the row shows.
 export function askBlocking(run, { quiet, step = null }) {
   return messageRun(run, "harbormaster-blocking", blockingRequest({ quiet, step }));
+}
+
+// Asks the orchestrator to address the review comments on one of its PRs (Address comments on
+// its card or pane): an inbox message, "address comments on <PR url>: ask|handle", then the
+// comments Harbormaster sees (comments.js commentsRequest), the way an ask what is blocking is sent.
+export function askComments(run, pr, mode) {
+  return messageRun(run, "harbormaster-comments", commentsRequest(pr, mode));
 }
 
 // proof-accepted.json in the run directory, which Harbormaster owns: read on the run's machine,

@@ -2,7 +2,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking } from "./data.js";
+import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
@@ -15,6 +15,7 @@ import { attentionOf, needsYouNow as needsYouOf } from "./attend.js";
 import { stepText, quietText, flowState, flowSetting, runDot } from "./attention.js";
 import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
+import { commentsAsked, commentsSig, defaultMode, commentLines } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
 
 // How each runPhase() reads on a card.
@@ -317,6 +318,65 @@ function blockingAction(view, t, r, att, id, short = false) {
     });
 }
 
+// PRs asked to address their comments from here, by PR URL: {sig} (comments.js commentsSig at
+// the click). The unread message (run.commentsAsked) carries it across copies and reloads.
+const commentsAskedHere = new Map();
+
+const MODE_TIP = {
+  ask: "Ask me: its orchestrator writes you one question listing each comment with what it proposes (fix, reply or leave, and why); it acts on your answer",
+  handle: "Handle them: its orchestrator fixes what it agrees with, pushes, replies on each thread it acted on (\"🤖 AI: …\"), resolves the threads it addressed and reports; it never merges",
+};
+
+// Address comments, on a run's card and pane: for each of its approved or changes-requested PRs
+// with open review comments, "Address N comments on #42" and two buttons, Ask me and Handle them,
+// the run's autonomy's default (comments.js defaultMode) highlighted; a click writes an inbox
+// message for that PR (data.js askComments) and the row reads "asked…" until the PR's comments
+// or the run's status change, or while the message is unread. Null when there are none, the run
+// is put away, or its orchestrator is not known here.
+function commentsAction(view, t, r, att, id) {
+  if (!r?.dir || !r.localTerminal || r.away) return null;
+  const prs = (att?.next?.comments?.prs ?? []).filter((p) => p.comments?.count > 0 && p.url);
+  if (!prs.length) return null;
+  const first = defaultMode(r.autonomy);
+  const rows = prs.map((p, i) => {
+    const mine = commentsAskedHere.get(p.url);
+    if (mine && mine.sig !== commentsSig(r, p)) commentsAskedHere.delete(p.url);
+    const n = p.comments.count;
+    const what = `Address ${n} comment${n === 1 ? "" : "s"}${prs.length > 1 || p.number ? ` on #${p.number}` : ""}`;
+    const label = div().id(`cmt-${id}-${i}-label`).flex_none().text_size(11.5).text_color(t.muted)
+      .tooltip(commentLines([p], 20).join("\n")).child(what);
+    if (commentsAsked(r, p, commentsAskedHere.get(p.url))) {
+      return h_flex().gap(8).items_center().child(label)
+        .child(div().id(`cmt-${id}-${i}`).flex_none().text_size(11).text_color(AMBER(t))
+          .tooltip("Asked its orchestrator to address these comments; waiting for the comments or the run's status to change").child("asked…"));
+    }
+    const send = (mode) => (cx) => {
+      commentsAskedHere.set(p.url, { sig: commentsSig(r, p) });
+      view.actionError = null;
+      cx.notify();
+      cx.spawn(async (cx) => {
+        try {
+          const out = await askComments(r, p, mode);
+          if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
+          else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
+        } catch (e) {
+          // Written but not woken: the ask is in the inbox, so it stays asked.
+          if (!e?.inInbox) commentsAskedHere.delete(p.url);
+          view.actionError = `${r.branch}: ${e?.message ?? e}`;
+        }
+        view.redraw = true;
+        try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+        try { await view.load(cx); } catch { /* the next refresh shows it */ }
+      }, { owner: null });
+    };
+    const tip = (mode) => `${MODE_TIP[mode]}.${mode === first ? ` The default at ${r.autonomy ?? "L0"}.` : ""}`;
+    return h_flex().gap(6).items_center().child(label)
+      .child(actionButton(t, `cmt-${id}-${i}-ask`, "Ask me", tip("ask"), send("ask"), first === "ask"))
+      .child(actionButton(t, `cmt-${id}-${i}-handle`, "Handle them", tip("handle"), send("handle"), first === "handle"));
+  });
+  return v_flex().gap(4).children(rows);
+}
+
 // Who reviews the run's pull requests, peer (a colleague on GitHub) or self (you, from the
 // proof), as a two-way toggle with the folder's default marked. A click sets it for the whole
 // repository folder (tracking.js setReviewFlow), so every run of it changes at once; picking
@@ -450,7 +510,8 @@ function cardHeader(view, t, r, f, meta) {
     .map(withContext(view, t, `run-${r.key}`, r.terminal))
     .child(runPin(t, `pin-${r.key}`, r, f.orch))
     .child(statusDot(t, f.dot))
-    .child(pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need));
+    .child(f.badge.tip ? div().id(`badge-${r.key}`).flex_none().tooltip(f.badge.tip).child(pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need))
+      : pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need));
 }
 
 // What a run needs you for, on its card and in its pane. Without a question: why, and a click
@@ -561,6 +622,7 @@ function card(view, t, r, ctx, compact = false) {
   // Not on a finished or put-away run's smaller card; a live card shows it even when narrow.
   const proof = r.phase !== "finished" && !r.away ? proofSummary(t, r) : null;
   const blocking = blockingAction(view, t, r, f.att, `card-${r.key}`);
+  const comments = commentsAction(view, t, r, f.att, `card-${r.key}`);
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(8).p(12).pl(16).rounded(10).bg(t.surface)
     .border(1).border_color(need ? t.blocked + "88" : t.border).cursor_pointer()
     .hover((s) => s.bg(t.raised)).on_click(focus)
@@ -571,6 +633,7 @@ function card(view, t, r, ctx, compact = false) {
     .when(Boolean(r.progress), (el) => el.child(progressLine(t, r, f.att)))
     .children(cardNotes(t, r, f))
     .when(Boolean(blocking), (el) => el.child(h_flex().child(blocking)))
+    .when(Boolean(comments), (el) => el.child(comments))
     .when(Boolean(proof), (el) => el.child(h_flex().id(`proof-${r.key}`).flex_wrap().items_center().gap(6).px(2).text_size(11.5).when(Boolean(proof.tip), (e) => e.tooltip(proof.tip))
       .child(div().flex_none().text_size(11).font_semibold().text_color(t.dim).child("Proof"))
       .child(h_flex().flex_wrap().items_center().children(joined(t, proof.parts)))))
@@ -1041,6 +1104,7 @@ function runDetail(view, t, r, ctx) {
   const facts = factsLine(t, r, prs, 13, f.att);
   const notes = cardNotes(t, r, f);
   const blocking = blockingAction(view, t, r, f.att, `pane-${r.key}`);
+  const comments = commentsAction(view, t, r, f.att, `pane-${r.key}`);
   // Most important first: who and what, whether it needs you, when and its PR, then the PR
   // itself, proof, tasks, decisions and agents; tokens last, since they are about cost.
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(14).p(14).pl(18).rounded(10).bg(t.surface)
@@ -1049,11 +1113,12 @@ function runDetail(view, t, r, ctx) {
     .child(div().id(`head-${r.key}`).cursor_pointer().on_click(() => orch !== "gone" && focusAgent(r.terminal))
       .child(cardHeader(view, t, r, f, runMeta(r, f))))
     .when(need, (el) => el.child(needBox(view, t, r, f, ctx, "pane")))
-    .when(Boolean(facts) || Boolean(r.progress) || notes.length > 0 || Boolean(blocking), (el) => el.child(v_flex().gap(4)
+    .when(Boolean(facts) || Boolean(r.progress) || notes.length > 0 || Boolean(blocking) || Boolean(comments), (el) => el.child(v_flex().gap(4)
       .when(Boolean(facts), (e) => e.child(facts))
       .when(Boolean(r.progress), (e) => e.child(progressLine(t, r, f.att)))
       .children(notes)
-      .when(Boolean(blocking), (e) => e.child(h_flex().pt(2).child(blocking)))))
+      .when(Boolean(blocking), (e) => e.child(h_flex().pt(2).child(blocking)))
+      .when(Boolean(comments), (e) => e.child(div().pt(2).child(comments)))))
     .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests", r.away ? null : flowToggle(t, r, `pane-${r.key}`))
       .children(prs.map((p, i) => prDetail(t, p, i)))
       .when(prs.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet"))))
