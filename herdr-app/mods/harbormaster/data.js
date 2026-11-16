@@ -21,15 +21,16 @@ import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingPro
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
 import { checkKind, ciTimes, prTtl } from "./attention.js";
+import { blockingRequest, blockingPending } from "./blocking.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f", GS = "\u001d";
 
 // The first lines of inbox messages that answer no question: level requests ("set autonomy to
-// L2") and asks to prove ("prove t23 to T2: …"). Kept equal to answer_messages in
-// skills/herdr-app-captain/scripts/lib.sh.
-const NOT_ANSWERS = "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: )";
+// L2"), asks to prove ("prove t23 to T2: …") and asks what is blocking ("what is blocking? …").
+// Kept equal to answer_messages in skills/herdr-app-captain/scripts/lib.sh.
+const NOT_ANSWERS = "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?)";
 
 // One sh script per machine: the captain's decisions, then every run, its files
 // separated by \x1f, runs by \x1e; then, after a \x1d, the process snapshot.
@@ -48,15 +49,15 @@ const SCRIPT = [
   '  [ -e "$d/question.md" ] && { stat -c %Y "$d/question.md" 2>/dev/null || stat -f %m "$d/question.md" 2>/dev/null; }; printf \'\\037\'',
   '  [ -e "$d/parked" ] && { printf +; head -c 400 "$d/parked"; }; printf \'\\037\'',
   '  [ -e "$d/closed" ] && { printf +; head -c 400 "$d/closed"; }; printf \'\\037\'',
-  // Unhandled messages, but for level requests and asks to prove (below), which the tags and the
-  // Proof rows show instead: one must not make a queued question read as answered.
+  // Unhandled messages, but for level requests, asks to prove and asks what is blocking (below),
+  // which the tags, the Proof rows and "asked…" show instead: one must not make a queued question read as answered.
   `  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && ! head -n 1 "$m" | grep -qE '${NOT_ANSWERS}' && n=$((n+1)); done; printf "%s\\037" "$n"`,
   // proof.md (a "+" before it when there is one, "!" when it was cut at 64 kB), then the names of the files in shared/proof/, capped.
   '  [ -e "$d/proof.md" ] && { [ "$(wc -c < "$d/proof.md")" -gt 64000 ] && printf \'!\' || printf +; head -c 64000 "$d/proof.md"; }; printf \'\\037\'',
   '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
   // decisions.md: the last 60 lines of its own decisions and the user's, capped.
   '  grep -a -E "^- \\[(decided|user)\\] " "$d/decisions.md" 2>/dev/null | tail -n 60 | tail -c 20000; printf \'\\037\'',
-  // Level requests (levels.js) and asks to prove (proof.js) in the inbox's unhandled messages,
+  // Level requests (levels.js), asks to prove (proof.js) and asks what is blocking (blocking.js) in the inbox's unhandled messages,
   // oldest first: what is pending. Only a message's first line, so an answer's free text that
   // reads like one is not one.
   `  for m in "$d"/inbox/*.message; do [ -e "$m" ] && head -n 1 "$m"; done | grep -a -E '${NOT_ANSWERS}' | tail -c 8000; printf '\\037'`,
@@ -265,6 +266,8 @@ function parseRun(machine, chunk) {
     ask: parseQuestion(question),
     askedAt: Number(asked?.trim()) * 1000 || null,
     unhandled: Number(inbox?.trim() || 0),
+    // An ask what is blocking (blocking.js) still unread in the inbox.
+    blockingAsked: blockingPending(requests),
     tasks,
     // The run's proof: its tier, proof.md's results by task id, and the file names in shared/proof/.
     proof: {
@@ -482,7 +485,7 @@ export function taskCounts(run) {
 
 // ---- pull requests (gh), cached in shared state so every copy and layout reuses them ----
 
-// reviewRequests for "waiting for <name>"; headRefOid so each CI run is recorded once (tracking.js recordCi).
+// reviewRequests for "review from <name>"; headRefOid so each CI run is recorded once (tracking.js recordCi).
 export const PR_FIELDS = "number,title,state,isDraft,reviewDecision,reviews,reviewRequests,author,statusCheckRollup,url,headRefName,headRefOid,body";
 // Run key → when its refresh started. Like a run read, a refresh whose task is cancelled
 // never ends, so one older than PR_STALE no longer holds the run back.
@@ -778,6 +781,13 @@ export function requestLevel(run, kind, level) {
 // while it is unhandled and the result line is the same.
 export function askProof(run, row) {
   return messageRun(run, "harbormaster-proof", proveRequest(row, run.proof?.tier?.tier ?? null));
+}
+
+// Asks the orchestrator of a stalled run what is blocking it (Ask what's blocking on its Crew row
+// or pane): an inbox message, "what is blocking? Harbormaster sees this run quiet for 34m (step:
+// …)", the way an ask to prove is sent. `quiet` and `step` are the texts the row shows.
+export function askBlocking(run, { quiet, step = null }) {
+  return messageRun(run, "harbormaster-blocking", blockingRequest({ quiet, step }));
 }
 
 // proof-accepted.json in the run directory, which Harbormaster owns: read on the run's machine,

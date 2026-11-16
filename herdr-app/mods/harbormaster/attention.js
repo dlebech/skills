@@ -41,12 +41,25 @@ export function reviewFlow(run, settings = {}) {
   return v === "peer" ? "peer" : "self";
 }
 
+// What a run card's review-flow toggle shows: {key, flow, fallback, isDefault}. `fallback` is
+// what the folder gets without a setting of the user's (the built-in default, else self).
+export function flowState(run, settings = {}) {
+  const key = flowKey(run);
+  const fallback = DEFAULT_FLOWS[key] === "peer" ? "peer" : "self";
+  const flow = reviewFlow(run, settings);
+  return { key, flow, fallback, isDefault: flow === fallback };
+}
+
+// The value to store when the user picks `flow` for a folder whose default is `fallback`:
+// null when it is the default, so a later change of the built-in default reaches it too.
+export const flowSetting = (flow, fallback) => (flow === fallback ? null : flow);
+
 // ---- next-step labels ----
 
 // The labels, most urgent first: what the user must act on before what they wait on.
 // Changes requested first (work is blocked on a fix), then the merges one click away, then
 // the review the user has yet to ask for, then the reviewer they wait on, then cleanup.
-export const LABELS = ["changes requested", "approved — merge", "review proof → merge", "request review", "waiting for", "merged — close run"];
+export const LABELS = ["changes requested", "approved — merge", "review proof → merge", "request review", "review from", "merged — close run"];
 // The labels that put a run in Needs you (when nothing is still working on it).
 const NEEDS_LABELS = new Set(["changes requested", "approved — merge", "review proof → merge", "request review"]);
 const rank = (label) => LABELS.indexOf(label);
@@ -55,10 +68,10 @@ export const isOpenPr = (pr) => pr?.state === "OPEN" || pr?.state === "DRAFT";
 const isShut = (pr) => pr?.state === "MERGED" || pr?.state === "CLOSED";
 
 // One PR's next step: {label, rank, who}, or null when its state is unknown. `who` is the
-// requested reviewers' names for "waiting for".
+// requested reviewers' names for "review from" (the user waits for their review).
 // Peer: a draft, or no reviewer requested and no standing review → request review; a change
 // request → changes requested; an approval → approved — merge; a reviewer requested who
-// has not answered → waiting for <name>; only comments, nobody requested → request review
+// has not answered → review from <name>; only comments, nobody requested → request review
 // (the review is back with the user). Self: changes requested if someone asked for them,
 // else review proof → merge. Merged or closed → merged — close run, either flow.
 // A reviewer asked again (back in `requested`) has no standing review: their change request
@@ -76,12 +89,13 @@ export function prStep(pr, flow) {
   if (pr.state === "DRAFT") return step("request review");
   if (changes) return step("changes requested");
   if (live(pr.approvedBy).length > 0 || decision === "APPROVED") return step("approved — merge");
-  if (pr.requested?.length > 0) return step("waiting for", pr.requested);
+  if (pr.requested?.length > 0) return step("review from", pr.requested);
   return step("request review");
 }
 
-// The run's next step from its PRs: the most urgent PR's {label, rank, who, count, same, pr},
-// where `count` is how many PRs the run has and `same` how many share that label; or null
+// The run's next step from its PRs: the most urgent PR's {label, rank, who, count, same, pr, prs},
+// where `count` is how many PRs the run has, `same` how many share that label and `prs` those
+// PRs; or null
 // without a PR (the run's own step applies) or when no PR's state is known.
 export function nextStep(prs, flow) {
   const steps = (prs ?? []).map((pr) => ({ pr, s: prStep(pr, flow) })).filter((x) => x.s);
@@ -89,14 +103,27 @@ export function nextStep(prs, flow) {
   const top = steps.reduce((a, b) => (b.s.rank < a.s.rank ? b : a));
   const same = steps.filter((x) => x.s.label === top.s.label);
   const who = [...new Set(same.flatMap((x) => x.s.who))];
-  return { label: top.s.label, rank: top.s.rank, who, count: (prs ?? []).length, same: same.length, pr: top.pr };
+  return { label: top.s.label, rank: top.s.rank, who, count: (prs ?? []).length, same: same.length, pr: top.pr, prs: same.map((x) => x.pr) };
 }
 
-// A next step as the Crew shows it: "waiting for anna, bo", then "· 3 PRs" with several PRs.
+// A next step as the Crew shows it: "review from anna, bo", then "· 3 PRs" with several PRs.
+// Short, for the narrow sidebar; reviewWaitText says it in full.
 export function nextStepText(step) {
   if (!step) return "";
-  const label = step.label === "waiting for" ? `waiting for ${step.who.join(", ") || "a reviewer"}` : step.label;
+  const label = step.label === "review from" ? `review from ${step.who.join(", ") || "a reviewer"}` : step.label;
   return step.count > 1 ? `${label} · ${step.count} PRs` : label;
+}
+
+// "#1, #2 and #3"
+const andList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] ?? "");
+
+// A review wait in full, for a hover: "Waiting for anna to review PR #1799 and #1372", or null
+// when the step is not a review wait.
+export function reviewWaitText(step) {
+  if (step?.label !== "review from") return null;
+  const nums = (step.prs ?? []).map((p) => p.number).filter(Boolean).map((n) => `#${n}`);
+  const who = andList(step.who ?? []) || "a reviewer";
+  return `Waiting for ${who} to review ${nums.length ? `PR ${andList(nums)}` : "its PR"}`;
 }
 
 // ---- reading state ----
@@ -288,7 +315,7 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   if (reasons.length) return out("needs", { reasons, next, stall });
   const why = working ? { key: "working", text: "agents working" }
     : ci.state === "running" ? { key: "ci-running", text: "CI running" }
-    : next?.label === "waiting for" ? { key: "waiting-for", text: nextStepText(next) }
+    : next?.label === "review from" ? { key: "waiting-for", text: nextStepText(next) }
     : { key: "idle", text: "idle" };
   return out("else", { reasons: [{ ...why, since: step.since }], next });
 }
