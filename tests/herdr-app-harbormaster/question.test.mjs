@@ -3,7 +3,7 @@
 // Run: node --import ./loader.mjs --test question.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseQuestion, needHead, questionSections, paragraphs, plain } from "../../herdr-app/mods/harbormaster/question.js";
+import { parseQuestion, needHead, questionSections, paragraphs, plain, replyId, replyItem } from "../../herdr-app/mods/harbormaster/question.js";
 
 const STRUCTURED = `# Merge #42 now or wait for t5?
 
@@ -94,6 +94,34 @@ test("hard-wrapped lines read as paragraphs; list items and blank lines break th
   assert.deepEqual(paragraphs(""), []);
 });
 
-test("bold markers are dropped from shown text, other marks kept", () => {
-  assert.equal(plain("then **Working** (agents) and __Done__, `a*b`"), "then Working (agents) and Done, `a*b`");
+test("bold markers are dropped from shown text, underscores and other marks kept", () => {
+  assert.equal(plain("then **Working** (agents), `a*b`"), "then Working (agents), `a*b`");
+  assert.equal(plain("edit pkg/__init__.py and foo__bar__baz"), "edit pkg/__init__.py and foo__bar__baz");
+  assert.deepEqual(paragraphs("see __init__.py"), ["see __init__.py"]);
+});
+
+test("Recommended shows its label line, then the rest of its body", () => {
+  const text = "# Which?\n\n## Options\n1. **A one**: a\n2. **B two**: b\n\n## Recommended\nB two: short\nLonger reasoning\non two lines.\n";
+  const s = questionSections(parseQuestion(text), text);
+  assert.deepEqual(s, [{ label: "Recommended", text: "B two — short\n\nLonger reasoning\non two lines." }]);
+  assert.deepEqual(paragraphs(s[0].text), ["B two — short", "Longer reasoning on two lines."]);
+});
+
+test("text before the first section and unknown sections are kept, unknown ones last", () => {
+  const text = "# Which?\nSome lead-in.\n\n## Context\nWhy now.\n\n## Question\nThe ask.\n\n## Notes\n\n## Risk\nLow.\n";
+  const s = questionSections(parseQuestion(text), text);
+  assert.deepEqual(s, [
+    { label: "", text: "Some lead-in." },
+    { label: "Question", text: "The ask." },
+    { label: "Risk", text: "Low." },
+    { label: "Context", text: "Why now." },
+  ]);
+});
+
+test("a need box's Reply id maps back to the queue item's id; the queue's is its own", () => {
+  assert.equal(replyId("", "need-local:/r"), "need-local:/r");
+  assert.equal(replyId("box", "need-local:/r"), "box:need-local:/r");
+  assert.equal(replyItem(replyId("box", "need-local:/r")), "need-local:/r");
+  assert.equal(replyItem(replyId("", "dec-x")), "dec-x");
+  assert.equal(replyItem(null), null);
 });

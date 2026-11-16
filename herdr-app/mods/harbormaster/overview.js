@@ -8,7 +8,7 @@ import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, state
 import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
 import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, proofCounts, proofRowParts, needsLook, resultLine } from "./proof.js";
-import { oneLine, needHead, questionSections, paragraphs, plain } from "./question.js";
+import { oneLine, needHead, questionSections, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf } from "./attend.js";
@@ -464,7 +464,7 @@ function needBox(view, t, r, f, ctx, where) {
   const head = needHead(r.ask);
   const key = `q-${r.key}`;
   const open = isOpen(view, key);
-  const a = answerParts(view, t, it, ctx, "box:");
+  const a = answerParts(view, t, it, ctx, "box");
   const sections = questionSections(r.ask, r.question);
   const count = it.options.length ? plural(it.options.length, "option") : "reply in your own words";
   const fold = h_flex().id(`qfold-${where}-${r.key}`).gap(6).items_center().min_w(0).rounded(4).cursor_pointer()
@@ -476,7 +476,7 @@ function needBox(view, t, r, f, ctx, where) {
     .child(div().truncate().text_color(t.dim).child([count, it.since ? `asked ${ago(it.since)}` : null].filter(Boolean).join(" · ")));
   // A section's text whole, as paragraphs (question.js), under its small label.
   const part = (label, text, color) => v_flex().gap(2)
-    .child(div().text_size(10.5).font_semibold().text_color(color ?? t.dim).child(label))
+    .when(Boolean(label), (el) => el.child(div().text_size(10.5).font_semibold().text_color(color ?? t.dim).child(label)))
     .children(paragraphs(text).map((l) => div().text_size(11.5).text_color(t.foreground).child(l)));
   const options = it.options.length > 0 && v_flex().gap(4)
     .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("Options"))
@@ -487,9 +487,9 @@ function needBox(view, t, r, f, ctx, where) {
   const details = open && v_flex().id(`qdetail-${where}-${r.key}`).gap(8).pt(4)
     // Clicks in here answer or type; they never fall through to the card's open-the-orchestrator.
     .on_click((_e, cx) => cx.stop_propagation())
-    .children(sections.filter((x) => x.label === "Question").map((x) => part(x.label, x.text)))
+    .children(sections.filter((x) => !x.label || x.label === "Question").map((x) => part(x.label, x.text)))
     .when(Boolean(options), (el) => el.child(options))
-    .children(sections.filter((x) => x.label !== "Question").map((x) => part(x.label, x.text, tone[x.label])))
+    .children(sections.filter((x) => x.label && x.label !== "Question").map((x) => part(x.label, x.text, tone[x.label])))
     .when(Boolean(a.replyBtn), (el) => el.child(h_flex().child(a.replyBtn)))
     .when(Boolean(a.input), (el) => el.child(a.input));
   return box.child(v_flex().flex_1().min_w(0).gap(4)
@@ -1127,8 +1127,8 @@ function sendAnswer(view, it, text, cx, option = false) {
 // Sends the inline reply as the answer to the item being replied to.
 export function submitReply(view, cx) {
   const text = view.reply.value().trim();
-  // A need box's Reply is the same item under "box:" (answerParts).
-  const id = view.replying?.replace(/^box:/, "");
+  // A need box's Reply answers the same item (question.js replyId).
+  const id = replyItem(view.replying);
   const it = decisionQueue(view.runs, view.decisions, facts()).find((x) => x.id === id);
   if (!text || !it || !sendAnswer(view, it, text, cx)) return;
   view.reply.set_value("");
@@ -1160,7 +1160,7 @@ function answerParts(view, t, it, ctx, slot = "") {
   const cap = captainOf(ctx);
   // An answer written for an earlier question of this run (another `since`) no longer counts.
   if (view.answered[it.id] !== undefined && view.answered[it.id] !== (it.since ?? 0)) delete view.answered[it.id];
-  const rid = slot + it.id;
+  const rid = replyId(slot, it.id);
   const open = view.replying === rid;
   // A message waiting in the run's inbox counts too: someone else (the captain, by hand) answered.
   const sent = view.answered[it.id] !== undefined;
@@ -1187,11 +1187,12 @@ function answerParts(view, t, it, ctx, slot = "") {
   // Greyed out once answered or when it can't be answered from here; a click picks that option.
   const optionButton = (i) => {
     const o = it.options[i];
-    const off = !canPick || compactWhy(o);
+    // Disabled always says why: from here it can't be answered, it was, or Compact must wait.
+    const off = why || (answered && "Already answered") || compactWhy(o);
     const b = actionButton(t, `${rid}-opt-${i}`, i === it.recommended ? `★ ${o.label}` : o.label,
       `${o.text || o.label}${i === it.recommended ? " (recommended)" : ""}`,
       off ? null : (cx) => { sendAnswer(view, it, o.label, cx, true); }, i === it.recommended);
-    return typeof off === "string" ? b.tooltip(off) : b;
+    return off ? b.tooltip(off) : b;
   };
   const note = answered && div().text_size(11).text_color(t.muted).child(it.run && runGone(it.run) ? "Waits in its inbox until the run is resumed" : sent ? "Answered, waiting for the orchestrator" : "Message waiting for the orchestrator");
   const input = open && v_flex().gap(4)

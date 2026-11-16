@@ -55,7 +55,7 @@ function showPopup(view, arg) {
   if (cur && cur.arg === arg && Date.now() - cur.at < 2000) return; // another copy just did
   const pick = view.runs.filter((r) => !r.away);
   // "<run> details" opens it with its question's Details unfolded, for a shot without a click.
-  const [, name, details] = /^(.*?)\s*\b(details)?$/.exec(arg) ?? [null, arg, null];
+  const [, name, details] = /^(.*?)(?:(?:^|\s+)(details))?$/.exec(arg) ?? [null, arg, null];
   const r = name ? view.runs.find((x) => [x.branch, x.dir, x.key, x.localTerminal].includes(name))
     : [...pick].sort(newestFirst)[0];
   if (!r) { console.log(`harbormaster.show-run: no run matches "${arg}"`); return; }
