@@ -12,8 +12,8 @@ import { oneLine } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf } from "./attend.js";
-import { nextStepText, stepText, quietText } from "./attention.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip } from "./crewrows.js";
+import { stepText, quietText } from "./attention.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine } from "./crewrows.js";
 
 // How each runPhase() reads on a card.
 const PHASE = {
@@ -265,18 +265,33 @@ function actionRow(view, t, r, orch, closed, counts) {
 }
 
 // What card() and runDetail() both show: the run's state, its links and the header row.
+// Each run's attention (attend.js), once per facts() snapshot: the overview's header, its
+// order and every card read it, and a render takes one snapshot.
+const attention = new WeakMap();
+function attOf(r, ctx) {
+  let m = attention.get(ctx);
+  if (!m) attention.set(ctx, (m = new Map()));
+  if (!m.has(r)) m.set(r, attentionOf(r, ctx));
+  return m.get(r);
+}
+
+// Whether a run needs you, as the Crew's Needs you group has it (a question, a blocker or
+// dialog, or what its PRs or a stall wait on you for); never a parked or closed run.
+const needsYouNow = (r, ctx) => !r.away && (needsYou(r, orchestratorState(r, ctx)) || attOf(r, ctx).group === "needs");
+
 function runFacts(r, ctx) {
   const orch = orchestratorState(r, ctx);
   const parked = isParked(r);
-  const need = needsYou(r, orch);
-  const att = attentionOf(r, ctx);
+  const att = attOf(r, ctx);
+  const need = needsYouNow(r, ctx);
   let badge = (parked ? PHASE.parked : r.away?.how === "closed" ? PHASE.closed : PHASE[r.phase]) ?? PHASE.unknown;
-  // A finished run says what comes next instead, as its Crew card does ("approved — merge").
-  if (badge === PHASE.finished && att.next) badge = { label: nextStepText(att.next), tone: att.group === "needs" ? "blocked" : "done" };
+  // A run in Needs you or Done says what comes next instead, as its Crew card does
+  // ("approved — merge"); a parked or closed one keeps saying so.
+  if (!r.away && badgeOf(att)) badge = badgeOf(att);
   return {
     orch, parked, need, badge, att,
     closed: isClosed(r, ctx),
-    reason: needReason(r, orch),
+    reason: needReason(r, orch) ?? needLine(att),
     counts: taskCounts(r),
     prs: prsOf(r) ?? r.prs.map((p) => unknownPr(p.url, p.repo)),
     related: relatedOf(r),
@@ -1026,13 +1041,13 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
 
 // The totals across runs, as small stats under the overview's title. "need you" counts
 // the captain's open decisions and the runs that need you, and focuses the first of them.
-function totals(t, s, decisions, ctx) {
+function totals(t, s, need, decisions, ctx) {
   const stat = (id, value, label, tone, onClick) => h_flex().id(id).flex_none().gap(4).items_baseline().px(6).h(22).rounded(5)
     .when(Boolean(onClick), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click(onClick))
     .child(div().text_size(13).font_semibold().text_color(tone ? t[tone] : t.foreground).child(String(value)))
     .child(div().text_size(11).text_color(t.dim).child(label));
-  const firstNeed = (decisions.length ? captainOf(ctx).terminal?.address : null) ?? s.need[0]?.terminal;
-  const needCount = s.need.length + decisions.length;
+  const firstNeed = (decisions.length ? captainOf(ctx).terminal?.address : null) ?? need[0]?.terminal;
+  const needCount = need.length + decisions.length;
   return h_flex().flex_wrap().gap(2).items_center()
     .child(stat("t-runs", s.live.length, "running", null))
     .child(stat("t-need", needCount, "need you", needCount ? "blocked" : null, firstNeed ? () => focusAgent(firstNeed) : null))
@@ -1133,9 +1148,12 @@ function closedHeader(view, t, closed) {
 export function cards(view, t, runs, errors, decisions = []) {
   const ctx = facts();
   const s = stats(runs, ctx);
-  const needing = new Set(s.need);
+  // Runs that need you, as the Crew counts them (finished ones too: a PR to merge), come first.
+  const need = s.shown.filter((r) => needsYouNow(r, ctx));
+  const needing = new Set(need);
   const sorted = (list) => [...list].sort(newestFirst);
-  const live = [...sorted(s.need), ...sorted(s.live.filter((r) => !needing.has(r)))];
+  const live = [...sorted(need), ...sorted(s.live.filter((r) => !needing.has(r)))];
+  const docked = s.docked.filter((r) => !needing.has(r));
   const closed = sorted(s.closed);
   const narrow = (view.size?.width ?? 600) / zoom() < 360;
   const waiting = waitingOnYou(view, t, s, decisions, runs, ctx);
@@ -1148,13 +1166,13 @@ export function cards(view, t, runs, errors, decisions = []) {
           .cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))
           .tooltip("Where the time goes, tokens, CPU and memory: per run, task and agent, and past runs")
           .on_click(() => openStats()).child("Stats")))
-      .child(totals(t, s, decisions, ctx)))
+      .child(totals(t, s, need, decisions, ctx)))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
       .when(Boolean(waiting), (el) => el.child(waiting))
       .child(captainStrip(view, t, ctx, s))
       .when(s.shown.length === 0, (el) => el.child(div().p(12).text_size(12).text_color(t.dim).child("No runs in progress. Ask the captain to start one, e.g. “start issue 185 in my-app”.")))
       .children(live.map((r) => card(view, t, r, ctx, narrow)))
-      .children(sorted(s.docked).map((r) => card(view, t, r, ctx, true)))
+      .children(sorted(docked).map((r) => card(view, t, r, ctx, true)))
       .when(s.parked.length > 0, (el) => el.child(div().pt(6).px(4).text_size(11).font_semibold().text_color(t.dim).child(`Parked · ${s.parked.length}`)))
       .children(sorted(s.parked).map((r) => card(view, t, r, ctx, true)))
       .when(closed.length > 0, (el) => el.child(closedHeader(view, t, closed)))

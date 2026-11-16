@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assess, STALL_MS } from "../../herdr-app/mods/harbormaster/attention.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip } from "../../herdr-app/mods/harbormaster/crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine } from "../../herdr-app/mods/harbormaster/crewrows.js";
 
 const MIN = 60000;
 const now = Date.parse("2026-11-16T12:00:00Z");
@@ -119,4 +119,22 @@ test("Done shows merged — close run with the PR count", () => {
   assert.match(rowTip(a, now)[0], /^Done: every pull request merged or closed/);
   const closed = at(run({ away: { how: "closed", at: ago(5) } }));
   assert.equal(rowLead(closed, now).lead, "closed");
+});
+
+test("a card's pill says the next step in Needs you and Done, and keeps its phase otherwise", () => {
+  const needs = at(run(), { pr: read([pr()]) });
+  assert.equal(needs.group, "needs");
+  assert.deepEqual(badgeOf(needs), { label: "review proof → merge", tone: "blocked" });
+  const done = at(run({ phase: "finished" }), { pr: read([pr({ state: "MERGED" })]) });
+  assert.deepEqual(badgeOf(done), { label: "merged — close run", tone: "done" });
+  assert.equal(badgeOf(at(run(), { working: true })), null);
+  const question = at(run({ question: "?", ask: { title: "Go?" }, prs: [] }), { pr: read([]) });
+  assert.equal(badgeOf(question), null);
+  assert.equal(badgeOf(null), null);
+});
+
+test("needLine says why a run needs you, and nothing outside Needs you", () => {
+  const a = at(run(), { pr: read([pr({ checks: { pass: 0, fail: 1, pending: 0 } })]) });
+  assert.equal(needLine(a), "red CI on #42 · review proof → merge");
+  assert.equal(needLine(at(run(), { working: true })), null);
 });
