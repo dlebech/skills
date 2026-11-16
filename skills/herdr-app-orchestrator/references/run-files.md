@@ -13,7 +13,9 @@ and it keeps nothing the files do not.
 | `orchestrator.json` | `init-run.sh` | captain, Harbormaster | `{terminal, tab_id, folder, branch, kind, started}`: how to find and resume the run. |
 | `spec.md` | orchestrator | orchestrator, agents | The goal, scope and acceptance criteria. |
 | `plan.md` | orchestrator | everyone | First line `Status: <one line>` (`running`, `waiting for user: <summary>`, `blocked: <reason>`, `finished`), then `Prefix:` and the tasks with their states. |
-| `status.json` | `set-status.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated}`. Outlives the orchestrator. |
+| `status.json` | `set-status.sh`, `tokens.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated, tokens}`. Outlives the orchestrator. `set-status.sh` keeps fields other scripts write. |
+| `sessions` | `tokens.sh` | `tokens.sh` | Every session the orchestrator's terminal has had, one `<kind> <session id or file>` a line (below). |
+| `.tokens/` | `tokens.sh` | `tokens.sh` | Its cache: each session file's parsed usage and how far it was read. Safe to delete. |
 | `decisions.md` | orchestrator | anyone | The decisions log: what was decided, by whom, why (the line format is below). |
 | `question.md` | orchestrator | Harbormaster, captain, you | The open question to you, if any (below). Removed once answered. |
 | `inbox/*.message` | anyone who answers or instructs | orchestrator | Messages to the orchestrator (below). The orchestrator renames a message it has read to `.handled`. |
@@ -147,6 +149,41 @@ terminal label `run.autonomy`; the run card shows it as a tag. L3 (auto-merge) i
 `[decided]` is a decision the orchestrator made itself, `[user]` one you made. Harbormaster reads the
 last 20 `[decided]` lines and shows them, newest first, as "Decided for you" on the run card and pane.
 A line that does not read as `<UTC time> <topic>: <decision> — <why>` is shown as its raw text.
+
+## Tokens: status.json `tokens`, sessions and .tokens/
+
+`set-status.sh` runs `scripts/tokens.sh <run-directory>` after every publish (quietly: a failure never
+stops the status; run it by hand to see why). It writes `status.json`'s `tokens`:
+
+```json
+{"total": 26222515, "input": 588, "output": 212199, "cache_read": 25133155, "cache_write": 876573,
+ "by_agent": [{"name": "orchestrator", "total": 8844538}, {"name": "pda-t1", "total": 4690650}],
+ "updated": "2026-11-16T09:02:56Z"}
+```
+
+`total` is the sum of the four kinds, as Harbormaster's context size is; `by_agent` lists the
+orchestrator first, then agents by size. What it counts, from the session files on this computer:
+
+- **The orchestrator**: each session listed in `sessions`. On every run it asks `hc get <terminal>` for
+  the orchestrator's pid, reads the session id from Claude Code's `~/.claude/sessions/<pid>.json`, and
+  appends `claude <id>` if new; for pi, which has no such map, the newest session in its folder,
+  `pi <file>`. So a resumed orchestrator's earlier sessions still count, although the orchestrator works
+  in the repository's checkout, whose folder other sessions share. Its sub-agents' transcripts count too.
+- **Agents**: every session in the run's worktrees, `~/.herdr/worktrees/<repo>/<prefix>-*` for each
+  repository in plan.md's `Repos:` (or the run's folder) and the integration worktree, found by Claude
+  Code's (`~/.claude/projects/<folder with each character other than A-Z a-z 0-9 - as ->/`, with
+  `<session>/subagents/*.jsonl`) and pi's (`~/.pi/agent/sessions/--<folder with / as ->--/`) folder
+  naming, so they are found after the worktrees are removed. Only messages from orchestrator.json's
+  `started` on count, so an older run that used the same prefix is not. Each is named by its worktree
+  (`pda-t3`), the integration worktree's as `integration`.
+- **Each response once**: Claude Code writes one line per content block of a response, each with the
+  same usage, so it counts each `message.id` once (they are one to one with `requestId`), across files
+  too, as a resumed session repeats earlier messages; pi by its entry `id`.
+
+`.tokens/` keeps, per session file, the usage rows read so far and how far it read (size, inode, and
+the run start used); a rerun reads only bytes added since, up to the last whole line, and rereads a
+file that was replaced or shrank. Harbormaster reads only `status.json`, so the numbers show for runs
+on other machines and stay after the orchestrator is gone.
 
 ## .captain-decisions.json
 

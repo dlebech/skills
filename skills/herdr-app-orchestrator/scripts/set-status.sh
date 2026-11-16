@@ -35,7 +35,8 @@
 #
 # status.json: {branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy,
 # issues: [url], prs: [{repo, url}], related: [{repo, url}], waiting: [name], updated}, where state is
-# running, waiting, blocked, or finished. It outlives the terminal, so it is the
+# running, waiting, blocked, or finished; fields other scripts write, such as tokens.sh's
+# tokens, are kept. Each call also runs tokens.sh, which counts the run's tokens into it. It outlives the terminal, so it is the
 # record of a finished run. The labels, for live lists such as Herdr's Agents list:
 # run.status (the state), run.type, run.autonomy, run.topic, progress, and run.prs (the PR URLs, space-separated).
 # The tab becomes "🐙 <name>", "🐙 ✋ <name>" or "🐙 ✓ <name>", where <name> is
@@ -46,6 +47,7 @@
 # no tab, only prints a warning, since the run goes on without one. An unreadable
 # status.json fails the call before anything changes.
 set -u
+. "$(dirname "$0")/lib.sh"
 
 usage() {
   echo 'usage: set-status.sh <run-directory> [<status>] [--type feat|fix|rev|expl] [--topic TEXT] [--progress TEXT] [--tasks M/N] [--autonomy L0|L1|L2] [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]' >&2
@@ -112,11 +114,7 @@ case $status in
   *) mark= state=running ;;
 esac
 
-old='{}'
-if [ -e "$dir/status.json" ]; then
-  old=$(jq -ce 'objects' "$dir/status.json" 2>/dev/null) ||
-    { echo "$dir/status.json is not a JSON object; fix or remove it" >&2; exit 1; }
-fi
+old=$(status_read "$dir") || exit 1
 issues_json=$(jq -cn '$ARGS.positional' --args ${issues[@]+"${issues[@]}"})
 pairs='$ARGS.positional as $a | [range(0; $a | length; 2) as $i | {repo: $a[$i], url: $a[$i + 1]}]'
 prs_json=$(jq -cn "$pairs" --args ${prs[@]+"${prs[@]}"})
@@ -138,7 +136,7 @@ jq -n --argjson old "$old" --argjson issues "$issues_json" --argjson prs "$prs_j
       if any(.[]; .repo == $p.repo) then map(if .repo == $p.repo then $p else . end) else . + [$p] end)
   | .related = reduce $related[] as $p (.related; if any(.[]; .url == $p.url) then . else . + [$p] end)
   | if $waiting_set != "" then .waiting = [$waiting | splits("\\s+") | select(. != "")] else . end
-  | {branch, folder, status, state, type, topic, progress, tasks, autonomy, issues, prs, related, waiting, updated}
+  | {branch, folder, status, state, type, topic, progress, tasks, autonomy, issues, prs, related, waiting, updated} + .
   ' >"$tmp" || exit 1
 # plan.md first: it is what counts, and status.json is only written once it changed.
 if [ -n "$new_status" ]; then
@@ -146,6 +144,9 @@ if [ -n "$new_status" ]; then
     mv "$dir/.plan.tmp" "$dir/plan.md" || { rm -f "$tmp"; exit 1; }
 fi
 mv "$tmp" "$dir/status.json" || exit 1
+# The run's token totals, cheap after the first count; a failure must not stop the
+# status from being published, so it is quiet here (run tokens.sh to see why).
+"$(dirname "$0")/tokens.sh" "$dir" >/dev/null 2>&1 || true
 
 # A label change is an hc event, which wakes herdr-app-captain's watcher at once.
 if [ -n "$terminal" ]; then

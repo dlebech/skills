@@ -5,7 +5,8 @@
 //
 // The run directory files it reads and writes are documented in
 // skills/herdr-app-orchestrator/references/run-files.md. In short, per run, under
-// <root>/<folder>/<branch>/: orchestrator.json, plan.md, status.json, question.md,
+// <root>/<folder>/<branch>/: orchestrator.json, plan.md, status.json (with the token
+// totals tokens.sh counts into it; this mod never reads session files for them), question.md,
 // inbox/*.message (written here on an answer or Close), parked and closed markers;
 // and <root>/.captain-decisions.json for the captain's open decisions.
 
@@ -202,6 +203,7 @@ function parse(machine, stdout) {
       // PRs the run is about but did not open, such as the one a review-only run reviews.
       related: (status.related ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
       waiting: status.waiting ?? [],
+      tokens: tokensOf(status.tokens),
       updated: status.updated ? Date.parse(status.updated) : null,
       // When the run was created (init-run.sh); null for runs from before it recorded that.
       started: Date.parse(orch.started ?? "") || null,
@@ -221,6 +223,18 @@ function parse(machine, stdout) {
       prefix: /^Prefix:\s*`?([\w-]+)/m.exec(plan ?? "")?.[1]?.toLowerCase() ?? null,
     };
   });
+}
+
+// The run's token use, as tokens.sh counted it into status.json: totals and each
+// agent's share (orchestrator first, then by size), or null before the first count.
+function tokensOf(x) {
+  const n = (v) => Number(v) || 0;
+  if (!(n(x?.total) > 0)) return null;
+  return {
+    total: n(x.total), input: n(x.input), output: n(x.output), cacheRead: n(x.cache_read), cacheWrite: n(x.cache_write),
+    byAgent: (Array.isArray(x.by_agent) ? x.by_agent : []).filter((a) => a?.name && n(a.total) > 0).map((a) => ({ name: String(a.name), total: n(a.total) })),
+    updated: Date.parse(x.updated ?? "") || null,
+  };
 }
 
 // A parked or closed marker, "+" and its first line: { how, at, was }, or null without one.
