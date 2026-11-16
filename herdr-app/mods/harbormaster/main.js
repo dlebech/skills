@@ -27,7 +27,8 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"
 
 // A brief popup of one run's pane, for taking a screenshot of it with `herdr-app shot` without
 // switching the user's space or tab. Commands sent with `herdr-app do 'harbormaster.<command>'`:
-//   show-run:<branch | run dir | orchestrator terminal>   open it (no name: the newest unclosed run); one at a time
+//   show-run:<branch | run dir | orchestrator terminal>   open it (no name: the newest unclosed run); one at a time;
+//                                                         "… details" / "… proof" unfold its question / its Proof list
 //   show-stats[:<branch | run dir>]                         open the Stats view (a run: focused on it)
 //   show-overview, show-crew                               open the runs overview, or the Crew block
 //   close-popup                                            close it
@@ -54,13 +55,14 @@ function showPopup(view, arg) {
   const cur = shared(POPUP);
   if (cur && cur.arg === arg && Date.now() - cur.at < 2000) return; // another copy just did
   const pick = view.runs.filter((r) => !r.away);
-  // "<run> details" opens it with its question's Details unfolded, for a shot without a click.
-  const [, name, details] = /^(.*?)(?:(?:^|\s+)(details))?$/.exec(arg) ?? [null, arg, null];
+  // "<run> details" opens it with its question's Details unfolded, "<run> proof" with its Proof
+  // list open and its first pending row unfolded, for a shot without a click.
+  const [, name, details] = /^(.*?)(?:(?:^|\s+)(details|proof))?$/.exec(arg) ?? [null, arg, null];
   const r = name ? view.runs.find((x) => [x.branch, x.dir, x.key, x.localTerminal].includes(name))
     : [...pick].sort(newestFirst)[0];
   if (!r) { console.log(`harbormaster.show-run: no run matches "${arg}"`); return; }
   closePopup();
-  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: details ? { ...runProps(r), details: true } : runProps(r) });
+  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: details ? { ...runProps(r), [details]: true } : runProps(r) });
   // Another copy opened one for this same command first: keep theirs, so none is left untracked.
   const won = shared(POPUP);
   if (won && won.arg === arg && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }

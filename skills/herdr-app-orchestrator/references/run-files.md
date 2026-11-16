@@ -95,7 +95,7 @@ Checks: green — <what ran, e.g. the repo's checks on the integration branch>
 ## <task id> <task name>
 Tier: T1
 Checked: <what was checked>
-Result: pass | fail | partial — <one line>
+Result: pass | fail | partial | pending — <one line>
 Files: shared/proof/<file>, shared/proof/<file>
 Ran: <short sha> <command> — <result>
 ```
@@ -108,12 +108,18 @@ A task's `## ` section is matched to the task by its id; its `Result` shows besi
 row in the Proof section. The optional header line `Checks: green — …` or `Checks: red — …` (CI or
 the local suite on the integration branch) shows as "checks green" in the verdict line. A T2 or T3
 task with a `Result:` whose `Files:` has no image or video (png, jpg, jpeg, gif, webp; mp4, webm, mov, m4v) counts as "n tasks without a screenshot" (tasks, not images; an image missing from `shared/proof/` does not count). `Files:` is comma-separated paths only: a note in parentheses after a path is ignored, and notes belong in `Checked:`. Only a `## ` section with a `Result:` or `Tier:` is a task; Harbormaster reads the first 64 kB of proof.md and marks the verdict "(proof.md cut)" past that.
+`pending` says the proof is still being gathered and is not the user's yet, with why
+(`Result: pending — waiting for t4`, when a later task takes this one's screenshots). Harbormaster
+also reads a task still under way (planned, implementing, in review, fixing; not blocked) as pending,
+whatever its result short of `fail`. A pending task shows calm, with no Accept or Ask to prove, and
+the verdict counts it apart (`1/8 pass · 2 pending`, an unscoped pending task included); once the run is finished, a `pending` result
+reads as not checked and needs a look. Replace it with the real result once the proof is in.
 A run with no `proof.md` shows its plan's evidence only.
 
 ### Accepting proof, or asking for it
 
 A task whose proof is not a pass (partial, fail, a T2+ pass without a screenshot, not checked, not
-scoped) has two buttons on its Proof row in Harbormaster. **Accept** records that you take its
+scoped), and not pending, has two buttons on its Proof row in Harbormaster. **Accept** records that you take its
 proof as it is (for a not-checked or not-scoped task, only once the task is done or the run is
 finished), in `proof-accepted.json`, which only Harbormaster writes, so it works with the
 orchestrator gone. It writes it on the run's machine under a `proof-accepted.json.lock` directory
@@ -125,7 +131,7 @@ overwritten (fix or delete it), and other entries and fields are kept:
 { "t23": { "at": "2026-11-16T10:00:00.000Z", "result": "partial — the hover card needs a real hover, not screenshotted" } }
 ```
 
-`result` is the result line accepted: `<pass|fail|partial> — <why>` from proof.md (with
+`result` is the result line accepted: `<pass|fail|partial|pending> — <why>` from proof.md (with
 ` (no screenshot)` for a T2+ pass without one), or `not checked` / `not scoped`. An acceptance holds
 only while the task's result line is still that one; once proof.md says something else, the task
 needs a look again. Unaccept removes its entry. An accepted task does not need a look: the
