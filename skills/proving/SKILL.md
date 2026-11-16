@@ -1,7 +1,6 @@
 ---
 name: proving
 description: Capture proof that a task, branch or PR works, for a tier T0–T3 (tests, test output, screenshots, demo), and write the PR's Evidence section.
-disable-model-invocation: true
 argument-hint: "[tier T0-T3] [task, branch or PR to prove]"
 ---
 
@@ -20,17 +19,17 @@ Capture evidence that a change works, at the depth a tier asks for, so a reviewe
 
 ## 2. Find where proof goes
 
-- **In an orchestrator run** (a directory `~/.herdr/hc-orchestration/<folder>/<branch>/`, or under `$HERDR_ORCHESTRATION_ROOT`, found from the branch as described in `herdr-app-orchestrator`'s `references/run-files.md`): files go in `<run>/shared/proof/`, the summary in `<run>/proof.md`.
-- **Otherwise**: a `proof/` folder outside the repository (for example next to it, or in the system temp folder), with the same `proof.md`.
+- Root: `${HERDR_ORCHESTRATION_ROOT:-~/.herdr/hc-orchestration}`. The run directory is `<root>/<last part of the repository's path>/<branch, with / and the like as ->`. If it holds an `orchestrator.json`, you are in a run: files go in `<run>/shared/proof/`, the summary in `<run>/proof.md`.
+- Otherwise: `${TMPDIR:-/tmp}/proof-<branch as ->/`, with the files and `proof.md` together in it.
 
 Never commit proof or put it in the repository. Name files `<task-id>-<what>.<ext>`.
 
 ## 3. Capture, by tier
 
-1. **T0**: find the repo's checks (CI workflow files, `README`, `CLAUDE.md`/`AGENTS.md`, `package.json` scripts, `Makefile`) and run them. With a PR, `gh pr checks <pr>` counts for CI. Save the command and its output.
+1. **T0**: find the repo's checks (CI workflow files, `README`, `CLAUDE.md`/`AGENTS.md`, `package.json` scripts, `Makefile`) and run them. With a PR, `gh pr checks <pr>` counts for CI. Save the command and its output. Finding none is `partial` with the note `no checks found`, never `pass`.
 2. **T1**: run the specific tests or commands for the changed behaviour, with realistic input (old and new formats where it matters). Save command and output, and a before/after when the change is a fix.
-3. **T2**: screenshot or record the change working, with the first of these that exists: a browser tool (a browser MCP, Playwright), the app's own capture (`herdr-app shot` for a Herdr mod), or a terminal capture for a CLI. Look at each image before keeping it.
-4. **T3**: a short guided demo with the `demo-video` skill if available.
+3. **T2**: screenshot or record the change working, with the first of these that exists: a browser tool (a browser MCP, Playwright), the app's own capture (`herdr-app shot` for a Herdr mod, if `command -v herdr-app` finds it; see its `--help`), or a terminal capture for a CLI. Look at each image before keeping it.
+4. **T3**: a short guided demo with the `demo-video` skill if available; without it write `T3 demo skipped: demo-video skill not available` and mark `partial`. A change with nothing to see (a script, a library) gets a terminal walkthrough of real commands instead.
 
 A missing tool is never a silent skip: note it in one line in `proof.md` (`T2 screenshot skipped: no browser tool available`) and mark the result `partial`. A failing check is `fail`, with the output saved; do not retry until it passes without saying so.
 
@@ -51,4 +50,4 @@ Files: shared/proof/<file>, shared/proof/<file>
 
 ## 5. The PR's Evidence section
 
-Write `## Evidence` text from `proof.md`: per task, what was checked, the result and the local file names (proof is not hosted, so say they are local). Hand it to the caller (the orchestrator puts it in the PR body), or when asked, update the PR body yourself with `gh pr edit`, replacing only that section. Do not paste screenshots or logs into the PR; describe them.
+Write `## Evidence` text from `proof.md`: per task, what was checked, the result and the local file names (proof is not hosted, so say they are local). Hand it to the caller (the orchestrator puts it in the PR body), or when asked, update the PR body yourself with `gh pr edit`, replacing only that section: read the body with `gh pr view <pr> --json body -q .body`, swap the text from `## Evidence` to the next `## ` heading, and write it back with `gh pr edit <pr> --body-file -`. Do not paste screenshots or logs into the PR; describe them.

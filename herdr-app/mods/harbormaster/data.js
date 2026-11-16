@@ -375,8 +375,9 @@ function standing(p) {
 // Only this line is kept, so the cached PR stays small.
 export function mergeDanger(body) {
   const m = /^##[ \t]+Merge danger[ \t]*\r?\n([\s\S]*?)(?=^#{1,2}[ \t]|(?![\s\S]))/im.exec(body ?? "");
-  const line = m?.[1].split(/\r?\n/).map((l) => l.trim()).find(Boolean);
-  return line ? line.replace(/^[-*>]\s+/, "").slice(0, 200) : null;
+  const line = m?.[1].split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith("```"));
+  const clean = line?.replace(/^[-*>]\s+/, "").replace(/\*\*|__|`/g, "").trim();
+  return clean ? clean.slice(0, 200) : null;
 }
 
 // What the views need from `gh pr view --json` output. GitHub only sets reviewDecision
@@ -398,7 +399,7 @@ function prSummary(p, repo) {
   };
 }
 
-// True for a "One-way door — …" line; anything else that is set is a two-way door or unclear.
+// True for a "One-way door — …" line.
 export const oneWay = (danger) => /^\W*one[- ]way/i.test(danger ?? "");
 
 // A PR recorded in status.json that gh hasn't described (yet).

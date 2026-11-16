@@ -51,9 +51,13 @@ function reviewText(pr) {
   return null;
 }
 
-// A PR's Merge danger on its row: red for a one-way door, dim for the rest; the tooltip has the whole line.
-const dangerTag = (t, pr) => div().flex_none().text_size(11).text_color(oneWay(pr.danger) ? t.blocked : t.dim)
-  .tooltip(pr.danger).child(oneWay(pr.danger) ? "One-way door" : "Two-way door");
+// A PR's Merge danger on its row: red for a one-way door, dim otherwise, and a line that is neither shown as written; the tooltip has the whole line.
+const dangerTag = (t, pr) => {
+  const one = oneWay(pr.danger);
+  const two = /^\W*two[- ]way/i.test(pr.danger);
+  const text = one ? "One-way door" : two ? "Two-way door" : pr.danger.length > 28 ? pr.danger.slice(0, 27) + "…" : pr.danger;
+  return div().flex_none().text_size(11).text_color(one ? t.blocked : t.dim).tooltip(pr.danger).child(text);
+};
 
 function prRow(t, pr, i) {
   const tone = PR_TONE[pr.state] ?? "dim";
