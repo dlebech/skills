@@ -30,39 +30,49 @@ export function groupRows(rows) {
 // Only stalled: what waits on the user is a nudge, not a decision, so amber, not red.
 const onlyStalled = (a) => Boolean(a.stall) && a.reasons.length > 0 && a.reasons.every((r) => r.key === "stalled");
 
-// The start of a row's detail line: {lead, rest, tone}. `lead` comes first (before when the
-// run started, so a narrow sidebar keeps it), `rest` after it (null for none). Tone is a
-// colour name: "blocked" (red), "amber", "dim" (grey, can't tell) or "muted".
-//   Needs you: its reasons ("red CI on #42 · review proof → merge"); a stalled run says
-//     what it was doing ("quiet 34m", then "t3 implementing").
-//   Working: the step and its age ("CI on #42 · 34m", "t3 implementing · 1h12m"); for a
-//     briefly idle run too, so the age shows how quiet it is.
+// Why a run can't be told, in two or three words for a row: its machine, its files, or GitHub.
+export function cantWhy(a) {
+  const why = a?.why ?? "";
+  if (/machine/.test(why)) return "machine offline";
+  if (/run files/.test(why)) return "no run files";
+  if (/not read yet/.test(why)) return "PRs not read yet";
+  return "GitHub unreadable";
+}
+
+// The start of a row's detail line: {lead, rest, tone}. `lead` comes first, so a narrow
+// sidebar keeps it, `rest` after it (null for none). Tone is a colour name: "blocked" (red),
+// "amber", "dim" (grey, can't tell) or "muted".
+//   Needs you: its reasons and how long the longest has waited ("approved — merge · 2 PRs · 1h");
+//     a stalled run says what it was doing ("quiet 34m", then "t3 implementing"), its quiet
+//     time being its age.
+//   Working: the step and its own age ("CI on #42 · 34m", "t3 implementing 1h12m · +1 task");
+//     for a briefly idle run too, so the age shows how quiet it is.
 //   Waiting on others: the label ("review from anna"), then the step.
-//   Can't tell: "can't tell", grey.
+//   Can't tell: "can't tell: machine offline", grey.
 //   Done: the label ("merged — close run · 2 PRs"), or "closed".
 export function rowLead(a, now = Date.now()) {
   const step = stepText(a.step, now) || null;
   if (a.group === "needs") {
-    const lead = a.reasons.map((r) => r.text).join(" · ");
-    return { lead, rest: a.stall ? a.step?.text || null : null, tone: onlyStalled(a) ? "amber" : "blocked" };
+    const why = a.reasons.map((r) => r.text).join(" · ");
+    const waited = !onlyStalled(a) && a.waitSince ? ageText(now - a.waitSince) : null;
+    return { lead: waited ? `${why} · ${waited}` : why, rest: a.stall ? a.step?.text || null : null, tone: onlyStalled(a) ? "amber" : "blocked" };
   }
   if (a.group === "done") return { lead: a.next ? nextStepText(a.next) : "closed", rest: null, tone: "muted" };
-  if (a.group === "cant" || a.cantTell) return { lead: "can't tell", rest: null, tone: "dim" };
+  if (a.group === "cant" || a.cantTell) return { lead: `can't tell: ${cantWhy(a)}`, rest: null, tone: "dim" };
   if (a.group === "waiting") return { lead: a.reasons[0]?.text ?? (a.next ? nextStepText(a.next) : "waiting"), rest: step, tone: "muted" };
   return { lead: step ?? a.reasons[0]?.text ?? (a.next ? nextStepText(a.next) : null) ?? "idle", rest: null, tone: "muted" };
 }
 
-// A row's edge colour name: red for Needs you (amber when it has only stalled), done's colour
-// for Done, grey for Can't tell, "review" (a calm colour of its own) for Waiting on others.
-// Working: working's colour only while agents work or CI runs, "neutral" for a run briefly
-// idle, so colour always means something.
+// A row's edge colour name, one meaning each: red ("blocked") for Needs you, you must act;
+// amber when it has only stalled, look soon; "review" (cyan) for Waiting on others; done's
+// colour for Done; grey for Can't tell. Working is "neutral", whether its agents work, CI runs
+// or it is briefly idle: fine needs no colour, and the row's spinner says it works.
 export function rowEdge(a) {
   if (a.group === "needs") return onlyStalled(a) ? "amber" : "blocked";
   if (a.group === "done") return "done";
   if (a.group === "cant" || a.cantTell) return "dim";
   if (a.group === "waiting") return "review";
-  const key = a.reasons?.[0]?.key;
-  return key === "working" || key === "ci-running" ? "working" : "neutral";
+  return "neutral";
 }
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
@@ -78,7 +88,7 @@ export function rowTip(a, now = Date.now()) {
   // Who said what on its approved or changes-requested PRs, one line each.
   if (a.group !== "done" && a.next?.comments && (hasComments(a.next.comments) || a.next.comments.unknown)) lines.push(...reviewCommentLines(a.next));
   if (a.cantTell) lines.push(`Can't tell${a.group === "needs" ? " its pull requests" : ""}: ${a.why ?? "its state could not be read"}`);
-  if (a.step?.text && a.group !== "done") lines.push(`Current step: ${a.step.text}${a.step.since ? `, for ${ageText(now - a.step.since)}` : ""}`);
+  if (a.step?.text && a.group !== "done") lines.push(`Current step: ${a.step.text}${a.step.since ? `, for ${ageText(now - a.step.since)}` : ""}${a.step.more > 0 ? ` (${a.step.more} more ${a.step.more === 1 ? "task" : "tasks"} at work)` : ""}`);
   return lines;
 }
 
@@ -117,6 +127,52 @@ export function closableDone(rows, busy = {}) {
   return rows.filter((x) => x.a?.group === "done" && x.a.next && x.r?.dir && x.r.phase === "finished" && !x.r.away && !x.r.question && !busy[x.r.key]).map((x) => x.r);
 }
 
-// The line an empty group shows in its place, or null: only a group with an `empty` text, and
-// only while there are orchestrators (`total` rows in all; none keeps the Crew's own empty text).
-export const emptyNote = (g, list, total) => (g.empty && !list.length && total > 0 ? g.empty : null);
+// The line an empty group shows in its place, or null: only a group with an `empty` text, only
+// while there are orchestrators (`total` rows in all; none keeps the Crew's own empty text),
+// and only when nothing counts in it: `count` is needCount for Needs you (the captain's open
+// decisions too), the list's length for any other group.
+export const emptyNote = (g, count, total) => (g.empty && !count && total > 0 ? g.empty : null);
+
+// ---- one Needs you for every view ----
+
+// Whether a run needs you, given its attention `a`: in Needs you and not put away (a parked or
+// closed run's PRs may wait on you, but it is not counted). attend.js needsYouNow is this.
+export const needsRun = (r, a) => !r.away && a.group === "needs";
+
+// The runs that need you, for the overview's cards and header and the Crew alike; `attOf(run)`
+// gives a run's attention.
+export const needRunsOf = (runs, attOf) => runs.filter((r) => needsRun(r, attOf(r)));
+
+// The Crew's rows, with its Needs you made the overview's set (attend.js needsYouNow), so the
+// two never disagree. `orchs`: a row ({term, r, a}) per live orchestrator, `r` its run or null;
+// `needRuns`: the runs the overview counts as needing you. A run there whose orchestrator has
+// no row (gone, or on a machine that did not answer) gets one of its own, {term: null, r, a},
+// `attOf(run)` giving its attention. An orchestrator's row in Needs you that the overview does
+// not count (its run is parked or closed) shows its step under Working instead.
+export function crewEntries(orchs, needRuns, attOf) {
+  const need = new Set(needRuns);
+  const seen = new Set(orchs.map((x) => x.r).filter(Boolean));
+  const rows = orchs.map((x) => (x.r && x.a?.group === "needs" && !need.has(x.r) ? { ...x, a: { ...x.a, group: "working" } } : x));
+  for (const r of needRuns) if (!seen.has(r)) rows.push({ term: null, r, a: attOf(r) });
+  return rows;
+}
+
+// Orchestrators without a run directory that need you (blocked on a dialog): the overview has
+// no run for them, so it adds these to its count.
+export const runlessNeeds = (orchs) => orchs.filter((x) => !x.r && x.a?.group === "needs");
+
+// How many things need you, for the overview's header and the Crew's Needs you heading alike:
+// the runs that need you, orchestrators without a run blocked on a dialog, and the captain's
+// open decisions.
+export const needCount = (needRuns, orchs, decisions) => needRuns.length + runlessNeeds(orchs).length + decisions;
+
+// The line under Needs you while the captain has open decisions: they count in the heading,
+// and the captain's own row (above, where it always is) is where to answer them.
+export const captainNeedNote = (decisions) => (decisions > 0 ? `+ the captain's ${decisions === 1 ? "decision" : `${decisions} decisions`}, above` : null);
+
+// What the captain's row says it watches, from stats(): "watching 2 runs · 1 finished", every
+// run it keeps an eye on (running and finished but open), then how many of them are finished.
+export function watchingText(live, docked) {
+  const n = live + docked;
+  return `watching ${n} run${n === 1 ? "" : "s"}${docked ? ` · ${docked} finished` : ""}`;
+}

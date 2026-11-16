@@ -360,6 +360,16 @@ export function cachedRuns() {
   return cache;
 }
 
+// A run read older than this no longer counts as read: the polls have stopped answering.
+const FILES_MAX_AGE = 2 * 60000;
+
+// Whether the run's files are a fresh read in `c` (cachedRuns): not carried from an earlier
+// read of a machine that failed (carryRuns), its machine answered the last poll, and that poll
+// is recent.
+export function filesFresh(run, now = Date.now(), c = cache) {
+  return !run.stale && now - c.at < FILES_MAX_AGE && !(c.failed ?? []).includes(run.machine ?? null);
+}
+
 // The runs of machines that failed this read (`failed`: their names, null for this one), from
 // the last read, marked `stale: true`, so they still show, as "can't tell", instead of
 // vanishing; and their PR entries are kept, since refreshPrs forgets only runs not in the
@@ -406,7 +416,7 @@ export function loadRuns() {
     // read (`fresh`) are acted on below: nothing is done on a stale read.
     cache = { at: Date.now(), runs, decisions, errors, failed, pending: null, pendingAt: 0 };
     const ctx = facts();
-    observeRuns(runs, ctx, answered);
+    observeRuns(runs, ctx, answered, (r) => r.tasks.map((k) => shownStage(k, taskAgents(k, r, ctx))));
     for (const [on, sample] of samples) ingest(on, sample);
     recordRuns(fresh.filter((r) => !r.away && orchestratorState(r, ctx) !== "gone"), (r) => runTerminals(r, ctx), answered).catch(() => {});
     for (const r of fresh) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
@@ -502,8 +512,9 @@ export const PR_FIELDS = "number,title,state,isDraft,reviewDecision,reviews,revi
 const prBusy = new Map();
 const PR_STALE = 5 * 60000;
 
-// A PR's state → a theme tone; the harbor maps the same tones to its own colors.
-export const PR_TONE = { OPEN: "working", DRAFT: "dim", MERGED: "done", CLOSED: "blocked" };
+// A PR's state → a theme tone; the harbor maps the same tones to its own colors. An open PR is
+// muted: no colour means fine (see overview.js AMBER); what it waits on has a colour of its own.
+export const PR_TONE = { OPEN: "muted", DRAFT: "dim", MERGED: "done", CLOSED: "blocked" };
 const isOpen = (pr) => pr.state === "OPEN" || pr.state === "DRAFT";
 
 function checks(rollup) {
@@ -748,9 +759,12 @@ export function stats(runs, ctx) {
 // An item: {id, kind: "run"|"decision"|"attention", title, options [{label, text}],
 // recommended (index or null), why, evidence, risk, blocks, since (ms or null), run,
 // decision, answered}. `answered` is set while a message waits in the run's inbox.
-export function decisionQueue(runs, decisions, ctx) {
+// `fresh(run)`: whether the run's files are a fresh read (filesFresh); a question read
+// from a stale read is under Can't tell, as everywhere else, so not queued here either.
+export function decisionQueue(runs, decisions, ctx, fresh = filesFresh) {
   const items = [];
   for (const r of runs) {
+    if (!fresh(r)) continue;
     const orch = orchestratorState(r, ctx);
     // Over budget without an open question: its own item, answered through the inbox. With a
     // question.md that question is the item (the orchestrator asked it), never both.

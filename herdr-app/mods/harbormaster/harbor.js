@@ -12,7 +12,7 @@ import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, stateText, runName, withTi
 
 const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
 // PR_TONE's tones as signal-flag colors.
-const FLAG = { working: "#3f8fd2", dim: "#9aa1a8", done: "#8256d0", blocked: "#c24a3a" };
+const FLAG = { muted: "#3f8fd2", dim: "#9aa1a8", done: "#8256d0", blocked: "#c24a3a" };
 const SKY = 86;
 
 function bubble(text) {
