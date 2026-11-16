@@ -74,7 +74,9 @@ export function makeCopier({ exec, writeTextFile, home }) {
     if (st.code !== 0 || !Number.isFinite(size)) throw new Error(`cannot read ${src}${on ? ` on ${on}` : ""}`);
     if (size > MAX_COPY) return { state: "large", size };
     const folder = runCacheDir(home, run.machine, run.dir);
-    const key = hash(rel);
+    // Keyed by the file, not by how it was named: proof.md says "shared/proof/x.png" and the
+    // folder listing "x.png", and one file should be copied (over ssh, for another machine) once.
+    const key = hash(src.slice(run.dir.length + 1));
     const name = `${key}-${size}-${mtime}-${safe(rel.split("/").pop())}`;
     const out = { state: "ready", size, abs: `${folder}/${name}`, path: `${CACHE}/${safe(run.machine || "local")}/${hash(run.dir)}/${name}` };
     if (!on) {
