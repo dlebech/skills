@@ -169,6 +169,11 @@ so commands that ended between two polls are missed (`estimated` in the file). O
 While the app is closed nothing is sampled, so peaks then are missed. The cost, measured on this
 machine with about 290 processes: the snapshot adds about 10 ms of CPU to each 5-second poll (the whole
 script about 90 ms), reading it about 0.3 ms in the app, and each run's write a few ms.
+Harbormaster's own biggest cost was not the poll but motion: a smooth spinner or pulse (`spin`,
+`loop`) makes Herdr redraw the whole window about 30 times a second while it is drawn. So a working
+agent's spinner steps through four frames five times a second (`frames`), and blocked dots and active
+task segments hold still. Unchanged runs are not parsed again on each poll, and a reread of a run's
+timing that finds nothing new does not redraw the stats view.
 
 ## Where the time went
 
@@ -336,7 +341,7 @@ Parking leaves the run directory, worktrees, branches and PRs in place, and the 
 | `herdr-app/mods/harbormaster/attribute.js` | Which agent and task each terminal's CPU and memory count for, for the stats view and the history |
 | `herdr-app/mods/harbormaster/stats.js`, `statsdata.js` | The stats view, and its figures: open and past runs in one shape, the sums across runs, the live table's groups |
 | `herdr-app/mods/harbormaster/harbor.js` | The sea, the reefs, the captain's boat, the rail and the pane headers |
-| `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, spinner, chevrons. All original, CC0 like the rest of this repository |
+| `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, chevrons. All original, CC0 like the rest of this repository |
 | `herdr-app/layouts/harbormaster-sea.json` (+ `.svg` preview) | The sea layout. `harbormaster-main` is made by `install.sh` |
 | `herdr-app/install.sh` | Install or update |
 

@@ -76,6 +76,8 @@ function showStats(view, arg) {
   setShared(POPUP, { id, at: Date.now(), arg: key });
 }
 
+const sameItems = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+
 async function listen(view, cx) {
   for (;;) {
     const c = String(await nextCommand());
@@ -130,7 +132,9 @@ export default class Harbormaster extends View {
     const { runs, decisions, errors } = await loadRuns();
     // The CPU and memory badges change with every sample, so only what they show counts.
     const hot = props()?.role === "stats" ? sampleVersion() : hotSignature(facts());
-    const changed = JSON.stringify(runs) !== JSON.stringify(this.runs) || JSON.stringify(decisions) !== JSON.stringify(this.decisions)
+    // data.js hands back the same object for a run whose files did not change, so most polls
+    // compare a few references instead of serialising every run twice per copy.
+    const changed = !sameItems(runs, this.runs) || JSON.stringify(decisions) !== JSON.stringify(this.decisions)
       || errors.join() !== this.errors.join() || hot !== this.hot;
     this.hot = hot;
     this.runs = runs;
