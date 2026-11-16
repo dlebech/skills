@@ -2,6 +2,9 @@
 // proof.md's per-task results. No herdr imports, so it can be run under plain node. The
 // format is in skills/herdr-app-orchestrator/references/run-files.md.
 
+import { isImage, isVideo } from "./media.js";
+export { isImage, isVideo };
+
 // "T1 — the evidence", "T1: the evidence", "T2" → {tier: 1, text}; null when no T0..T3 leads it.
 export function proofOf(s) {
   const m = /^[*_`\s]*T([0-3])\b[*_`]*\s*(?:[—–:-]\s*)?(.*)$/is.exec(s ?? "");
@@ -51,12 +54,10 @@ export function parseProofMd(text) {
   return out;
 }
 
-const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
-export const isImage = (name) => IMAGE.test(name ?? "");
 
 // One task's proof, from plan.md's Proof line and proof.md's entry:
 // {id, name, tier (its own, else the planned one), planned, result ("pass" | "partial" | "fail" | null), why, checked, files, images, missing}.
-// `missing` is a T2+ task with a proof.md result but no image in its Files list. The tasks are plan.md's, then proof.md's others.
+// `media` is its images and videos, in order. `missing` is a T2+ task with a proof.md result but no image or video in its Files list. The tasks are plan.md's, then proof.md's others.
 export function proofTasks(tasks, md) {
   const seen = new Set();
   const row = (id, name, planned) => {
@@ -66,8 +67,8 @@ export function proofTasks(tasks, md) {
     seen.add(id);
     return {
       id, name, planned, tier, result: e?.result ?? null, why: e?.why ?? "", checked: e?.checked ?? "", files,
-      images: files.filter(isImage), scoped: Boolean(planned || e),
-      missing: Boolean(e?.result) && tier !== null && tier >= 2 && !files.some(isImage),
+      images: files.filter(isImage), media: files.filter((f) => isImage(f) || isVideo(f)), scoped: Boolean(planned || e),
+      missing: Boolean(e?.result) && tier !== null && tier >= 2 && !files.some((f) => isImage(f) || isVideo(f)),
     };
   };
   const rows = tasks.map((k) => row(k.id, k.name, k.proof));
