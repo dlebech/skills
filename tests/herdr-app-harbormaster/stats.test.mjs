@@ -1,10 +1,13 @@
 // Unit tests for the stats view's figures (herdr-app/mods/harbormaster/statsdata.js): reading
 // .history.jsonl, an open run's summary from timing and .resources.json, merging open and past
-// runs, the across-runs sums and the live table's groups.
+// runs, the across-runs sums, the live table's groups and the view's shape (sorting, folding,
+// the hottest agent, the legend's split, the recent runs).
 // Run: node --import ./loader.mjs --test stats.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseHistory, summaryOf, mergeRuns, acrossRuns, liveGroups, isRunProp, taskOfName, timingOrder, refreshTimings, cats, addCats, catTotal, tokenParts } from "../../herdr-app/mods/harbormaster/statsdata.js";
+import { parseHistory, summaryOf, mergeRuns, acrossRuns, liveGroups, isRunProp, taskOfName, timingOrder, refreshTimings, cats, addCats, catTotal, tokenParts,
+  liveTable, groupProcesses, hottest, hottestText, timeSplit, recentRuns, foldQuiet } from "../../herdr-app/mods/harbormaster/statsdata.js";
+import { tokenShort, tokenHeadline } from "../../herdr-app/mods/harbormaster/context.js";
 
 const line = (o) => JSON.stringify({ v: 1, folder: "/p/skills", branch: "b", type: "feat", started: "2026-11-01T10:00:00Z", wall: 100, critical_path: { model: 60, idle: 40 }, ...o });
 
@@ -217,4 +220,115 @@ test("refreshTimings: a second caller during a pass hears each run read too", as
     await Promise.all([p1, p2]);
     assert.deepEqual(seen, { a: ["m:/r/listen"], b: ["m:/r/listen"] });
   } finally { delete globalThis.__herdrExec; }
+});
+
+const term = (address, cpu, rssKb, programs = [], own = { cpu: 0, rssKb: 0 }) => ({ cpu, rssKb, own, programs });
+
+test("liveTable: hottest first, a lone orchestrator is the run line, runs under 1% fold", () => {
+  const snap = { terminals: {
+    o1: term("o1", 1, 300), o2: term("o2", 3, 500), w2: term("w2", 44, 900, [{ name: "browser", cpu: 40, rssKb: 800, count: 3 }]),
+    o3: term("o3", 0.4, 400), o4: term("o4", 0.2, 200),
+  } };
+  const groups = liveGroups([
+    { title: "Quiet one", root: "o1", name: "orchestrator", members: [] },
+    { title: "Sunday", root: "o2", name: "orchestrator", members: [{ address: "w2", name: "impl-x-ui" }] },
+    { title: "Idle A", root: "o3", name: "orchestrator", members: [] },
+    { title: "Idle B", root: "o4", name: "orchestrator", members: [] },
+  ], snap);
+  const { groups: shown, quiet } = liveTable(groups);
+  assert.deepEqual(shown.map((g) => [g.title, g.rows.map((r) => r.name), Boolean(g.solo)]), [
+    ["Sunday", ["impl-x-ui", "orchestrator"], false],
+    ["Quiet one", [], true],
+  ]);
+  assert.equal(shown[1].solo.address, "o1");
+  assert.equal(quiet.count, 2);
+  assert.deepEqual(quiet.names, ["Idle A", "Idle B"]);
+  assert.ok(Math.abs(quiet.cpu - 0.6) < 1e-9);
+  assert.equal(quiet.rssKb, 600);
+  assert.deepEqual(liveTable([]), { groups: [], quiet: null });
+});
+
+test("groupProcesses: repeated programs are one row with a count, quiet ones fold", () => {
+  const other = [
+    { machine: null, pid: 1, name: "firefox", program: "browser", cpu: 15, rssKb: 100 },
+    { machine: null, pid: 2, name: "herdr-app", program: "herdr-app", cpu: 47, rssKb: 900 },
+    { machine: null, pid: 3, name: "firefox", program: "browser", cpu: 6, rssKb: 200 },
+    { machine: null, pid: 4, name: "firefox", program: "browser", cpu: 5, rssKb: 300 },
+    { machine: "box", pid: 5, name: "firefox", program: "browser", cpu: 2, rssKb: 10 },
+    { machine: null, pid: 6, name: "sshd", program: "sshd", cpu: 0.2, rssKb: 5 },
+  ];
+  const { busy, quiet } = groupProcesses(other);
+  assert.deepEqual(busy.map((g) => [g.name, g.machine, g.count, g.cpu, g.rssKb]), [
+    ["herdr-app", null, 1, 47, 900], ["firefox", null, 3, 26, 600], ["firefox", "box", 1, 2, 10],
+  ]);
+  assert.deepEqual(busy[1].pids, [1, 3, 4]);
+  assert.deepEqual(quiet.names, ["sshd"]);
+  assert.deepEqual(foldQuiet([{ name: "a", cpu: 1, rssKb: 0 }]), { busy: [{ name: "a", cpu: 1, rssKb: 0 }], quiet: null });
+});
+
+test("hottest: the busiest agent in plain words, what its CPU mostly goes to", () => {
+  const row = (name, cpu, programs, own = 0) => ({ name, cpu, rssKb: 1, own: { cpu: own, rssKb: 1 }, programs });
+  const g = [{ rows: [row("orchestrator", 2, [], 2)] }, { rows: [row("impl-xweek-ui", 44, [{ name: "browser", cpu: 37 }, { name: "mcp server", cpu: 0.3 }], 7)] }];
+  assert.deepEqual(hottest(g), { name: "impl-xweek-ui", cpu: 44, rssKb: 1, mostly: "browser" });
+  assert.equal(hottestText(hottest(g)), "Hottest: impl-xweek-ui 44%, mostly browser");
+  // No program has half: the two biggest. The agent's own process is "the agent itself".
+  assert.equal(hottest([{ rows: [row("a", 30, [{ name: "lint", cpu: 12 }, { name: "browser", cpu: 8 }], 10)] }]).mostly, "lint and the agent itself");
+  assert.equal(hottestText(hottest([{ rows: [row("a", 90, [], 90)] }])), "Hottest: a 90%, mostly the agent itself");
+  assert.equal(hottest([{ rows: [row("a", 0.5, [], 0.5)] }]), null);
+  assert.equal(hottestText(null), "Nothing busy right now");
+});
+
+test("timeSplit: idle apart, biggest first, the top four of 1% or more shown, the rest hidden", () => {
+  const m = { idle: 600, model: 100, agent_wait: 500, test: 2, git: 50, lint: 80, review: 60, user_wait: 0 };
+  const s = timeSplit(m);
+  assert.equal(s.idle, 600);
+  assert.equal(s.working, 792);
+  assert.deepEqual(s.parts.map((p) => p.key), ["agent_wait", "model", "lint", "review", "git", "test"]);
+  assert.deepEqual(s.shown.map((p) => p.key), ["agent_wait", "model", "lint", "review"]);
+  assert.deepEqual(s.hidden.map((p) => p.key), ["git", "test"]);
+  // Under 1% is hidden even when there is room.
+  assert.deepEqual(timeSplit({ model: 1000, test: 5 }).shown.map((p) => p.key), ["model"]);
+  assert.deepEqual(timeSplit({ idle: 10 }), { working: 0, idle: 10, parts: [], shown: [], hidden: [] });
+  assert.equal(timeSplit(undefined).working, 0);
+});
+
+test("recentRuns: the newest five, the rest counted as older unless all are asked for", () => {
+  const runs = Array.from({ length: 8 }, (_, i) => ({ key: i }));
+  assert.deepEqual([recentRuns(runs).rows.length, recentRuns(runs).older], [5, 3]);
+  assert.deepEqual([recentRuns(runs, true).rows.length, recentRuns(runs, true).older], [8, 0]);
+  assert.deepEqual(recentRuns(runs.slice(0, 2)).older, 0);
+});
+
+test("tokenShort: the card's fresh-first headline, short", () => {
+  const tk = { total: 95_100_000, input: 100_000, output: 1_000_000, cache_write: 2_000_000, cache_read: 92_000_000 };
+  assert.equal(tokenHeadline(tk), "3.1M tok (+92M cached)");
+  assert.equal(tokenShort(tk), "3.1M +92M");
+  assert.equal(tokenShort({ total: 500, input: 200, output: 300, cache_read: 0, cache_write: 0 }), "<1k");
+  assert.equal(tokenShort({ total: 1_200_000, input: 0, output: 0, cache_read: 0, cache_write: 0 }), "1.2M");
+});
+
+test("liveTable: only runs fold into quiet runs; Not in a run stays its own line", () => {
+  const snap = { terminals: { o1: term("o1", 0.3, 100), o2: term("o2", 0.2, 100), loose: term("loose", 0.5, 200 * 1024), o3: term("o3", 5, 100) } };
+  const groups = liveGroups([
+    { title: "Road routes", root: "o1", name: "orchestrator", members: [] },
+    { title: "Diesel", root: "o2", name: "orchestrator", members: [] },
+    { title: "Busy", root: "o3", name: "orchestrator", members: [] },
+  ], snap, { loose: "t4db" });
+  const { groups: shown, quiet } = liveTable(groups);
+  assert.deepEqual(shown.map((g) => g.title), ["Busy", "Not in a run"]);
+  assert.deepEqual(quiet.names, ["Road routes", "Diesel"]);
+  assert.equal(quiet.count, 2);
+});
+
+test("hottest: a run's orchestrator is named with its run", () => {
+  const snap = { terminals: { o1: term("o1", 40, 100, [], { cpu: 40, rssKb: 100 }), w1: term("w1", 3, 100) } };
+  const groups = liveGroups([{ title: "Sunday match", root: "o1", name: "orchestrator", members: [{ address: "w1", name: "impl-x" }] }], snap);
+  assert.equal(hottestText(hottest(groups)), "Hottest: Sunday match orchestrator 40%, mostly the agent itself");
+  // The captain's root row is "captain" in the "Captain" crew: not "Captain captain".
+  const cap = liveGroups([{ title: "Captain", root: "o1", name: "captain", members: [] }], snap);
+  assert.equal(hottest(cap).name, "captain");
+  // A worker keeps its own name.
+  const w = liveGroups([{ title: "Sunday match", root: "o1", name: "orchestrator", members: [{ address: "w1", name: "impl-x" }] }],
+    { terminals: { o1: term("o1", 1, 1), w1: term("w1", 30, 1) } });
+  assert.equal(hottest(w).name, "impl-x");
 });
