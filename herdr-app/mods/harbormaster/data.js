@@ -69,7 +69,8 @@ export function runPhase(text) {
 const cells = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
 // "merged (9eefaf1); worktree removed" → "merged"; "**done** here" → "done"; "merged d3c8862d" → "merged".
 const stateWords = (s) => s.replace(/[*_`]/g, "").replace(/[(;,.].*$/, "").replace(/\s+[0-9a-f]{6,}\b.*$/i, "").trim().toLowerCase();
-const statusIn = (text) => /\bstatus:\s*([^\n]+)/i.exec(text)?.[1] ?? null;
+// The status text runs to the end of the line, or to a Proof: that follows it in a list item.
+const statusIn = (text) => /\bstatus:\s*((?:(?!\bproof:)[^\n])+)/i.exec(text)?.[1] ?? null;
 const DASH = /\s[—–-]\s+/;
 function tasksOf(plan) {
   const out = [];
@@ -99,7 +100,7 @@ function tasksOf(plan) {
       open = null;
       continue;
     }
-    const proofLine = last && /^\s*[-*]\s+proof:\s*(.*)$/i.exec(line);
+    const proofLine = last && /^\s*[-*]\s+[*_]*proof:?[*_]*\s*(.*)$/i.exec(line);
     if (proofLine) { last.proof = proofOf(proofLine[1]); continue; }
     if (line.trim().startsWith("|")) {
       const row = cells(line);

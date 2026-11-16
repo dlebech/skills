@@ -4,13 +4,13 @@
 
 // "T1 — the evidence", "T1: the evidence", "T2" → {tier: 1, text}; null when no T0..T3 leads it.
 export function proofOf(s) {
-  const m = /^[*_`\s]*T([0-3])\b[*_`]*\s*(?:[—–:-]\s*)?(.*)$/s.exec(s ?? "");
+  const m = /^[*_`\s]*T([0-3])\b[*_`]*\s*(?:[—–:-]\s*)?(.*)$/is.exec(s ?? "");
   return m ? { tier: Number(m[1]), text: m[2].replace(/[*_`]+$/, "").trim() } : null;
 }
 
 // plan.md's `Proof tier: T2` or `Proof tier: T2 (set by user)` → {tier, byUser}, else null.
 export function declaredTier(plan) {
-  const m = /^Proof tier:\s*T([0-3])\b(.*)$/im.exec(plan ?? "");
+  const m = /^[*_\s]*Proof tier:?[*_\s]*T([0-3])\b(.*)$/im.exec(plan ?? "");
   return m ? { tier: Number(m[1]), byUser: /set by user/i.test(m[2]) } : null;
 }
 

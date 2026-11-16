@@ -367,12 +367,15 @@ function proofSection(t, r) {
         .when(Boolean(res?.checked), (el) => el.child(div().text_size(11).text_color(t.dim).child(`Checked: ${res.checked}`))))
       .when(Boolean(res?.result), (el) => el.child(pill(t, res.result, RESULT_TONE[res.result]).tooltip(res.why || res.result)));
   };
+  // A run planned before proof lines existed: one quiet line, not a red row per task.
+  const none = !tier && !md && files.length === 0 && r.tasks.every((k) => !k.proof);
+  if (none) return section(t, title).child(div().px(2).text_size(11.5).text_color(t.dim).child("No proof planned"));
   return section(t, title, unscoped > 0 && `${unscoped} not scoped`)
     .children(r.tasks.map(row))
     .when(r.tasks.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child("No tasks planned yet")))
     .child(h_flex().flex_wrap().gap(6).px(2).pt(2).items_center()
       .when(Boolean(md), (el) => el.child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md")))
-      .when(files.length > 0, (el) => el.child(pathLink(t, r, `pf-dir-${r.key}`, "shared/proof", `shared/proof/ · ${plural(files.length, "file")}`)))
+      .when(files.length > 0, (el) => el.child(pathLink(t, r, `pf-dir-${r.key}`, "shared/proof", `shared/proof/ · ${files.length >= 40 ? "40+ files" : plural(files.length, "file")}`)))
       .when(!md && files.length === 0, (el) => el.child(div().text_size(11).text_color(t.dim).child("No proof captured yet"))));
 }
 
@@ -425,7 +428,7 @@ function runDetail(view, t, r, ctx) {
       .children(related.map((p, i) => prDetail(t, p, i, true)))))
     .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
-    .when(r.tasks.length > 0 || r.proof.tier, (el) => el.child(proofSection(t, r)))
+    .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(t, r)))
     .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
       .children(workers.map((w) => workerRow(t, w, ctx, workOf.get(w.address), w.parent !== r.terminal)))))
     .child(actionRow(view, t, r, orch, closed, counts));
