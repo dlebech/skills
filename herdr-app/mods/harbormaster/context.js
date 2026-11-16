@@ -4,6 +4,10 @@
 //                ~/.claude/projects/*/<session>.jsonl has each call's usage
 //   pi           the newest ~/.pi/agent/sessions/--<cwd>--/*.jsonl (by folder, so a second
 //                pi in the same folder can be mistaken for it)
+//   opencode     the newest assistant message of any session in the terminal's folder in
+//                ~/.local/share/opencode/opencode.db (read-only, with python3; a second
+//                opencode in the same folder can be mistaken for it). The terminal's app is
+//                taken to be named opencode*: check `hc get` on one if it does not show.
 // Other programs show nothing until a case is added below.
 
 import { exec } from "herdr";
@@ -37,6 +41,38 @@ for a; do
       tail -c 4000000 "$f" | grep -F '"usage"' | jq -rR --arg a "$a" 'fromjson? | .message
         | select(.role == "assistant" and (.usage.totalTokens // 0) > 0)
         | [$a, .usage.totalTokens, (.model // "")] | @tsv' 2>/dev/null | tail -1 ;;
+    opencode*)
+      python3 - "$a" "$cwd" 2>/dev/null <<'PY'
+import json, os, sqlite3, sys
+a, cwd = sys.argv[1:3]
+path = os.path.join(os.environ.get("OPENCODE_DATA_DIR") or os.path.expanduser("~/.local/share/opencode"), "opencode.db")
+if not os.path.exists(path):
+    sys.exit()
+db = sqlite3.connect("file:" + path + "?mode=ro", uri=True, timeout=5)
+tables = {r[0] for r in db.execute("select name from sqlite_master where type = 'table'")}
+best = None
+# Both table generations: session + message, session_v2 + session_message.
+for s, m, where in (("session", "message", "data like '%\"assistant\"%'"), ("session_v2", "session_message", "type = 'assistant'")):
+    if s not in tables or m not in tables:
+        continue
+    q = "select time_created, data from %s where %s and session_id in (select id from %s where directory = ?)" % (m, where, s)
+    for created, data in db.execute(q, (cwd,)):
+        try:
+            d = json.loads(data)
+        except ValueError:
+            continue
+        t = d.get("tokens")
+        if d.get("role", "assistant") != "assistant" or not isinstance(t, dict):
+            continue
+        c = t.get("cache") or {}
+        n = sum(int(x or 0) for x in (t.get("input"), t.get("output"), t.get("reasoning"), c.get("read"), c.get("write")))
+        mod = d.get("modelID") or (d.get("model") or {}).get("id") or ""
+        if n > 0 and (best is None or created > best[0]):
+            best = (created, n, mod)
+if best:
+    print("%s\t%d\t%s" % (a, best[1], best[2]))
+PY
+      ;;
   esac
 done
 `;

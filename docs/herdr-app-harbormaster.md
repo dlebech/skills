@@ -2,7 +2,7 @@
 
 Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-captain` and its `herdr-app-orchestrator` runs are doing, so you don't have to read the Agents list row by row. Everything in it is written from scratch: it uses Herdr's mod API and leaves Herdr's own mods and layouts unchanged.
 
-- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list. The captain's and each orchestrator's card shows how full that agent's context is (`144k`), as of its last turn, read from its own session file: Claude Code and pi for now, nothing for other programs.
+- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list. The captain's and each orchestrator's card shows how full that agent's context is (`144k`), as of its last turn, read from its own session file: Claude Code, pi and opencode (needs `python3`), nothing for other programs.
   - The captain's card says whether its watcher is running and how many runs it watches, running and finished, and turns red with how many decisions it is waiting on you for. Clicking it focuses the captain and opens the runs overview beside it, if it isn't open already.
   - Each orchestrator's card is named for what the run is about, with a tag for its type (`feat`, `fix`, `rev` or `expl`): the issue or PR number from its branch and the short topic its orchestrator published (`feat` `#985 · Road routes`, `rev` `PR 368 · Triage decision`), with the full branch in the tooltip. Run cards and the harbor's signs show the type the same way. A run with no topic yet, such as one started before orchestrators published one, shows its branch. The name gets the card's whole first line. The line below starts with the type tag and the number of 🦀 workers, then its progress, its status when it isn't running, and its PRs, so a narrow sidebar cuts the progress short before the tag and workers. A run that needs you turns red and says what for. Finished ones come last, with a green edge and their PR numbers. Clicking it focuses the orchestrator and opens that run's card beside it (see below), if it isn't open already. Clicking a card never closes its pane; close it like any pane.
   - Each Adrift line shows the agent's space and its name as Herdr's own Agents list gives it: the tab's name when someone named it, otherwise the agent's own title (Claude Code sets one from its session), never a bare tab number like "1". Clicking it focuses the agent.
@@ -106,10 +106,10 @@ parse is shown as its raw text. Formats: [run-files.md](../skills/herdr-app-orch
 How many tokens a run has used, across its orchestrator and every agent it ran, counted by
 `skills/herdr-app-orchestrator/scripts/tokens.sh` into the run's `status.json` (`tokens`). The
 orchestrator does not run it itself: `set-status.sh` runs it on every publish, and later runs read only
-what the session files gained since, so it stays cheap. It reads Claude Code's and pi's own session
+what the session files gained since, so it stays cheap. It reads Claude Code's, pi's and opencode's own session
 files on the orchestrator's computer, from the run's start on, including those of agents already
 killed and worktrees already removed, those of an orchestrator resumed in a new terminal (best effort
-for a pi orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
+for a pi or opencode orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
 down. A run's card shows the total in its
 meta line (`26M tok`); the run pane has a **Tokens** section with the split by kind (output, cache
 read, cache write, input; exact counts on hover) and each agent's share as a bar, the orchestrator
