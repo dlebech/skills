@@ -2,7 +2,7 @@
 // (Needs you, Working, Waiting on others, Can't tell, Done), its place in it, the words that lead its detail line,
 // their colour, and its hover. Pure, so the tests drive it; overview.js crew() draws it.
 
-import { byWait, nextStepText, stepText, ageText, reviewWaitText } from "./attention.js";
+import { byWait, nextStepText, stepText, ageText, reviewWaitText, FINISHED_LABEL } from "./attention.js";
 
 // The groups, in the order the Crew shows them: what you must act on, what is at work, what
 // waits on someone else (a reviewer), what can't be read (grey, so it is never mixed into
@@ -80,10 +80,12 @@ export function rowTip(a, now = Date.now()) {
 }
 
 // A run card's pill when it should say what comes next, as the Crew does: {label, tone} for
-// a run with a next-step label that is in Needs you (red) or Done (done's colour), or that
-// is finished (`finished`: its phase), in a neutral colour, since a label beats "Finished";
+// a run with a next-step label that is in Needs you (red) or Done (done's colour), a finished
+// run with no PR (finished — read and close, red), or that is finished (`finished`: its phase), in a neutral colour, since a label beats "Finished";
 // else null (the card keeps its phase: running, parked, closed…).
 export function badgeOf(a, finished = false) {
+  // A finished run with no PR has no PR label: its own reason is the pill.
+  if (!a?.next && a?.group === "needs" && a.reasons.some((r) => r.key === "finished")) return { label: FINISHED_LABEL, tone: "blocked" };
   if (!a?.next) return null;
   const tone = a.group === "needs" ? "blocked" : a.group === "done" ? "done" : finished ? "muted" : null;
   return tone ? { label: nextStepText(a.next), tone } : null;
@@ -93,11 +95,11 @@ export function badgeOf(a, finished = false) {
 export const needLine = (a) => (a?.group === "needs" ? a.reasons.map((r) => r.text).join(" · ") || null : null);
 
 // The runs Close all merged closes, from the Done group's rows ({r, a}): runs with a directory,
-// not already parked or closed, with no open question, and Done because every PR is merged or
-// closed (a label; a run Done because it is closed has none). `busy`: run keys an action is
-// already under way on, left to it.
+// not already parked or closed, finished (closing a running run would end it mid-run), with no
+// open question, and Done because every PR is merged or closed (a label; a run Done because it
+// is closed has none). `busy`: run keys an action is already under way on, left to it.
 export function closableDone(rows, busy = {}) {
-  return rows.filter((x) => x.a?.group === "done" && x.a.next && x.r?.dir && !x.r.away && !x.r.question && !busy[x.r.key]).map((x) => x.r);
+  return rows.filter((x) => x.a?.group === "done" && x.a.next && x.r?.dir && x.r.phase === "finished" && !x.r.away && !x.r.question && !busy[x.r.key]).map((x) => x.r);
 }
 
 // The line an empty group shows in its place, or null: only a group with an `empty` text, and

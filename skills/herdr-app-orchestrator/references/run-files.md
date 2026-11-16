@@ -206,7 +206,7 @@ or an ask what is blocking (below).
 
 A run Harbormaster sees as stalled (no new progress line, no change in its agents and no new
 terminal output for 30 minutes, or CI past twice the repository's usual time) offers **Ask what's
-blocking** on its Crew row and pane. It writes a message (source `harbormaster-blocking`, woken like
+blocking** on its Crew row, card and pane. It writes a message (source `harbormaster-blocking`, woken like
 an answer) whose first line starts `what is blocking?`:
 
 ```

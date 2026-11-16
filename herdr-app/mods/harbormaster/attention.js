@@ -59,6 +59,8 @@ export const flowSetting = (flow, fallback) => (flow === fallback ? null : flow)
 // The labels, most urgent first: what the user must act on before what they wait on.
 // Changes requested first (work is blocked on a fix), then the merges one click away, then
 // the review the user has yet to ask for, then the reviewer they wait on, then cleanup.
+// What a finished run with no PR shows in Needs you.
+export const FINISHED_LABEL = "finished — read and close";
 export const LABELS = ["changes requested", "approved — merge", "review proof → merge", "request review", "review from", "merged — close run"];
 // The labels that put a run in Needs you (when nothing is still working on it).
 const NEEDS_LABELS = new Set(["changes requested", "approved — merge", "review proof → merge", "request review"]);
@@ -237,14 +239,16 @@ export const stepText = (step, now = Date.now()) => (step?.text ? (step.since ? 
 // its step, its agents or their terminal output for STALL_MS (lastActivity, the latest of
 // them; null when not known yet, which never stalls). CI: a CI run on an open PR past
 // CI_STALL_FACTOR times the repository's usual CI time (ciUsual, ms; null: no baseline, no
-// CI stall). While CI runs and the repository has a baseline, only the CI rule judges: a
-// quiet wait on CI inside its usual time is not a stall. Only a running run stalls: a finished, waiting, blocked, parked or closed one,
-// or one with an open question, already shows why it waits.
+// CI stall). While CI runs, only the CI rule judges: a quiet wait on CI inside its usual time,
+// or with no usual time to judge it by, is not a stall. Only a running run with its
+// orchestrator there stalls: a finished, waiting, blocked, parked or closed one, one with an
+// open question, or one whose orchestrator is gone (assess says so) already shows why it
+// waits. A wait on a reviewer is not a stall either; assess drops a quiet stall then.
 export function stalled(run, { now, lastActivity = null, prs = [], ciUsual = null, orch = null } = {}) {
-  if (!run || run.away || run.phase === "finished" || needsYou(run, orch)) return false;
+  if (!run || run.away || run.phase === "finished" || orch === "gone" || needsYou(run, orch)) return false;
   const ci = ciState(prs);
-  if (ci.state === "running" && ciUsual) {
-    return ci.startedAt && now - ci.startedAt > CI_STALL_FACTOR * ciUsual ? { quietMs: now - ci.startedAt, by: "ci" } : false;
+  if (ci.state === "running") {
+    return ciUsual && ci.startedAt && now - ci.startedAt > CI_STALL_FACTOR * ciUsual ? { quietMs: now - ci.startedAt, by: "ci" } : false;
   }
   if (lastActivity && now - lastActivity >= STALL_MS) return { quietMs: now - lastActivity, by: "quiet" };
   return false;
@@ -264,14 +268,17 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 //   stall     stalled() of the run
 //   stages, since   for stepOf
 //   filesOk   false when the run's files are a stale read (its machine did not answer)
+//   closed    data.js isClosed: a finished run whose tab the user closed waits on nothing
 //   now
 // Returns {group: "needs" | "working" | "waiting" | "cant" | "done", cantTell, why, reasons: [{key, text, since}],
 // next (nextStep), step (stepOf), stall, waitSince (ms: the longest-waiting reason's anchor,
-// for sorting; oldest first)}. Reason keys: question, stalled, red-ci, and the next-step
-// labels in Needs you; working, ci-running, idle in Working (idle: briefly quiet, not
+// for sorting; oldest first)}. Reason keys: question, gone (an unfinished run whose
+// orchestrator is gone or lost: Resume is what it needs), stalled, red-ci, and the next-step
+// labels in Needs you, and finished (a finished run with no PR: its report is read and the
+// run closed); working, ci-running, idle in Working (idle: briefly quiet, not
 // stalled yet); waiting-for in Waiting on others; cant-tell in Can't tell. A Needs you run
 // may still have cantTell: a question read from its files, its PRs unreadable.
-export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, filesOk = true, now = Date.now() } = {}) {
+export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, filesOk = true, closed = false, now = Date.now() } = {}) {
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
   const step = stepOf(run, { prs, stages, since });
@@ -293,6 +300,9 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   if (run.away?.how === "closed") return out("done", {});
   const reasons = [];
   if (needsYou(run, orch)) reasons.push({ key: "question", text: needReason(run, orch), since: run.askedAt ?? run.updated ?? null });
+  // Nobody carries an unfinished run on once its orchestrator is gone: a live fact, so it
+  // counts whatever the PR read says. A finished one waits on its PRs as before.
+  if (orch === "gone" && run.phase !== "finished") reasons.push({ key: "gone", text: "orchestrator gone", since: run.updated ?? null });
   if (!pr?.readable) {
     // The question was read from its file, so it still counts; nothing is said on PR grounds.
     if (reasons.length) return out("needs", { reasons, cantTell: true, why: pr?.why ?? null });
@@ -300,10 +310,14 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   }
   const next = nextStep(prs, flow);
   base.next = next;
-  // Done: every PR merged or closed, and nothing still at work or asking.
-  if (prs.length && prs.every(isShut) && !working && !reasons.length) return out("done", { next });
-  if (stall) reasons.push({ key: "stalled", text: quietText(stall), since: now - stall.quietMs });
+  // Done: a finished run with every PR merged or closed, and nothing still at work or asking.
+  // A running run between PRs is not done, however idle it looks.
+  if (run.phase === "finished" && prs.length && prs.every(isShut) && !working && !reasons.length) return out("done", { next });
   const ci = ciState(prs);
+  // Waiting on a reviewer is a wait on a person, not a stall (only CI past its usual time
+  // stalls while CI runs).
+  if (stall && stall.by !== "ci" && (next?.label === "review from" || ci.state === "running")) stall = false;
+  if (stall) reasons.push({ key: "stalled", text: quietText(stall), since: now - stall.quietMs });
   // PR grounds only once nothing works on the run any more and CI is not running: while it
   // works, it is the run's turn, not the user's.
   if (!working && ci.state !== "running") {
@@ -314,6 +328,9 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
       reasons.push({ key: next.label, text: nextStepText(next), since: reviewed ?? settled });
     }
   }
+  // A finished run with no PR (a review or an exploration) leaves a report: reading it and
+  // closing the run is the user's to do. Not Done: Done is merged PRs, which it has none of.
+  if (run.phase === "finished" && !prs.length && !working && !closed) reasons.push({ key: "finished", text: FINISHED_LABEL, since: run.updated ?? null });
   if (reasons.length) return out("needs", { reasons, next, stall });
   const why = working ? { key: "working", text: "agents working" }
     : ci.state === "running" ? { key: "ci-running", text: "CI running" }

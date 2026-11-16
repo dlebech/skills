@@ -189,6 +189,16 @@ test("Close all merged takes only Done runs whose PRs are all merged or closed, 
   assert.deepEqual(closableDone(rows, { b: { label: "Closing…" } }).map((r) => r.key), ["a"]);
   // Not Done, or Done only because it is closed: never.
   assert.deepEqual(closableDone([{ r: run(), a: at(run(), { pr: read([pr()]) }) }]), []);
+  // A finished run with no PR is in Needs you, not Done: never closed by it.
+  const report = run({ key: "f", phase: "finished", prs: [] });
+  const ra = at(report, { pr: read([]) });
+  assert.equal(ra.group, "needs");
+  assert.deepEqual(closableDone([{ r: report, a: ra }]), []);
+  assert.deepEqual(rowLead(ra, now), { lead: "finished — read and close", rest: null, tone: "blocked" });
+  assert.deepEqual(badgeOf(ra, true), { label: "finished — read and close", tone: "blocked" });
+  // A running run is never closed by it, even if something hands it a Done result.
+  assert.deepEqual(closableDone([{ r: run({ key: "e" }), a: rows[0].a }]), []);
+  assert.notEqual(at(run(), { pr: read([pr({ state: "MERGED" })]) }).group, "done");
 });
 
 test("an empty Needs you says nothing is for you, only while there are orchestrators", () => {

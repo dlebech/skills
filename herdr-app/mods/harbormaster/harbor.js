@@ -6,7 +6,8 @@ import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, panes, run, setAgentOrder } from "herdr";
 import { stats, taskTone, taskCounts, prsOf, PR_TONE, isParked, resumeRun } from "./data.js";
-import { facts, orchestratorState, agentStatus, workersOf, captainOf, needsYou, needReason, adrift, agentNames, focusAgent, openUrl } from "./live.js";
+import { facts, orchestratorState, agentStatus, workersOf, captainOf, adrift, agentNames, focusAgent, openUrl } from "./live.js";
+import { needsYouNow, needWhy, attentionOf } from "./attend.js";
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, stateText, runName, withTip } from "./ui.js";
 
 const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
@@ -58,8 +59,10 @@ function resumeAsk(view, r) {
 
 function reef(view, r, ctx, x, y, w, h, n) {
   const orch = orchestratorState(r, ctx);
-  const need = needsYou(r, orch);
-  const reason = needReason(r, orch);
+  // Needs you by the overview's and the Crew's rule (attend.js), so the harbor agrees with them.
+  const att = attentionOf(r, ctx);
+  const need = needsYouNow(r, ctx, att);
+  const reason = needWhy(r, ctx, att);
   // Reefs are drawn for open runs and parked ones. A finished one here is docked: its
   // work is done and its PR is up, so the reef goes quiet. A parked one is set aside
   // for later: dimmed, with no octopus, and a click offers to resume it, as for a run
@@ -141,7 +144,7 @@ export function harbor(view) {
   const s = stats(view.runs, ctx);
   // Every open run: those still working, then finished ones until their tab is closed,
   // then parked ones, set aside for later.
-  const runs = [...s.shown, ...s.parked], need = s.need;
+  const runs = [...s.shown, ...s.parked], need = runs.filter((r) => needsYouNow(r, ctx));
   const cap = captainOf(ctx);
   // What the captain calls out: its own open decisions, then each run that needs you.
   const calls = [...(view.decisions?.length ? [plural(view.decisions.length, "decision")] : []), ...need.map((r) => r.branch)];
