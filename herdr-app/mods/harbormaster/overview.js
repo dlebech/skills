@@ -515,7 +515,7 @@ function cardHeader(view, t, r, f, meta) {
     .map(withContext(view, t, `run-${r.key}`, r.terminal))
     .child(runPin(t, `pin-${r.key}`, r, f.orch))
     .child(statusDot(t, f.dot))
-    .when(Boolean(f.parkedNext), (el) => el.child(div().id(`parked-next-${r.key}`).flex_shrink().min_w(0).truncate().text_size(11).text_color(t.dim)
+    .when(Boolean(f.parkedNext), (el) => el.child(div().id(`parked-next-${r.key}`).min_w(0).truncate().text_size(11).text_color(t.dim)
       .tooltip("What its pull requests wait on, and how long it has been parked. Parked runs stay out of Needs you.").child(f.parkedNext)))
     .child(f.badge.tip ? div().id(`badge-${r.key}`).flex_none().tooltip(f.badge.tip).child(pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need))
       : pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need));
