@@ -13,6 +13,7 @@ import { props, theme } from "herdr";
 import { loadRuns, cachedRuns, refreshPrs, isClosed } from "./data.js";
 import { facts, crewAddresses } from "./live.js";
 import { loadContexts } from "./context.js";
+import { hotSignature } from "./resources.js";
 import { cards, crew, runPane, submitReply } from "./overview.js";
 import { harbor, rail, paneHeader } from "./harbor.js";
 
@@ -44,8 +45,11 @@ export default class Harbormaster extends View {
   // Reads the runs and the captain's decisions again; redraws when they changed.
   async load(cx) {
     const { runs, decisions, errors } = await loadRuns();
+    // The CPU and memory badges change with every sample, so only what they show counts.
+    const hot = hotSignature(facts());
     const changed = JSON.stringify(runs) !== JSON.stringify(this.runs) || JSON.stringify(decisions) !== JSON.stringify(this.decisions)
-      || errors.join() !== this.errors.join();
+      || errors.join() !== this.errors.join() || hot !== this.hot;
+    this.hot = hot;
     this.runs = runs;
     this.decisions = decisions;
     this.errors = errors;

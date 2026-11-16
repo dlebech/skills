@@ -6,6 +6,7 @@ import { stats, decisionQueue, answerRun, compactRun, isCompact, isBudgetQuestio
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag } from "./ui.js";
 import { tokenText } from "./context.js";
+import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
 import { decidedText } from "./decided.js";
 import { oneLine } from "./question.js";
 
@@ -35,6 +36,19 @@ const withContext = (view, t, id, address, run = null) => (el) => {
   return el.child(div().id(`${id}-ctx`).flex_none().text_size(10.5).text_color(t.dim).child(tokenText(c.tokens))
     .tooltip(`Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`
       + (run?.tokens ? `\nRun total: ${run.tokens.total.toLocaleString("en")} tokens, all its agents` : "")));
+};
+
+// A small "85% · 2.1G" badge for an agent (or an orchestrator and its agents) above
+// resources.js's HOT limits, so a busy machine can be explained at a glance; nothing otherwise.
+// The tooltip names what uses it: the agent itself and its busiest programs.
+const withUsage = (t, id, u, whose) => (el) => {
+  const text = hotText(u);
+  if (!text) return el;
+  const progs = (u.programs ?? []).slice(0, 4).map((g) => `${g.name}: ${Math.round(g.cpu)}% · ${memText(g.rssKb)}`);
+  const tip = [`${whose}: ${Math.round(u.cpu)}% CPU (100% is one core), ${memText(u.rssKb)} memory`,
+    u.own ? `the agent itself: ${Math.round(u.own.cpu)}% · ${memText(u.own.rssKb)}` : null, ...progs].filter(Boolean).join("\n");
+  return el.child(div().id(`${id}-use`).flex_none().px(5).rounded(4).text_size(10).font_semibold()
+    .bg(t.working + "22").text_color(t.working).tooltip(tip).child(text));
 };
 
 function statusDot(t, status) {
@@ -476,6 +490,7 @@ function workerRow(t, w, ctx, work, nested) {
     .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim)
       .child(work ? [work.task.id, work.task.name].filter(Boolean).join(" ") : ""))
     .when(Boolean(color), (el) => el.child(div().flex_none().text_size(11).text_color(color).child(STAGE[work.stage].label)))
+    .map(withUsage(t, `wk-${w.address}`, liveUsage(w.address), "This agent and its commands"))
     .child(statusDot(t, status));
 }
 
@@ -875,7 +890,7 @@ export function crew(view, t) {
     .sort((a, b) => (a.state === "finished") - (b.state === "finished"));
   // The focused agent, or the crew agent beside a focused Harbormaster pane.
   const current = currentAgent(ctx, [cap.terminal?.address, ...orchestrators.map((o) => o.term.address)].filter(Boolean));
-  const row = ({ id, emoji, type = null, title, tip = null, detail, tone, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
+  const row = ({ id, emoji, type = null, title, tip = null, detail, tone, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null, usage = null, whose = "" }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
     .rounded(7).bg(address === current ? edge + "33" : edge + "14").cursor_pointer().hover((st) => st.bg(address === current ? edge + "40" : edge + "26"))
     .when(address === current, (el) => el.border(1).border_color(edge + "aa"))
     .on_click(open)
@@ -890,6 +905,7 @@ export function crew(view, t) {
         .when(crabs > 0, (el) => el.child(h_flex().flex_none().gap(3).items_center().text_size(11).text_color(t.muted)
           .child(div().text_size(11).child(CRAB)).child(String(crabs))))
         .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail))))
+    .map(withUsage(t, id, usage, whose))
     .map(withContext(view, t, id, address, run))
     .child(statusDot(t, status));
   const rows = [];
@@ -903,6 +919,7 @@ export function crew(view, t) {
       open: () => focusWithPane(cap.terminal.address),
       detail: [asks ? `asks you: ${plural(asks, "decision")}` : null, cap.watching ? `on watch · ${watched}` : "not watching runs"].filter(Boolean).join(" · "),
       tone: asks || !cap.watching ? "blocked" : "muted", status: agentStatus(cap.terminal, ctx), address: cap.terminal.address, edge: t.accent,
+      usage: liveUsage(cap.terminal.address), whose: "The captain and its commands",
     }));
   }
   for (const { term, r, state } of orchestrators) {
@@ -915,7 +932,8 @@ export function crew(view, t) {
     const prs = r ? prsOf(r) : null;
     const prText = prs?.length ? prs.map((p) => (p.number ? `PR #${p.number}` : "PR")).join(", ")
       : labels["run.prs"] ? plural(String(labels["run.prs"]).split(/[\s,]+/).filter(Boolean).length, "PR") : null;
-    const workers = workersOf(term.address, ctx).length;
+    const crewOf = workersOf(term.address, ctx);
+    const workers = crewOf.length;
     const detail = (need ? [`needs you: ${reason}`]
       : state === "finished" ? ["finished", prText]
       : [state !== "running" ? (PHASE[state] ?? PHASE.unknown).label.toLowerCase() : null, labels.progress ?? r?.progress, prText]
@@ -926,6 +944,7 @@ export function crew(view, t) {
       type: labels["run.type"] || r?.type || null,
       ...runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic),
       tone: need ? "blocked" : "muted", status, address: term.address, crabs: state === "finished" ? 0 : workers, run: r,
+      usage: treeUsage([term.address, ...crewOf.map((w) => w.address)]), whose: "The orchestrator, its agents and their commands",
       // Clicking a run's orchestrator also opens that run's card beside it, while it's there.
       open: () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(term.address, runProps(r)) : focusAgent(term.address)),
       edge: (need ? t.blocked : state === "finished" ? t.done : t.working) ?? t.border,
@@ -939,6 +958,7 @@ export function crew(view, t) {
     .on_click(() => focusAgent(a.address))
     .child(programIcon(a.program, 13, t.muted))
     .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(`${a.space_name} · ${names[i]}`))
+    .map(withUsage(t, `adrift-${a.address}`, liveUsage(a.address), "This agent and its commands"))
     .child(statusDot(t, a.status));
   return v_flex().id("crew").size_full().min_h(0).bg(t.chrome).text_size(12.5)
     .child(div().flex_none().px(12).pt(8).pb(4).text_size(11.5).font_semibold().text_color(t.foreground).child("Crew"))
