@@ -2,7 +2,7 @@
 
 import { div, svg, image } from "gpui-kit";
 import { settings } from "herdr";
-import { autonomyTip, typeTip } from "./levels.js";
+import { typeTip } from "./levels.js";
 
 // Token bars, here and in the stats view: fresh tokens (input, output, cache writes) in the accent,
 // cache reads green in every theme: the theme's own "done" colour is blue in some, which made both
@@ -46,10 +46,6 @@ export function runName(branch, topic) {
   const ref = pr ? `PR ${pr}` : issue ? `#${issue}` : null;
   return { title: ref ? `${ref} · ${topic}` : topic, tip: branch ?? null };
 }
-
-// A run's autonomy (set-status.sh --autonomy), "L1", as a small tag; its hover defines the level.
-export const autonomyTag = (t, id, level) => div().id(id).flex_none().text_size(10).font_semibold().px(5).rounded(4)
-  .bg(t.raised).text_color(level === "L0" ? t.dim : t.muted).tooltip(autonomyTip(level)).child(level);
 
 // A run's type (set-status.sh --type) as a small tag before its name: what kind of
 // run it is, so a review reads apart from a feature at a glance. With an `id`, it says so on hover.

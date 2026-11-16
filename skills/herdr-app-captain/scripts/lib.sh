@@ -91,6 +91,16 @@ unhandled_messages() {
   done
 }
 
+# answer_messages <run-dir>: the unhandled inbox messages that may answer a question, one
+# path per line: all but level requests ("set autonomy to L2", "set proof tier to T3" as
+# their first line, from Harbormaster's level tags; run-files.md), which answer nothing.
+answer_messages() {
+  local f
+  unhandled_messages "$1" | while IFS= read -r f; do
+    head -n 1 "$f" | grep -qE '^set (autonomy|proof tier) to ' || echo "$f"
+  done
+}
+
 # run_marker <run-dir>: "closed" or "parked" when the user put the run away (a
 # closed marker wins), else nothing.
 run_marker() {

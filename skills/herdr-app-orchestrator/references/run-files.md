@@ -139,6 +139,24 @@ click an option or Reply; the captain relays the same way. The orchestrator read
 message, renames it `.handled`, deletes `question.md` and carries on. While `question.md` is still there and
 a message is unhandled, Harbormaster shows "answered, waiting for the orchestrator".
 
+### Changing a level
+
+Hovering a run's autonomy (`L1`) or proof tier (`T2`) tag in Harbormaster lists every level;
+clicking another writes a message whose first line asks for it, then one line on what it implies:
+
+```
+set proof tier to T3
+Asked from Harbormaster (was T2): every task is proved with …, done tasks included.
+```
+
+(`set autonomy to L0|L1|L2`, or `set proof tier to T0|T1|T2|T3`; source `harbormaster-level`, woken
+like an answer). Harbormaster never writes `status.json` or `plan.md` itself. The orchestrator
+applies it, `set-status.sh --autonomy <level>` or the plan's `Proof tier: T<n> (set by user)`, logs
+a `- [user]` line in `decisions.md`, renames the message `.handled` and acts on it: a higher tier on
+a finished run means proving its done tasks to the new tier, which sets the run back to running.
+Until `status.json` or `plan.md` shows the level, while the message is unhandled, the tag reads
+`T3 requested…`. A level request does not count as an answer to an open `question.md`.
+
 An orchestrator that is gone or lost is never woken (its terminal is gone, or only a shell, which would run the wake-up as a command): the message waits, and Harbormaster says so ("waits in its inbox until the run is resumed"). The resumed orchestrator reads waiting messages in name order, so an answer is not lost.
 
 ## Autonomy and decisions.md

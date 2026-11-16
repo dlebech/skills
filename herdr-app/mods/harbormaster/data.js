@@ -7,13 +7,14 @@
 // skills/herdr-app-orchestrator/references/run-files.md. In short, per run, under
 // <root>/<folder>/<branch>/: orchestrator.json, plan.md, status.json (with the token
 // totals tokens.sh counts into it; this mod never reads session files for them), question.md,
-// inbox/*.message (written here on an answer or Close), parked and closed markers;
+// inbox/*.message (written here on an answer, Close or a level request from a tag), parked and closed markers;
 // and <root>/.captain-decisions.json for the captain's open decisions. The same poll takes a
 // process snapshot for CPU and memory (resources.js), kept per run in .resources.json.
 
 import { exec, appHome, machines, spaces, shared, setShared, run as command } from "herdr";
 import { parseQuestion, answerMessage } from "./question.js";
 import { parseDecidedLines } from "./decided.js";
+import { levelRequest, pendingLevels } from "./levels.js";
 import { tokenText } from "./context.js";
 import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd } from "./proof.js";
@@ -40,12 +41,17 @@ const SCRIPT = [
   '  [ -e "$d/question.md" ] && { stat -c %Y "$d/question.md" 2>/dev/null || stat -f %m "$d/question.md" 2>/dev/null; }; printf \'\\037\'',
   '  [ -e "$d/parked" ] && { printf +; head -c 400 "$d/parked"; }; printf \'\\037\'',
   '  [ -e "$d/closed" ] && { printf +; head -c 400 "$d/closed"; }; printf \'\\037\'',
-  '  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && n=$((n+1)); done; printf "%s\\037" "$n"',
+  // Unhandled messages, but for level requests (below), which the tags show instead: one must not
+  // make a queued question read as answered.
+  '  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && ! head -n 1 "$m" | grep -qE "^set (autonomy|proof tier) to " && n=$((n+1)); done; printf "%s\\037" "$n"',
   // proof.md (a "+" before it when there is one, "!" when it was cut at 64 kB), then the names of the files in shared/proof/, capped.
   '  [ -e "$d/proof.md" ] && { [ "$(wc -c < "$d/proof.md")" -gt 64000 ] && printf \'!\' || printf +; head -c 64000 "$d/proof.md"; }; printf \'\\037\'',
   '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
   // decisions.md: the last 60 lines of its own decisions and the user's, capped.
   '  grep -a -E "^- \\[(decided|user)\\] " "$d/decisions.md" 2>/dev/null | tail -n 60 | tail -c 20000; printf \'\\037\'',
+  // Level requests (levels.js) in the inbox's unhandled messages, oldest first: what is pending.
+  // Only a message's first line, so an answer's free text that reads like one is not one.
+  '  for m in "$d"/inbox/*.message; do [ -e "$m" ] && head -n 1 "$m"; done | grep -a -E "^set (autonomy|proof tier) to " | head -c 2000; printf \'\\037\'',
   // The run's CPU and memory totals so far (resources.js adds each sample to them).
   '  head -c 1000000 "$d/.resources.json" 2>/dev/null',
   "done",
@@ -193,12 +199,14 @@ function parse(machine, stdout) {
 }
 
 function parseRun(machine, chunk) {
-  const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile] = chunk.split(US);
+  const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile, requests] = chunk.split(US);
   const orch = json(orchFile) ?? {};
   const status = json(statusFile) ?? {};
   const tasks = tasksOf(plan);
   const statusLine = /^Status:\s*(.*)$/m.exec(plan ?? "")?.[1]?.trim() ?? null;
   const folder = orch.folder ?? status.folder ?? "";
+  const autonomy = /^L[0-2]$/.test(status.autonomy) ? status.autonomy : "L0";
+  const tier = runTier(plan, tasks);
   const parts = dir.split("/");
   const onMachine = (id) => (id ? (machine ? `${machine}/${id}` : id) : null);
   return {
@@ -221,7 +229,9 @@ function parseRun(machine, chunk) {
     type: status.type ?? null,
     topic: status.topic ?? null,
     // How much the orchestrator decides itself (set-status.sh --autonomy); a missing one is L0.
-    autonomy: /^L[0-2]$/.test(status.autonomy) ? status.autonomy : "L0",
+    autonomy,
+    // Levels asked for from a tag's popover and not applied yet: {autonomy: "L2" | null, tier: 2 | null}.
+    pending: pendingLevels(requests, { autonomy, tier: tier?.tier ?? null }),
     // Decisions it made itself, newest first (decisions.md).
     decided: parseDecidedLines(decidedFile),
     progress: status.progress ?? null,
@@ -248,7 +258,7 @@ function parseRun(machine, chunk) {
     tasks,
     // The run's proof: its tier, proof.md's results by task id, and the file names in shared/proof/.
     proof: {
-      tier: runTier(plan, tasks),
+      tier,
       md: /^[+!]/.test(proofFile ?? "") ? { ...parseProofMd(proofFile.slice(1)), cut: proofFile[0] === "!" } : null,
       files: (proofNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
     },
@@ -688,13 +698,23 @@ export const dropDecision = (d) => exec("sh", ["-c", DROP, "sh", d.id], { on: d.
 // A gone or lost orchestrator is never told: its terminal is gone, or only a shell, which
 // would run the wake-up line as a command. The message waits in the inbox until the run is
 // resumed, and this resolves to {blocked: false, waits: true}.
-export async function answerRun(run, title, answer, free = "") {
-  const text = answerMessage(title, answer, free);
+export const answerRun = (run, title, answer, free = "") => messageRun(run, "harbormaster", answerMessage(title, answer, free));
+
+// Writes `text` to the run's inbox and wakes its orchestrator, unless it is gone (see answerRun).
+async function messageRun(run, source, text) {
   if (orchestratorState(run, facts()) === "gone") {
-    await writeInbox(run, "harbormaster", text);
+    await writeInbox(run, source, text);
     return { blocked: false, waits: true };
   }
-  return tellOrchestrator(run, "harbormaster", text);
+  return tellOrchestrator(run, source, text);
+}
+
+// Asks the orchestrator to change the run's autonomy ("L2") or proof tier (2), from a tag's
+// popover: an inbox message (levels.js levelRequest), the way an answer is sent. The
+// orchestrator applies it to status.json or plan.md; until then the tag shows it as requested.
+export function requestLevel(run, kind, level) {
+  const from = kind === "autonomy" ? run.autonomy : run.proof?.tier?.tier ?? null;
+  return messageRun(run, "harbormaster-level", levelRequest(kind, level, { from, finished: run.phase === "finished" }));
 }
 
 // Compacts the orchestrator's context: the answer goes into its inbox first, then /compact is

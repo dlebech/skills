@@ -1,15 +1,16 @@
 // The serious views: the runs overview (totals, what's waiting on you, captain, run cards) and the Crew block.
 
 import { div, svg } from "gpui-kit";
-import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, decisionQueue, answerRun, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
+import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
+import { stats, decisionQueue, answerRun, requestLevel, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
-import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag } from "./ui.js";
+import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
 import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText } from "./proof.js";
 import { oneLine } from "./question.js";
 import { thumbs } from "./viewer.js";
+import { levelChoices } from "./levels.js";
 
 // How each runPhase() reads on a card.
 const PHASE = {
@@ -35,8 +36,13 @@ const withContext = (view, t, id, address, run = null) => (el) => {
   const c = view.contexts?.[address];
   if (!c) return el;
   return el.child(div().id(`${id}-ctx`).flex_none().text_size(10.5).text_color(t.dim).child(tokenText(c.tokens))
-    .tooltip(`Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`
-      + (run?.tokens ? `\nRun total: ${tokenHeadline(run.tokens)} (${run.tokens.total.toLocaleString("en")} in all), all its agents` : "")));
+    .tooltip(contextTip(view, address, run)));
+};
+// What withContext's hover says: the context size, and for an orchestrator the run's total; null without either.
+const contextTip = (view, address, run = null) => {
+  const c = view.contexts?.[address];
+  return [c && `Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`,
+    run?.tokens && `Run total: ${tokenHeadline(run.tokens)} (${run.tokens.total.toLocaleString("en")} in all), all its agents`].filter(Boolean).join("\n") || null;
 };
 
 // A small "85% · 2.1G" badge for an agent and the commands it runs, above resources.js's HOT
@@ -276,9 +282,8 @@ function cardHeader(view, t, r, f, meta) {
     .child(div().flex_none().text_size(15).child(OCTOPUS))
     .child(v_flex().flex_1().min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)
-        .when(Boolean(r.type), (el) => el.child(typeTag(t, r.type, `type-${r.key}`)))
-        .child(autonomyTag(t, `auto-${r.key}`, r.autonomy))
-        .when(Boolean(r.proof.tier), (el) => el.child(tierTag(t, `tier-${r.key}`, r.proof.tier.tier, `${tierTip(r.proof.tier.tier)}${r.proof.tier.byUser ? "\nSet by user" : ""}${r.tasks.some((k) => !k.proof) ? `\n${plural(r.tasks.filter((k) => !k.proof).length, "task")} not scoped` : ""}`)))
+        .when(Boolean(r.type), (el) => el.child(runTypeTag(t, r, r.key)))
+        .children(levelTags(view, t, r, r.key))
         .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(13.5).text_color(t.foreground), runName(r.branch, r.topic)))
         .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
       .child(metaLine(t, r, meta)))
@@ -483,6 +488,78 @@ const RESULT_COLOR = { pass: PASS, fail: (t) => t.blocked, partial: AMBER };
 const tierTag = (t, id, tier, tip) => div().id(id).flex_none().text_size(10).font_semibold().px(5).rounded(4)
   .bg(t.raised).text_color(t.muted).tooltip(tip).child(`T${tier}`);
 
+// ---- the run's level tags ----
+
+// A run's tags, as the pane header and its Crew row show them: its type, then its autonomy and,
+// with a tier, its proof tier. `r` may be a stand-in for a run without a directory
+// ({type, autonomy} from its terminal's labels): its tags then only say what they are.
+// `short`, for the narrow Crew block, writes a pending request "T3…" instead of "T3 requested…".
+// The type tag on its own, so a Crew row can put its crab count right after it.
+const runTypeTag = (t, r, id) => (r.type ? typeTag(t, r.type, `type-${id}`) : null);
+function levelTags(view, t, r, id, short = false) {
+  return [
+    levelTag(view, t, r, "autonomy", `auto-${id}`, short),
+    r.proof?.tier ? levelTag(view, t, r, "tier", `tier-${id}`, short) : null,
+  ].filter(Boolean);
+}
+
+// An autonomy ("L1") or proof tier ("T2") tag. Resting the pointer on it opens a card that
+// lists every level with its definition, the run's own highlighted; clicking another asks the
+// orchestrator to change it (data.js requestLevel: a message in the run's inbox). Until
+// status.json or plan.md shows the new level, the tag reads "T3 requested…": from the request
+// still unread in the inbox (r.pending), so it survives a reload, and from the click itself
+// until the next read sees that message (at most 15 s, should the orchestrator be quicker).
+function levelTag(view, t, r, kind, id, short = false) {
+  const cur = kind === "autonomy" ? r.autonomy : r.proof.tier.tier;
+  const label = (l) => (kind === "autonomy" ? l : `T${l}`);
+  const key = `${r.key}:${kind}`;
+  let asked = view.levelAsked?.get(key)?.level;
+  // The click's own note goes once the run's files show the request, or the level itself.
+  if (asked !== undefined && (r.pending?.[kind] === asked || cur === asked || Date.now() - view.levelAsked.get(key).at > 15000)) { view.levelAsked.delete(key); asked = undefined; }
+  const pending = asked ?? r.pending?.[kind] ?? null;
+  const tag = div().flex_none().text_size(10).font_semibold().px(5).rounded(4).bg(pending !== null ? AMBER(t) + "22" : t.raised)
+    .text_color(pending !== null ? AMBER(t) : kind === "autonomy" && cur === "L0" ? t.dim : t.muted)
+    .child(pending !== null ? `${label(pending)}${short ? "…" : " requested…"}` : label(cur));
+  const canAsk = Boolean(r.dir && r.localTerminal);
+  const notes = kind === "tier" ? [r.proof.tier.byUser && "Set by user", r.tasks.some((k) => !k.proof) && `${plural(r.tasks.filter((k) => !k.proof).length, "task")} not scoped`] : [];
+  const choice = (c) => {
+    const ask = canAsk && !c.current && !c.pending;
+    return h_flex().id(`${id}-${c.label}`).gap(8).items_start().px(6).py(4).rounded(5)
+      .when(c.current, (el) => el.bg(t.selected))
+      .when(ask, (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click((_e, cx) => {
+        cx.stop_propagation();
+        view.levelAsked ??= new Map();
+        view.levelAsked.set(key, { level: c.level, at: Date.now() });
+        view.actionError = null;
+        cx.notify();
+        cx.spawn(async (cx) => {
+          try { await requestLevel(r, kind, c.level); } catch (e) {
+            // Written but not woken: the request is in the inbox, so it stays requested.
+            if (!e?.inInbox) view.levelAsked.delete(key);
+            view.actionError = `${r.branch}: ${e?.message ?? e}`;
+          }
+          view.redraw = true;
+          try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+          try { await view.load(cx); } catch { /* the next refresh shows it */ }
+        }, { owner: null });
+      }))
+      .child(div().flex_none().w(20).font_semibold().text_color(c.current ? t.foreground : t.muted).child(c.label))
+      .child(v_flex().flex_1().min_w(0)
+        .child(div().text_color(c.current ? t.foreground : t.muted).child(c.text))
+        .when(c.current || c.pending, (el) => el.child(div().text_size(10.5).text_color(c.pending ? AMBER(t) : t.dim)
+          .child(c.pending ? "Requested, waiting for the orchestrator" : "This run"))));
+  };
+  return HoverCard.new(id).anchor("top_left").open_delay(300)
+    .trigger(tag)
+    .content(v_flex().w(320).p(6).gap(2).rounded(8).bg(t.popover ?? t.surface).border(1).border_color(t.border).shadow_lg().text_size(11.5)
+      .child(div().px(6).pt(2).pb(4).text_size(11).font_semibold().text_color(t.dim)
+        .child(kind === "autonomy" ? "Autonomy: how much the orchestrator decides itself" : "Proof tier: what proves a task done"))
+      .children(levelChoices(kind, cur, pending).map(choice))
+      .children(notes.filter(Boolean).map((n) => div().px(6).text_size(10.5).text_color(t.dim).child(n)))
+      .child(div().px(6).pt(4).text_size(10.5).text_color(t.dim)
+        .child(canAsk ? "Click a level to ask the orchestrator to change it" : "Its orchestrator isn't known here, so it can't be changed from here")));
+}
+
 // A path under the run as a link that opens on this machine; for a run on another machine
 // it is plain text, since nothing here can open a file there.
 function pathLink(t, r, id, rel, label) {
@@ -494,21 +571,17 @@ function pathLink(t, r, id, rel, label) {
 }
 
 // "Decisions": the heading row is the fold, at the top, with its chevron and the counts
-// ("Decisions · 57 · 45 by the orchestrator, 12 from you"). Folded, the latest three as
-// readable lines (yours marked "You"), each with its reason; unfolded, every decision as its
-// one-line title, and clicking one shows its reason. A line that did not parse shows its raw text.
+// ("Decisions · 57 · 45 by the orchestrator, 12 from you"), in normal text with only the
+// chevron and the counts muted. Folded, that row is all of it. Unfolded, every decision as its
+// one-line title (yours marked "You"); clicking one shows all of it and its reason. A line that
+// did not parse shows its raw text.
 function decisionsSection(view, t, r) {
   const key = `dec-${r.key}`, open = isOpen(view, key);
   const you = r.decided.filter((d) => d.by === "user").length, orch = r.decided.length - you;
   const counts = [orch > 0 && `${orch} by the orchestrator`, you > 0 && `${you} from you`].filter(Boolean).join(", ");
   const title = (d) => `${d.by === "user" ? "You · " : ""}${d.topic ? `${d.topic}: ${d.decision}` : d.decision}`;
   const when = (d) => div().flex_none().w(34).text_color(t.dim).child(d.at ? ago(d.at).replace(" ago", "") : "—");
-  const latest = (d, i) => h_flex().id(`dec-${r.key}-${i}`).gap(8).items_start().px(2).text_size(11.5)
-    .child(when(d))
-    .child(v_flex().flex_1().min_w(0)
-      .child(div().text_color(t.foreground).child(title(d)))
-      .when(Boolean(d.why), (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(d.why))));
-  // Unfolded: one line each, cut to fit; a click shows its whole title and its reason under it.
+  // One line each, cut to fit; a click shows its whole title and its reason under it.
   // Every row clicks, since any title can be cut, reason or not. Keyed on the line itself, not
   // its place: a new decision moves every row down one.
   const line = (d, i) => {
@@ -526,15 +599,14 @@ function decisionsSection(view, t, r) {
         .child(div().when(!more, (el) => el.truncate()).text_color(t.foreground).child(title(d)))
         .when(Boolean(more && d.why), (el) => el.child(div().text_size(11).text_color(t.dim).child(d.why))));
   };
-  if (r.decided.length <= 3) return section(t, "Decisions", counts).children(r.decided.map(latest));
   return v_flex().gap(4)
     .child(h_flex().id(`fold-${key}`).gap(6).px(2).items_center().min_w(0).rounded(4).cursor_pointer().text_size(11)
-      .hover((st) => st.bg(t.hover)).tooltip(open ? "Show only the latest three" : "Show every decision")
+      .hover((st) => st.bg(t.hover)).tooltip(open ? "Fold the decisions" : "Show every decision")
       .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); cx.notify(); })
       .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
-      .child(div().flex_none().font_semibold().text_color(t.dim).child("Decisions"))
-      .child(div().min_w(0).truncate().text_color(t.dim).child(`· ${r.decided.length}${counts ? ` · ${counts}` : ""}`)))
-    .children(open ? r.decided.map(line) : r.decided.slice(0, 3).map(latest));
+      .child(div().flex_none().font_semibold().text_color(t.foreground).child("Decisions"))
+      .child(div().min_w(0).truncate().text_color(t.muted).child(`· ${r.decided.length}${counts ? ` · ${counts}` : ""}`)))
+    .when(open, (el) => el.children(r.decided.map(line)));
 }
 
 // "Tokens": what the run has used, across its orchestrator and every agent it ran. One line:
@@ -1056,31 +1128,38 @@ export function crew(view, t) {
     .sort((a, b) => (a.state === "finished") - (b.state === "finished"));
   // The focused agent, or the crew agent beside a focused Harbormaster pane.
   const current = currentAgent(ctx, [cap.terminal?.address, ...orchestrators.map((o) => o.term.address)].filter(Boolean));
-  const row = ({ id, emoji, type = null, title, tip = null, detail, tone, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null, usage = null, whose = "", more = null }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
+  // Only the captain has a mark (a small one): the rest are all orchestrators. The context size
+  // and the run's token total are in the row's hover, which leaves the width to the tags. The
+  // hover is on its two lines of text, not the whole row, so it never covers a tag's own card.
+  const row = ({ id, mark = null, type = null, tags = [], title, tip = null, detail, tone, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null, usage = null, whose = "", more = null }) => {
+    const hover = [title, tip, contextTip(view, address, run)].filter(Boolean).join("\n");
+    return h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
     .rounded(7).bg(address === current ? edge + "33" : edge + "14").cursor_pointer().hover((st) => st.bg(address === current ? edge + "40" : edge + "26"))
     .when(address === current, (el) => el.border(1).border_color(edge + "aa"))
     .on_click(open)
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
-    .child(div().flex_none().text_size(15).child(emoji))
+    .when(Boolean(mark), (el) => el.child(div().flex_none().text_size(12).child(mark)))
     .child(v_flex().flex_1().min_w(0)
-      // The title gets the whole first line; the type tag and worker count lead the second,
-      // so a narrow sidebar truncates the detail before them.
-      .child(withTip(div().id(`${id}-title`).min_w(0).truncate().text_size(12.5).font_semibold().text_color(t.foreground), { title, tip }))
+      // The title gets the whole first line; the type tag, the worker count and the level
+      // tags (a pending request short, "T3…") lead the second, in that order, so a narrow
+      // sidebar truncates the detail first, then the level tags, before the type and crabs.
+      .child(div().id(`${id}-title`).min_w(0).truncate().text_size(12.5).font_semibold().text_color(t.foreground).tooltip(hover).child(title))
       .child(h_flex().gap(6).items_center().min_w(0)
-        .when(Boolean(type), (el) => el.child(typeTag(t, type)))
+        .when(Boolean(type), (el) => el.child(type))
         .when(crabs > 0, (el) => el.child(h_flex().flex_none().gap(3).items_center().text_size(11).text_color(t.muted)
           .child(div().text_size(11).child(CRAB)).child(String(crabs))))
-        .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail))))
+        .children(tags)
+        .child(div().id(`${id}-detail`).flex_1().min_w(0).truncate().text_size(11).text_color(t[tone] ?? t.dim).tooltip(hover).child(detail))))
     .map(withUsage(t, id, usage, whose, more))
-    .map(withContext(view, t, id, address, run))
     .child(statusDot(t, status));
+  };
   const rows = [];
   if (cap.terminal) {
     // The same counts as the overview: runs still working, and finished ones still open.
     const watched = watchedText(stats(view.runs, ctx));
     const asks = view.decisions?.length ?? 0;
     rows.push(row({
-      id: "crew-captain", emoji: CAPTAIN, title: "Captain",
+      id: "crew-captain", mark: CAPTAIN, title: "Captain",
       // Clicking the captain also opens the runs overview beside it.
       open: () => focusWithPane(cap.terminal.address),
       detail: [asks ? `asks you: ${plural(asks, "decision")}` : null, cap.watching ? `on watch · ${watched}` : "not watching runs"].filter(Boolean).join(" · "),
@@ -1109,9 +1188,13 @@ export function crew(view, t) {
     ).filter(Boolean).join(" · ");
     const name = runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic);
     rows.push(row({
-      id: `crew-${term.address}`, emoji: OCTOPUS, detail: detail || "orchestrator",
-      // The run's type, then its number and topic; without a topic, its branch.
-      type: labels["run.type"] || r?.type || null,
+      id: `crew-${term.address}`, detail: detail || "orchestrator",
+      // The run's tags as its pane's header shows them, then its number and topic; without a
+      // topic, its branch. Without a run directory, its terminal's labels stand in.
+      ...(() => {
+        const run = r ?? { key: term.address, type: labels["run.type"] || null, autonomy: /^L[0-2]$/.test(labels["run.autonomy"]) ? labels["run.autonomy"] : "L0" };
+        return { type: runTypeTag(t, run, `crew-${term.address}`), tags: levelTags(view, t, run, `crew-${term.address}`, true) };
+      })(),
       title: name.title, tip: [name.tip, startedTip(r?.started)].filter(Boolean).join("\n") || null,
       tone: need ? "blocked" : "muted", status, address: term.address, crabs: state === "finished" ? 0 : workers, run: r,
       // Badged on its own, like any agent: a run's agents together pass 2 GB while nothing is busy.
