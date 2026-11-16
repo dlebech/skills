@@ -453,7 +453,7 @@ function tokensSection(t, r) {
 function proofSection(view, t, r, prs) {
   const { tier, md, files } = r.proof;
   const danger = prs.find((p) => p.danger)?.danger;
-  const verdict = proofVerdict({ tier, md, tasks: r.tasks, danger });
+  const verdict = proofVerdict({ tier, md, tasks: r.tasks, danger, shotFiles: files });
   // A run planned before proof lines existed: one quiet line, not a red row per task.
   if (!verdict) {
     // Files in shared/proof/ without a plan or proof.md still get their folder link.
@@ -488,7 +488,7 @@ function proofSection(view, t, r, prs) {
         .when(hasRes, (e) => e.child(div().text_size(11).text_color(t.dim).child(`Result: ${k.result}${k.why ? ` — ${k.why}` : ""}`)))
         .when(k.files.length > 0, (e) => e.child(div().text_size(11).text_color(t.dim).child(`Files: ${k.files.join(", ")}`))));
   };
-  const rows = proofTasks(r.tasks, md);
+  const rows = proofTasks(r.tasks, md, files);
   const unscoped = rows.filter((k) => !k.scoped).length;
   return v_flex().gap(4)
     .child(h_flex().id(`pf-head-${r.key}`).gap(6).px(2).items_center().cursor_pointer().text_size(11.5)

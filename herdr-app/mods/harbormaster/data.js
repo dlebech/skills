@@ -10,11 +10,11 @@
 // inbox/*.message (written here on an answer or Close), parked and closed markers;
 // and <root>/.captain-decisions.json for the captain's open decisions.
 
-import { exec, machines, spaces, shared, setShared, run as command } from "herdr";
+import { exec, appHome, machines, spaces, shared, setShared, run as command } from "herdr";
 import { parseQuestion, answerMessage } from "./question.js";
 import { parseDecidedLines } from "./decided.js";
 import { tokenText } from "./context.js";
-import { dropCache } from "./viewer.js";
+import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd } from "./proof.js";
 import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
@@ -38,8 +38,8 @@ const SCRIPT = [
   '  [ -e "$d/parked" ] && { printf +; head -c 400 "$d/parked"; }; printf \'\\037\'',
   '  [ -e "$d/closed" ] && { printf +; head -c 400 "$d/closed"; }; printf \'\\037\'',
   '  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && n=$((n+1)); done; printf "%s\\037" "$n"',
-  // proof.md (a "+" before it when there is one), then the names of the files in shared/proof/, capped.
-  '  [ -e "$d/proof.md" ] && { printf +; head -c 12000 "$d/proof.md"; }; printf \'\\037\'',
+  // proof.md (a "+" before it when there is one, "!" when it was cut at 64 kB), then the names of the files in shared/proof/, capped.
+  '  [ -e "$d/proof.md" ] && { [ "$(wc -c < "$d/proof.md")" -gt 64000 ] && printf \'!\' || printf +; head -c 64000 "$d/proof.md"; }; printf \'\\037\'',
   '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
   // decisions.md: the last 60 lines of its own decisions and the user's, capped.
   '  grep -a -E "^- \\[(decided|user)\\] " "$d/decisions.md" 2>/dev/null | tail -n 60 | tail -c 20000',
@@ -222,7 +222,7 @@ function parse(machine, stdout) {
       // The run's proof: its tier, proof.md's results by task id, and the file names in shared/proof/.
       proof: {
         tier: runTier(plan, tasks),
-        md: proofFile?.startsWith("+") ? parseProofMd(proofFile.slice(1)) : null,
+        md: /^[+!]/.test(proofFile ?? "") ? { ...parseProofMd(proofFile.slice(1)), cut: proofFile[0] === "!" } : null,
         files: (proofNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
       },
       // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
@@ -934,7 +934,7 @@ export async function deleteRun(run) {
     run.localTerminal ?? "", run.away?.how === "closed" ? "1" : ""], { on: run.machine });
   if (out.code !== 0) throw new Error((out.stderr || "could not delete the run directory").trim());
   // The run's copied proof images go with it (they are on this computer whichever machine it ran on).
-  await dropCache(run).catch(() => {});
+  await exec("sh", dropCacheArgs(appHome(), run.machine, run.dir)).catch(() => {});
   const prs = { ...(shared("harbormaster.prs") ?? {}) };
   delete prs[run.key];
   setShared("harbormaster.prs", prs);
