@@ -41,10 +41,10 @@ test("approved — merge names the PRs, who approved and when, with an Open butt
   ]);
 });
 
-test("approved with open comments says to address them or merge", () => {
+test("approved with open comments says to address them, then merge", () => {
   const comments = { count: 3, bots: {}, items: [] };
   const [it] = items(run(), [pr({ approvedBy: ["anna"], review: "APPROVED", comments })], { flow: "peer" });
-  assert.equal(it.line, "Approved by anna with 3 comments on #42: address them or merge");
+  assert.equal(it.line, "Approved by anna with 3 comments on #42: address them, then merge");
   assert.deepEqual(kinds(it), ["open"]);
 });
 
@@ -204,4 +204,53 @@ test("the red-CI ask is a what-is-blocking message naming the PR, the check and 
   assert.ok(BLOCKING.test(m));
   assert.equal(m.split("\n")[0], "what is blocking? Harbormaster sees CI red on #42 (failing: lint): https://x/1.");
   assert.equal(ciRequest({ pr: null }).split("\n")[0], "what is blocking? Harbormaster sees CI red on the PR.");
+});
+
+// ---- t15: the box carries Address comments, a failed proof is never merged past ----
+
+const here = (o = {}) => run({ localTerminal: "w/orch", ...o });
+const said = (count) => ({ count, bots: {}, items: [] });
+
+test("approved with comments: the box has Ask me and Handle them, the autonomy's default first-class, then Open, and the age", () => {
+  const p = pr({ approvedBy: ["anna"], review: "APPROVED", reviewedAt: ago(85), comments: said(3) });
+  const [it] = items(here(), [p], { flow: "peer" });
+  assert.equal(it.line, "Approved by anna 1h25m ago with 3 comments on #42: address them, then merge");
+  assert.deepEqual(it.actions.map((a) => [a.kind, a.label, a.primary ?? null]),
+    [["address", "Ask me", true], ["address", "Handle them", false], ["open", "Open #42", null]]);
+  assert.deepEqual(it.actions.slice(0, 2).map((a) => [a.mode, a.pr]), [["ask", p], ["handle", p]]);
+  // At L2 the orchestrator handles them by default.
+  const [l2] = items(here({ autonomy: "L2" }), [p], { flow: "peer" });
+  assert.deepEqual(l2.actions.filter((a) => a.primary).map((a) => a.label), ["Handle them"]);
+});
+
+test("with several PRs each one's buttons carry the PR they are about; one without comments only opens", () => {
+  const list = [pr({ approvedBy: ["anna"], review: "APPROVED", comments: said(15) }),
+    pr({ number: 1372, url: "https://github.com/o/skills/pull/1372", approvedBy: ["anna"], review: "APPROVED", comments: said(0) })];
+  const [it] = items(here(), list, { flow: "peer" });
+  assert.deepEqual(it.actions.map((a) => [a.label, a.row]), [
+    ["Ask me", "#42 · 15 comments"], ["Handle them", "#42 · 15 comments"], ["Open #42", "#42 · 15 comments"], ["Open #1372", "#1372"],
+  ]);
+});
+
+test("changes requested with comments offers Address too; a run that can't be asked only opens", () => {
+  const p = pr({ changesBy: ["bo"], review: "CHANGES_REQUESTED", comments: said(2) });
+  const [it] = items(here(), [p], { flow: "peer" });
+  assert.equal(it.key, "changes requested");
+  assert.deepEqual(kinds(it), ["address", "address", "open"]);
+  // Not here (no local terminal), put away, or with an open question: Open only.
+  assert.deepEqual(kinds(items(run(), [p], { flow: "peer" })[0]), ["open"]);
+  const asking = here({ question: "?", ask: { title: "Go?" }, statusLine: "waiting for user" });
+  assert.deepEqual(kinds(items(asking, [p], { flow: "peer" }).find((x) => x.key === "changes requested")), ["open"]);
+});
+
+test("a failed proof task is named and read before any merge", () => {
+  const proof = { tier: 1, pass: 1, total: 2, fail: 1, failed: "t2 polish" };
+  assert.equal(proofText(proof), "T1 · 1/2 pass · 1 fail");
+  const [it] = items(run(), [pr({ number: 1 })], { flow: "self" }, { proof });
+  assert.equal(it.line, "Proof: t2 polish failed — read it before merging #1");
+  assert.deepEqual(it.actions.map((a) => a.label), ["Proof", "Open #1"]);
+  const [two] = items(run(), [pr({ number: 1 })], { flow: "self" }, { proof: { ...proof, fail: 2, pass: 0 } });
+  assert.equal(two.line, "Proof: t2 polish and 1 more failed — read it before merging #1");
+  const [draft] = items(run(), [pr({ number: 1, state: "DRAFT" })], { flow: "self" }, { proof });
+  assert.equal(draft.line, "Proof: t2 polish failed — read it before marking #1 ready");
 });

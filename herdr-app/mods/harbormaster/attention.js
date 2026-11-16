@@ -103,8 +103,8 @@ export const COMMENT_LABELS = new Set(["approved — merge", "changes requested"
 // The run's next step from its PRs: the most urgent PR's {label, rank, who, count, same, pr, prs,
 // comments}, where `count` is how many PRs the run has, `same` how many share that label, `prs`
 // those PRs and `comments` their review comments summed (comments.js stepComments; null for a
-// label that does not count them); or null without a PR (the run's own step applies) or when no
-// PR's state is known.
+// label that does not count them) and `draft` (any of those PRs is a draft); or null without a PR
+// (the run's own step applies) or when no PR's state is known.
 export function nextStep(prs, flow) {
   const steps = (prs ?? []).map((pr) => ({ pr, s: prStep(pr, flow) })).filter((x) => x.s);
   if (!steps.length) return null;
@@ -113,19 +113,24 @@ export function nextStep(prs, flow) {
   const who = [...new Set(same.flatMap((x) => x.s.who))];
   const list = same.map((x) => x.pr);
   const comments = COMMENT_LABELS.has(top.s.label) ? stepComments(list) : null;
-  return { label: top.s.label, rank: top.s.rank, who, count: (prs ?? []).length, same: same.length, pr: top.pr, prs: list, comments };
+  return { label: top.s.label, rank: top.s.rank, who, count: (prs ?? []).length, same: same.length, pr: top.pr, prs: list, comments, draft: list.some((p) => p.state === "DRAFT") };
 }
 
 // A next step as the Crew shows it: "review from anna, bo", then "· 3 PRs" with several PRs.
 // Short, for the narrow sidebar; reviewWaitText says it in full. With review comments,
 // "approved · 3 comments" in place of "approved — merge" (merging comes after them), and
-// "changes requested · 3 comments"; "· comments ?" when they could not be read.
-export function nextStepText(step) {
+// "changes requested · 3 comments"; "· comments ?" when they could not be read. Options:
+//   comments  false leaves the comment count out (the narrow sidebar, so the age survives); an
+//             approval with comments still reads "approved", not "approved — merge"
+//   red       CI is red on the run: "review proof", no "→ merge" (needaction.js says the same)
+// A self-flow draft reads "review proof → ready": it is marked ready before it is merged.
+export function nextStepText(step, { comments = true, red = false } = {}) {
   if (!step) return "";
   const said = commentsText(step.comments);
   const label = step.label === "review from" ? `review from ${step.who.join(", ") || "a reviewer"}`
-    : said && step.label === "approved — merge" ? `approved · ${said}`
-    : said ? `${step.label} · ${said}`
+    : step.label === "review proof → merge" ? (red ? "review proof" : step.draft ? "review proof → ready" : step.label)
+    : said && step.label === "approved — merge" ? (comments ? `approved · ${said}` : "approved")
+    : said && comments ? `${step.label} · ${said}`
     : step.label;
   return step.count > 1 ? `${label} · ${step.count} PRs` : label;
 }
@@ -207,9 +212,10 @@ export function usualCi(samples) {
 
 // ---- the current step and its age ----
 
-// "34m", "1h12m", "2d3h"; under a minute "0m".
+// "34m", "1h12m", "2d3h"; under a minute "<1m", as Herdr's Agents list says it.
 export function ageText(ms) {
   const m = Math.max(0, Math.floor((ms ?? 0) / 60000));
+  if (m < 1) return "<1m";
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
   return h < 24 ? `${h}h${m % 60}m` : `${Math.floor(h / 24)}d${h % 24}h`;
@@ -369,7 +375,9 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
     if (ci.state === "red") reasons.push({ key: "red-ci", text: `red CI on #${ci.pr.number}`, since: ci.finishedAt ?? settled });
     if (next && NEEDS_LABELS.has(next.label)) {
       const reviewed = next.label === "changes requested" || next.label === "approved — merge" ? next.pr.reviewedAt ?? null : null;
-      reasons.push({ key: next.label, text: nextStepText(next), since: reviewed ?? settled });
+      // `short`: without the comment count, for the narrow sidebar (crewrows.js rowLead).
+      const red = ci.state === "red";
+      reasons.push({ key: next.label, text: nextStepText(next, { red }), short: nextStepText(next, { red, comments: false }), since: reviewed ?? settled });
     }
   }
   // A finished run with no PR (a review or an exploration) leaves a report: reading it and

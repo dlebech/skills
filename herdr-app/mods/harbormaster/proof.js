@@ -292,6 +292,18 @@ export function proofTone(row, finished, done = true) {
   return finished && done ? "unchecked" : null;
 }
 
+// How a task's segment looks once proofTone() has spoken: {color, mark}. `color` is "stage" (its
+// stage's colour: done stays done's, whether or not its proof passed), "blocked" for a failed
+// proof or "amber" for proof that wants a look (partial, no screenshot, not checked): amber means
+// look soon, never "at work". `mark` is "pass" for a passed or accepted proof, drawn as a green
+// underline on the done segment rather than a second colour for done.
+export function segmentLook(tone) {
+  if (tone === "pass" || tone === "accepted") return { color: "stage", mark: "pass" };
+  if (tone === "fail") return { color: "blocked", mark: null };
+  if (tone === "partial" || tone === "unchecked") return { color: "amber", mark: null };
+  return { color: "stage", mark: null };
+}
+
 // How a proofTone() reads in the segment's hover: "proof pass", "proof partial — no screenshot".
 export function proofToneText(tone, row) {
   if (!tone) return null;

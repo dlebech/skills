@@ -52,7 +52,7 @@ test("a Needs you row leads with its reasons and how long the longest has waited
   assert.equal(a.group, "needs");
   const l = rowLead(a, now);
   // Red since its CI finished, 80 minutes ago.
-  assert.equal(l.lead, "red CI on #42 · review proof → merge · 1h20m");
+  assert.equal(l.lead, "red CI on #42 · review proof · 1h20m");
   assert.equal(l.tone, "blocked");
   assert.equal(rowEdge(a), "blocked");
 });
@@ -175,7 +175,7 @@ test("a card's pill says the next step in Needs you and Done, and keeps its phas
 
 test("needLine says why a run needs you, and nothing outside Needs you", () => {
   const a = at(run(), { pr: read([pr({ checks: { pass: 0, fail: 1, pending: 0 } })]) });
-  assert.equal(needLine(a), "red CI on #42 · review proof → merge");
+  assert.equal(needLine(a), "red CI on #42 · review proof");
   assert.equal(needLine(at(run(), { working: true })), null);
 });
 

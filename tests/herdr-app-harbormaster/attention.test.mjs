@@ -188,7 +188,7 @@ test("ages read 34m, 1h12m, 2d3h", () => {
   assert.equal(ageText(34 * MIN), "34m");
   assert.equal(ageText(72 * MIN), "1h12m");
   assert.equal(ageText((51 * 60) * MIN), "2d3h");
-  assert.equal(ageText(-5), "0m");
+  assert.equal(ageText(-5), "<1m");
 });
 
 test("the current step: tasks at work, else CI on a PR, else the progress line", () => {

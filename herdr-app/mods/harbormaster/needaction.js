@@ -7,7 +7,7 @@
 // since most reasons are done elsewhere (on GitHub, in the proof, with Close).
 
 import { ageText, ciState } from "./attention.js";
-import { hasComments, commentsText } from "./comments.js";
+import { hasComments, commentsText, defaultMode } from "./comments.js";
 
 // "#1, #2 and #3"
 const andList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] ?? "");
@@ -36,11 +36,35 @@ const checksUrl = (pr) => pr?.failed?.url || (pr?.url ? `${pr.url.replace(/\/+$/
 // the cleanup of a finished run.
 const ORDER = ["question", "gone", "red-ci", "changes requested", "approved — merge", "review proof → merge", "request review", "stalled", "finished"];
 
-// "T2 · 5/10 pass" from {tier, pass, total}, or null with no proof to read.
+// "T2 · 5/10 pass · 1 fail" from {tier, pass, total, fail}, or null with no proof to read.
 export function proofText(proof) {
   if (!proof) return null;
-  const parts = [proof.tier != null ? `T${proof.tier}` : null, proof.total ? `${proof.pass ?? 0}/${proof.total} pass` : null].filter(Boolean);
+  const parts = [proof.tier != null ? `T${proof.tier}` : null, proof.total ? `${proof.pass ?? 0}/${proof.total} pass` : null,
+    proof.fail ? `${proof.fail} fail` : null].filter(Boolean);
   return parts.length ? parts.join(" · ") : null;
+}
+
+// Address comments in the box (comments.js): for each of `prs` with open review comments, Ask me
+// and Handle them, the run's autonomy's default first-class (`primary`), then its Open; the
+// other PRs' Open after. With several PRs each action carries `row`, the PR it is about
+// ("#1799 · 15 comments"), so the box draws a row per PR. Only for a run whose orchestrator is
+// here to ask, not put away, with no open question (an Ask me's question would queue behind it):
+// as the card's own Address row was.
+function addressPrs(prs, run) {
+  const can = Boolean(run?.dir && run.localTerminal && !run.away && !run.question);
+  const first = defaultMode(run?.autonomy);
+  const asks = can ? prs.filter((p) => p?.url && hasComments(p.comments)) : [];
+  if (!asks.length) return openPrs(prs);
+  const row = (p) => (prs.length > 1 ? { row: [numOf(p) ?? "the PR", commentsText(p.comments)].filter(Boolean).join(" · ") } : {});
+  const open = (p) => openPrs([p]).map((x) => ({ ...x, ...row(p) }));
+  const rest = prs.filter((p) => p?.url && !asks.includes(p)).slice(0, Math.max(0, MAX_OPEN - asks.length));
+  return [
+    ...asks.flatMap((p) => [
+      ...["ask", "handle"].map((mode) => ({ kind: "address", label: mode === "ask" ? "Ask me" : "Handle them", mode, pr: p, primary: mode === first, ...row(p) })),
+      ...open(p),
+    ]),
+    ...rest.flatMap(open),
+  ];
 }
 
 // The reports about a whole run among shared/'s file names (or paths), the final one first:
@@ -56,6 +80,7 @@ export function runReports(paths) {
 
 // One reason's {key, line, tip, actions}. Action kinds (overview.js clicks them):
 //   open {url}          opens a PR or check on GitHub
+//   address {pr, mode}  Address comments on a PR: Ask me ("ask") or Handle them ("handle")
 //   proof               unfolds the run's proof
 //   ask-ci {pr, check}  asks the orchestrator to see to the red CI (an inbox message)
 //   ask-blocking        a stalled run's Ask what's blocking
@@ -63,6 +88,8 @@ export function runReports(paths) {
 //   close               the run's Close, with its confirm
 //   resume              the run's Resume, with its confirm
 //   focus {address}     shows an agent's terminal (a dialog waits in it)
+// An action may carry `primary` (it stands out, else only the box's first does) and `row` (the
+// PR it is about, when the box draws a row of buttons per PR).
 function reasonItem(r, a, ctx) {
   const { run, now, proof, reports = [], blocked = null } = ctx;
   const next = a.next;
@@ -97,16 +124,17 @@ function reasonItem(r, a, ctx) {
       const who = [...new Set(same.flatMap((p) => p.changesBy ?? []))];
       const said = commentsText(next?.comments);
       const at = Math.max(0, ...same.map((p) => p.reviewedAt ?? 0)) || null;
-      return { line: `${andList(who) || "A reviewer"} asked for changes on ${prsText(same)}${said ? ` · ${said}` : ""}${at ? ` ·${ago(at, now)}` : ""}`, actions: openPrs(same) };
+      return { line: `${andList(who) || "A reviewer"} asked for changes on ${prsText(same)}${said ? ` · ${said}` : ""}${at ? ` ·${ago(at, now)}` : ""}`, actions: addressPrs(same, run) };
     }
     case "approved — merge": {
       const who = [...new Set(same.flatMap((p) => p.approvedBy ?? []))];
       const at = Math.max(0, ...same.map((p) => p.reviewedAt ?? 0)) || null;
       const by = who.length ? ` by ${andList(who)}` : "";
+      // The comments come before the merge: address them, then merge.
       const line = hasComments(next?.comments)
-        ? `Approved${by} with ${commentsText(next.comments)} on ${prsText(same)}: address them or merge`
+        ? `Approved${by}${ago(at, now)} with ${commentsText(next.comments)} on ${prsText(same)}: address them, then merge`
         : `Merge ${prsText(same)} · approved${by}${ago(at, now)}`;
-      return { line, actions: openPrs(same) };
+      return { line, actions: addressPrs(same, run) };
     }
     case "review proof → merge": {
       const p = proofText(proof);
@@ -115,6 +143,12 @@ function reasonItem(r, a, ctx) {
       const draft = same.some((x) => x.state === "DRAFT");
       const it = same.length > 1 ? "them" : "it";
       const merge = (what) => (red ? "" : draft ? `, then mark ${what} ready and merge` : `, then merge ${what}`);
+      // A failed proof task is never merged past: name it and say to read it first.
+      if (proof?.fail > 0) {
+        const name = proof.failed ? `${proof.failed}${proof.fail > 1 ? ` and ${proof.fail - 1} more` : ""}` : `${proof.fail} ${proof.fail === 1 ? "task" : "tasks"}`;
+        return { line: `Proof: ${name} failed — read it${red ? "" : ` before ${draft ? "marking" : "merging"} ${prsText(same)}${draft ? " ready" : ""}`}`,
+          actions: [{ kind: "proof", label: "Proof" }, ...openPrs(same)] };
+      }
       return { line: p ? `Read the proof (${p})${merge(prsText(same))}` : `Review ${prsText(same)}${merge(it)}`,
         actions: [...(p ? [{ kind: "proof", label: "Proof" }] : []), ...openPrs(same)] };
     }
@@ -144,7 +178,8 @@ function reasonItem(r, a, ctx) {
 //   run      the run (data.js), for its orchestrator's terminal
 //   prs      its PR summaries as read (data.js prSummary), for which PR's CI is red
 //   now
-//   proof    {tier, pass, total} of its proof, or null
+//   proof    {tier, pass, total, fail, failed} of its proof, or null; `failed` names its first
+//            failing task ("t2 polish")
 //   reports  its report files in shared/, paths to open (runReports picks the run's own)
 //   blocked  {name, address} of the agent a dialog waits in, when known
 export function needActions(a, ctx = {}) {
