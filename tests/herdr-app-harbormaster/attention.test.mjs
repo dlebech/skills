@@ -4,10 +4,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   reviewFlow, flowKey, prStep, nextStep, nextStepText, prRead, ciState, ciTimes, usualCi, ageText, stepOf, stepText,
-  trackSince, stepSig, stalled, quietText, assess, byWait, STALL_MS, PR_READ_MAX_AGE,
+  trackSince, stepSig, stalled, quietText, assess, byWait, STALL_MS, prMaxAge, prTtl,
 } from "../../herdr-app/mods/harbormaster/attention.js";
-import { addCiSample, nextSteps, screenSig, CI_KEEP } from "../../herdr-app/mods/harbormaster/tracking.js";
-import { prSummary, PR_FIELDS } from "../../herdr-app/mods/harbormaster/data.js";
+import { addCiSample, nextSteps, screenSig, CI_KEEP, probeEvery } from "../../herdr-app/mods/harbormaster/tracking.js";
+import { prSummary, PR_FIELDS, carryRuns } from "../../herdr-app/mods/harbormaster/data.js";
+import { filesFresh } from "../../herdr-app/mods/harbormaster/attend.js";
 
 const MIN = 60000;
 const now = Date.parse("2026-11-16T12:00:00Z");
@@ -81,7 +82,7 @@ test("a PR read is unreadable before the first read, after a gh failure, with a 
   assert.equal(prRead(run(), { at: now, list: [pr()], error: "gh: offline" }, now).why, "gh: offline");
   assert.equal(prRead(run(), { at: now, list: [pr({ state: "UNKNOWN" })] }, now).readable, false);
   assert.equal(prRead(run(), { at: now, list: [pr({ stale: true })] }, now).readable, false);
-  assert.equal(prRead(run(), { at: now - PR_READ_MAX_AGE - 1, list: [pr()] }, now).readable, false);
+  assert.equal(prRead(run(), { at: now - prMaxAge(false) - 1, list: [pr()] }, now).readable, false);
   assert.equal(prRead(run(), { at: ago(1), list: [pr()] }, now).readable, true);
 });
 
@@ -282,7 +283,8 @@ test("CI times: first start to last completion, none while a check is pending", 
   ];
   assert.deepEqual(ciTimes(done), { startedAt: ago(10), finishedAt: ago(4) });
   const running = [...done, { status: "QUEUED", conclusion: "", startedAt: "0001-01-01T00:00:00Z", completedAt: "0001-01-01T00:00:00Z" }];
-  assert.deepEqual(ciTimes(running), { startedAt: ago(10), finishedAt: null });
+  // Only a queued check is pending and it has not started: no start to age CI from yet.
+  assert.deepEqual(ciTimes(running), { startedAt: null, finishedAt: null });
   assert.deepEqual(ciTimes([]), { startedAt: null, finishedAt: null });
 });
 
@@ -309,4 +311,67 @@ test("PR reads ask for reviewRequests, and the summary names who is requested", 
   assert.equal(s.reviewedAt, Date.parse("2026-11-16T11:00:00Z"));
   assert.deepEqual(s.ci, { startedAt: Date.parse("2026-11-16T10:00:00Z"), finishedAt: Date.parse("2026-11-16T10:05:00Z") });
   assert.deepEqual([s.sha, s.repo, s.checks.pass], ["abc", "o/r", 1]);
+});
+
+// ---- review round 1 ----
+
+test("a closed run's PRs, read every 15 minutes, do not go stale between reads", () => {
+  assert.equal(prTtl(true), 15 * MIN);
+  const entry = { at: ago(14), list: [pr({ state: "MERGED" })] };
+  // Open, a 14-minute-old read means the refresh is stuck; closed, it is on schedule.
+  assert.equal(prRead(run(), entry, now, false).readable, false);
+  assert.equal(prRead(run({ phase: "finished" }), entry, now, true).readable, true);
+  assert.equal(prRead(run(), { ...entry, at: now - prMaxAge(true) - 1 }, now, true).readable, false);
+});
+
+test("peer: a reviewer asked again waits, even after their change request or approval", () => {
+  const again = pr({ review: "CHANGES_REQUESTED", changesBy: ["anna"], requested: ["anna"] });
+  const s = prStep(again, "peer");
+  assert.deepEqual([s.label, s.who], ["waiting for", ["anna"]]);
+  assert.equal(prStep(pr({ review: "APPROVED", approvedBy: ["anna"], requested: ["anna"] }), "peer").label, "waiting for");
+  // Someone else's change request still stands.
+  assert.equal(prStep(pr({ changesBy: ["anna", "bo"], requested: ["anna"] }), "peer").label, "changes requested");
+  // The repo's reviewDecision counts when no reviewer's review stands and nobody is asked.
+  assert.equal(prStep(pr({ review: "CHANGES_REQUESTED" }), "peer").label, "changes requested");
+  const g = settled(run({ phase: "finished" }), [again], { flow: "peer" });
+  assert.deepEqual([g.group, g.reasons[0].text], ["else", "waiting for anna"]);
+});
+
+test("an offline machine's runs are carried, marked stale, and read as can't tell", () => {
+  const a = run({ key: ":/a", machine: null }), b = run({ key: "box:/b", machine: "box", prs: [], phase: "waiting" });
+  const carried = carryRuns([a, b], ["box"]);
+  assert.deepEqual(carried.map((r) => [r.key, r.stale]), [["box:/b", true]]);
+  // Carried again, the same object.
+  assert.equal(carryRuns(carried, ["box"])[0], carried[0]);
+  assert.deepEqual(carryRuns([a], [null]).map((r) => r.key), [":/a"]);
+  const cache = { at: now - 1000, failed: ["box"] };
+  assert.equal(filesFresh(carried[0], now, cache), false);
+  assert.equal(filesFresh(a, now, cache), true);
+  assert.equal(filesFresh(a, now, { at: ago(3), failed: [] }), false, "a poll over 2 minutes old");
+  // Even its waiting plan, read before the machine went away, is not Needs you now.
+  const g = assess(carried[0], { orch: null, pr: read([]), filesOk: filesFresh(carried[0], now, cache), now });
+  assert.deepEqual([g.group, g.cantTell], ["else", true]);
+});
+
+test("a re-run failed job is aged from its re-run, not from the first checks", () => {
+  const t = (m) => new Date(ago(m)).toISOString();
+  const rollup = [
+    { status: "COMPLETED", conclusion: "SUCCESS", startedAt: t(50), completedAt: t(40) },
+    { status: "IN_PROGRESS", conclusion: "", startedAt: t(2), completedAt: null },
+  ];
+  assert.deepEqual(ciTimes(rollup), { startedAt: ago(2), finishedAt: null });
+  const prs = [pr({ checks: checks(1, 0, 1), ci: ciTimes(rollup) })];
+  assert.equal(stalled(run(), { now, lastActivity: ago(1), prs, ciUsual: 10 * MIN }), false);
+  assert.equal(stepText(stepOf(run(), { prs }), now), "CI on #42 · 2m");
+});
+
+test("a quiet wait on CI inside its usual time is not a stall; without a baseline the quiet rule applies", () => {
+  const prs = [pr({ checks: checks(0, 0, 3), ci: { startedAt: ago(35), finishedAt: null } })];
+  assert.equal(stalled(run(), { now, lastActivity: ago(35), prs, ciUsual: 40 * MIN }), false);
+  assert.deepEqual(stalled(run(), { now, lastActivity: ago(35), prs, ciUsual: null }), { quietMs: 35 * MIN, by: "quiet" });
+});
+
+test("screens of a stalled run are read every 5 minutes, not every minute", () => {
+  assert.equal(probeEvery(26 * MIN), MIN);
+  assert.equal(probeEvery(STALL_MS), 5 * MIN);
 });

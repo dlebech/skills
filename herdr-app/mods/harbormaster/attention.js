@@ -13,8 +13,12 @@ import { needsYou, needReason } from "./live.js";
 // No new progress line, no change in the run's agents and no new terminal output for this
 // long, and the run has stalled.
 export const STALL_MS = 30 * 60000;
-// A PR read older than this, for a run still open, no longer tells: its refresh is stuck.
-export const PR_READ_MAX_AGE = 10 * 60000;
+// How often a run's PRs are read (data.js refreshPrs): every minute while the run is open,
+// every 15 minutes once it is closed (data.js isClosed).
+export const prTtl = (closed) => (closed ? 15 * 60000 : 60000);
+// A PR read older than its ttl plus this no longer tells: its refresh is stuck.
+export const PR_READ_MARGIN = 10 * 60000;
+export const prMaxAge = (closed) => prTtl(closed) + PR_READ_MARGIN;
 // A CI watch past this many times the repository's usual CI time has stalled.
 export const CI_STALL_FACTOR = 2;
 // The fewest finished CI runs a repository needs before its usual time is trusted.
@@ -57,15 +61,21 @@ const isShut = (pr) => pr?.state === "MERGED" || pr?.state === "CLOSED";
 // has not answered → waiting for <name>; only comments, nobody requested → request review
 // (the review is back with the user). Self: changes requested if someone asked for them,
 // else review proof → merge. Merged or closed → merged — close run, either flow.
+// A reviewer asked again (back in `requested`) has no standing review: their change request
+// or approval was before the re-request, so the PR waits for them. GitHub's own
+// reviewDecision counts only when no reviewer's review stands and nobody is asked.
 export function prStep(pr, flow) {
   if (isShut(pr)) return { label: "merged — close run", rank: rank("merged — close run"), who: [] };
   if (!isOpenPr(pr)) return null;
-  const changes = pr.review === "CHANGES_REQUESTED" || pr.changesBy?.length > 0;
+  const requested = pr.requested ?? [];
+  const live = (who) => (who ?? []).filter((w) => !requested.includes(w));
+  const decision = !pr.changesBy?.length && !pr.approvedBy?.length && !requested.length ? pr.review : null;
+  const changes = live(pr.changesBy).length > 0 || decision === "CHANGES_REQUESTED";
   const step = (label, who = []) => ({ label, rank: rank(label), who });
   if (flow !== "peer") return step(changes ? "changes requested" : "review proof → merge");
   if (pr.state === "DRAFT") return step("request review");
   if (changes) return step("changes requested");
-  if (pr.review === "APPROVED" || pr.approvedBy?.length > 0) return step("approved — merge");
+  if (live(pr.approvedBy).length > 0 || decision === "APPROVED") return step("approved — merge");
   if (pr.requested?.length > 0) return step("waiting for", pr.requested);
   return step("request review");
 }
@@ -94,14 +104,15 @@ export function nextStepText(step) {
 // What a run's PR read tells: {list, readable, why}. `entry` is its harbormaster.prs entry
 // ({at, list, okAt, error}), or null before the first read. Unreadable when the run has PRs
 // but none was read yet, the last read failed for any PR (gh failing, offline), or the
-// entry is older than maxAge while the run is still open (the refresh is stuck).
-export function prRead(run, entry, now, maxAge = PR_READ_MAX_AGE) {
+// entry is older than prMaxAge for the schedule its PRs are read on (`closed`: data.js
+// isClosed, as refreshPrs is given it), when the refresh is stuck.
+export function prRead(run, entry, now, closed = false) {
   if (!run?.prs?.length) return { list: [], readable: true, why: null };
   if (!entry) return { list: null, readable: false, why: "pull requests not read yet" };
   const list = entry.list ?? [];
   if (entry.error) return { list, readable: false, why: entry.error };
   if (list.some((p) => p.state === "UNKNOWN" || p.stale)) return { list, readable: false, why: "a pull request could not be read" };
-  if (!run.away && now - (entry.at ?? 0) > maxAge) return { list, readable: false, why: "the pull request read is stale" };
+  if (now - (entry.at ?? 0) > prMaxAge(closed)) return { list, readable: false, why: "the pull request read is stale" };
   return { list, readable: true, why: null };
 }
 
@@ -115,14 +126,16 @@ export function checkKind(x) {
   return PASS.includes(v) ? "pass" : FAIL.includes(v) ? "fail" : "pending";
 }
 
-// A rollup's start and end in ms: the first check's start and, once none is pending, the
-// last one's completion. GitHub sends "0001-01-01T00:00:00Z" for a check not started yet.
+// A rollup's start and end in ms. While checks are pending, the start is the earliest start
+// among the pending ones, so a failed job re-run long after the rest is aged from its re-run;
+// once none is pending, the first check's start and the last one's completion. GitHub sends
+// "0001-01-01T00:00:00Z" for a check not started yet.
 const time = (s) => { const t = Date.parse(s ?? ""); return t > 946684800000 ? t : null; };
 export function ciTimes(rollup) {
   const list = rollup ?? [];
-  const starts = list.map((x) => time(x.startedAt)).filter(Boolean);
-  const ends = list.map((x) => time(x.completedAt)).filter(Boolean);
   const pending = list.some((x) => checkKind(x) === "pending");
+  const starts = list.filter((x) => !pending || checkKind(x) === "pending").map((x) => time(x.startedAt)).filter(Boolean);
+  const ends = list.map((x) => time(x.completedAt)).filter(Boolean);
   return { startedAt: starts.length ? Math.min(...starts) : null, finishedAt: !pending && ends.length ? Math.max(...ends) : null };
 }
 
@@ -197,13 +210,14 @@ export const stepText = (step, now = Date.now()) => (step?.text ? (step.since ? 
 // its step, its agents or their terminal output for STALL_MS (lastActivity, the latest of
 // them; null when not known yet, which never stalls). CI: a CI run on an open PR past
 // CI_STALL_FACTOR times the repository's usual CI time (ciUsual, ms; null: no baseline, no
-// CI stall). Only a running run stalls: a finished, waiting, blocked, parked or closed one,
+// CI stall). While CI runs and the repository has a baseline, only the CI rule judges: a
+// quiet wait on CI inside its usual time is not a stall. Only a running run stalls: a finished, waiting, blocked, parked or closed one,
 // or one with an open question, already shows why it waits.
 export function stalled(run, { now, lastActivity = null, prs = [], ciUsual = null, orch = null } = {}) {
   if (!run || run.away || run.phase === "finished" || needsYou(run, orch)) return false;
   const ci = ciState(prs);
-  if (ci.state === "running" && ci.startedAt && ciUsual && now - ci.startedAt > CI_STALL_FACTOR * ciUsual) {
-    return { quietMs: now - ci.startedAt, by: "ci" };
+  if (ci.state === "running" && ciUsual) {
+    return ci.startedAt && now - ci.startedAt > CI_STALL_FACTOR * ciUsual ? { quietMs: now - ci.startedAt, by: "ci" } : false;
   }
   if (lastActivity && now - lastActivity >= STALL_MS) return { quietMs: now - lastActivity, by: "quiet" };
   return false;

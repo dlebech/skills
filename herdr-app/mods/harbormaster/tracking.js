@@ -11,7 +11,8 @@
 //     afresh at the first poll, so a run cannot be called stalled for STALL_MS after a reload:
 //     too late rather than wrong. Terminal output is not something the mod API reports (panes
 //     refresh only on scroll-state transitions), so the screens of a run quiet by every other
-//     sign for STALL_MS minus 5 minutes are read with `hc read` once a minute, and a change
+//     sign for STALL_MS minus 5 minutes are read with `hc read` once a minute (every 5 once
+//     it is stalled), and a change
 //     in their words (digits and symbols left out, so a spinner or a ticking timer is not
 //     output) counts as life.
 //   - each repository's finished CI runs: shared state harbormaster.ci, {[owner/repo]: [{sha, ms}]},
@@ -31,6 +32,8 @@ const CI_KEY = "harbormaster.ci";
 const FLOWS_KEY = "harbormaster.reviewFlows";
 export const CI_KEEP = 20;
 const PROBE_EVERY = 60000;
+// Once a run is stalled, its screens are read only this often, until its agents change.
+const PROBE_STALLED_EVERY = 5 * 60000;
 const PROBE_AFTER = STALL_MS - 5 * 60000;
 
 // ---- pure helpers (tests drive them) ----
@@ -91,6 +94,10 @@ export function lastActivity(run) {
   return a || s ? Math.max(a ?? 0, s ?? 0) : null;
 }
 
+// How often to read a quiet run's screens: every minute as it nears a stall, every 5 minutes
+// once it is stalled (it already shows, and may stay so for hours), until a change resets it.
+export const probeEvery = (quietMs) => (quietMs >= STALL_MS ? PROBE_STALLED_EVERY : PROBE_EVERY);
+
 // Reads the screens of the run's agents, and counts it as life when their words changed.
 async function probe(run, ctx, entry) {
   entry.probing = true;
@@ -117,6 +124,8 @@ export function observeRuns(runs, ctx, answered) {
   const listed = new Set(runs.map((r) => r.key));
   for (const key of activity.keys()) if (!listed.has(key)) activity.delete(key);
   for (const r of runs) {
+    // A stale run (its machine did not answer) keeps what is known of it, untouched.
+    if (r.stale) continue;
     if (r.away || r.phase === "finished") { activity.delete(r.key); continue; }
     const prev = activity.get(r.key);
     const t = trackSince(prev ? { sig: prev.sig, since: prev.since } : null, agentSig(r, ctx), now);
@@ -125,7 +134,8 @@ export function observeRuns(runs, ctx, answered) {
     if (!prev || t.since !== prev.since) entry.since = t.since;
     activity.set(r.key, entry);
     const last = lastActivity(r);
-    if (r.terminal && r.phase === "running" && last && now - last >= PROBE_AFTER && !entry.probing && now - entry.probedAt >= PROBE_EVERY) {
+    if (r.terminal && r.phase === "running" && last && now - last >= PROBE_AFTER && !entry.probing
+      && now - entry.probedAt >= probeEvery(now - last)) {
       probe(r, ctx, entry).catch(() => {});
     }
   }

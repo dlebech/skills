@@ -20,7 +20,7 @@ import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, proveRequest, withAcceptance, resultLine } from "./proof.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
-import { checkKind, ciTimes } from "./attention.js";
+import { checkKind, ciTimes, prTtl } from "./attention.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
@@ -347,18 +347,32 @@ export function cachedRuns() {
   return cache;
 }
 
+// The runs of machines that failed this read (`failed`: their names, null for this one), from
+// the last read, marked `stale: true`, so they still show, as "can't tell", instead of
+// vanishing; and their PR entries are kept, since refreshPrs forgets only runs not in the
+// cache. A run already marked stays the same object.
+export function carryRuns(prev, failed) {
+  const out = new Set(failed.map((m) => m ?? null));
+  return (prev ?? []).filter((r) => out.has(r.machine ?? null)).map((r) => (r.stale ? r : { ...r, stale: true }));
+}
+
 export function loadRuns() {
   if (Date.now() - cache.at < 2500) return Promise.resolve(cache);
   if (cache.pending && Date.now() - cache.pendingAt < STALE_READ) return cache.pending;
   const read = ++reads;
   cache.pendingAt = Date.now();
   cache.pending = (async () => {
-    const names = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
+    const all = machines();
+    const names = all.filter((m) => m.layout !== "unavailable").map((m) => m.name);
     if (!names.includes(null)) names.unshift(null);
-    const runs = [], decisions = [], errors = [], failed = [], answered = new Set(), samples = [];
+    // An unavailable (offline) machine is not asked, and counts as failed: its runs are carried.
+    const failed = all.filter((m) => m.layout === "unavailable" && m.name !== null).map((m) => m.name);
+    const runs = [], decisions = [], errors = [], answered = new Set(), samples = [];
     await Promise.all(names.map(async (on) => {
       try {
         const out = await exec("sh", ["-c", SCRIPT], { on });
+        // A machine that could not be reached prints nothing and fails.
+        if (out.code !== 0 && !out.stdout.trim()) throw new Error((out.stderr || `exit ${out.code}`).trim());
         const [files, sample] = out.stdout.split(GS);
         decisions.push(...parseDecisions(on, files.split(RS)[0]));
         runs.push(...parse(on, files));
@@ -369,19 +383,23 @@ export function loadRuns() {
         failed.push(on);
       }
     }));
+    const fresh = [...runs];
+    runs.push(...carryRuns(cache.runs, failed));
     runs.sort((a, b) => (a.machine ?? "").localeCompare(b.machine ?? "") || a.dir.localeCompare(b.dir));
     decisions.sort((a, b) => (a.asked ?? 0) - (b.asked ?? 0));
     if (read !== reads) return cache;
-    // `failed`: the machines (null for this one) whose runs could not be read this time.
+    // `failed`: the machines (null for this one) whose runs could not be read this time; their
+    // runs from the last read stay in `runs`, marked `stale` (carryRuns). Only the runs just
+    // read (`fresh`) are acted on below: nothing is done on a stale read.
     cache = { at: Date.now(), runs, decisions, errors, failed, pending: null, pendingAt: 0 };
     const ctx = facts();
     observeRuns(runs, ctx, answered);
     for (const [on, sample] of samples) ingest(on, sample);
-    recordRuns(runs.filter((r) => !r.away && orchestratorState(r, ctx) !== "gone"), (r) => runTerminals(r, ctx), answered).catch(() => {});
-    for (const r of runs) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
-    for (const r of runs) if (r.machine && !r.away) nameTab(r);
+    recordRuns(fresh.filter((r) => !r.away && orchestratorState(r, ctx) !== "gone"), (r) => runTerminals(r, ctx), answered).catch(() => {});
+    for (const r of fresh) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
+    for (const r of fresh) if (r.machine && !r.away) nameTab(r);
     nameCaptainTab(ctx);
-    showWorktrees(runs, ctx, answered).catch(() => {});
+    showWorktrees(fresh, ctx, answered).catch(() => {});
     return cache;
   })().catch((e) => {
     if (read !== reads) return cache;
@@ -561,7 +579,7 @@ export function relatedOf(run) {
 // that got them all, so a failing gh shows as "can't tell" instead of old data passing as new.
 export async function refreshPrs(run, closed = false) {
   const have = (shared("harbormaster.prs") ?? {})[run.key];
-  const ttl = closed ? 15 * 60000 : 60000;
+  const ttl = prTtl(closed);
   if (Date.now() - (prBusy.get(run.key) ?? 0) < PR_STALE || (have && Date.now() - have.at < ttl)) return;
   const started = Date.now();
   prBusy.set(run.key, started);
