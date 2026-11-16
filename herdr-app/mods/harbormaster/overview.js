@@ -3,8 +3,8 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, decisionQueue, answerRun, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
-import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
-import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag } from "./ui.js";
+import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
+import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag, tokenColors } from "./ui.js";
 import { tokenText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
 import { decidedText, decidedSummary } from "./decided.js";
@@ -429,11 +429,9 @@ function decidedSection(view, t, r) {
 // "Tokens": what the run has used, across its orchestrator and every agent it ran. Each
 // agent's bar is stacked: fresh tokens (input, output, cache writes) in blue, cache reads in
 // green; the exact numbers are on hover. The bars' scale is the run's total.
-// Cache reads are green in every theme: the theme's own "done" colour is blue in some, which made
-// both segments look the same. ansi2 is the theme's green; the fixed one reads on dark and light.
-const GREEN_FALLBACK = "#3fa055";
+// The colours are ui.js's tokenColors, shared with the stats view.
 function tokensSection(t, r) {
-  const GREEN = t.ansi2 ?? GREEN_FALLBACK;
+  const { fresh: BLUE, cached: GREEN } = tokenColors(t);
   const { total, input, output, cacheRead, cacheWrite, byAgent, updated } = r.tokens;
   const n = (v) => v.toLocaleString("en");
   const fresh = (x) => x.input + x.output + x.cacheWrite;
@@ -446,14 +444,14 @@ function tokensSection(t, r) {
       .tooltip(a.split ? `${a.name}: ${tip(a)}` : `${a.name}: ${n(a.total)} tokens`)
       .child(div().flex_none().w(96).truncate().text_color(a.name === "orchestrator" ? t.foreground : t.muted).child(a.name))
       .child(div().flex_1().min_w(0).h(5).rounded(3).bg(t.raised).overflow_hidden().flex()
-        .child(div().h_full().flex_none().bg(t.accent ?? t.muted).w(pct(f)))
+        .child(div().h_full().flex_none().bg(BLUE).w(pct(f)))
         .child(div().h_full().flex_none().bg(GREEN).w(pct(a.split ? a.cacheRead : 0))))
       .child(div().flex_none().w(44).text_color(t.dim).child(tokenText(a.total)));
   };
   const all = { input, output, cacheRead, cacheWrite };
   return section(t, `Tokens · ${tokenText(total)}`, updated && `counted ${ago(updated)}`)
     .child(h_flex().id(`tok-${r.key}`).gap(10).px(2).text_size(11).tooltip(`${n(total)} tokens: ${tip(all)}`)
-      .child(div().text_color(t.accent ?? t.muted).child(`fresh ${tokenText(fresh(all))}`))
+      .child(div().text_color(BLUE).child(`fresh ${tokenText(fresh(all))}`))
       .child(div().text_color(GREEN).child(`cache read ${tokenText(cacheRead)}`))
       .child(div().text_color(t.dim).child(`out ${tokenText(output)}`)))
     .when(Boolean(r.budget), (el) => el.child(div().id(`budget-${r.key}`).px(2).text_size(11).text_color(overBudget(r) ? t.blocked : t.dim)
@@ -879,7 +877,12 @@ export function cards(view, t, runs, errors, decisions = []) {
   return v_flex().id("root").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .on_size_change((size, cx) => { view.size = size; cx.notify(); })
     .child(v_flex().flex_none().px(10).pt(10).pb(6).gap(2)
-      .child(div().px(4).text_size(11.5).font_medium().text_color(t.dim).child("Runs"))
+      .child(h_flex().px(4).items_center()
+        .child(div().flex_1().text_size(11.5).font_medium().text_color(t.dim).child("Runs"))
+        .child(div().id("open-stats").flex_none().px(6).h(18).rounded(4).flex().items_center().text_size(11).text_color(t.dim)
+          .cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))
+          .tooltip("Where the time goes, tokens, CPU and memory: per run, task and agent, and past runs")
+          .on_click(() => openStats()).child("Stats")))
       .child(totals(t, s, decisions, ctx)))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
       .when(Boolean(waiting), (el) => el.child(waiting))

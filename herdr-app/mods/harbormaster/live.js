@@ -261,3 +261,16 @@ export function closeOwnPane() {
   const f = focused();
   if (f?.pane && panes().find((x) => x.pane === f.pane)?.mod === "harbormaster") run("pane.close", { pane: f.pane });
 }
+
+// Opens the stats view (props.role "stats") in a tab of its own, or shows the one already open:
+// a tab named "Stats" whose only pane is Harbormaster.
+export function openStats() {
+  for (const s of spaces()) {
+    const tab = (s.tabs ?? []).find((t) => t.name === "Stats" && t.panes === 1 && panes().some((p) => p.tab === t.id && p.mod === "harbormaster"));
+    if (!tab) continue;
+    run("space.select", { id: s.id });
+    run("tab.select", { id: tab.id });
+    return;
+  }
+  run("tab.new", { name: "Stats", mod: "harbormaster", props: { role: "stats" } });
+}
