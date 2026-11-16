@@ -98,7 +98,9 @@ read_machines() {
       continue
     fi
     (
-      if hc exec --on "$name" --timeout 30 sh -c "$REMOTE_RUNS_SCRIPT" >"$dest/$name.out" 2>"$dest/$name.err"; then
+      # CAPTAIN_MACHINES_ROOT, for tests, is the runs root to read on every machine instead.
+      if hc exec --on "$name" --timeout 30 ${CAPTAIN_MACHINES_ROOT:+--env "HERDR_ORCHESTRATION_ROOT=$CAPTAIN_MACHINES_ROOT"} \
+        sh -c "$REMOTE_RUNS_SCRIPT" >"$dest/$name.out" 2>"$dest/$name.err"; then
         unpack_runs "$dest/$name" <"$dest/$name.out" >"$dest/$name.result.tmp"
         printf '%s\t%s\n' "$name" "$(cat "$dest/$name.result.tmp")" >"$dest/$name.result"
       else

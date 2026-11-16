@@ -50,7 +50,9 @@ capt=$repo/skills/herdr-app-captain/scripts
 herdr-app ls >/dev/null || { echo "Open the Herdr window first." >&2; exit 1; }
 
 work=$(mktemp -d)
-export HERDR_ORCHESTRATION_ROOT=$work/runs WATCH_RUNS_INTERVAL=1
+# CAPTAIN_MACHINES empty: this machine only, so runs on other machines stay out of it
+# (runs-remote.sh checks those).
+export HERDR_ORCHESTRATION_ROOT=$work/runs WATCH_RUNS_INTERVAL=1 CAPTAIN_MACHINES=
 suffix=$$
 fake=rtest-orc-$suffix
 watch=rtest-watch-$suffix
@@ -89,7 +91,7 @@ contains() { # contains <description> <text> <wanted part>
 }
 tab_name() { herdr-app ls | jq -r --arg t "$1" '.spaces[].tabs[] | select(.id == $t) | .name'; }
 start_watcher() { # [interval]; hc run does not pass on this environment, so it goes in the command
-  hc run --bg --name "$watch" --no-notify --cwd "$work" -- env HERDR_ORCHESTRATION_ROOT="$HERDR_ORCHESTRATION_ROOT" \
+  hc run --bg --name "$watch" --no-notify --cwd "$work" -- env HERDR_ORCHESTRATION_ROOT="$HERDR_ORCHESTRATION_ROOT" CAPTAIN_MACHINES= \
     WATCH_RUNS_INTERVAL="${1:-1}" "$capt/watch-runs.sh" >/dev/null
 }
 watch_once() { # start the watcher, wait for it to exit, print what it said
