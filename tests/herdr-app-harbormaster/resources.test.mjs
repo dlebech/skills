@@ -125,6 +125,8 @@ test("programOf names commands from the table, else by program", () => {
   assert.equal(programOf("node", "node_modules/.bin/eslint ."), "lint");
   assert.equal(programOf("bash", "-c ls"), "shell");
   assert.equal(programOf("php", "artisan serve"), "php");
+  assert.equal(programOf("node", "/x/.bin/firefox-devtools-mcp --tool-preset developer"), "mcp server");
+  assert.equal(programOf("firefox", "-marionette"), "browser");
 });
 
 const usage = (totalMs, ownMs, rssKb, pids, programs = []) => ({ totalMs, ownMs, rssKb, pids, programs });

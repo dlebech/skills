@@ -16,6 +16,7 @@ and it keeps nothing the files do not.
 | `status.json` | `set-status.sh`, `tokens.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated, tokens, budget, budget_asked, budget_answered}`. Outlives the orchestrator. `set-status.sh` keeps fields other scripts write. |
 | `sessions` | `tokens.sh` | `tokens.sh` | Every session the orchestrator's terminal has had, one `<kind> <session id or file>` a line (below). |
 | `.tokens/` | `tokens.sh` | `tokens.sh` | Its cache: each session file's parsed usage and how far it was read (below). |
+| `.resources.json` | Harbormaster | Harbormaster, run history | CPU and memory per agent and program, added to on each 5 s poll while the run is open (below). |
 | `decisions.md` | orchestrator | anyone | The decisions log: what was decided, by whom, why (the line format is below). |
 | `question.md` | orchestrator | Harbormaster, captain, you | The open question to you, if any (below). Removed once answered. |
 | `inbox/*.message` | anyone who answers or instructs | orchestrator | Messages to the orchestrator (below). The orchestrator renames a message it has read to `.handled`. |
@@ -204,6 +205,36 @@ safe while the session files are there. Writes to `status.json` go through `lib.
 `status_update`, under a lock (`.status.lock`), so `set-status.sh` and `tokens.sh` publishing at once
 do not undo each other. Harbormaster reads only `status.json`, so the numbers show for runs on other
 machines and stay after the orchestrator is gone.
+
+## CPU and memory: .resources.json
+
+Harbormaster's poll (`herdr-app/mods/harbormaster/resources.js`) adds a process snapshot to this file
+every 5 s while the run is open and its orchestrator is there; the orchestrator never writes it. One
+JSON object, `sampled_ms` always its first key:
+
+```json
+{"sampled_ms": 1794830000000, "version": 1, "os": "linux", "estimated": false,
+ "samples": 720, "seconds": 3600, "cpu_s": 812.4, "peak_rss_mb": 3120.5, "avg_rss_mb": 1840.2, "rss_mbs": 6624720,
+ "programs": {"test runner": {"cpu_s": 210.3}, "short-lived": {"cpu_s": 40.1}},
+ "agents": {
+   "impl-rss-t7": {"terminals": ["t53c"], "parent": "orc-skills-stats", "first_ms": 0, "last_ms": 0, "seconds": 1800,
+     "cpu_s": 300.2, "own_cpu_s": 120.0, "peak_rss_mb": 900.1, "avg_rss_mb": 610.4,
+     "programs": {"test runner": {"cpu_s": 150.0, "peak_rss_mb": 400.0, "avg_rss_mb": 80.2}},
+     "raw": {"terms": {}, "done_ms": {}, "rss_mbs": 0, "prog_mbs": {}, "prog_peak": {}}}}}
+```
+
+- `agents` is keyed by terminal name (its address without one): the orchestrator, its agents and the
+  terminals they started with `hc run`, each with its `parent`'s name, so the task is in the name
+  (`impl-<prefix>-<task>`). `own_cpu_s` is the agent's own process; `programs` its commands, by program;
+  `short-lived` the CPU of commands no poll saw alive (shorter than 5 s), the rest of `cpu_s`.
+- CPU seconds come from cumulative counters, kept as the largest value seen per terminal and process, so a
+  sample counted twice adds nothing. Memory is in MB of RSS: `peak_*` the largest sample, `avg_*` weighted by
+  the time since the sample before, at most 15 s (the app may have been closed). The run's own peak and
+  average are of the sum of its agents at each sample. `seconds` is the time samples cover.
+- `estimated: true` (macOS): no exited commands are known, so CPU totals are what the polls saw.
+- `raw` is the bookkeeping these come from; read the other fields.
+- Writes go to a temporary file and `mv`, under a `.resources.json.lock` directory, and only when the file
+  still has the `sampled_ms` the poll read, so two windows polling at once cannot interleave or count twice.
 
 ## Soft budget
 
