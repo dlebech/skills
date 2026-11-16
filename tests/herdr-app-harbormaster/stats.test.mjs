@@ -61,6 +61,11 @@ test("taskOfName", () => {
   assert.equal(taskOfName("rev-pda-final-fix", "pda"), "final-fix");
   assert.equal(taskOfName("orc-skills-stats", "rss"), null);
   assert.equal(taskOfName("impl-rss-t3", null), null);
+  // "final" is no task; a round suffix is dropped only when the base is a known task.
+  assert.equal(taskOfName("rev-rss-final", "rss"), null);
+  assert.equal(taskOfName("rev-rss-t2-2", "rss", new Set(["t2"])), "t2");
+  assert.equal(taskOfName("grunt-rss-t2-2", "rss", new Set(["t2"])), "t2");
+  assert.equal(taskOfName("rev-rss-t2-2", "rss"), "t2-2");
 });
 
 const run = { key: ":/r/live", dir: "/r/live", machine: null, branch: "run-x", folder: "/p/skills", type: "feat", topic: "Stats", prefix: "rss", merged: 1, planned: 3, statusLine: "running", away: null, started: Date.parse("2026-11-16T08:00:00Z"), tokens: { total: 50, input: 1, output: 4, cacheRead: 40, cacheWrite: 5 } };

@@ -27,12 +27,13 @@ const MAX_GAP_S = 15;
 
 // Programs by name, first match wins, tested against "<program> <arguments>". Anything else
 // is named by its program's file name (node, php, python3, ...). Editable on purpose.
+// categories.tsv classifies the same commands for the time table; keep the two alike.
 export const PROGRAMS = [
-  ["test runner", /\b(vitest|jest|mocha|pytest|py\.test|phpunit|pest|rspec|bats|playwright test|cargo test|go test|node --test|runs-live\.sh|npm (run )?test|pnpm (run )?test|yarn test)\b/],
+  ["test runner", /\b(vitest|jest|mocha|pytest|py\.test|phpunit|pest|rspec|bats|playwright test|cargo test|go test|node\b.*\s--test|runs-live\.sh|npm (run )?test|pnpm (run )?test|yarn test)\b/],
   // Before browser: firefox-devtools-mcp is a tool server, not the browser it may start.
   ["mcp server", /(-mcp\b|\bmcp-server|\bmcp\b)/i],
   ["browser", /(chrom|firefox|MainThread|headless_shell|WebKit|Web Content|Isolated Web|msedge|safari)/i],
-  ["lint", /\b(eslint|biome|phpstan|psalm|ruff|mypy|pyright|tsc|shellcheck|clippy|prettier|stylelint)\b/],
+  ["lint", /\b(herdr-app check|bash -n|node --check|eslint|biome|phpstan|psalm|ruff|mypy|pyright|tsc|shellcheck|clippy|prettier|stylelint)\b/],
   ["install", /\b(npm (ci|install|i)|pnpm (install|i)|yarn install|composer (install|update)|pip3? install|bundle install|uv sync)\b/],
   ["build", /\b(webpack|vite|esbuild|rollup|turbo|make|cmake|ninja|gcc|g\+\+|cc1\w*|clang\+*|rustc|cargo|go build|gradle|mvn|swc|next build)\b/],
   ["docker", /^(docker|podman|containerd)/],

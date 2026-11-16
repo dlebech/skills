@@ -140,6 +140,10 @@ test("macOS sampler reads ps output", () => {
 test("programOf names commands from the table, else by program", () => {
   assert.equal(programOf("node", "/x/.bin/vitest run"), "test runner");
   assert.equal(programOf("php", "vendor/bin/phpunit"), "test runner");
+  assert.equal(programOf("node", "--import ./loader.mjs --test a.test.mjs"), "test runner");
+  assert.equal(programOf("bash", "tests/herdr-app-captain/runs-live.sh"), "test runner");
+  assert.equal(programOf("node", "--check a.js"), "lint");
+  assert.equal(programOf("composer", "install"), "install");
   assert.equal(programOf("cargo", "build --release"), "build");
   assert.equal(programOf("cargo", "test"), "test runner");
   assert.equal(programOf("node", "node_modules/.bin/eslint ."), "lint");
