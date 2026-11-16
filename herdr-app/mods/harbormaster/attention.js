@@ -103,8 +103,8 @@ export const COMMENT_LABELS = new Set(["approved — merge", "changes requested"
 // The run's next step from its PRs: the most urgent PR's {label, rank, who, count, same, pr, prs,
 // comments}, where `count` is how many PRs the run has, `same` how many share that label, `prs`
 // those PRs and `comments` their review comments summed (comments.js stepComments; null for a
-// label that does not count them); or null without a PR (the run's own step applies) or when no
-// PR's state is known.
+// label that does not count them) and `draft` (any of those PRs is a draft); or null without a PR
+// (the run's own step applies) or when no PR's state is known.
 export function nextStep(prs, flow) {
   const steps = (prs ?? []).map((pr) => ({ pr, s: prStep(pr, flow) })).filter((x) => x.s);
   if (!steps.length) return null;
@@ -113,22 +113,34 @@ export function nextStep(prs, flow) {
   const who = [...new Set(same.flatMap((x) => x.s.who))];
   const list = same.map((x) => x.pr);
   const comments = COMMENT_LABELS.has(top.s.label) ? stepComments(list) : null;
-  return { label: top.s.label, rank: top.s.rank, who, count: (prs ?? []).length, same: same.length, pr: top.pr, prs: list, comments };
+  return { label: top.s.label, rank: top.s.rank, who, count: (prs ?? []).length, same: same.length, pr: top.pr, prs: list, comments, draft: list.some((p) => p.state === "DRAFT") };
 }
 
 // A next step as the Crew shows it: "review from anna, bo", then "· 3 PRs" with several PRs.
 // Short, for the narrow sidebar; reviewWaitText says it in full. With review comments,
 // "approved · 3 comments" in place of "approved — merge" (merging comes after them), and
-// "changes requested · 3 comments"; "· comments ?" when they could not be read.
-export function nextStepText(step) {
+// "changes requested · 3 comments"; "· comments ?" when they could not be read. Options:
+//   comments  false leaves the comment count out (the narrow sidebar, so the age survives); an
+//             approval with comments still reads "approved", not "approved — merge"
+//   red       CI is red on the run: "review proof", no "→ merge" (needaction.js says the same)
+//   failed    a proof task failed: "proof failed", never "→ merge" (the box says to read it first)
+// A self-flow draft reads "review proof → ready": it is marked ready before it is merged.
+export function nextStepText(step, { comments = true, red = false, failed = false } = {}) {
   if (!step) return "";
   const said = commentsText(step.comments);
   const label = step.label === "review from" ? `review from ${step.who.join(", ") || "a reviewer"}`
-    : said && step.label === "approved — merge" ? `approved · ${said}`
-    : said ? `${step.label} · ${said}`
+    : step.label === "review proof → merge" ? (failed ? "proof failed" : red ? "review proof" : step.draft ? "review proof → ready" : step.label)
+    : said && step.label === "approved — merge" ? (comments ? `approved · ${said}` : "approved")
+    : said && comments ? `${step.label} · ${said}`
     : step.label;
   return step.count > 1 ? `${label} · ${step.count} PRs` : label;
 }
+
+// nextStepText for an assessed run (assess), with what it knows beside the step: red CI and a
+// failed proof. One rule for the views that word the step outside assess (parkedLabel, toasts).
+export const stepTextOf = (att, opts = {}) => nextStepText(att?.next, {
+  red: Boolean(att?.reasons?.some((r) => r.key === "red-ci")), failed: Boolean(att?.proofFailed), ...opts,
+});
 
 // "#1, #2 and #3"
 const andList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] ?? "");
@@ -207,9 +219,10 @@ export function usualCi(samples) {
 
 // ---- the current step and its age ----
 
-// "34m", "1h12m", "2d3h"; under a minute "0m".
+// "34m", "1h12m", "2d3h"; under a minute "<1m", as Herdr's Agents list says it.
 export function ageText(ms) {
   const m = Math.max(0, Math.floor((ms ?? 0) / 60000));
+  if (m < 1) return "<1m";
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
   return h < 24 ? `${h}h${m % 60}m` : `${Math.floor(h / 24)}d${h % 24}h`;
@@ -313,20 +326,21 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 //   stages, since, ages   for stepOf
 //   filesOk   false when the run's files are a stale read (its machine did not answer)
 //   closed    data.js isClosed: a finished run whose tab the user closed waits on nothing
+//   proofFailed  a proof task failed (attend.js): the review-proof step reads "proof failed"
 //   now
 // Returns {group: "needs" | "working" | "waiting" | "cant" | "done", cantTell, why, reasons: [{key, text, since}],
-// next (nextStep), step (stepOf), stall, waitSince (ms: the longest-waiting reason's anchor,
+// next (nextStep), step (stepOf), stall, proofFailed, waitSince (ms: the longest-waiting reason's anchor,
 // for sorting; oldest first)}. Reason keys: question, gone (an unfinished run whose
 // orchestrator is gone or lost: Resume is what it needs), stalled, red-ci, and the next-step
 // labels in Needs you, and finished (a finished run with no PR: its report is read and the
 // run closed); working, ci-running, idle in Working (idle: briefly quiet, not
 // stalled yet); waiting-for in Waiting on others; cant-tell in Can't tell. A Needs you run
 // may still have cantTell: a question read from its files, its PRs unreadable.
-export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, now = Date.now() } = {}) {
+export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, proofFailed = false, now = Date.now() } = {}) {
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
   const step = stepOf(run, { prs, stages, since, ages });
-  const base = { cantTell: false, why: null, next: null, step, stall: false, reasons: [] };
+  const base = { cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed) };
   const out = (group, extra) => {
     const r = { ...base, ...extra, group };
     const anchors = r.reasons.map((x) => x.since).filter(Boolean);
@@ -369,7 +383,9 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
     if (ci.state === "red") reasons.push({ key: "red-ci", text: `red CI on #${ci.pr.number}`, since: ci.finishedAt ?? settled });
     if (next && NEEDS_LABELS.has(next.label)) {
       const reviewed = next.label === "changes requested" || next.label === "approved — merge" ? next.pr.reviewedAt ?? null : null;
-      reasons.push({ key: next.label, text: nextStepText(next), since: reviewed ?? settled });
+      // `short`: without the comment count, for the narrow sidebar (crewrows.js rowLead).
+      const opts = { red: ci.state === "red", failed: Boolean(proofFailed) };
+      reasons.push({ key: next.label, text: nextStepText(next, opts), short: nextStepText(next, { ...opts, comments: false }), since: reviewed ?? settled });
     }
   }
   // A finished run with no PR (a review or an exploration) leaves a report: reading it and

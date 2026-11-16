@@ -8,6 +8,8 @@ import { exec } from "herdr";
 import { loadTiming } from "./timing.js";
 import { resourcesOf, chunks } from "./resources.js";
 import { attributeResources, taskResources } from "./attribute.js";
+// A cycle with data.js (it writes the history), safe: only called, never read at load.
+import { recordedCounts } from "./data.js";
 
 const r1 = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
@@ -49,7 +51,7 @@ export function buildLine(run, timing, resources, closedMs, now = Date.now()) {
     ended: timing?.end ?? null,
     closed: iso(closedMs),
     status: run.statusLine ?? null,
-    tasks_merged: run.merged ?? null, tasks_planned: run.planned ?? null,
+    tasks_merged: recordedCounts(run).merged, tasks_planned: recordedCounts(run).planned,
     wall: timing?.wall ?? null,
     critical_path: timing?.critical_path ?? null,
     categories: timing?.categories ?? null,

@@ -4,6 +4,7 @@
 import { prEntryOf, taskAgents, shownStage, isClosed, isParked, filesFresh } from "./data.js";
 import { orchestratorState, agentStatus, workersOf, needReason } from "./live.js";
 import { assess, prRead, reviewFlow, stalled, ciState } from "./attention.js";
+import { proofTasks, proofCounts, gatheringStage } from "./proof.js";
 import { stepSince, stepAges, lastActivity, ciUsualOf, reviewFlows } from "./tracking.js";
 import { needLine, needsRun } from "./crewrows.js";
 
@@ -22,14 +23,28 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
   const prs = pr.readable ? pr.list : [];
   const ci = ciState(prs);
   const stall = stalled(run, { now, lastActivity: lastActivity(run), prs, ciUsual: ci.pr?.repo ? ciUsualOf(ci.pr.repo) : null, orch });
+  const stages = run.tasks.map((k) => shownStage(k, taskAgents(k, run, ctx)));
   return assess(run, {
     orch, working, pr, stall, now, closed,
     flow: reviewFlow(run, reviewFlows()),
-    stages: run.tasks.map((k) => shownStage(k, taskAgents(k, run, ctx))),
+    stages,
+    proofFailed: proofFailed(run, stages),
     since: stepSince(run),
     ages: stepAges(run),
     filesOk: filesFresh(run, now),
   });
+}
+
+// Whether a proof task failed, counted as the box counts it (overview.js needItemsOf: proof.js's
+// rows, a task still under way pending), so the pill and the Crew never say merge over it.
+export function proofFailed(run, stages = []) {
+  if (!run.proof?.md) return false;
+  const gathering = (id) => {
+    const i = run.tasks.findIndex((x) => x.id === id);
+    return i >= 0 && gatheringStage(stages[i]);
+  };
+  const finished = run.phase === "finished" || Boolean(run.away);
+  return proofCounts(proofTasks(run.tasks, run.proof.md, run.proof.files, { accepted: run.proof.accepted, gathering, finished })).fail > 0;
 }
 
 // Whether a run needs you now, one rule for every view that counts it (the overview's header

@@ -29,10 +29,14 @@ function optionsOf(body) {
   return items.map(optionOf).filter((o) => o.label);
 }
 
-// Which option ## Recommended names, by its first line: a number ("2", "Option 2"), else a
-// label, case-insensitive, either side containing the other. -1 when none fits.
+// A leading number's comma read as the separator it is: "1, it is what production runs." is
+// option 1 and its why, as "1: it is…" is. Only after a number: a label may hold a comma.
+const numComma = (line) => line.replace(/^(\s*[*_]*(?:option\s+)?#?\d+\.?[*_]*)\s*,/i, "$1:");
+
+// Which option ## Recommended names, by its first line: a number ("2", "Option 2", "1, …"), else
+// a label, case-insensitive, either side containing the other. -1 when none fits.
 function recommendedIndex(body, options) {
-  const first = unbold(body.split("\n").find((l) => l.trim()) ?? "");
+  const first = unbold(numComma(body.split("\n").find((l) => l.trim()) ?? ""));
   const lead = first.replace(/[:—–].*$/s, "").trim().toLowerCase();
   if (!lead) return -1;
   const n = /^(?:option\s+)?#?(\d+)\.?$/.exec(lead);
@@ -77,7 +81,7 @@ export function parseQuestion(text) {
   const options = structured ? optionsOf(body("options")) : [];
   const rec = recommendedIndex(body("recommended"), options);
   // Only what follows a separator is why: a bare "2" or label has none.
-  const first = body("recommended").split("\n").find((l) => l.trim()) ?? "";
+  const first = numComma(body("recommended").split("\n").find((l) => l.trim()) ?? "");
   const why = /[:—–]/.test(first) ? first.replace(/^[^:—–]*[:—–]\s*/, "").trim() : "";
   return {
     title,

@@ -329,13 +329,14 @@ export const isBudgetQuestion = (it) => it.kind === "budget" || /^Over the token
 // is gone, or has not asked yet): the same three options, recommended the way the
 // orchestrator's own question is: Continue when most tasks are merged, else Compact.
 function budgetItem(r, tokenText) {
-  const mostlyDone = r.planned > 0 && (r.merged ?? 0) / r.planned >= 0.5;
+  const { merged, planned } = taskCounts(r);
+  const mostlyDone = planned > 0 && merged / planned >= 0.5;
   const top = r.tokens.byAgent.slice(0, 3).map((a) => `${a.name} ${tokenText(a.total)}`).join(", ");
   return {
     id: `need-${r.key}`, kind: "budget", title: `Over budget: ${tokenText(r.tokens.total)} of ${tokenText(r.budget)} tokens`,
     options: BUDGET_OPTIONS, recommended: mostlyDone ? 0 : 1,
     why: mostlyDone ? "most tasks are merged" : "much work is left; a smaller context is cheaper",
-    evidence: `${tokenText(r.tokens.total)} used${r.planned ? `, ${r.merged ?? 0}/${r.planned} tasks done` : ""}${top ? `; largest: ${top}` : ""}`,
+    evidence: `${tokenText(r.tokens.total)} used${planned ? `, ${merged}/${planned} tasks done` : ""}${top ? `; largest: ${top}` : ""}`,
     risk: "Continue keeps spending; Stop parks the run until you resume it; Compact drops the orchestrator's context, which it re-reads from the run files.",
     blocks: "nothing is blocked: it is a soft budget", since: r.updated ?? r.started, run: r, answered: r.unhandled > 0,
   };
@@ -495,12 +496,24 @@ export function shownStage(task, agents) {
   return agents[0]?.stage ?? stage;
 }
 
-// How many tasks a run has merged and planned, from status.json, else plan.md.
+// How many tasks a run has done (`merged`) and planned: one count for the overview's header, the
+// cards, the pane and a confirm's "N of M tasks done" alike. Done is plan.md's tasks whose state
+// reads done (taskTone), as the task strip shows them; status.json's `merged` only when plan.md
+// lists no tasks, since an orchestrator updates it less often (one said 7 merged of 14 done).
+// Planned is the larger of status.json's and plan.md's count: a plan may list its tasks late.
 export function taskCounts(run) {
+  const tasks = run.tasks ?? [];
   return {
-    merged: run.merged ?? run.tasks.filter((task) => task.state === "merged").length,
-    planned: Math.max(run.planned ?? 0, run.tasks.length),
+    merged: tasks.length ? tasks.filter((task) => taskTone(task.state) === "done").length : run.merged ?? 0,
+    planned: Math.max(run.planned ?? 0, tasks.length),
   };
+}
+
+// taskCounts for a record (the stats view, the history line), so a run's row says what its card
+// said; nulls when neither plan.md nor status.json says anything.
+export function recordedCounts(run) {
+  if (!run.tasks?.length && run.merged == null && run.planned == null) return { merged: null, planned: null };
+  return taskCounts(run);
 }
 
 // ---- pull requests (gh), cached in shared state so every copy and layout reuses them ----

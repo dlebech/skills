@@ -50,10 +50,12 @@ export function cantWhy(a) {
 //   Waiting on others: the label ("review from anna"), then the step.
 //   Can't tell: "can't tell: machine offline", grey.
 //   Done: the label ("merged — close run · 2 PRs"), or "closed".
-export function rowLead(a, now = Date.now()) {
+// `narrow` (the sidebar): a label without its comment count ("approved · 2 PRs · 1h25m"), so
+// the age survives the truncation; the hover, the pill and the need box keep the count.
+export function rowLead(a, now = Date.now(), { narrow = false } = {}) {
   const step = stepText(a.step, now) || null;
   if (a.group === "needs") {
-    const why = a.reasons.map((r) => r.text).join(" · ");
+    const why = a.reasons.map((r) => (narrow && r.short) || r.text).join(" · ");
     const waited = !onlyStalled(a) && a.waitSince ? ageText(now - a.waitSince) : null;
     return { lead: waited ? `${why} · ${waited}` : why, rest: a.stall ? a.step?.text || null : null, tone: onlyStalled(a) ? "amber" : "blocked" };
   }
@@ -102,10 +104,16 @@ export function reviewCommentLines(next) {
   return [head, ...commentLines(c.prs).map((l) => `  ${l}`)];
 }
 
+// The reason a Needs-you run's pill names: the first one the Crew row leads with, past a question
+// (its own box says what is asked, and its title is too long for a pill). Null for none.
+export const pillReason = (a) => (a?.group === "needs" ? a.reasons.find((r) => r.key !== "question") ?? null : null);
+
 // A run card's pill when it should say what comes next, as the Crew does: {label, tone} for
 // a run with a next-step label that is in Needs you (red) or Done (done's colour), a finished
-// run with no PR (finished — read and close, red), or that is finished (`finished`: its phase), in a neutral colour, since a label beats "Finished";
-// else null (the card keeps its phase: running, parked, closed…).
+// run with no PR (finished — read and close, red), or that is finished (`finished`: its phase),
+// in a neutral colour, since a label beats "Finished"; else null (the card keeps its phase:
+// running, parked, closed…). In Needs you it says what the Crew row leads with (pillReason):
+// "red CI on #42" over a run whose label is review proof, never a step the box puts second.
 export function badgeOf(a, finished = false) {
   // A finished run with no PR has no PR label: its own reason is the pill.
   if (!a?.next && a?.group === "needs" && a.reasons.some((r) => r.key === "finished")) return { label: FINISHED_LABEL, tone: "blocked" };
@@ -113,7 +121,8 @@ export function badgeOf(a, finished = false) {
   const tone = a.group === "needs" ? "blocked" : a.group === "done" ? "done" : finished ? "muted" : null;
   // With review comments, a `tip` saying who said what.
   const tip = reviewCommentLines(a.next).join("\n");
-  return tone ? { label: nextStepText(a.next), tone, ...(tip ? { tip } : {}) } : null;
+  const label = pillReason(a)?.text ?? nextStepText(a.next);
+  return tone ? { label, tone, ...(tip ? { tip } : {}) } : null;
 }
 
 // Why a run is in Needs you, in one line ("red CI on #42 · review proof → merge"), or null.

@@ -1,20 +1,20 @@
 // The serious views: the runs overview (totals, what's waiting on you, captain, run cards) and the Crew block.
 
 import { div, svg } from "gpui-kit";
-import { openOverlay } from "herdr";
+import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
 import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCi } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
-import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, proofCounts, proofRowParts, needsLook, resultLine, pendingLine, gatheringStage } from "./proof.js";
+import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, segmentLook, proofCounts, proofRowParts, needsLook, resultLine, pendingLine, gatheringStage } from "./proof.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf, needsYouNow as needsYouOf } from "./attend.js";
 import { stepText, quietText, flowState, flowSetting, runDot } from "./attention.js";
-import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } from "./tell.js";
+import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText, reviewText, prStateText, prFacts } from "./tell.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
 import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, crewEntries, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
@@ -84,14 +84,6 @@ function statusDot(t, status) {
   return div().size(8).flex_none().rounded(4).bg(t[status] ?? t.dim);
 }
 
-// A PR's review as [text, tone]: who approved or asked for changes, when we know.
-function reviewText(pr) {
-  const who = (list) => (list?.length ? ` by ${list.join(", ")}` : "");
-  if (pr.review === "CHANGES_REQUESTED") return [`Changes requested${who(pr.changesBy)}`, "blocked"];
-  if (pr.review === "APPROVED") return [`Approved${who(pr.approvedBy)}`, "done"];
-  if (pr.review === "REVIEW_REQUIRED") return ["Review needed", "dim"];
-  return null;
-}
 
 // A link chip: the run's issues, and PRs it is about but did not open, side by side.
 // A PR chip's icon takes its state's color; its title and state are in the tooltip.
@@ -101,22 +93,27 @@ function linkChip(t, id, url, icon, tip) {
     .on_click((_e, cx) => { cx.stop_propagation(); openUrl(url); })
     .child(icon).child(shortRef(url));
 }
-const prStateText = (pr) => (pr.state === "UNKNOWN" ? null : pr.state === "DRAFT" ? "Draft" : pr.state[0] + pr.state.slice(1).toLowerCase());
 
 // A task's life-cycle stages (data.js taskStage) as they read and color, and which
-// are marked because an agent is at it. Implementing is Herdr's working colour, mirroring
-// its agent status like the spinner (see AMBER). Review takes the accent, fixing the implementer's
-// second pass a color of its own, so implementing and reviewing tasks tell apart.
+// are marked because an agent is at it. Implementing is a neutral bright tone, not amber: amber
+// means look soon (see AMBER), and the light edge on an active segment (and the spinner on rows)
+// says it is at work. Review takes the accent, fixing the implementer's second pass a colour of
+// its own, so implementing and reviewing tasks tell apart. The agent rows' stage text uses the same.
 const STAGE = {
   planned: { label: "Planned", color: (t) => t.border },
-  implement: { label: "Implementing", color: (t) => t.working, active: true },
+  implement: { label: "Implementing", color: (t) => t.muted, active: true },
   review: { label: "In review", color: (t) => t.accent, active: true },
-  fix: { label: "Fixing", color: (t) => t.ansi5 ?? t.working, active: true },
+  fix: { label: "Fixing", color: (t) => t.ansi5 ?? t.muted, active: true },
   done: { label: "Done", color: (t) => t.done },
   blocked: { label: "Blocked", color: (t) => t.blocked },
 };
-// A task's color: its stage's, else its tone's (a state that names no stage).
-const taskColor = (t, task, stage) => (stage ? STAGE[stage].color(t) : t[taskTone(task.state)] ?? t.border);
+// A task's color: its stage's, else its tone's (a state that names no stage); a task at work
+// that names no stage ("validating") is neutral, as Implementing is, never amber.
+const taskColor = (t, task, stage) => {
+  if (stage) return STAGE[stage].color(t);
+  const tone = taskTone(task.state);
+  return tone === "working" ? t.muted : t[tone] ?? t.border;
+};
 const pulse = (stage, task) => (stage ? STAGE[stage].active : taskTone(task.state) === "working");
 const stageText = (task, stage) => (stage ? STAGE[stage].label : stateText(task.state));
 
@@ -152,21 +149,22 @@ function taskDone(r, stages, i) {
   const stage = stages?.[i]?.stage;
   return stage ? stage === "done" : taskTone(r.tasks[i].state) === "done";
 }
-const PROOF_COLOR = { pass: (t) => PASS(t), accepted: (t) => PASS(t), fail: (t) => t.blocked, partial: (t) => AMBER(t), unchecked: (t) => AMBER(t) };
-
 // One segment per planned task, hover for its name, stage and proof, and how many are done
-// and under way below it; only for runs that plan at least one. A task's proof result, once it
-// has one, colours its segment (green pass, red fail, amber partial, no screenshot or, once the
-// run is finished, not checked); its stage colours it otherwise. The one task bar: the Proof
-// section has none of its own.
+// and under way below it; only for runs that plan at least one. Its stage colours it; a proof
+// that failed turns it red, one that wants a look (partial, no screenshot or, once the run is
+// finished, not checked) amber, and a passed one keeps done's colour with a green underline
+// (proof.js segmentLook). The one task bar: the Proof section has none of its own.
 function taskStrip(t, r, counts, stages, names = true) {
   const proof = taskProof(r, stages);
   return v_flex().gap(5)
     .child(h_flex().gap(3).h(6).children(Array.from({ length: counts.planned }, (_, i) => {
       const task = r.tasks[i];
       const p = proof[i] ?? null;
-      const color = p ? PROOF_COLOR[p.tone](t) : task ? taskColor(t, task, stages[i].stage) : i < counts.merged ? t.done : t.border;
+      const look = segmentLook(p?.tone);
+      const color = look.color === "blocked" ? t.blocked : look.color === "amber" ? AMBER(t)
+        : task ? taskColor(t, task, stages[i].stage) : i < counts.merged ? t.done : t.border;
       return div().id(`seg-${r.key}-${i}`).flex_1().h_full().rounded(3).bg(color)
+        .when(look.mark === "pass", (el) => el.border_b(2).border_color(PASS(t)))
         .when(Boolean(task), (el) => el.tooltip([[task.id, task.name].filter(Boolean).join(" "), stageText(task, stages[i].stage), p?.text].filter(Boolean).join(" · ")))
         // An agent is at it: a light edge, still (see statusDot for why not a pulse).
         .when(Boolean(task) && pulse(stages[i].stage, task), (el) => el.border(1).border_color(t.foreground + "88"));
@@ -174,10 +172,10 @@ function taskStrip(t, r, counts, stages, names = true) {
     .when(names, (el) => el.child(div().text_size(11).text_color(t.dim).child(tasksText(r, counts, stages))));
 }
 
-// "21/22 done · 1 in review": the tasks done, then those under way by stage.
+// "21/22 done · 1 in review": the tasks done (data.js taskCounts, as the header counts them),
+// then those under way by stage.
 function tasksText(r, counts, stages) {
-  const done = r.tasks.length ? r.tasks.filter((task) => taskTone(task.state) === "done").length : counts.merged;
-  return [`${done}/${counts.planned} done`, stageSummary(stages)].filter(Boolean).join(" · ");
+  return [`${counts.merged}/${counts.planned} done`, stageSummary(stages)].filter(Boolean).join(" · ");
 }
 
 // What a card offers: Park and Close while its orchestrator runs, finished or not (a
@@ -395,43 +393,54 @@ function commentsAction(view, t, r, att, id) {
   if (!prs.length) return null;
   const first = defaultMode(r.autonomy);
   const rows = prs.map((p, i) => {
-    const mine = commentsAskedHere.get(p.url);
-    if (mine && mine.sig !== commentsSig(r, p)) commentsAskedHere.delete(p.url);
     const n = p.comments.count, b = botCount(p.comments.bots);
     const what = `Address ${n} comment${n === 1 ? "" : "s"}${b ? ` (+${b} from bots)` : ""}${prs.length > 1 || p.number ? ` on #${p.number}` : ""}`;
     const label = div().id(`cmt-${id}-${i}-label`).flex_none().text_size(11.5).text_color(t.muted)
       .tooltip(commentLines([p], 20).join("\n")).child(what);
-    if (commentsAsked(r, p, commentsAskedHere.get(p.url))) {
-      return h_flex().gap(8).items_center().child(label)
-        .child(div().id(`cmt-${id}-${i}`).flex_none().text_size(11).text_color(t.muted)
-          .tooltip("Asked its orchestrator to address these comments; waiting for the comments or the run's status to change").child("asked…"));
-    }
-    const send = (mode) => (cx) => {
-      commentsAskedHere.set(p.url, { sig: commentsSig(r, p) });
-      view.actionError = null;
-      cx.notify();
-      cx.spawn(async (cx) => {
-        try {
-          const out = await askComments(r, p, mode);
-          if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
-          else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
-        } catch (e) {
-          // Written but not woken: the ask is in the inbox, so it stays asked.
-          if (!e?.inInbox) commentsAskedHere.delete(p.url);
-          view.actionError = `${r.branch}: ${e?.message ?? e}`;
-        }
-        view.redraw = true;
-        try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
-        try { await view.load(cx); } catch { /* the next refresh shows it */ }
-      }, { owner: null });
-    };
-    const tip = (mode) => `${MODE_TIP[mode]}.${mode === first ? ` The default at ${r.autonomy ?? "L0"}.` : ""}`;
+    if (addressAsked(r, p)) return h_flex().gap(8).items_center().child(label).child(askedNote(t, `cmt-${id}-${i}`));
     return h_flex().gap(6).items_center().child(label)
-      .child(actionButton(t, `cmt-${id}-${i}-ask`, "Ask me", tip("ask"), send("ask"), first === "ask"))
-      .child(actionButton(t, `cmt-${id}-${i}-handle`, "Handle them", tip("handle"), send("handle"), first === "handle"));
+      .child(actionButton(t, `cmt-${id}-${i}-ask`, "Ask me", modeTip(r, "ask"), addressSend(view, r, p, "ask"), first === "ask"))
+      .child(actionButton(t, `cmt-${id}-${i}-handle`, "Handle them", modeTip(r, "handle"), addressSend(view, r, p, "handle"), first === "handle"));
   });
   return v_flex().gap(4).children(rows);
 }
+
+// Whether a PR's Address comments was asked and nothing has moved since (comments.js commentsAsked),
+// dropping a click from here whose PR or run has moved on.
+function addressAsked(r, p) {
+  const mine = commentsAskedHere.get(p.url);
+  if (mine && mine.sig !== commentsSig(r, p)) commentsAskedHere.delete(p.url);
+  return commentsAsked(r, p, commentsAskedHere.get(p.url));
+}
+const askedNote = (t, id) => div().id(id).flex_none().text_size(11).text_color(t.muted)
+  .tooltip("Asked its orchestrator to address these comments; waiting for the comments or the run's status to change").child("asked…");
+const modeTip = (r, mode) => `${MODE_TIP[mode]}.${mode === defaultMode(r.autonomy) ? ` The default at ${r.autonomy ?? "L0"}.` : ""}`;
+
+// The click of an Ask me or Handle them: writes the run's inbox message for the PR (data.js
+// askComments); the button reads "asked…" until the PR's comments or the run's status change.
+const addressSend = (view, r, p, mode) => (cx) => {
+  commentsAskedHere.set(p.url, { sig: commentsSig(r, p) });
+  view.actionError = null;
+  cx.notify();
+  cx.spawn(async (cx) => {
+    try {
+      const out = await askComments(r, p, mode);
+      if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
+      else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
+    } catch (e) {
+      // Written but not woken: the ask is in the inbox, so it stays asked.
+      if (!e?.inInbox) commentsAskedHere.delete(p.url);
+      view.actionError = `${r.branch}: ${e?.message ?? e}`;
+    }
+    view.redraw = true;
+    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+    try { await view.load(cx); } catch { /* the next refresh shows it */ }
+  }, { owner: null });
+};
+
+// Whether the need box carries Address comments (needaction.js), so the card and pane leave out
+// their own Address rows.
+const boxAddresses = (r, ctx, f) => f.need && needItemsOf(r, ctx, f.att).some((it) => it.actions.some((x) => x.kind === "address"));
 
 // Who reviews the run's pull requests, peer (a colleague on GitHub) or self (you, from the
 // proof), as a two-way toggle with the folder's default marked. A click sets it for the whole
@@ -582,7 +591,9 @@ function cardHeader(view, t, r, f, meta) {
 function needItemsOf(r, ctx, att = attOf(r, ctx)) {
   if (att?.group !== "needs") return [];
   const rows = hasProof(r) ? proofRows(r, stagesOf(r, ctx)) : null;
-  const proof = rows ? { tier: r.proof.tier?.tier ?? null, pass: proofCounts(rows).pass, total: rows.filter((k) => k.scoped).length } : null;
+  const failed = rows?.find((k) => k.scoped && !k.accepted && !k.pending && k.result === "fail");
+  const proof = rows ? { tier: r.proof.tier?.tier ?? null, pass: proofCounts(rows).pass, fail: proofCounts(rows).fail, total: rows.filter((k) => k.scoped).length,
+    failed: failed ? [failed.id, failed.name].filter(Boolean).join(" ") : null } : null;
   return needActions(att, { run: r, prs: prsOf(r) ?? [], now: Date.now(), proof, reports: (r.reports ?? []).map((n) => `shared/${n}`) });
 }
 
@@ -592,6 +603,9 @@ function needButton(view, t, r, f, x, id, where, primary) {
   const confirm = (action) => (cx) => { view.confirm = { key: r.key, action, box: where }; view.actionError = null; view.actionNote = null; cx.notify(); };
   switch (x.kind) {
     case "open": return actionButton(t, id, x.label, x.url, () => openUrl(x.url), primary);
+    // Ask me and Handle them share one "asked…" once either was clicked.
+    case "address": return addressAsked(r, x.pr) ? (x.mode === "ask" ? askedNote(t, id) : null)
+      : actionButton(t, id, x.label, modeTip(r, x.mode), addressSend(view, r, x.pr, x.mode), primary);
     case "focus": return actionButton(t, id, x.label, "Show its terminal", () => focusAgent(x.address), primary);
     case "ask-ci": return ciAction(view, t, r, x, id);
     case "ask-blocking": return blockingAction(view, t, r, f.att, id);
@@ -613,12 +627,24 @@ function needButton(view, t, r, f, x, id, where, primary) {
   }
 }
 
-// The need items as lines, each with its buttons; the first item's first button stands out.
+// The need items as lines, each with its buttons; the first item's first button stands out, unless
+// the actions say which does (`primary`). Actions about one PR each (`row`: "#1799 · 15 comments")
+// go in a row per PR, led by it.
 function needLines(view, t, r, f, items, where) {
-  return items.map((it, i) => v_flex().id(`needl-${where}-${r.key}-${i}`).gap(4)
-    .child(div().id(`needt-${where}-${r.key}-${i}`).text_size(12).text_color(t.foreground).when(Boolean(it.tip), (el) => el.tooltip(it.tip)).child(oneLine(it.line, 220)))
-    .when(it.actions.length > 0, (el) => el.child(h_flex().flex_wrap().gap(6).items_center()
-      .children(it.actions.map((x, j) => needButton(view, t, r, f, x, `need-${where}-${r.key}-${i}-${j}`, where, i === 0 && j === 0)).filter(Boolean)))));
+  return items.map((it, i) => {
+    const buttons = it.actions.map((x, j) => ({ row: x.row ?? null,
+      el: needButton(view, t, r, f, x, `need-${where}-${r.key}-${i}-${j}`, where, x.primary ?? (i === 0 && j === 0)) })).filter((b) => b.el);
+    const rows = [];
+    for (const b of buttons) {
+      if (!rows.length || rows[rows.length - 1].row !== b.row) rows.push({ row: b.row, els: [] });
+      rows[rows.length - 1].els.push(b.el);
+    }
+    return v_flex().id(`needl-${where}-${r.key}-${i}`).gap(4)
+      .child(div().id(`needt-${where}-${r.key}-${i}`).text_size(12).text_color(t.foreground).when(Boolean(it.tip), (el) => el.tooltip(it.tip)).child(oneLine(it.line, 220)))
+      .children(rows.map((x) => h_flex().flex_wrap().gap(6).items_center()
+        .when(Boolean(x.row), (el) => el.child(div().flex_none().min_w(0).pr(2).text_size(11).text_color(t.muted).child(x.row)))
+        .children(x.els)));
+  });
 }
 
 // A Close or Resume clicked in this need box, confirmed here rather than in the action row at
@@ -760,7 +786,8 @@ function card(view, t, r, ctx, compact = false) {
   const proof = r.phase !== "finished" && !r.away ? proofSummary(t, r) : null;
   // A stalled run's Ask what's blocking is in its need box.
   const blocking = need ? null : blockingAction(view, t, r, f.att, `card-${r.key}`);
-  const comments = commentsAction(view, t, r, f.att, `card-${r.key}`);
+  // The need box carries Address comments when it shows; else its own rows.
+  const comments = boxAddresses(r, ctx, f) ? null : commentsAction(view, t, r, f.att, `card-${r.key}`);
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(8).p(12).pl(16).rounded(10).bg(t.surface)
     .border(1).border_color(need ? t.blocked + "88" : t.border).cursor_pointer()
     .hover((s) => s.bg(t.raised)).on_click(focus)
@@ -788,10 +815,11 @@ function card(view, t, r, ctx, compact = false) {
 // (a stall, CI past its usual time, partial or missing proof); cyan = waiting on a reviewer;
 // no colour = fine (work going on, CI within its usual time, a wait on the orchestrator). The
 // spinner (runDot) says a run works. Green for a pass and green checks (the theme's green,
-// apart from done's blue). Amber is the theme's working colour, so no row's edge, tint, pill
-// or status text uses it for work going on. The exceptions mirror Herdr's own agent status,
-// as the spinner does: the task strip's Implementing segments and an agent row's stage text
-// (STAGE) keep Herdr's working colour.
+// apart from done's blue). Amber is the theme's working colour, so no row's edge, tint, pill,
+// status text, task strip segment or agent row's stage text uses it for work going on: the task
+// strip's Implementing segments are a neutral bright tone (STAGE), and amber there is only
+// proof that wants a look. A passed proof marks a done segment (a green underline) rather than
+// recolouring done. Herdr's own Agents list is not Harbormaster's and keeps its colours.
 const PASS = (t) => t.ansi2 ?? "#3fa055";
 const AMBER = (t) => t.working;
 
@@ -815,20 +843,17 @@ function factsLine(t, r, prs, size = 13, att = null) {
   const live = att && r.phase !== "finished" && !r.away;
   if (live && att.stall) items.push({ text: quietText(att.stall), color: AMBER(t), bold: true });
   if (live && att.step?.text && att.step.text !== r.progress) items.push({ text: stepText(att.step), color: t.muted });
-  prs.forEach((p, i) => {
-    const state = prStateText(p);
-    items.push({ el: div().id(`fact-pr-${r.key}-${i}`).flex_none().cursor_pointer().hover((s) => s.text_color(t.accent)).tooltip(`${p.title ?? ""}\n${p.url}`.trim())
-      .on_click((_e, cx) => { cx.stop_propagation(); openUrl(p.url); })
-      .child(`${p.number ? `PR #${p.number}` : "PR"}${state ? ` ${state.toLowerCase()}` : ""}`) });
-    const c = p.checks ?? {};
-    if (c.fail) items.push({ text: `checks ✗ ${c.fail} failing`, color: t.blocked });
-    else if (c.pending) items.push({ text: `checks … ${c.pending} running`, color: t.dim });
-    else if (c.pass) items.push({ text: "checks ✓", color: PASS(t) });
-    // A one-way door is worth seeing before the PR card (and the overview card has no PR rows).
-    if (p.danger && oneWay(p.danger)) items.push({ text: "one-way door", color: t.blocked, bold: true });
-    const review = reviewText(p);
-    if (review) items.push({ text: review[0], color: review[1] === "done" ? PASS(t) : t[review[1]] });
-  });
+  // Each PR (a link) with its checks, a one-way door and its review; PRs that all say the same
+  // as one ("2 PRs open · checks ✓ · Approved by anna"), each one's title and link in its hover.
+  for (const x of prFacts(prs, { away: Boolean(r.away), oneWay })) {
+    if (x.kind === "pr") {
+      const p = x.pr;
+      items.push({ el: div().id(`fact-pr-${r.key}-${x.i}`).flex_none().cursor_pointer().hover((s) => s.text_color(t.accent)).tooltip(`${p.title ?? ""}\n${p.url}`.trim())
+        .on_click((_e, cx) => { cx.stop_propagation(); openUrl(p.url); }).child(x.text) });
+    } else if (x.kind === "prs") {
+      items.push({ el: div().id(`fact-prs-${r.key}`).flex_none().tooltip(x.prs.map((p) => `${p.number ? `#${p.number} ` : ""}${p.title ?? ""}\n${p.url}`).join("\n")).child(x.text) });
+    } else items.push({ text: x.text, color: x.tone === "pass" ? PASS(t) : t[x.tone], bold: x.bold });
+  }
   if (items.length === 0) return null;
   return h_flex().flex_wrap().items_center().text_size(size).font_medium().text_color(t.foreground).children(joined(t, items));
 }
@@ -923,11 +948,12 @@ function foldLine(view, t, key, tip, items) {
 }
 
 // A PR as a row with room to spare: its whole title, then repo, checks and review.
-function prDetail(t, pr, i, related = false) {
+// `away`: the run is parked or closed, so failing checks are dim, not red (tell.js prFacts).
+function prDetail(t, pr, i, related = false, away = false) {
   const tone = PR_TONE[pr.state] ?? "dim";
   const c = pr.checks ?? {};
   const checkText = c.fail ? `✗ ${c.fail} failing` : c.pending ? `… ${c.pending} running` : c.pass ? `✓ ${c.pass} checks` : null;
-  const checkColor = c.fail ? t.blocked : c.pending ? t.dim : PASS(t);
+  const checkColor = c.fail ? (away ? t.dim : t.blocked) : c.pending ? t.dim : PASS(t);
   const review = reviewText(pr);
   const state = prStateText(pr);
   return h_flex().id(`prd-${related ? "rel" : "own"}-${i}-${pr.url}`).gap(8).items_start().p(8).rounded(7).bg(t.raised + "88").cursor_pointer()
@@ -1265,7 +1291,7 @@ function runDetail(view, t, r, ctx) {
   const facts = factsLine(t, r, prs, 13, f.att);
   const notes = cardNotes(t, r, f, false);
   const blocking = need ? null : blockingAction(view, t, r, f.att, `pane-${r.key}`);
-  const comments = commentsAction(view, t, r, f.att, `pane-${r.key}`);
+  const comments = boxAddresses(r, ctx, f) ? null : commentsAction(view, t, r, f.att, `pane-${r.key}`);
   // Most important first: who and what, whether it needs you, when and its PR, then the PR
   // itself, proof, tasks, decisions and agents; tokens last, since they are about cost.
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(14).p(14).pl(18).rounded(10).bg(t.surface)
@@ -1280,12 +1306,13 @@ function runDetail(view, t, r, ctx) {
       .children(notes)
       .when(Boolean(blocking), (e) => e.child(h_flex().pt(2).child(blocking)))
       .when(Boolean(comments), (e) => e.child(div().pt(2).child(comments)))))
-    .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests", r.away ? null : flowToggle(t, r, `pane-${r.key}`))
-      .children(prs.map((p, i) => prDetail(t, p, i)))
+    // Who reviews means nothing before there is a PR to review: the toggle comes with the first.
+    .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests", r.away || !prs.length ? null : flowToggle(t, r, `pane-${r.key}`))
+      .children(prs.map((p, i) => prDetail(t, p, i, false, Boolean(r.away))))
       .when(prs.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet"))))
     .when(r.issues.length + related.length > 0, (el) => el.child(section(t, "Issues and related PRs")
       .children(r.issues.map((url) => issueRow(t, url)))
-      .children(related.map((p, i) => prDetail(t, p, i, true)))))
+      .children(related.map((p, i) => prDetail(t, p, i, true, Boolean(r.away))))))
     .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(view, t, r, stages)))
     .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
@@ -1721,6 +1748,9 @@ export function crew(view, t) {
   // the live run would get a second, "orchestrator gone" row with a Resume.
   const runOf = (term) => view.runs.find((r) => !r.away && r.terminal === term.address) ?? view.runs.find((r) => r.terminal === term.address);
   const now = Date.now();
+  // The sidebar, not the Crew popup (an overlay): its rows' leads leave out comment counts
+  // (rowLead), so the age survives its narrow width.
+  const narrow = !props()?.overlay;
   // Each orchestrator's attention, once per render: which group it is in and why. An
   // orchestrator without a run directory is judged by its terminal alone (can't tell).
   const orchestrators = orchestratorsOf(ctx)
@@ -1782,7 +1812,7 @@ export function crew(view, t) {
     // Why it is in its group (its reasons, the next-step label or the step and its age) leads,
     // then the rest; when it started is in the title's hover. Without a run directory, its
     // progress label.
-    const { lead, rest, tone } = rowLead(a, now);
+    const { lead, rest, tone } = rowLead(a, now, { narrow });
     const detail = [lead, rest ?? (r ? null : labels.progress)].filter(Boolean).join(" · ");
     const name = runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic);
     const edge = rowEdge(a);
@@ -1811,7 +1841,7 @@ export function crew(view, t) {
   // A run that needs you with no orchestrator to focus (gone, or its machine did not answer):
   // its row opens the run's card as a popup, where Resume is.
   const runRow = ({ r, a }) => {
-    const { lead, tone } = rowLead(a, now);
+    const { lead, tone } = rowLead(a, now, { narrow });
     const name = runName(r.branch, r.topic);
     const open = () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) });
     return row({
