@@ -11,10 +11,11 @@
 // and <root>/.captain-decisions.json for the captain's open decisions. The same poll takes a
 // process snapshot for CPU and memory (resources.js), kept per run in .resources.json.
 
-import { exec, machines, spaces, shared, setShared, run as command } from "herdr";
+import { exec, appHome, machines, spaces, shared, setShared, run as command } from "herdr";
 import { parseQuestion, answerMessage } from "./question.js";
 import { parseDecidedLines } from "./decided.js";
 import { tokenText } from "./context.js";
+import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd } from "./proof.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
@@ -40,11 +41,11 @@ const SCRIPT = [
   '  [ -e "$d/parked" ] && { printf +; head -c 400 "$d/parked"; }; printf \'\\037\'',
   '  [ -e "$d/closed" ] && { printf +; head -c 400 "$d/closed"; }; printf \'\\037\'',
   '  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && n=$((n+1)); done; printf "%s\\037" "$n"',
-  // proof.md (a "+" before it when there is one), then the names of the files in shared/proof/, capped.
-  '  [ -e "$d/proof.md" ] && { printf +; head -c 12000 "$d/proof.md"; }; printf \'\\037\'',
+  // proof.md (a "+" before it when there is one, "!" when it was cut at 64 kB), then the names of the files in shared/proof/, capped.
+  '  [ -e "$d/proof.md" ] && { [ "$(wc -c < "$d/proof.md")" -gt 64000 ] && printf \'!\' || printf +; head -c 64000 "$d/proof.md"; }; printf \'\\037\'',
   '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
-  // decisions.md: the last 20 lines the orchestrator logged as its own decisions, capped.
-  '  grep -a "^- \\[decided\\] " "$d/decisions.md" 2>/dev/null | tail -n 20 | tail -c 8000; printf \'\\037\'',
+  // decisions.md: the last 60 lines of its own decisions and the user's, capped.
+  '  grep -a -E "^- \\[(decided|user)\\] " "$d/decisions.md" 2>/dev/null | tail -n 60 | tail -c 20000; printf \'\\037\'',
   // The run's CPU and memory totals so far (resources.js adds each sample to them).
   '  head -c 1000000 "$d/.resources.json" 2>/dev/null',
   "done",
@@ -228,7 +229,7 @@ function parse(machine, stdout) {
       // The run's proof: its tier, proof.md's results by task id, and the file names in shared/proof/.
       proof: {
         tier: runTier(plan, tasks),
-        md: proofFile?.startsWith("+") ? parseProofMd(proofFile.slice(1)) : null,
+        md: /^[+!]/.test(proofFile ?? "") ? { ...parseProofMd(proofFile.slice(1)), cut: proofFile[0] === "!" } : null,
         files: (proofNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
       },
       // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
@@ -244,7 +245,11 @@ function tokensOf(x) {
   if (!(n(x?.total) > 0)) return null;
   return {
     total: n(x.total), input: n(x.input), output: n(x.output), cacheRead: n(x.cache_read), cacheWrite: n(x.cache_write),
-    byAgent: (Array.isArray(x.by_agent) ? x.by_agent : []).filter((a) => a?.name && n(a.total) > 0).map((a) => ({ name: String(a.name), total: n(a.total) })),
+    byAgent: (Array.isArray(x.by_agent) ? x.by_agent : []).filter((a) => a?.name && n(a.total) > 0).map((a) => ({
+      name: String(a.name), total: n(a.total), input: n(a.input), output: n(a.output), cacheRead: n(a.cache_read), cacheWrite: n(a.cache_write),
+      // A count from before tokens.sh split them has only a total: its bar is all one colour.
+      split: a.cache_read !== undefined,
+    })),
     updated: Date.parse(x.updated ?? "") || null,
   };
 }
@@ -455,7 +460,7 @@ export function mergeDanger(body) {
   const m = /^##[ \t]+Merge danger[ \t]*\r?\n([\s\S]*?)(?=^#{1,2}[ \t]|(?![\s\S]))/im.exec(body ?? "");
   const line = m?.[1].split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith("```"));
   const clean = line?.replace(/^[-*>]\s+/, "").replace(/\*\*|__|`/g, "").replace(/^[*_]+([^*_]+?)[*_]+/, "$1").trim();
-  return clean ? clean.slice(0, 200) : null;
+  return clean ? clean.slice(0, 600) : null;
 }
 
 // What the views need from `gh pr view --json` output. GitHub only sets reviewDecision
@@ -952,6 +957,8 @@ export async function deleteRun(run) {
   const out = await exec("sh", ["-c", DELETE, "sh", run.dir, run.folder ?? "", run.branch,
     run.localTerminal ?? "", run.away?.how === "closed" ? "1" : ""], { on: run.machine });
   if (out.code !== 0) throw new Error((out.stderr || "could not delete the run directory").trim());
+  // The run's copied proof images go with it (they are on this computer whichever machine it ran on).
+  await exec("sh", dropCacheArgs(appHome(), run.machine, run.dir)).catch(() => {});
   const prs = { ...(shared("harbormaster.prs") ?? {}) };
   delete prs[run.key];
   setShared("harbormaster.prs", prs);
