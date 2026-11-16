@@ -2,8 +2,8 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, decisionQueue, answerRun, compactRun, isCompact, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
-import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
+import { stats, decisionQueue, answerRun, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
+import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag } from "./ui.js";
 import { tokenText } from "./context.js";
 import { decidedText } from "./decided.js";
@@ -576,7 +576,7 @@ function sendAnswer(view, it, text, cx, option = false) {
   cx.spawn(async (cx) => {
     try {
       // The budget question's Compact button compacts the orchestrator first (never a typed reply).
-      if (option && isCompact(text) && (it.kind === "budget" || /budget/i.test(it.title))) await compactRun(run, it.title, text);
+      if (option && isCompact(text) && isBudgetQuestion(it)) await compactRun(run, it.title, text);
       else await answerRun(run, it.title, text);
       // The captain isn't there to clear its decision, so it goes with the answer.
       if (it.kind === "decision") await dropDecision(it.decision).catch(() => {});
@@ -658,9 +658,9 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
         }))
       .child(open ? "Cancel" : "Reply");
     // /compact is typed into the orchestrator, so only while it sits idle or done.
-    const orchNow = it.run ? orchestratorState(it.run, ctx) : null;
-    const compactWhy = (o) => (isCompact(o.label) && (it.kind === "budget" || /budget/i.test(it.title)) && orchNow !== "idle" && orchNow !== "done"
-      ? `Compact needs the orchestrator idle or done (it is ${orchNow === "gone" ? "gone" : orchNow})` : null);
+    const orchNow = it.run ? exactStatus(it.run.terminal, ctx) ?? (orchestratorState(it.run, ctx) === "gone" ? "gone" : "unknown") : null;
+    const compactWhy = (o) => (isCompact(o.label) && isBudgetQuestion(it) && !["idle", "done"].includes(orchNow)
+      ? `Compact needs the orchestrator idle or done (it is ${orchNow})` : null);
     const buttons = !answered && !why && it.options.length > 0 && h_flex().flex_wrap().gap(6).pl(22)
       .children(it.options.map((o, i) => {
         const off = compactWhy(o);

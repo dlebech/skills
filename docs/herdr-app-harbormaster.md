@@ -123,9 +123,10 @@ are matched: [run-files.md](../skills/herdr-app-orchestrator/references/run-file
 which the orchestrator sets when started with `budget=2M`. A run that has used it shows `31M / 30M tok` in
 the blocked colour on its card and a note in its Tokens section, from `status.json` alone. The
 orchestrator asks a budget question when it notices (Continue, Compact or Stop; at any autonomy level),
-which shows in Waiting on you like any other. A run over budget with no question open gets the same
+which shows in Waiting on you like any other. A run over budget with no question open, whose orchestrator is gone, idle or done (not working, and not
+needing you for another reason), and whose question is not marked answered (`--budget-answered`), gets the same
 three buttons from Harbormaster itself. **Compact** types `/compact` into the orchestrator's terminal,
-enabled only while it is idle or done, then answers through the inbox; the other two answer through the
+enabled only while it is idle or done, waits for the compaction to end, and wakes it to read the answer in its inbox; the other two answer through the
 inbox. Nothing stops by itself. Details: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
 ## Proof

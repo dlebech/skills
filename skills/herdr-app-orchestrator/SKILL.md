@@ -33,7 +33,7 @@ Parse `$ARGUMENTS` for the work source, constraints, options, and optional profi
 - `implementer=<kind>` and `implementer-model=<model>` override implementation and fixes.
 - `reviewer=<kind>` and `reviewer-model=<model>` override review.
 - `autonomy=L0|L1|L2` sets how much you decide yourself (default `L0`; section 6).
-- `budget=<tokens>` (`500k`, `2M`) is a soft token budget: start with `set-status.sh --budget <it>`. When `set-status.sh` prints `over budget: …`, ask the budget question (Continue, Compact or Stop; template in [run-files.md](references/run-files.md)) whatever the autonomy level, and carry out the answer. Default: none.
+- `budget=<tokens>` (`500k`, `2M`) is a soft token budget: start with `set-status.sh --budget <it>`. When `set-status.sh` prints `over budget: …`, ask the budget question (Continue, Compact or Stop; template in [run-files.md](references/run-files.md)) whatever the autonomy level, and carry out the answer, then run `set-status.sh --budget-answered`. Read every `set-status.sh` output: the line prints once. On resume, `budget_asked` equal to `budget` without a matching `budget_answered` means ask it. Default: none.
 - `specialist=<kind>` and `specialist-model=<model>` define an optional stronger profile for a user-assigned or unusually complex task, and for the final review of a large branch.
 - Natural-language equivalents are valid, such as “use Sonnet for implementation, Haiku for review, Opus for complex tasks.”
 

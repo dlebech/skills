@@ -13,7 +13,7 @@ and it keeps nothing the files do not.
 | `orchestrator.json` | `init-run.sh` | captain, Harbormaster | `{terminal, tab_id, folder, branch, kind, started}`: how to find and resume the run. |
 | `spec.md` | orchestrator | orchestrator, agents | The goal, scope and acceptance criteria. |
 | `plan.md` | orchestrator | everyone | First line `Status: <one line>` (`running`, `waiting for user: <summary>`, `blocked: <reason>`, `finished`), then `Prefix:` and the tasks with their states. |
-| `status.json` | `set-status.sh`, `tokens.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated, tokens, budget, budget_asked}`. Outlives the orchestrator. `set-status.sh` keeps fields other scripts write. |
+| `status.json` | `set-status.sh`, `tokens.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated, tokens, budget, budget_asked, budget_answered}`. Outlives the orchestrator. `set-status.sh` keeps fields other scripts write. |
 | `sessions` | `tokens.sh` | `tokens.sh` | Every session the orchestrator's terminal has had, one `<kind> <session id or file>` a line (below). |
 | `.tokens/` | `tokens.sh` | `tokens.sh` | Its cache: each session file's parsed usage and how far it was read (below). |
 | `decisions.md` | orchestrator | anyone | The decisions log: what was decided, by whom, why (the line format is below). |
@@ -239,16 +239,29 @@ and the captain does not answer it):
 Nothing: it is a soft budget
 ```
 
-- **Continue**: `set-status.sh --budget <the number in the answer, else twice the old one>`, then carry on.
-- **Compact**: the answerer has already sent `/compact` to the orchestrator's terminal (Claude Code and pi
-  take it as input), and does so only while the orchestrator is idle or done, never working or blocked.
-  After the compaction, re-read the skill, `spec.md`, `plan.md` and `decisions.md` (as always), then carry on.
-- **Stop**: finish the current step, commit and push everything, set the status to `blocked: stopped at
-  budget` and end the turn. The user resumes it later (and may raise the budget first).
+Whatever the answer, run `set-status.sh --budget-answered` (it records `budget_answered`, the budget the
+question was for, so Harbormaster stops offering it; Continue's new budget does that too):
 
-When a run is over budget with no `question.md` (the orchestrator is gone or has not asked yet),
-Harbormaster shows the same three options in its queue and answers them through `inbox/`. Its Compact
-button sends `/compact` first, and is enabled only while the orchestrator is idle or done.
+- **Continue**: `set-status.sh --budget <the number in the answer, else twice the old one> --budget-answered`, then carry on.
+- **Compact**: the answerer has already put the answer in `inbox/`, typed `/compact` into the orchestrator's
+  terminal (Claude Code and pi take it as input) while it was idle or done, never working or blocked, and
+  woken it only once the compaction was over (an answer typed meanwhile may be queued or lost). After the
+  compaction, re-read the skill, `spec.md`, `plan.md` and `decisions.md` (as always), run
+  `set-status.sh --budget-answered`, then carry on.
+- **Stop**: finish the current step, commit and push everything, run `set-status.sh --budget-answered`,
+  set the status to `blocked: stopped at budget` and end the turn. The user resumes it later (and may raise
+  the budget first).
+
+Read every `set-status.sh` call's output: the line is printed once and `budget_asked` is already recorded.
+A resumed orchestrator whose `status.json` has `budget_asked` equal to `budget` and no matching
+`budget_answered` has not had its question answered: it asks it (or finds it in `question.md`).
+
+When a run is over budget with no `question.md` (the orchestrator is gone, or idle or done without having
+asked), and `budget_answered` is not this budget, Harbormaster shows the same three options in its queue
+and answers them through `inbox/`. It does not while the orchestrator is working (it may be about to ask),
+nor when the run needs you for another reason (a dialog, `blocked: stopped at budget`): that reason shows
+instead. Its Compact button is enabled only while the orchestrator reports idle or done, and writes the
+answer, sends `/compact`, waits (up to 10 minutes) for the compaction to end, then wakes it.
 
 ## .captain-decisions.json
 

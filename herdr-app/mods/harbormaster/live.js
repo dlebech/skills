@@ -12,6 +12,14 @@ export function agentStatus(term, ctx) {
   return s === "error" ? "blocked" : s ?? "idle";
 }
 
+// An agent's status exactly as reported, or null when it reports none: unlike agentStatus
+// it does not call an unknown status idle, for what must only happen to an idle agent.
+export function exactStatus(address, ctx) {
+  if (!address) return null;
+  const s = ctx.agents.find((a) => a.address === address)?.status ?? ctx.terminals.find((t) => t.address === address)?.status ?? null;
+  return s === "error" ? "blocked" : s;
+}
+
 // Whether the orchestrator is lost: its terminal is live but only a shell runs in it
 // (its program now, not the command it started with), with no agent status.
 // herdr-core keeps terminals across a restart but replaces their lost programs with a
