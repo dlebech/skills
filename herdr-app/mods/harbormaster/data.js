@@ -3,17 +3,15 @@
 // run's pull requests from `gh`, asked on the machine that owns the run.
 // Live facts from herdr-core are in live.js; text helpers in ui.js.
 //
-// Run directory protocol (herdr-app-captain's lib.sh):
-//   <root>/<folder>/<branch>/orchestrator.json  {terminal, tab_id, folder, branch}
-//   <root>/<folder>/<branch>/plan.md            "Status: <status>" first, then "### t1 name ... — <state>" tasks
-//   <root>/<folder>/<branch>/status.json        {status, type, topic, progress, tasks:{merged,planned}, issues, prs:[{repo,url}], related:[{repo,url}], waiting, updated}
-//   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
-//   <root>/<folder>/<branch>/inbox/*.message    relayed messages not yet handled
-//   <root>/<folder>/<branch>/parked, closed     the person put the run away: "<time>\t<status then>"
-//   <root>/.captain-decisions.json              the captain's open decisions: [{id, question, run, asked}]
+// The run directory files it reads and writes are documented in
+// skills/herdr-app-orchestrator/references/run-files.md. In short, per run, under
+// <root>/<folder>/<branch>/: orchestrator.json, plan.md, status.json, question.md,
+// inbox/*.message (written here on an answer or Close), parked and closed markers;
+// and <root>/.captain-decisions.json for the captain's open decisions.
 
 import { exec, machines, spaces, shared, setShared, run as command } from "herdr";
-import { orchestratorState, orchestratorLost, workersOf, needsYou, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
+import { parseQuestion, answerMessage } from "./question.js";
+import { orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
 
@@ -30,6 +28,8 @@ const SCRIPT = [
   '  cat "$d/status.json" 2>/dev/null; printf \'\\037\'',
   '  head -c 60000 "$d/plan.md" 2>/dev/null; printf \'\\037\'',
   '  [ -e "$d/question.md" ] && head -c 4000 "$d/question.md"; printf \'\\037\'',
+  // When it was asked: question.md's mtime (GNU stat, then BSD/macOS).
+  '  [ -e "$d/question.md" ] && { stat -c %Y "$d/question.md" 2>/dev/null || stat -f %m "$d/question.md" 2>/dev/null; }; printf \'\\037\'',
   '  [ -e "$d/parked" ] && { printf +; head -c 400 "$d/parked"; }; printf \'\\037\'',
   '  [ -e "$d/closed" ] && { printf +; head -c 400 "$d/closed"; }; printf \'\\037\'',
   '  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && n=$((n+1)); done; echo "$n"',
@@ -118,7 +118,10 @@ function tasksOf(plan) {
   return out;
 }
 
-// The captain's open decisions, oldest first: {key, id, question, run, asked, machine}.
+// The captain's open decisions, oldest first: {key, id, question, run, asked, machine} and,
+// when decisions.sh was given them, options [{label, text}], recommended (an index into
+// options, or null), why, evidence, risk and blocks.
+const str = (v) => (typeof v === "string" ? v.trim() : "");
 function parseDecisions(machine, text) {
   const list = json(text);
   if (!Array.isArray(list)) return [];
@@ -129,12 +132,23 @@ function parseDecisions(machine, text) {
     run: typeof d.run === "string" ? d.run : null,
     asked: Date.parse(d.asked) || null,
     machine,
-  }));
+    options: (Array.isArray(d.options) ? d.options : []).filter((o) => o && str(o.label)).map((o) => ({ label: str(o.label), text: str(o.text) })),
+    evidence: str(d.evidence),
+    risk: str(d.risk),
+    blocks: str(d.blocks),
+    rec: str(d.recommended),
+  })).map(({ rec, ...d }) => {
+    // `recommended` names an option by label (case-insensitive) or number, then maybe why.
+    const n = /^(?:option\s+)?#?(\d+)\b/i.exec(rec);
+    const at = n ? Number(n[1]) - 1 : d.options.findIndex((o) => rec.toLowerCase().startsWith(o.label.toLowerCase()));
+    const known = at >= 0 && at < d.options.length;
+    return { ...d, recommended: known ? at : null, why: /^[^:—–]*[:—–]\s*(.*)$/s.exec(rec)?.[1] ?? (known ? "" : rec) };
+  });
 }
 
 function parse(machine, stdout) {
   return stdout.split(RS).slice(1).filter((s) => s.trim()).map((chunk) => {
-    const [dir, orchFile, statusFile, plan, question, parkedFile, closedFile, inbox] = chunk.split(US);
+    const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox] = chunk.split(US);
     const orch = json(orchFile) ?? {};
     const status = json(statusFile) ?? {};
     const statusLine = /^Status:\s*(.*)$/m.exec(plan ?? "")?.[1]?.trim() ?? null;
@@ -172,6 +186,9 @@ function parse(machine, stdout) {
       // When the run was created (init-run.sh); null for runs from before it recorded that.
       started: Date.parse(orch.started ?? "") || null,
       question: question?.trim() || null,
+      // The question read into its sections (question.js), and when it was asked, in ms.
+      ask: parseQuestion(question),
+      askedAt: Number(asked?.trim()) * 1000 || null,
       unhandled: Number(inbox?.trim() || 0),
       tasks: tasksOf(plan),
       // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
@@ -448,6 +465,39 @@ export function stats(runs, ctx) {
   };
 }
 
+// ---- the decision queue ----
+
+// Everything waiting on the person, across all runs and machines, oldest first (the work
+// blocked longest): each run's question.md, the captain's open decisions and the runs that
+// need them without a question (a dialog, a blocked status), which click through only.
+// An item: {id, kind: "run"|"decision"|"attention", title, options [{label, text}],
+// recommended (index or null), why, evidence, risk, blocks, since (ms or null), run,
+// decision, answered}. `answered` is set while a message waits in the run's inbox.
+export function decisionQueue(runs, decisions, ctx) {
+  const items = [];
+  for (const r of runs) {
+    const orch = orchestratorState(r, ctx);
+    if (!needsYou(r, orch)) continue;
+    const q = r.ask;
+    items.push(q ? {
+      id: `need-${r.key}`, kind: "run", title: q.title, options: q.options, recommended: q.recommended, why: q.why,
+      evidence: q.evidence, risk: q.risk, blocks: q.blocks, since: r.askedAt ?? r.updated ?? r.started, run: r,
+      answered: r.unhandled > 0,
+    } : {
+      id: `need-${r.key}`, kind: "attention", title: needReason(r, orch) ?? "needs you", options: [], recommended: null, why: "",
+      evidence: "", risk: "", blocks: "", since: r.updated ?? r.started, run: r,
+    });
+  }
+  for (const d of decisions) {
+    items.push({
+      id: `dec-${d.key}`, kind: "decision", title: d.question, options: d.options, recommended: d.recommended, why: d.why,
+      evidence: d.evidence, risk: d.risk, blocks: d.blocks, since: d.asked, decision: d,
+      run: d.run ? runs.find((r) => r.dir === d.run && r.machine === d.machine) ?? null : null,
+    });
+  }
+  return items.sort((a, b) => (a.since ?? Infinity) - (b.since ?? Infinity));
+}
+
 // ---- putting runs away and bringing them back ----
 // The marker line herdr-app-captain's lib.sh writes with mark_run, written here on the
 // run's machine: the mod is installed on its own, without the captain's scripts.
@@ -456,21 +506,40 @@ const MARK = 'd=$1 m=$2; { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d "\\n"; printf "\\
 
 // A message in the run's inbox, as herdr-app-captain relays them: written beside, then
 // moved in, so the orchestrator never reads half of it.
-const POST = 'd=$1 f=$2; printf "%s\\n" "$3" >"$d/inbox/.$f.tmp" && mv "$d/inbox/.$f.tmp" "$d/inbox/$f"';
+const POST = 'd=$1 f=$2; mkdir -p "$d/inbox" && printf "%s\\n" "$3" >"$d/inbox/.$f.tmp" && mv "$d/inbox/.$f.tmp" "$d/inbox/$f"';
+
+// Writes `text` to the run's inbox as <UTC yyyymmddThhmmssZ>-<source>.message and wakes the
+// orchestrator: the one path Close and an answer from the queue share (run-files.md).
+// Resolves to {blocked}: true when the orchestrator is on a dialog and reads the message
+// once that is answered. Throws when the message could not be written, or the wake failed
+// (the message then still waits in the inbox).
+async function tellOrchestrator(run, source, text) {
+  const stamp = new Date().toISOString().replace(/[-:]|\.\d+/g, "");
+  const file = `${stamp}-${source}.message`;
+  const out = await exec("sh", ["-c", POST, "sh", run.dir, file, text], { on: run.machine });
+  if (out.code !== 0) throw new Error(out.stderr || "could not write to its inbox");
+  const sent = await exec("hc", ["send", run.localTerminal, `Read and act on ${run.dir}/inbox/${file}.`], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  if (sent.code === 9) return { blocked: true };
+  if (sent.code !== 0) throw new Error(`the message is in its inbox, but its orchestrator could not be told: ${(sent.stderr || sent.stdout || "hc send failed").trim()}`);
+  return { blocked: false };
+}
+
+// Answers a run's question (or a captain decision that names the run) from the queue:
+// `answer` is an option's label or the person's own words.
+export function answerRun(run, title, answer, free = "") {
+  return tellOrchestrator(run, "harbormaster", answerMessage(title, answer, free));
+}
 
 // Closing a run whose orchestrator is there asks it to clean up: it ends its agents,
 // pushes what is not on the remote, deletes the run's worktrees, writes the closed
 // marker and closes its own tab (herdr-app-orchestrator's section 9). Resolves to a note
 // for the card, and whether it is blocked. A blocked orchestrator reads it once its dialog is answered.
 async function askToClose(run) {
-  const file = `harbormaster-close-${Math.floor(Date.now() / 1000)}.message`;
-  const text = "The user closed this run in Harbormaster. Clean up and close your tab, as in your skill's section 9 (Close).";
-  const out = await exec("sh", ["-c", POST, "sh", run.dir, file, text], { on: run.machine });
-  if (out.code !== 0) throw new Error(out.stderr || "could not write to its inbox");
-  const sent = await exec("hc", ["send", run.localTerminal, `Read and act on ${run.dir}/inbox/${file}.`], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
-  if (sent.code === 9) return { blocked: true, note: "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes" };
-  if (sent.code !== 0) throw new Error(`the message is in its inbox, but its orchestrator could not be told: ${(sent.stderr || sent.stdout || "hc send failed").trim()}`);
-  return { blocked: false, note: "its orchestrator is cleaning up, and its tab closes when done" };
+  const { blocked } = await tellOrchestrator(run, "harbormaster-close",
+    "The user closed this run in Harbormaster. Clean up and close your tab, as in your skill's section 9 (Close).");
+  return blocked
+    ? { blocked: true, note: "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes" }
+    : { blocked: false, note: "its orchestrator is cleaning up, and its tab closes when done" };
 }
 
 // The run's integration worktrees: each linked worktree with the run's branch checked

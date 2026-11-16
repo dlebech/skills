@@ -28,7 +28,8 @@ export default class Harbormaster extends View {
     this.step = 0;
     this.showDone = false;
     this.contexts = {}; // { [address]: { tokens, model } } for the crew
-    this.replying = null; // the key of the decision being answered inline
+    this.replying = null; // the id of the queue item being answered inline
+    this.answered = {}; // { [queue item id]: its since } for answers written to a run's inbox, until the question goes
     this.busy = {}; // { [run key]: { label: "Deleting…", at, branch, limit? } } while a card's action is under way
     this.redraw = false; // an action ended in a task that could not redraw this view
     this.reply = InputState.new({ placeholder: "Your answer…" });
