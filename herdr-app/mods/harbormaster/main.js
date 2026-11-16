@@ -76,6 +76,17 @@ function showStats(view, arg) {
   setShared(POPUP, { id, at: Date.now(), arg: key });
 }
 
+// The runs overview as the same brief popup, for screenshots of its cards.
+function showOverview() {
+  const cur = shared(POPUP);
+  if (cur && cur.arg === "overview" && Date.now() - cur.at < 2000) return;
+  closePopup();
+  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 900, props: { role: "cards" } });
+  const won = shared(POPUP);
+  if (won && won.arg === "overview" && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }
+  setShared(POPUP, { id, at: Date.now(), arg: "overview" });
+}
+
 const sameItems = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 async function listen(view, cx) {
@@ -86,6 +97,7 @@ async function listen(view, cx) {
       const [, name, arg] = /^([\w-]+)[:\s]*(.*)$/s.exec(c.trim()) ?? [];
       if (name === "show-run") showPopup(view, arg?.trim() ?? "");
       else if (name === "show-stats") showStats(view, arg?.trim() ?? "");
+      else if (name === "show-overview") showOverview();
       else if (name === "close-popup") closePopup();
       cx.notify();
     } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }
@@ -109,7 +121,7 @@ export default class Harbormaster extends View {
     this.reply.on("submit", (_e, cx) => submitReply(this, cx));
     if (!DATA_ROLES.has(role)) return;
     // The popup's own copy doesn't listen: a command that closed or replaced the popup would end it.
-    if (!checking() && role !== "harbor" && !((role === "run" || role === "stats") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
+    if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
     this.refresh(cx);
     cx.timer.every(5000, (cx) => this.refresh(cx));
     // The harbor's scuttle target: data, not frames; .transition does the moving.

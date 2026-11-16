@@ -4,10 +4,9 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, decisionQueue, answerRun, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
-import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag, tokenColors } from "./ui.js";
+import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
-import { decidedText, decidedSummary } from "./decided.js";
 import { proofVerdict, proofTasks, tierTip } from "./proof.js";
 import { oneLine } from "./question.js";
 import { thumbs } from "./viewer.js";
@@ -24,7 +23,7 @@ const PHASE = {
 };
 
 function pill(t, text, tone, solid = false) {
-  const c = t[tone] ?? t.dim;
+  const c = String(tone ?? "").startsWith("#") ? tone : t[tone] ?? t.dim;
   return div().flex_none().px(7).h(18).rounded(9).flex().items_center()
     .bg(solid ? c : c + "22").text_size(10.5).font_semibold().text_color(solid ? t.background : c).child(text);
 }
@@ -74,34 +73,6 @@ function reviewText(pr) {
   if (pr.review === "APPROVED") return [`Approved${who(pr.approvedBy)}`, "done"];
   if (pr.review === "REVIEW_REQUIRED") return ["Review needed", "dim"];
   return null;
-}
-
-// The text cut to at most n characters at a word, with an ellipsis; short text is returned as is.
-const cutAt = (s, n) => (s.length <= n ? s : `${s.slice(0, n).replace(/\s+\S*$/, "")}…`);
-
-// A PR's Merge danger on its row: red for a one-way door, dim otherwise, and a line that is neither shown as written; the tooltip has the whole line.
-const dangerTag = (t, pr) => {
-  const one = oneWay(pr.danger);
-  const two = /^\W*two[- ]way/i.test(pr.danger);
-  const text = one ? "One-way door" : two ? "Two-way door" : pr.danger.length > 28 ? pr.danger.slice(0, 27) + "…" : pr.danger;
-  return div().flex_none().text_size(11).text_color(one ? t.blocked : t.dim).tooltip(pr.danger).child(text);
-};
-
-function prRow(t, pr, i) {
-  const tone = PR_TONE[pr.state] ?? "dim";
-  const c = pr.checks;
-  const checkText = c.fail ? `✗ ${c.fail} failing` : c.pending ? `… ${c.pending} running` : c.pass ? `✓ ${c.pass}` : "";
-  const checkTone = c.fail ? "blocked" : c.pending ? "working" : "done";
-  const review = reviewText(pr);
-  return h_flex().id(`pr-${i}-${pr.url}`).gap(7).items_center().h(24).px(6).rounded(6).cursor_pointer()
-    .hover((s) => s.bg(t.hover)).tooltip(pr.url).on_click((_e, cx) => { cx.stop_propagation(); openUrl(pr.url); })
-    .child(svg("mods/harbormaster/pr.svg").size(13).flex_none().text_color(t[tone] ?? t.dim))
-    .child(div().flex_none().text_color(t.muted).child(pr.number ? `#${pr.number}` : "PR"))
-    .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(pr.title ?? pr.url))
-    .when(Boolean(checkText), (el) => el.child(div().flex_none().text_size(11).text_color(t[checkTone]).child(checkText)))
-    .when(Boolean(review), (el) => el.child(div().flex_none().text_size(11).text_color(t[review[1]]).child(review[0])))
-    .when(Boolean(pr.danger), (el) => el.child(dangerTag(t, pr)))
-    .child(pill(t, pr.state === "DRAFT" ? "Draft" : pr.state[0] + pr.state.slice(1).toLowerCase(), tone));
 }
 
 // A link chip: the run's issues, and PRs it is about but did not open, side by side.
@@ -315,10 +286,10 @@ function cardNotes(t, r, f) {
 }
 
 const unscopedOf = (r) => (r.proof.tier ? r.tasks.filter((k) => !k.proof).length : 0);
-// The tokens segment: "2.9M tok (+89.5M cached)", with the budget against the total after it,
-// "· 92M/100M budget", in the blocked colour once over the soft budget.
-const tokenMeta = (r) => (!r.tokens ? null : r.budget ? `${tokenHeadline(r.tokens)} · ${tokenText(r.tokens.total)}/${tokenText(r.budget)} budget` : tokenHeadline(r.tokens));
-const runMeta = (r, f) => [r.repo, f.workers.length ? plural(f.workers.length, "agent") : null, tokenMeta(r), unscopedOf(r) ? `${unscopedOf(r)} unscoped` : null, r.updated ? ago(r.updated) : null].filter(Boolean).join(" · ");
+// The tokens segment, only once over the soft budget ("over budget 92M/100M", in the blocked
+// colour); otherwise the tokens are in the Tokens section, not the header.
+const tokenMeta = (r) => (r.tokens && r.budget && overBudget(r) ? `over budget ${tokenText(r.tokens.total)}/${tokenText(r.budget)}` : null);
+const runMeta = (r, f) => [r.repo, f.workers.length ? plural(f.workers.length, "agent") : null, tokenMeta(r), unscopedOf(r) ? `${unscopedOf(r)} unscoped` : null, r.updated ? `updated ${ago(r.updated)}` : null].filter(Boolean).join(" · ");
 // The meta line as three texts, around the tokens segment: it has the breakdown on hover, and
 // the blocked colour once over budget.
 const metaLine = (t, r, meta) => {
@@ -343,27 +314,98 @@ function card(view, t, r, ctx, compact = false) {
       svg("mods/harbormaster/pr.svg").size(11).flex_none().text_color(t[PR_TONE[p.state]] ?? t.dim), relatedTip(p))),
   ];
   const focus = () => orch !== "gone" && focusAgent(r.terminal);
+  const facts = factsLine(t, r, prs, 12.5);
+  const proof = !compact ? proofSummary(t, r) : null;
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(8).p(12).pl(16).rounded(10).bg(t.surface)
     .border(1).border_color(need ? t.blocked + "88" : t.border).cursor_pointer()
     .hover((s) => s.bg(t.raised)).on_click(focus)
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
     .child(cardHeader(view, t, r, f, runMeta(r, f)))
     .when(need, (el) => el.child(needBox(t, r, f)))
-    .when(Boolean(r.progress), (el) => el.child(div().text_size(12.5).text_color(t.foreground).child(r.progress)))
-    .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts, f.stages)))
+    .when(Boolean(facts), (el) => el.child(facts))
+    .when(Boolean(r.progress), (el) => el.child(progressLine(t, r)))
     .children(cardNotes(t, r, f))
-    .when(r.decided.length > 0, (el) => el.child(decidedLine(t, r)))
-    .when(prs.length > 0 || links.length > 0, (el) => el.child(v_flex().gap(1).text_size(12)
-      .children(prs.map((p, i) => prRow(t, p, i)))
-      .when(links.length > 0, (el) => el.child(h_flex().flex_wrap().gap(6).px(6).pt(2).children(links)))))
+    .when(Boolean(proof), (el) => el.child(h_flex().flex_wrap().items_center().gap(6).px(2).text_size(11.5)
+      .child(div().flex_none().text_size(11).font_semibold().text_color(t.dim).child("Proof"))
+      .child(h_flex().flex_wrap().items_center().children(joined(t, proof.parts)))))
+    .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts, f.stages)))
+    .when(links.length > 0, (el) => el.child(h_flex().flex_wrap().gap(6).children(links)))
     .when(prs.length === 0 && related.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(11).text_color(t.dim).child("No pull request yet")))
     .child(actionRow(view, t, r, orch, closed, counts));
 }
 
-// What the orchestrator decided for you: on the overview card the one summary line (counts and
-// the latest decision); the pane has the same line, which expands to the list (decidedSection).
-const decidedLine = (t, r) => div().truncate().text_size(11.5).text_color(t.dim).tooltip(r.decided.map(decidedText).join("\n"))
-  .child(decidedSummary(r.decided));
+// ---- shared by the card and the pane ----
+
+// Status colours: green for a pass and green checks (the theme's green, apart from done's
+// blue), amber for something missing or still waiting, red for a failure.
+const PASS = (t) => t.ansi2 ?? "#3fa055";
+const AMBER = (t) => t.working;
+
+// Texts joined by dim dots, each in its own colour: [{ text, color?, bold?, el? }]; `el`
+// is a ready element (a link) used as is.
+function joined(t, items) {
+  return items.filter(Boolean).flatMap((x, i) => [
+    i > 0 ? div().flex_none().px(5).text_color(t.dim).child("·") : null,
+    x.el ?? div().flex_none().when(Boolean(x.color), (e) => e.text_color(x.color)).when(Boolean(x.bold), (e) => e.font_semibold()).child(x.text),
+  ]).filter(Boolean);
+}
+
+// The facts line, the one prominent line under the header: when the run started and how
+// long it has gone, then each of its PRs (a link) with its checks, a one-way door, and its review.
+// "Started today 09:28 · finished after 8h 7m · PR #42 open · checks ✓". Null when it has none of them.
+function factsLine(t, r, prs, size = 13) {
+  const items = [];
+  if (r.started) items.push({ el: div().id(`age-${r.key}`).flex_none().tooltip(startedTip(r.started)).child(runAgeText(r)) });
+  prs.forEach((p, i) => {
+    const state = prStateText(p);
+    items.push({ el: div().id(`fact-pr-${r.key}-${i}`).flex_none().cursor_pointer().hover((s) => s.text_color(t.accent)).tooltip(`${p.title ?? ""}\n${p.url}`.trim())
+      .on_click((_e, cx) => { cx.stop_propagation(); openUrl(p.url); })
+      .child(`${p.number ? `PR #${p.number}` : "PR"}${state ? ` ${state.toLowerCase()}` : ""}`) });
+    const c = p.checks ?? {};
+    if (c.fail) items.push({ text: `checks ✗ ${c.fail} failing`, color: t.blocked });
+    else if (c.pending) items.push({ text: `checks … ${c.pending} running`, color: AMBER(t) });
+    else if (c.pass) items.push({ text: "checks ✓", color: PASS(t) });
+    // A one-way door is worth seeing before the PR card (and the overview card has no PR rows).
+    if (p.danger && oneWay(p.danger)) items.push({ text: "one-way door", color: t.blocked, bold: true });
+    const review = reviewText(p);
+    if (review && review[1] !== "dim") items.push({ text: review[0], color: review[1] === "done" ? PASS(t) : t[review[1]] });
+  });
+  if (items.length === 0) return null;
+  return h_flex().flex_wrap().items_center().text_size(size).font_medium().text_color(t.foreground).children(joined(t, items));
+}
+
+// The orchestrator's own progress note: under the facts, smaller and muted, since it is in
+// its words and can lag behind.
+const progressLine = (t, r) => div().text_size(11.5).text_color(t.muted).child(r.progress);
+
+// The proof verdict as coloured parts, from plan.md's Proof lines and proof.md:
+// "T2 · 20/20 pass · checks green", with failures red and what is missing amber. Null for a run
+// planned before proof lines existed. Merge danger is the PR's, not repeated here.
+function proofSummary(t, r) {
+  const { tier, md, files } = r.proof;
+  if (!proofVerdict({ tier, md, tasks: r.tasks, danger: null, shotFiles: files })) return null;
+  const rows = proofTasks(r.tasks, md, files);
+  const scoped = rows.filter((k) => k.scoped);
+  const n = (res) => scoped.filter((k) => k.result === res).length;
+  const pass = n("pass"), fail = n("fail"), partial = n("partial");
+  const pending = scoped.length - pass - fail - partial;
+  const missing = scoped.filter((k) => k.missing).length;
+  const unscoped = rows.length - scoped.length;
+  const finished = r.phase === "finished" || Boolean(r.away);
+  const checks = md?.checks?.state;
+  const parts = [
+    tier && { text: `T${tier.tier}` },
+    scoped.length > 0 && { text: `${pass}/${scoped.length} pass`, color: pass === scoped.length ? PASS(t) : null, bold: true },
+    fail > 0 && { text: `${fail} fail`, color: t.blocked },
+    partial > 0 && { text: `${partial} partial`, color: AMBER(t) },
+    missing > 0 && { text: `${plural(missing, "task")} without a screenshot`, color: AMBER(t) },
+    pending > 0 && (pass + fail + partial > 0 || md) && { text: `${pending} not checked`, color: finished ? AMBER(t) : t.dim },
+    unscoped > 0 && { text: `${unscoped} not scoped`, color: AMBER(t) },
+    md?.cut && { text: "proof.md cut", color: t.dim },
+    checks && { text: `checks ${checks}`, color: checks === "green" ? PASS(t) : checks === "red" ? t.blocked : t.dim },
+  ].filter(Boolean);
+  return { parts, rows, scoped, finished };
+}
 
 // ---- one run on its own, as the pane pinned beside its orchestrator ----
 
@@ -371,12 +413,25 @@ const section = (t, title, ...rest) => v_flex().gap(4)
   .child(h_flex().gap(6).px(2).items_center().text_size(11).font_semibold().text_color(t.dim).child(title)
     .children(rest.filter(Boolean).map((x) => div().font_normal().child(x))));
 
+// Every fold in the pane looks the same: under the section's small grey label, a dim chevron
+// and a one-line summary in normal text; colour only on status words. Open state per key in
+// view.folds, closed by default and not persisted.
+const isOpen = (view, key) => Boolean(view.folds?.get(key));
+function foldLine(view, t, key, tip, items) {
+  const open = isOpen(view, key);
+  return h_flex().id(`fold-${key}`).gap(6).px(2).items_center().min_w(0).rounded(4).cursor_pointer().text_size(11.5).text_color(t.foreground)
+    .hover((s) => s.bg(t.hover)).tooltip(tip)
+    .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); cx.notify(); })
+    .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
+    .child(h_flex().flex_1().min_w(0).flex_wrap().items_center().children(joined(t, items)));
+}
+
 // A PR as a row with room to spare: its whole title, then repo, checks and review.
 function prDetail(t, pr, i, related = false) {
   const tone = PR_TONE[pr.state] ?? "dim";
   const c = pr.checks ?? {};
   const checkText = c.fail ? `✗ ${c.fail} failing` : c.pending ? `… ${c.pending} running` : c.pass ? `✓ ${c.pass} checks` : null;
-  const checkTone = c.fail ? "blocked" : c.pending ? "working" : "done";
+  const checkColor = c.fail ? t.blocked : c.pending ? AMBER(t) : PASS(t);
   const review = reviewText(pr);
   const state = prStateText(pr);
   return h_flex().id(`prd-${related ? "rel" : "own"}-${i}-${pr.url}`).gap(8).items_start().p(8).rounded(7).bg(t.raised + "88").cursor_pointer()
@@ -386,17 +441,17 @@ function prDetail(t, pr, i, related = false) {
       .child(div().text_size(12.5).text_color(t.foreground).child(pr.title ?? pr.url))
       .child(h_flex().flex_wrap().gap_x(10).text_size(11).text_color(t.dim)
         .child(div().child(`${pr.repo ?? shortRef(pr.url)}${pr.number ? ` #${pr.number}` : ""}`))
-        .when(Boolean(checkText), (el) => el.child(div().text_color(t[checkTone]).child(checkText)))
-        .when(Boolean(review), (el) => el.child(div().text_color(t[review[1]]).child(review[0]))))
-      // The pane is narrow, so a long line is cut at a word with an ellipsis; the tooltip has all of it.
-      .when(Boolean(pr.danger), (el) => el.child(div().id(`danger-${pr.url}`).text_size(11).text_color(oneWay(pr.danger) ? t.blocked : t.dim).tooltip(pr.danger)
-        .child(`Merge danger: ${cutAt(pr.danger, 150)}`))))
+        .when(Boolean(checkText), (el) => el.child(div().text_color(checkColor).child(checkText)))
+        .when(Boolean(review), (el) => el.child(div().text_color(review[1] === "done" ? PASS(t) : t[review[1]]).child(review[0]))))
+      // Merge danger lives here only, in full: red for a one-way door.
+      .when(Boolean(pr.danger), (el) => el.child(div().id(`danger-${pr.url}`).text_size(11).text_color(oneWay(pr.danger) ? t.blocked : t.muted)
+        .child(`Merge danger: ${pr.danger}`))))
     .when(Boolean(state), (el) => el.child(pill(t, state, tone)));
 }
 
 // ---- proof ----
 
-const RESULT_TONE = { pass: "done", fail: "blocked", partial: "working" };
+const RESULT_COLOR = { pass: PASS, fail: (t) => t.blocked, partial: AMBER };
 
 // A tier as a small tag, "T2"; `tip` says what it is.
 const tierTag = (t, id, tier, tip) => div().id(id).flex_none().text_size(10).font_semibold().px(5).rounded(4)
@@ -412,135 +467,108 @@ function pathLink(t, r, id, rel, label) {
     .child(div().child("▤")).child(label);
 }
 
-// "Decided for you": one summary line, collapsed; a click lists every decision, newest first,
-// and another collapses it. A line that did not parse shows as its raw text. Not persisted.
-function decidedSection(view, t, r) {
-  const open = view.decidedOpen?.has(r.key);
+// "Decisions": the latest three as readable lines (yours marked "You"), then a fold for the rest
+// with the counts. A line that did not parse shows as its raw text.
+function decisionsSection(view, t, r) {
+  const key = `dec-${r.key}`, open = isOpen(view, key);
+  const you = r.decided.filter((d) => d.by === "user").length, orch = r.decided.length - you;
+  const counts = [orch > 0 && `${orch} by the orchestrator`, you > 0 && `${you} from you`].filter(Boolean).join(", ");
   const row = (d, i) => h_flex().id(`dec-${r.key}-${i}`).gap(8).items_start().px(2).text_size(11.5)
-    .child(div().flex_none().w(46).text_color(t.dim).child(d.at ? ago(d.at) : "—"))
+    .child(div().flex_none().w(34).text_color(t.dim).child(d.at ? ago(d.at).replace(" ago", "") : "—"))
     .child(v_flex().flex_1().min_w(0)
       .child(div().text_color(t.foreground).child(`${d.by === "user" ? "You · " : ""}${d.topic ? `${d.topic}: ${d.decision}` : d.decision}`))
-      .when(Boolean(d.why), (el) => el.child(div().text_size(11).text_color(t.dim).child(d.why))));
-  return v_flex().gap(4)
-    .child(h_flex().id(`dec-more-${r.key}`).gap(6).px(2).items_center().cursor_pointer().text_size(11.5).text_color(t.dim)
-      .hover((s) => s.text_color(t.foreground)).tooltip(open ? "Hide the decisions" : "Show every decision")
-      .on_click((_e, cx) => {
-        cx.stop_propagation();
-        view.decidedOpen ??= new Set();
-        if (open) view.decidedOpen.delete(r.key); else view.decidedOpen.add(r.key);
-        cx.notify();
-      })
-      .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none())
-      .child(div().flex_1().min_w(0).truncate().child(decidedSummary(r.decided))))
-    .when(open, (el) => el.children(r.decided.map(row)));
+      .when(Boolean(d.why), (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(d.why))));
+  return section(t, "Decisions")
+    .children((open ? r.decided : r.decided.slice(0, 3)).map(row))
+    .when(r.decided.length > 3, (el) => el.child(foldLine(view, t, key, open ? "Show only the latest three" : "Show every decision",
+      [{ text: open ? "Fewer" : `All ${r.decided.length}`, color: t.muted }, !open && { text: counts, color: t.dim }])));
 }
 
-// "Tokens": what the run has used, across its orchestrator and every agent it ran. One line of
-// totals: fresh tokens in blue (as in the headline: input, output and cache writes), the output
-// part of them in its own colour, cache reads in green, and the total. The per-agent bars fold out on demand (collapsed by default, not
-// persisted); each is stacked in the same colours, scaled to the run's total, exact numbers on hover.
-// The colours are ui.js's tokenColors, shared with the stats view.
+// "Tokens": what the run has used, across its orchestrator and every agent it ran. One line:
+// fresh tokens (input, output and cache writes, as in the headline) in cyan, the output part of
+// them in magenta, cache reads in grey and the total in bold; colours apart from the status ones.
+// It folds out to each agent's bar, scaled to the run's total, stacked fresh over cache reads,
+// with the exact numbers on hover.
 function tokensSection(view, t, r) {
-  const { fresh: BLUE, cached: GREEN, out: OUT } = tokenColors(t);
+  const FRESH = t.ansi6 ?? t.accent, OUT = t.ansi5 ?? "#b07cd8";
   const { total, input, output, cacheRead, cacheWrite, byAgent, updated } = r.tokens;
   const n = (v) => v.toLocaleString("en");
   const fresh = (x) => x.input + x.output + x.cacheWrite;
   const tip = (x) => `fresh ${n(fresh(x))} (in ${n(x.input)}, out ${n(x.output)}, cache write ${n(x.cacheWrite)}) · cache read ${n(x.cacheRead)}`;
   const pct = (v) => `${((100 * v) / total).toFixed(2)}%`;
-  const open = view.tokensOpen?.has(r.key);
-  const row = (a) => {
-    // A count from before the split has only a total: all of it blue.
-    const seg = (color, v) => div().h_full().flex_none().bg(color).w(pct(v));
-    return h_flex().id(`tok-${r.key}-${a.name}`).gap(8).items_center().px(2).h(18).text_size(11.5)
-      .tooltip(a.split ? `${a.name}: ${tip(a)}` : `${a.name}: ${n(a.total)} tokens`)
-      .child(div().flex_none().w(96).truncate().text_color(a.name === "orchestrator" ? t.foreground : t.muted).child(a.name))
-      .child(div().flex_1().min_w(0).h(5).rounded(3).bg(t.raised).overflow_hidden().flex()
-        .child(seg(BLUE, a.split ? a.input + a.cacheWrite : a.total))
-        .child(seg(OUT, a.split ? a.output : 0))
-        .child(seg(GREEN, a.split ? a.cacheRead : 0)))
-      .child(div().flex_none().w(44).text_color(t.dim).child(tokenText(a.total)));
-  };
-  return section(t, div().id(`tokhead-${r.key}`).tooltip(tokenDetail(r.tokens)).child("Tokens"), updated && `counted ${ago(updated)}`)
-    .child(h_flex().id(`tok-${r.key}`).flex_wrap().gap_x(10).px(2).text_size(11).tooltip(tokenDetail(r.tokens))
-      .child(div().text_color(BLUE).child(`fresh ${tokenText(input + output + cacheWrite)}`))
-      .child(div().text_color(OUT).child(`of it out ${tokenText(output)}`))
-      .child(div().text_color(GREEN).child(`cache read ${tokenText(cacheRead)}`))
-      .child(div().text_color(t.foreground).child(`total ${tokenText(total)}`)))
+  const key = `tok-${r.key}`, open = isOpen(view, key);
+  const row = (a) => h_flex().id(`tok-${r.key}-${a.name}`).gap(8).items_center().px(2).h(18).text_size(11.5)
+    .tooltip(a.split ? `${a.name}: ${tip(a)}` : `${a.name}: ${n(a.total)} tokens`)
+    .child(div().flex_none().w(96).truncate().text_color(a.name === "orchestrator" ? t.foreground : t.muted).child(a.name))
+    .child(div().flex_1().min_w(0).h(5).rounded(3).bg(t.raised).overflow_hidden().flex()
+      // A count from before the split has only a total: all of it fresh.
+      .child(div().h_full().flex_none().bg(FRESH).w(pct(a.split ? fresh(a) : a.total)))
+      .child(div().h_full().flex_none().bg(t.dim).w(pct(a.split ? a.cacheRead : 0))))
+    .child(div().flex_none().w(44).text_color(t.dim).child(tokenText(a.total)));
+  const items = [
+    { text: `fresh ${tokenText(input + output + cacheWrite)}`, color: FRESH },
+    { text: `of it out ${tokenText(output)}`, color: OUT },
+    { text: `cache read ${tokenText(cacheRead)}`, color: t.muted },
+    { text: `total ${tokenText(total)}`, bold: true },
+  ];
+  return section(t, "Tokens", updated && `counted ${ago(updated)}`)
+    .child(byAgent.length > 0 ? foldLine(view, t, key, `${tokenDetail(r.tokens)}\n${open ? "Hide" : "Show"} each agent's tokens`, items)
+      : h_flex().id(key).px(2).flex_wrap().items_center().text_size(11.5).text_color(t.foreground).tooltip(tokenDetail(r.tokens)).children(joined(t, items)))
     .when(Boolean(r.budget), (el) => el.child(div().id(`budget-${r.key}`).px(2).text_size(11).text_color(overBudget(r) ? t.blocked : t.dim)
       .tooltip("A soft budget: crossing it asks you whether to continue, compact or stop; nothing stops by itself")
       .child(`${overBudget(r) ? "Over" : "Under"} its soft budget of ${tokenText(r.budget)} tokens`)))
-    .when(byAgent.length > 0, (el) => el.child(h_flex().id(`tok-more-${r.key}`).gap(6).px(2).items_center().cursor_pointer().text_size(11).text_color(t.dim)
-      .hover((s) => s.text_color(t.foreground)).tooltip(open ? "Hide the per-agent bars" : "Show each agent's tokens")
-      .on_click((_e, cx) => {
-        cx.stop_propagation();
-        view.tokensOpen ??= new Set();
-        if (open) view.tokensOpen.delete(r.key); else view.tokensOpen.add(r.key);
-        cx.notify();
-      })
-      .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none())
-      .child(div().child(`By agent · ${byAgent.length}`))))
     .when(open, (el) => el.children(byAgent.map(row)));
 }
 
-// The Proof section: one verdict line on top (tier, passes, what is missing, checks, merge
-// danger), then one compact row per task: tier, name and result. A row's "Checked:", "Result:"
-// and files show only when it is expanded. A finished run starts with the section collapsed to
-// the verdict; a running one open. A click on the verdict or a row toggles it (not persisted).
-function proofSection(view, t, r, prs) {
-  const { tier, md, files } = r.proof;
-  const danger = prs.find((p) => p.danger)?.danger;
-  const verdict = proofVerdict({ tier, md, tasks: r.tasks, danger, shotFiles: files });
+// The Proof section: the verdict as one fold line, a bar with a segment per scoped task
+// (green pass, red fail, amber partial, grey not checked), then the rows that need a look
+// (failed, partial, missing a screenshot, not scoped, or not checked once the run is done)
+// without unfolding. Unfolding lists every task. A row shows its files as a count; clicking
+// it opens its evidence, checks, result and thumbnails. Not persisted.
+function proofSection(view, t, r) {
+  const { md, files } = r.proof;
+  const s = proofSummary(t, r);
+  const folder = () => pathLink(t, r, `pf-dir-${r.key}`, "shared/proof", `shared/proof/ · ${files.length >= 40 ? "40+ files" : plural(files.length, "file")}`);
   // A run planned before proof lines existed: one quiet line, not a red row per task.
-  if (!verdict) {
-    // Files in shared/proof/ without a plan or proof.md still get their folder link.
+  if (!s) {
     return section(t, "Proof").child(div().px(2).text_size(11.5).text_color(t.dim).child("No proof planned"))
-      .when(files.length > 0, (el) => el.child(h_flex().px(2).pt(2)
-        .child(pathLink(t, r, `pf-dir-${r.key}`, "shared/proof", `shared/proof/ · ${files.length >= 40 ? "40+ files" : plural(files.length, "file")}`))));
+      .when(files.length > 0, (el) => el.child(h_flex().px(2).pt(2).child(folder())));
   }
-  const over = view.proofOpen?.get(r.key);
-  const finished = r.phase === "finished" || Boolean(r.away);
-  const open = over ?? !finished;
-  const toggle = (map, key, now) => (_e, cx) => {
-    cx.stop_propagation();
-    view[map] ??= map === "proofOpen" ? new Map() : new Set();
-    if (map === "proofOpen") view[map].set(key, !now); else if (now) view[map].delete(key); else view[map].add(key);
-    cx.notify();
-  };
+  const key = `pf-${r.key}`, open = isOpen(view, key);
+  const colorOf = (k) => RESULT_COLOR[k.result]?.(t) ?? t.border;
+  const problem = (k) => !k.scoped || k.result === "fail" || k.result === "partial" || k.missing || (!k.result && s.finished);
   const row = (k) => {
     const id = `${r.key}-${k.id}`;
     const more = view.proofRows?.has(id);
-    const hasRes = Boolean(k.result);
     return v_flex().id(`pf-${id}`).gap(3).px(8).py(4).rounded(7).bg(t.raised + "88").cursor_pointer()
-      .hover((s) => s.bg(t.hover)).on_click(toggle("proofRows", id, more))
+      .hover((st) => st.bg(t.hover)).on_click((_e, cx) => {
+        cx.stop_propagation();
+        view.proofRows ??= new Set();
+        if (more) view.proofRows.delete(id); else view.proofRows.add(id);
+        cx.notify();
+      })
       .child(h_flex().gap(8).items_center()
         .child(k.tier !== null ? tierTag(t, `pft-${id}`, k.tier, `${tierTip(k.tier)}\n${k.planned ? "Planned" : "Recorded in proof.md"}`) : div().flex_none().text_size(10).px(5).text_color(t.blocked).child("—"))
-        .child(div().flex_1().min_w(0).truncate().text_size(12).font_semibold().text_color(t.foreground).child(k.name ? `${k.id} ${k.name}` : k.id))
-        .when(k.files.length > 0, (e) => e.child(thumbs(view, t, r, k.id, k.files)))
-        .child(hasRes ? pill(t, k.result, RESULT_TONE[k.result]).tooltip(k.why || k.result)
-          : k.scoped ? pill(t, "not checked", "dim") : pill(t, "not scoped", "blocked").tooltip("No Proof line in plan.md")))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).child(k.name ? `${k.id} ${k.name}` : k.id))
+        .when(k.files.length > 0 && !more, (e) => e.child(div().flex_none().text_size(11).text_color(t.dim).child(plural(k.files.length, "file"))))
+        .child(k.result ? pill(t, k.result, colorOf(k)).tooltip(k.why || k.result)
+          : k.scoped ? pill(t, "not checked", s.finished ? AMBER(t) : "dim") : pill(t, "not scoped", AMBER(t)).tooltip("No Proof line in plan.md")))
       .when(more, (el) => el
-        .child(div().text_size(11.5).text_color(k.planned ? t.muted : t.blocked).child(k.planned ? k.planned.text || "(no evidence named)" : "Not scoped: no Proof line in plan.md"))
+        .child(div().text_size(11.5).text_color(k.planned ? t.muted : AMBER(t)).child(k.planned ? k.planned.text || "(no evidence named)" : "Not scoped: no Proof line in plan.md"))
         .when(Boolean(k.checked), (e) => e.child(div().text_size(11).text_color(t.dim).child(`Checked: ${k.checked}`)))
-        .when(hasRes, (e) => e.child(div().text_size(11).text_color(t.dim).child(`Result: ${k.result}${k.why ? ` — ${k.why}` : ""}`)))
+        .when(Boolean(k.result), (e) => e.child(div().text_size(11).text_color(t.dim).child(`Result: ${k.result}${k.why ? ` — ${k.why}` : ""}`)))
+        .when(k.files.length > 0, (e) => e.child(thumbs(view, t, r, k.id, k.files)))
         .when(k.files.length > 0, (e) => e.child(div().text_size(11).text_color(t.dim).child(`Files: ${k.files.join(", ")}`))));
   };
-  const rows = proofTasks(r.tasks, md, files);
-  const unscoped = rows.filter((k) => !k.scoped).length;
-  return v_flex().gap(4)
-    .child(h_flex().id(`pf-head-${r.key}`).gap(6).px(2).items_center().cursor_pointer().text_size(11.5)
-      .text_color(t[verdict.tone] ?? t.dim).hover((s) => s.opacity(0.8))
-      .tooltip(`${tier ? `${tierTip(tier.tier)}\n` : ""}${open ? "Hide the tasks' proof" : "Show the tasks' proof"}`)
-      .on_click(toggle("proofOpen", r.key, open))
-      .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none())
-      .child(div().flex_1().min_w(0).truncate().font_semibold().child(verdict.text))
-      .when(unscoped > 0, (el) => el.child(div().flex_none().font_normal().text_color(t.dim).child(`${unscoped} not scoped`))))
-    .when(open, (el) => el
-      .children(rows.map(row))
-      .when(rows.length === 0, (e) => e.child(div().px(2).text_size(11.5).text_color(t.dim).child("No tasks planned yet")))
-      .child(h_flex().flex_wrap().gap(6).px(2).pt(2).items_center()
-        .when(Boolean(md), (e) => e.child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md")))
-        .when(files.length > 0, (e) => e.child(pathLink(t, r, `pf-dir-${r.key}`, "shared/proof", `shared/proof/ · ${files.length >= 40 ? "40+ files" : plural(files.length, "file")}`)))
-        .when(!md && files.length === 0, (e) => e.child(div().text_size(11).text_color(t.dim).child("No proof captured yet")))));
+  const shown = open ? s.rows : s.rows.filter(problem);
+  return section(t, "Proof")
+    .child(foldLine(view, t, key, open ? "Show only the tasks that need a look" : `Show every task's proof (${s.rows.length})`, s.parts))
+    .when(s.scoped.length > 0, (el) => el.child(h_flex().gap(2).h(5).px(2).children(s.scoped.map((k) => div().flex_1().h_full().rounded(2).bg(colorOf(k))))))
+    .children(shown.map(row))
+    .when(open, (el) => el.child(h_flex().flex_wrap().gap(6).px(2).pt(2).items_center()
+      .when(Boolean(md), (e) => e.child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md")))
+      .when(files.length > 0, (e) => e.child(folder()))
+      .when(!md && files.length === 0, (e) => e.child(div().text_size(11).text_color(t.dim).child("No proof captured yet")))));
 }
 
 function issueRow(t, url) {
@@ -576,31 +604,33 @@ function runDetail(view, t, r, ctx) {
   const { orch, closed, need, counts, prs, related, workers, stages } = f;
   // Each agent's task and that task's stage, by address.
   const workOf = new Map(stages.flatMap(({ agents, stage }, i) => agents.map((a) => [a.agent.address, { task: r.tasks[i], stage }])));
+  const facts = factsLine(t, r, prs);
+  const notes = cardNotes(t, r, f);
+  // Most important first: who and what, whether it needs you, when and its PR, then the PR
+  // itself, proof, tasks, decisions and agents; tokens last, since they are about cost.
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(14).p(14).pl(18).rounded(10).bg(t.surface)
     .border(1).border_color(need ? t.blocked + "88" : t.border)
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
     .child(div().id(`head-${r.key}`).cursor_pointer().on_click(() => orch !== "gone" && focusAgent(r.terminal))
       .child(cardHeader(view, t, r, f, runMeta(r, f))))
-    // When it started and how long it has gone, in full size right under the header.
-    .when(Boolean(r.started), (el) => el.child(div().id(`age-${r.key}`).text_size(13).font_medium().text_color(t.foreground)
-      .tooltip(startedTip(r.started)).child(runAgeText(r))))
     .when(need, (el) => el.child(div().id(`need-${r.key}`).cursor_pointer().on_click(() => focusAgent(r.terminal)).child(needBox(t, r, f))))
-    .when(Boolean(r.progress) || cardNotes(t, r, f).length > 0, (el) => el.child(v_flex().gap(4)
-      .when(Boolean(r.progress), (el) => el.child(div().text_size(13).text_color(t.foreground).child(r.progress)))
-      .children(cardNotes(t, r, f))))
+    .when(Boolean(facts) || Boolean(r.progress) || notes.length > 0, (el) => el.child(v_flex().gap(4)
+      .when(Boolean(facts), (e) => e.child(facts))
+      .when(Boolean(r.progress), (e) => e.child(progressLine(t, r)))
+      .children(notes)))
     .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests")
       .children(prs.map((p, i) => prDetail(t, p, i)))
       .when(prs.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet"))))
     .when(r.issues.length + related.length > 0, (el) => el.child(section(t, "Issues and related PRs")
       .children(r.issues.map((url) => issueRow(t, url)))
       .children(related.map((p, i) => prDetail(t, p, i, true)))))
+    .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(view, t, r)))
     .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
-    .when(r.decided.length > 0, (el) => el.child(decidedSection(view, t, r)))
-    .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(view, t, r, prs)))
-    .when(Boolean(r.tokens), (el) => el.child(tokensSection(view, t, r)))
+    .when(r.decided.length > 0, (el) => el.child(decisionsSection(view, t, r)))
     .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
       .children(workers.map((w) => workerRow(t, w, ctx, workOf.get(w.address), w.parent !== r.terminal)))))
+    .when(Boolean(r.tokens), (el) => el.child(tokensSection(view, t, r)))
     .child(actionRow(view, t, r, orch, closed, counts));
 }
 

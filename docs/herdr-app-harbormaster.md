@@ -7,8 +7,8 @@ Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-capta
   - Each orchestrator's card is named for what the run is about, with a tag for its type (`feat`, `fix`, `rev` or `expl`): the issue or PR number from its branch and the short topic its orchestrator published (`feat` `#985 · Road routes`, `rev` `PR 368 · Triage decision`), with the full branch in the tooltip. Run cards and the harbor's signs show the type the same way. A run with no topic yet, such as one started before orchestrators published one, shows its branch. The name gets the card's whole first line. The line below starts with the type tag and the number of 🦀 workers, then its progress, its status when it isn't running, and its PRs, so a narrow sidebar cuts the progress short before the tag and workers. A run that needs you turns red and says what for. Finished ones come last, with a green edge and their PR numbers. Clicking it focuses the orchestrator and opens that run's card beside it (see below), if it isn't open already. Clicking a card never closes its pane; close it like any pane.
   - Each Adrift line shows the agent's space and its name as Herdr's own Agents list gives it: the tab's name when someone named it, otherwise the agent's own title (Claude Code sets one from its session), never a bare tab number like "1". Clicking it focuses the agent.
 - **Runs overview.** The totals across runs on top (running, need you, finished, agents, tasks done, open PRs and failing checks; "need you" counts the captain's open decisions and the runs that need you, and clicking it focuses the first of them), then **Waiting on you**, then the captain, then one card per run:
-  - its name, as in the Crew block, and repository, a status pill, when it started and how long it has run, in full size under the name (`Started today 09:28 · running for 8h 12m`; a finished run says `finished after …`, up to its last status update, and a run parked or closed before it finished says `stopped after …`), the progress line, and a task bar from `plan.md` (hover a segment for its task), with the tasks done and those under way counted by stage below it (`21/22 done · 1 in review`), colored by each task's stage: planned, implementing, in review, fixing, done or blocked (a task is done once it is merged into the run's integration branch). Tasks are read from `### <id> <name> — <state>` headings (or with a `Status:` in or below them), from a table with an `id`, `#` or `task` column and a `status` column, or from list items under `## Tasks` with a `Status:`. The stage comes from the task's state words; when they name none, or say it is still planned, from the run's live agents working on it, matched by name (`impl-<prefix>-<task>`, `rev-…`, `fix-…`, and `grunt-…` (a command-watching agent, shown as implementing), with the run's `Prefix:` from `plan.md`);
-  - every PR the run opened, with its state, checks and review (who approved it or asked for changes), and below them its related links: its issues, and the PRs it is about but did not open, such as the PR a review-only run reviews (their icon takes the PR's state color; they don't count as open PRs);
+  - its name, as in the Crew block, and repository, a status pill, and under them the **facts line**: when it started and how long it has run, then each PR it opened with its checks (green when they pass, amber while running, red when failing), a one-way door in red, and its review (`Started today 09:28 · finished after 8h 7m · PR #42 open · checks ✓`; a running run says `running for …`, a finished one `finished after …`, up to its last status update, and a run parked or closed before it finished `stopped after …`; click a PR to open it). Then the orchestrator's progress note, smaller and muted since it is in the orchestrator's words and can lag, the proof verdict (see [Proof](#proof)), and a task bar from `plan.md` (hover a segment for its task), with the tasks done and those under way counted by stage below it (`21/22 done · 1 in review`), colored by each task's stage: planned, implementing, in review, fixing, done or blocked (a task is done once it is merged into the run's integration branch). Tasks are read from `### <id> <name> — <state>` headings (or with a `Status:` in or below them), from a table with an `id`, `#` or `task` column and a `status` column, or from list items under `## Tasks` with a `Status:`. The stage comes from the task's state words; when they name none, or say it is still planned, from the run's live agents working on it, matched by name (`impl-<prefix>-<task>`, `rev-…`, `fix-…`, and `grunt-…` (a command-watching agent, shown as implementing), with the run's `Prefix:` from `plan.md`);
+  - below them its related links: its issues, and the PRs it is about but did not open, such as the PR a review-only run reviews (their icon takes the PR's state color; they don't count as open PRs);
   - what the run needs you for, shown first: its open question, the dialog it is blocked on, or the reason in its status;
   - and, when they apply: relayed messages the orchestrator hasn't read, agents waiting on an answer, "No pull request yet", and a note when the run's orchestrator is gone;
   - a pin, while its orchestrator is there, that keeps this card open as a pane beside the orchestrator;
@@ -102,11 +102,9 @@ It changes the window on its own only for a closed run (a `closed` marker): it c
 `L2` it runs to a merge-ready PR with proof and stops at merge. A run's card and pane show it as a
 small tag by the name (`L1`; hover for what it means); the narrow Crew block leaves it out so the
 type tag and agent count keep their room. Every decision an orchestrator makes itself is a
-`- [decided] <UTC time> <topic>: <decision> — <why>` line in `decisions.md`. The overview card shows
-one summary line, "Decided for you · 20 by the orchestrator, 1 from you · latest: …" (counts of `[decided]`
-and `[user]` lines, the newest of either), with all of them in the tooltip. The run pane has the same line; click it
-to list every decision (up to the last 60 lines) with when it was made and why, newest first, and again to collapse
-(not remembered). A line that does not parse is shown as its raw text. Formats: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
+`- [decided] <UTC time> <topic>: <decision> — <why>` line in `decisions.md`. The run pane's **Decisions**
+section shows the latest three, yours marked "You", with how long ago and why, then a fold, "All 53 · 42 by the orchestrator,
+11 from you", that lists the rest (up to the last 60 lines), newest first (not remembered). A line that does not parse is shown as its raw text. Formats: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
 ## Tokens
 
@@ -117,10 +115,7 @@ what the session files gained since, so it stays cheap. It reads Claude Code's, 
 files on the orchestrator's computer, from the run's start on, including those of agents already
 killed and worktrees already removed, those of an orchestrator resumed in a new terminal (best effort
 for a pi or opencode orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
-down. A run's card leads its meta line with the fresh tokens and shows the cache reads beside them (`2.9M tok (+89.5M cached)`),
-the same in the orchestrator's context tooltip ("Run total"); a count from before the split reads `26M tok`. Hovering the card's token text or the section title shows the full breakdown (total, input, output, cache writes, cache reads, and that cache reads are billed at about a tenth of input). The run pane has a **Tokens** section with one line of totals (fresh tokens, meaning input, output and cache writes, in
-blue; the output part of them in its own colour; cache reads in green; and the total) and, folded under **By agent**
-until clicked, each agent's share as a stacked bar in the same colours, with the exact numbers on
+down. The orchestrator's context tooltip ("Run total") leads with the fresh tokens and shows the cache reads beside them (`2.9M tok (+89.5M cached)`); a count from before the split reads `26M tok`. A run's card and pane header show tokens only once over the soft budget (`over budget 92M/100M`, in red). The run pane has a **Tokens** section, last since it is about cost, with one line of totals: fresh tokens (input, output and cache writes) in cyan, the output part of them in magenta, cache reads in grey and the total in bold, colours kept apart from the status ones. Hovering it shows the full breakdown (total, input, output, cache writes, cache reads, and that cache reads are billed at about a tenth of input). Clicking it folds out each agent's share as a bar, fresh in cyan over cache reads in grey, with the exact numbers on
 hover (`fresh 1,234,567 (in 12, out 3,456, cache write 1,230,000) · cache read 28,000,000`), the orchestrator
 first, then the agents by size, named by their worktree (`pda-t3`). The narrow Crew block leaves it
 out; hovering an orchestrator's context size there shows the run total too. The total (and so the budget) counts any of input,
@@ -259,23 +254,21 @@ yet), a row of its own, its task from its name (`impl-<prefix>-<task>`).
 
 ## Proof
 
-A run's pane has a Proof section. Its top line is the verdict, for example `Proof T2 · 6/8 pass · 2
-partial (2 tasks without a screenshot) · checks green · two-way door`: the run's tier (plan.md's `Proof tier:`
+A run's pane has a Proof section. Its summary line is the verdict, for example `T2 · 6/8 pass · 2
+partial · 2 tasks without a screenshot · checks green`: the run's tier (plan.md's `Proof tier:`
 line, else the highest among the tasks), passes over the tasks that have a `Proof:` line or a proof.md
 entry, fails and partials, tasks of tier T2 or higher with a result whose `Files:` list has no existing image or video ("n tasks without a
-screenshot": it counts tasks, not images; proof.md is read up to 64 kB, and the verdict says "(proof.md cut)" past that), the `Checks: green|red` line of proof.md, and the merge danger of the run's PR (`two-way
-door` or `one-way door`). It is in the blocked colour for a fail, red checks or a one-way door, green
-when everything passes, dim otherwise. Below it is one compact row per task: tier, name and a pass,
-partial, fail, not checked or not scoped pill, and small thumbnails of the task's images from its proof.md
-`Files:` (the first three, then `+n`; a `▶` box for a video: mp4, webm, mov, m4v). A thumbnail click opens the
+screenshot": it counts tasks, not images; proof.md is read up to 64 kB, and the verdict says "proof.md cut" past that), tasks not checked and not scoped, and the `Checks: green|red` line of proof.md. Only the status words are coloured: a full pass and green checks green, fails and red checks red, partials, missing screenshots and unscoped tasks amber, and tasks not checked amber once the run is done. Under it a bar has one segment per scoped task in the same colours. The PR's merge danger is not repeated here: it is on the PR's card in full, red for a one-way door, which the facts line also names.
+The tasks that need a look show below the bar without unfolding: failed, partial, without a screenshot, not scoped, or, once the run is done, not checked. Clicking the verdict lists every task (not remembered). A row has the tier, the name, how many files it has and a pass,
+partial, fail, not checked or not scoped pill; click it for its evidence, "Checked:", "Result:", thumbnails of its images from its proof.md
+`Files:` (the first three, then `+n`; a `▶` box for a video: mp4, webm, mov, m4v) and its files. A thumbnail click opens the
 screenshot in a Harbormaster overlay, scaled to fit, with its file name, `‹` `›` for the task's other images and
 Esc or ✕ to close. A video opens in the system player. A file over 6 MB is not copied (see below) and says "too
 large to preview".
-Click a row to see its evidence, "Checked:", "Result:" and files. A running run shows the rows; once it
-is finished, parked or closed the section starts collapsed to the verdict line (click it to expand;
-not remembered). Two links open `proof.md` and the
+With every task listed, two links open `proof.md` and the
 `shared/proof/` folder; for a run on another machine they are shown as paths, since nothing here
-can open a file there. In the runs overview, a run's card carries a small tier tag by its name
+can open a file there. In the runs overview, a run's card shows the same verdict as a line (not for a finished run's
+smaller card) and a small tier tag by its name
 (hover for what the tier means, from the table in `skills/proving/SKILL.md`, and how many tasks are not scoped; the verdict line and each task row have the same hover) and "n unscoped" in its meta line. The formats are in
 [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
@@ -301,6 +294,7 @@ without switching your space or tab, takes the shot and closes it:
 ```sh
 herdr-app do 'harbormaster.show-run:<branch>'   # or the run's directory, or its orchestrator's terminal
 herdr-app do 'harbormaster.show-stats'          # the Stats view; show-stats:<branch> focuses one run
+herdr-app do 'harbormaster.show-overview'       # the runs overview, with every run's card
 sleep 1; herdr-app shot proof.png
 herdr-app do 'harbormaster.close-popup'
 ```
