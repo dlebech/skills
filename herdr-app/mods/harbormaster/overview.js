@@ -5,10 +5,10 @@ import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, decisionQueue, answerRun, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag, tokenColors } from "./ui.js";
-import { tokenText } from "./context.js";
+import { tokenText, tokenHeadline, tokenDetail } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
 import { decidedText, decidedSummary } from "./decided.js";
-import { proofVerdict, proofTasks } from "./proof.js";
+import { proofVerdict, proofTasks, tierTip } from "./proof.js";
 import { oneLine } from "./question.js";
 import { thumbs } from "./viewer.js";
 
@@ -37,7 +37,7 @@ const withContext = (view, t, id, address, run = null) => (el) => {
   if (!c) return el;
   return el.child(div().id(`${id}-ctx`).flex_none().text_size(10.5).text_color(t.dim).child(tokenText(c.tokens))
     .tooltip(`Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`
-      + (run?.tokens ? `\nRun total: ${run.tokens.total.toLocaleString("en")} tokens, all its agents` : "")));
+      + (run?.tokens ? `\nRun total: ${tokenHeadline(run.tokens)} (${run.tokens.total.toLocaleString("en")} in all), all its agents` : "")));
 };
 
 // A small "85% · 2.1G" badge for an agent and the commands it runs, above resources.js's HOT
@@ -279,7 +279,7 @@ function cardHeader(view, t, r, f, meta) {
       .child(h_flex().gap(6).items_center().min_w(0)
         .when(Boolean(r.type), (el) => el.child(typeTag(t, r.type)))
         .child(autonomyTag(t, `auto-${r.key}`, r.autonomy))
-        .when(Boolean(r.proof.tier), (el) => el.child(tierTag(t, `tier-${r.key}`, r.proof.tier.tier, `Proof tier${r.proof.tier.byUser ? " (set by user)" : ""}${r.tasks.some((k) => !k.proof) ? `; ${plural(r.tasks.filter((k) => !k.proof).length, "task")} not scoped` : ""}`)))
+        .when(Boolean(r.proof.tier), (el) => el.child(tierTag(t, `tier-${r.key}`, r.proof.tier.tier, `${tierTip(r.proof.tier.tier)}${r.proof.tier.byUser ? "\nSet by user" : ""}${r.tasks.some((k) => !k.proof) ? `\n${plural(r.tasks.filter((k) => !k.proof).length, "task")} not scoped` : ""}`)))
         .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(13.5).text_color(t.foreground), runName(r.branch, r.topic)))
         .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
       .child(metaLine(t, r, meta)))
@@ -310,16 +310,20 @@ function cardNotes(t, r, f) {
 }
 
 const unscopedOf = (r) => (r.proof.tier ? r.tasks.filter((k) => !k.proof).length : 0);
-// The tokens segment: "26M tok", or "31M / 30M tok" in the blocked colour once over the soft budget.
-const tokenMeta = (r) => (!r.tokens ? null : r.budget ? `${tokenText(r.tokens.total)} / ${tokenText(r.budget)} tok` : `${tokenText(r.tokens.total)} tok`);
+// The tokens segment: "2.9M tok (+89.5M cached)", with the budget against the total after it,
+// "· 92M/100M budget", in the blocked colour once over the soft budget.
+const tokenMeta = (r) => (!r.tokens ? null : r.budget ? `${tokenHeadline(r.tokens)} · ${tokenText(r.tokens.total)}/${tokenText(r.budget)} budget` : tokenHeadline(r.tokens));
 const runMeta = (r, f) => [r.repo, f.workers.length ? plural(f.workers.length, "agent") : null, tokenMeta(r), unscopedOf(r) ? `${unscopedOf(r)} unscoped` : null, r.updated ? ago(r.updated) : null].filter(Boolean).join(" · ");
-// The meta line as one text, or three when the tokens segment is over budget, to colour it.
+// The meta line as three texts, around the tokens segment: it has the breakdown on hover, and
+// the blocked colour once over budget.
 const metaLine = (t, r, meta) => {
   const tok = tokenMeta(r), at = tok ? meta.indexOf(tok) : -1;
   const line = h_flex().min_w(0).text_size(11.5).text_color(t.dim);
-  if (!overBudget(r) || at < 0) return div().truncate().text_size(11.5).text_color(t.dim).child(meta);
+  if (at < 0) return div().truncate().text_size(11.5).text_color(t.dim).child(meta);
+  const over = overBudget(r);
+  const tip = !r.budget ? tokenDetail(r.tokens) : `${tokenDetail(r.tokens)}\n${over ? "Over its" : "Under its"} soft budget of ${r.budget.toLocaleString("en")} tokens`;
   return line.child(div().flex_none().child(meta.slice(0, at)))
-    .child(div().id(`over-${r.key}`).flex_none().text_color(t.blocked).font_semibold().tooltip(`Over its soft budget of ${r.budget.toLocaleString("en")} tokens`).child(tok))
+    .child((over ? div().id(`over-${r.key}`).text_color(t.blocked).font_semibold() : div().id(`tokmeta-${r.key}`)).min_w(0).truncate().tooltip(tip).child(tok))
     .child(div().truncate().child(meta.slice(at + tok.length)));
 };
 const runEdge = (t, f) => (f.need ? t.blocked : t[f.badge.tone] ?? t.border);
@@ -449,8 +453,8 @@ function tokensSection(t, r) {
       .child(div().flex_none().w(44).text_color(t.dim).child(tokenText(a.total)));
   };
   const all = { input, output, cacheRead, cacheWrite };
-  return section(t, `Tokens · ${tokenText(total)}`, updated && `counted ${ago(updated)}`)
-    .child(h_flex().id(`tok-${r.key}`).gap(10).px(2).text_size(11).tooltip(`${n(total)} tokens: ${tip(all)}`)
+  return section(t, div().id(`tokhead-${r.key}`).tooltip(tokenDetail(r.tokens)).child(`Tokens · ${tokenHeadline(r.tokens)}`), updated && `counted ${ago(updated)}`)
+    .child(h_flex().id(`tok-${r.key}`).gap(10).px(2).text_size(11).tooltip(tokenDetail(r.tokens))
       .child(div().text_color(BLUE).child(`fresh ${tokenText(fresh(all))}`))
       .child(div().text_color(GREEN).child(`cache read ${tokenText(cacheRead)}`))
       .child(div().text_color(t.dim).child(`out ${tokenText(output)}`)))
@@ -491,7 +495,7 @@ function proofSection(view, t, r, prs) {
     return v_flex().id(`pf-${id}`).gap(3).px(8).py(4).rounded(7).bg(t.raised + "88").cursor_pointer()
       .hover((s) => s.bg(t.hover)).on_click(toggle("proofRows", id, more))
       .child(h_flex().gap(8).items_center()
-        .child(k.tier !== null ? tierTag(t, `pft-${id}`, k.tier, k.planned ? "The proof tier this task is planned for" : "The proof tier recorded in proof.md") : div().flex_none().text_size(10).px(5).text_color(t.blocked).child("—"))
+        .child(k.tier !== null ? tierTag(t, `pft-${id}`, k.tier, `${tierTip(k.tier)}\n${k.planned ? "Planned" : "Recorded in proof.md"}`) : div().flex_none().text_size(10).px(5).text_color(t.blocked).child("—"))
         .child(div().flex_1().min_w(0).truncate().text_size(12).font_semibold().text_color(t.foreground).child(k.name ? `${k.id} ${k.name}` : k.id))
         .when(k.files.length > 0, (e) => e.child(thumbs(view, t, r, k.id, k.files)))
         .child(hasRes ? pill(t, k.result, RESULT_TONE[k.result]).tooltip(k.why || k.result)
@@ -507,7 +511,7 @@ function proofSection(view, t, r, prs) {
   return v_flex().gap(4)
     .child(h_flex().id(`pf-head-${r.key}`).gap(6).px(2).items_center().cursor_pointer().text_size(11.5)
       .text_color(t[verdict.tone] ?? t.dim).hover((s) => s.opacity(0.8))
-      .tooltip(open ? "Hide the tasks' proof" : "Show the tasks' proof")
+      .tooltip(`${tier ? `${tierTip(tier.tier)}\n` : ""}${open ? "Hide the tasks' proof" : "Show the tasks' proof"}`)
       .on_click(toggle("proofOpen", r.key, open))
       .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none())
       .child(div().flex_1().min_w(0).truncate().font_semibold().child(verdict.text))

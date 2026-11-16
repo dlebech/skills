@@ -78,7 +78,7 @@ below and shows them in the run's Proof section.
   evidence>` under a heading task, a `proof` column in a task table, or `Proof: T1 — …` inside
   a list item under `## Tasks`. The tier is `T0` to `T3`; the text after the dash is the evidence.
 - Tiers: `T0` CI or the local test suite is green (the default, so not by itself a sign that a task needs no review); `T1` T0 plus test output for the
-  changed behaviour; `T2` T1 plus screenshots or a recording; `T3` T2 plus a guided demo.
+  changed behaviour; `T2` T1 plus screenshots or a recording; `T3` T2 plus a guided demo. The proving skill's tier table has the canonical wording, which Harbormaster shows on hover; `tests/herdr-app-harbormaster/tiers.sh` checks they match.
 
 ## proof.md and shared/proof/
 
@@ -307,7 +307,7 @@ Every `set-status.sh` call checks it after the token count. When `tokens.total >
 `budget_asked` is not this budget, it records `budget_asked: <budget>` and prints one line:
 `over budget: <total> of <budget> tokens; ask the budget question (run-files.md)`. It prints once per
 budget value, so raising the budget arms it again. It never writes `question.md` (one may be open).
-Harbormaster marks a run over budget from `status.json` alone (`31M / 30M tok`, in the blocked colour),
+Harbormaster marks a run over budget from `status.json` alone (`2.9M tok (+28M cached) · 31M/30M budget`, in the blocked colour),
 even when the orchestrator is gone.
 
 On that line the orchestrator asks this question, at any autonomy level (it is always yours to decide,

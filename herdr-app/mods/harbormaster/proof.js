@@ -4,6 +4,19 @@
 
 import { isImage, isVideo } from "./media.js";
 
+// What each tier means, shown on hover over a tier tag. The source is the tier table in
+// skills/proving/SKILL.md (each row stands alone); tests/herdr-app-harbormaster/tiers.sh
+// fails when these differ from it, so change both together.
+export const TIER_TEXT = [
+  "Tests green (CI, or the repo's local suite).",
+  "Tests green, plus output for the changed behaviour.",
+  "Tests green, output for the changed behaviour, and screenshots or a recording.",
+  "Tests green, output for the changed behaviour, screenshots or a recording, and a guided demo.",
+];
+
+// "T2: Tests green, output for …"
+export const tierTip = (tier) => `T${tier}: ${TIER_TEXT[tier] ?? ""}`.trim();
+
 // "T1 — the evidence", "T1: the evidence", "T2" → {tier: 1, text}; null when no T0..T3 leads it.
 export function proofOf(s) {
   const m = /^[*_`\s]*T([0-3])\b[*_`]*\s*(?:[—–:-]\s*)?(.*)$/is.exec(s ?? "");
