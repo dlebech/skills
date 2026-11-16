@@ -40,8 +40,8 @@ const SCRIPT = [
   // proof.md (a "+" before it when there is one), then the names of the files in shared/proof/, capped.
   '  [ -e "$d/proof.md" ] && { printf +; head -c 12000 "$d/proof.md"; }; printf \'\\037\'',
   '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
-  // decisions.md: the last 20 lines the orchestrator logged as its own decisions, capped.
-  '  grep -a "^- \\[decided\\] " "$d/decisions.md" 2>/dev/null | tail -n 20 | tail -c 8000',
+  // decisions.md: the last 60 lines of its own decisions and the user's, capped.
+  '  grep -a -E "^- \\[(decided|user)\\] " "$d/decisions.md" 2>/dev/null | tail -n 60 | tail -c 20000',
   "done",
 ].join("\n");
 
@@ -237,7 +237,11 @@ function tokensOf(x) {
   if (!(n(x?.total) > 0)) return null;
   return {
     total: n(x.total), input: n(x.input), output: n(x.output), cacheRead: n(x.cache_read), cacheWrite: n(x.cache_write),
-    byAgent: (Array.isArray(x.by_agent) ? x.by_agent : []).filter((a) => a?.name && n(a.total) > 0).map((a) => ({ name: String(a.name), total: n(a.total) })),
+    byAgent: (Array.isArray(x.by_agent) ? x.by_agent : []).filter((a) => a?.name && n(a.total) > 0).map((a) => ({
+      name: String(a.name), total: n(a.total), input: n(a.input), output: n(a.output), cacheRead: n(a.cache_read), cacheWrite: n(a.cache_write),
+      // A count from before tokens.sh split them has only a total: its bar is all one colour.
+      split: a.cache_read !== undefined,
+    })),
     updated: Date.parse(x.updated ?? "") || null,
   };
 }

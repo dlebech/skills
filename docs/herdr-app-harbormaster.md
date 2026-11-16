@@ -97,9 +97,10 @@ It changes the window on its own only for a closed run (a `closed` marker): it c
 small tag by the name (`L1`; hover for what it means); the narrow Crew block leaves it out so the
 type tag and agent count keep their room. Every decision an orchestrator makes itself is a
 `- [decided] <UTC time> <topic>: <decision> — <why>` line in `decisions.md`. The overview card shows
-the newest as one line, "Decided for you · 4: …", with all of them in the tooltip; the run pane lists
-the latest 3 with when they were made and why, and "+N more" shows up to 20. A line that does not
-parse is shown as its raw text. Formats: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
+one summary line, "Decided for you · 20 by the orchestrator, 1 from you · latest: …" (counts of `[decided]`
+and `[user]` lines, the newest of either), with all of them in the tooltip. The run pane has the same line; click it
+to list every decision (up to the last 60 lines) with when it was made and why, newest first, and again to collapse
+(not remembered). A line that does not parse is shown as its raw text. Formats: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
 ## Tokens
 
@@ -111,8 +112,9 @@ files on the orchestrator's computer, from the run's start on, including those o
 killed and worktrees already removed, those of an orchestrator resumed in a new terminal (best effort
 for a pi orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
 down. A run's card shows the total in its
-meta line (`26M tok`); the run pane has a **Tokens** section with the split by kind (output, cache
-read, cache write, input; exact counts on hover) and each agent's share as a bar, the orchestrator
+meta line (`26M tok`); the run pane has a **Tokens** section with the split (fresh tokens, meaning input, output and cache writes, in
+blue; cache reads in green) and each agent's share as a stacked bar in the same colours, with the exact numbers on
+hover (`fresh 1,234,567 (in 12, out 3,456, cache write 1,230,000) · cache read 28,000,000`), the orchestrator
 first, then the agents by size, named by their worktree (`pda-t3`). The narrow Crew block leaves it
 out; hovering an orchestrator's context size there shows the run total too. A token is any of input,
 output, cache read and cache write, so the total is dominated by cache reads: it measures how much the
@@ -135,11 +137,17 @@ inbox. Nothing stops by itself. Details: [run-files.md](../skills/herdr-app-orch
 
 ## Proof
 
-A run's pane has a Proof section. Its title is the run's tier, `Proof · T2` (`(set by user)` when
-the plan says so), from plan.md's `Proof tier:` line, else the highest tier among the tasks. Each
-task is a row: its tier, its evidence from the task's `Proof:` line, and, when `proof.md` has a
-section for it, what was checked and a pass, fail or partial pill. A task with no `Proof:` line is
-flagged "Not scoped", and the section's title counts them. Two links open `proof.md` and the
+A run's pane has a Proof section. Its top line is the verdict, for example `Proof T2 · 6/8 pass · 2
+partial (missing: 3 screenshots) · checks green · two-way door`: the run's tier (plan.md's `Proof tier:`
+line, else the highest among the tasks), passes over the tasks that have a `Proof:` line or a proof.md
+entry, fails and partials, tasks of tier T2 or higher whose `Files:` list has no image ("missing: n
+screenshots"), the `Checks: green|red` line of proof.md, and the merge danger of the run's PR (`two-way
+door` or `one-way door`). It is in the blocked colour for a fail, red checks or a one-way door, green
+when everything passes, dim otherwise. Below it is one compact row per task: tier, name and a pass,
+partial, fail, not checked or not scoped pill (a spot for screenshot thumbnails is reserved in the row).
+Click a row to see its evidence, "Checked:", "Result:" and files. A running run shows the rows; once it
+is finished, parked or closed the section starts collapsed to the verdict line (click it to expand;
+not remembered). Two links open `proof.md` and the
 `shared/proof/` folder; for a run on another machine they are shown as paths, since nothing here
 can open a file there. In the runs overview, a run's card carries a small tier tag by its name
 (hover for how many tasks are not scoped) and "n unscoped" in its meta line. The formats are in

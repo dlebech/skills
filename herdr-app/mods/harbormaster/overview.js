@@ -6,7 +6,8 @@ import { stats, decisionQueue, answerRun, compactRun, isCompact, isBudgetQuestio
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag } from "./ui.js";
 import { tokenText } from "./context.js";
-import { decidedText } from "./decided.js";
+import { decidedText, decidedSummary } from "./decided.js";
+import { proofVerdict, proofTasks } from "./proof.js";
 import { oneLine } from "./question.js";
 
 // How each runPhase() reads on a card.
@@ -330,10 +331,10 @@ function card(view, t, r, ctx, compact = false) {
     .child(actionRow(view, t, r, orch, closed, counts));
 }
 
-// What the orchestrator decided for you: on the overview card one line, the newest
-// decision and how many there are; the pane lists them (decidedSection).
+// What the orchestrator decided for you: on the overview card the one summary line (counts and
+// the latest decision); the pane has the same line, which expands to the list (decidedSection).
 const decidedLine = (t, r) => div().truncate().text_size(11.5).text_color(t.dim).tooltip(r.decided.map(decidedText).join("\n"))
-  .child(`Decided for you · ${r.decided.length}: ${decidedText(r.decided[0])}`);
+  .child(decidedSummary(r.decided));
 
 // ---- one run on its own, as the pane pinned beside its orchestrator ----
 
@@ -380,79 +381,116 @@ function pathLink(t, r, id, rel, label) {
     .child(div().child("▤")).child(label);
 }
 
-// "Decided for you": the latest 3 decisions the orchestrator made itself, newest first,
-// the rest after "+N more". A line that did not parse shows as its raw text.
+// "Decided for you": one summary line, collapsed; a click lists every decision, newest first,
+// and another collapses it. A line that did not parse shows as its raw text. Not persisted.
 function decidedSection(view, t, r) {
   const open = view.decidedOpen?.has(r.key);
-  const shown = open ? r.decided : r.decided.slice(0, 3);
-  const more = r.decided.length - shown.length;
   const row = (d, i) => h_flex().id(`dec-${r.key}-${i}`).gap(8).items_start().px(2).text_size(11.5)
     .child(div().flex_none().w(46).text_color(t.dim).child(d.at ? ago(d.at) : "—"))
     .child(v_flex().flex_1().min_w(0)
-      .child(div().text_color(t.foreground).child(d.topic ? `${d.topic}: ${d.decision}` : d.decision))
+      .child(div().text_color(t.foreground).child(`${d.by === "user" ? "You · " : ""}${d.topic ? `${d.topic}: ${d.decision}` : d.decision}`))
       .when(Boolean(d.why), (el) => el.child(div().text_size(11).text_color(t.dim).child(d.why))));
-  const toggle = (label) => div().id(`dec-more-${r.key}`).px(2).text_size(11).text_color(t.muted).cursor_pointer()
-    .hover((s) => s.text_color(t.foreground)).child(label)
-    .on_click((_e, cx) => {
-      cx.stop_propagation();
-      view.decidedOpen ??= new Set();
-      if (open) view.decidedOpen.delete(r.key); else view.decidedOpen.add(r.key);
-      cx.notify();
-    });
-  return section(t, `Decided for you · ${r.decided.length}`)
-    .children(shown.map(row))
-    .when(more > 0, (el) => el.child(toggle(`+${more} more`)))
-    .when(open && r.decided.length > 3, (el) => el.child(toggle("Show fewer")));
+  return v_flex().gap(4)
+    .child(h_flex().id(`dec-more-${r.key}`).gap(6).px(2).items_center().cursor_pointer().text_size(11.5).text_color(t.dim)
+      .hover((s) => s.text_color(t.foreground)).tooltip(open ? "Hide the decisions" : "Show every decision")
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        view.decidedOpen ??= new Set();
+        if (open) view.decidedOpen.delete(r.key); else view.decidedOpen.add(r.key);
+        cx.notify();
+      })
+      .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none())
+      .child(div().flex_1().min_w(0).truncate().child(decidedSummary(r.decided))))
+    .when(open, (el) => el.children(r.decided.map(row)));
 }
 
-// "Tokens": what the run has used, across its orchestrator and every agent it ran,
-// each one's share as a bar, and the split by kind on hover.
+// "Tokens": what the run has used, across its orchestrator and every agent it ran. Each
+// agent's bar is stacked: fresh tokens (input, output, cache writes) in blue, cache reads in
+// green; the exact numbers are on hover. The bars' scale is the run's total.
 function tokensSection(t, r) {
   const { total, input, output, cacheRead, cacheWrite, byAgent, updated } = r.tokens;
-  const exact = (n) => `${n.toLocaleString("en")} tokens`;
-  const row = (a) => h_flex().id(`tok-${r.key}-${a.name}`).gap(8).items_center().px(2).h(18).text_size(11.5).tooltip(exact(a.total))
-    .child(div().flex_none().w(96).truncate().text_color(a.name === "orchestrator" ? t.foreground : t.muted).child(a.name))
-    .child(div().flex_1().min_w(0).h(5).rounded(3).bg(t.raised)
-      .child(div().h_full().rounded(3).bg(t.accent ?? t.muted).w(`${Math.max(1, (100 * a.total) / total).toFixed(1)}%`)))
-    .child(div().flex_none().w(44).text_color(t.dim).child(tokenText(a.total)));
+  const n = (v) => v.toLocaleString("en");
+  const fresh = (x) => x.input + x.output + x.cacheWrite;
+  const tip = (x) => `fresh ${n(fresh(x))} (in ${n(x.input)}, out ${n(x.output)}, cache write ${n(x.cacheWrite)}) · cache read ${n(x.cacheRead)}`;
+  const pct = (v) => `${((100 * v) / total).toFixed(2)}%`;
+  const row = (a) => {
+    // A count from before the split has only a total: all of it blue.
+    const f = a.split ? fresh(a) : a.total;
+    return h_flex().id(`tok-${r.key}-${a.name}`).gap(8).items_center().px(2).h(18).text_size(11.5)
+      .tooltip(a.split ? `${a.name}: ${tip(a)}` : `${a.name}: ${n(a.total)} tokens`)
+      .child(div().flex_none().w(96).truncate().text_color(a.name === "orchestrator" ? t.foreground : t.muted).child(a.name))
+      .child(div().flex_1().min_w(0).h(5).rounded(3).bg(t.raised).overflow_hidden().flex()
+        .child(div().h_full().flex_none().bg(t.accent ?? t.muted).w(pct(f)))
+        .child(div().h_full().flex_none().bg(t.done).w(pct(a.split ? a.cacheRead : 0))))
+      .child(div().flex_none().w(44).text_color(t.dim).child(tokenText(a.total)));
+  };
+  const all = { input, output, cacheRead, cacheWrite };
   return section(t, `Tokens · ${tokenText(total)}`, updated && `counted ${ago(updated)}`)
-    .child(div().id(`tok-${r.key}`).px(2).text_size(11).text_color(t.dim)
-      .tooltip(`${exact(total)}: input ${input.toLocaleString("en")}, output ${output.toLocaleString("en")}, cache read ${cacheRead.toLocaleString("en")}, cache write ${cacheWrite.toLocaleString("en")}`)
-      .child(`output ${tokenText(output)} · cache read ${tokenText(cacheRead)} · cache write ${tokenText(cacheWrite)} · input ${tokenText(input)}`))
+    .child(h_flex().id(`tok-${r.key}`).gap(10).px(2).text_size(11).tooltip(`${n(total)} tokens: ${tip(all)}`)
+      .child(div().text_color(t.accent ?? t.muted).child(`fresh ${tokenText(fresh(all))}`))
+      .child(div().text_color(t.done).child(`cache read ${tokenText(cacheRead)}`))
+      .child(div().text_color(t.dim).child(`out ${tokenText(output)}`)))
     .when(Boolean(r.budget), (el) => el.child(div().id(`budget-${r.key}`).px(2).text_size(11).text_color(overBudget(r) ? t.blocked : t.dim)
       .tooltip("A soft budget: crossing it asks you whether to continue, compact or stop; nothing stops by itself")
       .child(`${overBudget(r) ? "Over" : "Under"} its soft budget of ${tokenText(r.budget)} tokens`)))
     .children(byAgent.map(row));
 }
 
-// The Proof section: the run's tier, each task's tier and evidence with its result from
-// proof.md, tasks not scoped yet flagged, and links to proof.md and shared/proof/.
-function proofSection(t, r) {
+// The Proof section: one verdict line on top (tier, passes, what is missing, checks, merge
+// danger), then one compact row per task: tier, name and result. A row's "Checked:", "Result:"
+// and files show only when it is expanded. A finished run starts with the section collapsed to
+// the verdict; a running one open. A click on the verdict or a row toggles it (not persisted).
+function proofSection(view, t, r, prs) {
   const { tier, md, files } = r.proof;
-  const results = md?.tasks ?? {};
-  const unscoped = r.tasks.filter((k) => !k.proof).length;
-  const title = tier ? `Proof · T${tier.tier}${tier.byUser ? " (set by user)" : ""}` : "Proof";
-  const row = (k) => {
-    const res = results[k.id];
-    return h_flex().id(`pf-${r.key}-${k.id}`).gap(8).items_start().px(8).py(5).rounded(7).bg(t.raised + "88")
-      .child(k.proof ? tierTag(t, `pft-${r.key}-${k.id}`, k.proof.tier, "The proof tier this task is planned for") : div().flex_none().text_size(10).px(5).text_color(t.blocked).child("—"))
-      .child(v_flex().flex_1().min_w(0).gap(1)
-        .child(div().text_size(12).font_semibold().text_color(t.foreground).child(k.name ? `${k.id} ${k.name}` : k.id))
-        .child(div().text_size(11.5).text_color(k.proof ? t.muted : t.blocked)
-          .child(k.proof ? k.proof.text || "(no evidence named)" : "Not scoped: no Proof line in plan.md"))
-        .when(Boolean(res?.checked), (el) => el.child(div().text_size(11).text_color(t.dim).child(`Checked: ${res.checked}`))))
-      .when(Boolean(res?.result), (el) => el.child(pill(t, res.result, RESULT_TONE[res.result]).tooltip(res.why || res.result)));
-  };
+  const danger = prs.find((p) => p.danger)?.danger;
+  const verdict = proofVerdict({ tier, md, tasks: r.tasks, danger });
   // A run planned before proof lines existed: one quiet line, not a red row per task.
-  const none = !tier && !md && files.length === 0 && r.tasks.every((k) => !k.proof);
-  if (none) return section(t, title).child(div().px(2).text_size(11.5).text_color(t.dim).child("No proof planned"));
-  return section(t, title, unscoped > 0 && `${unscoped} not scoped`)
-    .children(r.tasks.map(row))
-    .when(r.tasks.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child("No tasks planned yet")))
-    .child(h_flex().flex_wrap().gap(6).px(2).pt(2).items_center()
-      .when(Boolean(md), (el) => el.child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md")))
-      .when(files.length > 0, (el) => el.child(pathLink(t, r, `pf-dir-${r.key}`, "shared/proof", `shared/proof/ · ${files.length >= 40 ? "40+ files" : plural(files.length, "file")}`)))
-      .when(!md && files.length === 0, (el) => el.child(div().text_size(11).text_color(t.dim).child("No proof captured yet"))));
+  if (!verdict) return section(t, "Proof").child(div().px(2).text_size(11.5).text_color(t.dim).child("No proof planned"));
+  const over = view.proofOpen?.get(r.key);
+  const finished = r.phase === "finished" || Boolean(r.away);
+  const open = over ?? !finished;
+  const toggle = (map, key, now) => (_e, cx) => {
+    cx.stop_propagation();
+    view[map] ??= map === "proofOpen" ? new Map() : new Set();
+    if (map === "proofOpen") view[map].set(key, !now); else if (now) view[map].delete(key); else view[map].add(key);
+    cx.notify();
+  };
+  const row = (k) => {
+    const id = `${r.key}-${k.id}`;
+    const more = view.proofRows?.has(id);
+    const hasRes = Boolean(k.result);
+    return v_flex().id(`pf-${id}`).gap(3).px(8).py(4).rounded(7).bg(t.raised + "88").cursor_pointer()
+      .hover((s) => s.bg(t.hover)).on_click(toggle("proofRows", id, more))
+      .child(h_flex().gap(8).items_center()
+        .child(k.tier !== null ? tierTag(t, `pft-${id}`, k.tier, k.planned ? "The proof tier this task is planned for" : "The proof tier recorded in proof.md") : div().flex_none().text_size(10).px(5).text_color(t.blocked).child("—"))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).font_semibold().text_color(t.foreground).child(k.name ? `${k.id} ${k.name}` : k.id))
+        // Where t10's screenshot thumbnails go: one element, filled with the task's images.
+        .child(h_flex().id(`pf-thumbs-${id}`).flex_none().gap(4).items_center())
+        .child(hasRes ? pill(t, k.result, RESULT_TONE[k.result]).tooltip(k.why || k.result)
+          : k.scoped ? pill(t, "not checked", "dim") : pill(t, "not scoped", "blocked").tooltip("No Proof line in plan.md")))
+      .when(more, (el) => el
+        .child(div().text_size(11.5).text_color(k.planned ? t.muted : t.blocked).child(k.planned ? k.planned.text || "(no evidence named)" : "Not scoped: no Proof line in plan.md"))
+        .when(Boolean(k.checked), (e) => e.child(div().text_size(11).text_color(t.dim).child(`Checked: ${k.checked}`)))
+        .when(hasRes, (e) => e.child(div().text_size(11).text_color(t.dim).child(`Result: ${k.result}${k.why ? ` — ${k.why}` : ""}`)))
+        .when(k.files.length > 0, (e) => e.child(div().text_size(11).text_color(t.dim).child(`Files: ${k.files.join(", ")}`))));
+  };
+  const rows = proofTasks(r.tasks, md);
+  const unscoped = rows.filter((k) => !k.scoped).length;
+  return v_flex().gap(4)
+    .child(h_flex().id(`pf-head-${r.key}`).gap(6).px(2).items_center().cursor_pointer().text_size(11.5)
+      .text_color(t[verdict.tone] ?? t.dim).hover((s) => s.opacity(0.8))
+      .tooltip(open ? "Hide the tasks' proof" : "Show the tasks' proof")
+      .on_click(toggle("proofOpen", r.key, open))
+      .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none())
+      .child(div().flex_1().min_w(0).truncate().font_semibold().child(verdict.text))
+      .when(unscoped > 0, (el) => el.child(div().flex_none().font_normal().text_color(t.dim).child(`${unscoped} not scoped`))))
+    .when(open, (el) => el
+      .children(rows.map(row))
+      .when(rows.length === 0, (e) => e.child(div().px(2).text_size(11.5).text_color(t.dim).child("No tasks planned yet")))
+      .child(h_flex().flex_wrap().gap(6).px(2).pt(2).items_center()
+        .when(Boolean(md), (e) => e.child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md")))
+        .when(files.length > 0, (e) => e.child(pathLink(t, r, `pf-dir-${r.key}`, "shared/proof", `shared/proof/ · ${files.length >= 40 ? "40+ files" : plural(files.length, "file")}`)))
+        .when(!md && files.length === 0, (e) => e.child(div().text_size(11).text_color(t.dim).child("No proof captured yet")))));
 }
 
 function issueRow(t, url) {
@@ -505,7 +543,7 @@ function runDetail(view, t, r, ctx) {
     .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
     .when(r.decided.length > 0, (el) => el.child(decidedSection(view, t, r)))
-    .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(t, r)))
+    .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(view, t, r, prs)))
     .when(Boolean(r.tokens), (el) => el.child(tokensSection(t, r)))
     .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
       .children(workers.map((w) => workerRow(t, w, ctx, workOf.get(w.address), w.parent !== r.terminal)))))
