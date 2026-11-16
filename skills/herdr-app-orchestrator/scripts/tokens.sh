@@ -17,17 +17,22 @@
 #                 other sessions, so its folder alone cannot tell which are its. pi has
 #                 no pid to session map: best effort, the earliest session in its folder
 #                 whose header names that folder and that started after its terminal did.
+#                 opencode likewise: the earliest session in its folder created after its
+#                 terminal, with that session's sub-sessions.
 #   agents        every session in the run's worktrees, <worktrees>/<repo>/<prefix>-*
 #                 for each repository in plan.md's Repos line (or the run's folder) and
 #                 the integration worktree, with Claude Code's sub-agent transcripts. An
 #                 agent is named by its worktree, e.g. pda-t3; the integration
-#                 worktree's as "integration".
+#                 worktree's as "integration". opencode keeps all sessions in one SQLite
+#                 database, found by each session's folder; opencode-usage.py (python3,
+#                 read-only) reads it, and without either opencode adds nothing.
 # Only messages from the run's start (orchestrator.json `started`) on count, for both:
 # what a session said before the run, or an older run that used the same prefix, is not
 # this run's. Claude Code logs one API response once per content block, each line
 # carrying the same usage, so responses are counted once by message id, across files
 # too, as a resumed session repeats earlier messages; pi by session and entry id, since
-# its 8-character entry ids repeat across sessions. A token is any of input, output,
+# its 8-character entry ids repeat across sessions; opencode by message id. Its
+# reasoning tokens count as output and a v2 compaction is a call like any other. A token is any of input, output,
 # cache read and cache write: `total` is their sum, as the context size Harbormaster
 # shows is.
 #
@@ -36,6 +41,9 @@
 # before that point, so a rerun reads only the bytes appended since, and rereads a file
 # that was replaced, shrank or was rewritten. When no session file is newer than the
 # last count and none came or went, the last count is used as is, for up to a minute.
+# opencode's database is not append-only, so a session's cache is keyed by a stamp (its
+# newest message's update time and message count) and re-read whole when that changes;
+# rows once seen are kept, so a message opencode deletes later still counts.
 # The cache is what is summed, so a session file Claude Code deletes later (after 30
 # days by default) still counts; and a count lower than the one in status.json, or one
 # where a file could not be read into the cache, is never written.
@@ -44,8 +52,9 @@
 # cache_write, by_agent: [{name, total}], updated}, the orchestrator first, then agents
 # by size. Exits 1, writing nothing, when the count failed.
 #
-# CLAUDE_CONFIG_DIR, PI_CODING_AGENT_DIR and HERDR_WORKTREES_ROOT move where it looks,
-# for tests; they default to ~/.claude, ~/.pi/agent and ~/.herdr/worktrees.
+# CLAUDE_CONFIG_DIR, PI_CODING_AGENT_DIR, OPENCODE_DATA_DIR and HERDR_WORKTREES_ROOT move
+# where it looks, for tests; they default to ~/.claude, ~/.pi/agent,
+# ~/.local/share/opencode and ~/.herdr/worktrees.
 set -u
 . "$(dirname "$0")/lib.sh"
 
@@ -56,6 +65,8 @@ dir=${1%/}
 [ -e "$dir/orchestrator.json" ] || { echo "no orchestrator.json in $dir" >&2; exit 1; }
 claude=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
 pi=${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}
+opencode=${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}
+oc_usage=$(dirname "$0")/opencode-usage.py
 worktrees=${HERDR_WORKTREES_ROOT:-$HOME/.herdr/worktrees}
 cache=$dir/.tokens
 mkdir -p "$cache" || exit 1
@@ -76,6 +87,13 @@ repos=$(sed -n 's/^Repos: *//p' "$dir/plan.md" 2>/dev/null | head -1 | tr ',' '\
 claude_dir() { printf '%s/projects/%s' "$claude" "$(printf '%s' "$1" | sed 's/[^A-Za-z0-9-]/-/g')"; }
 pi_dir() { printf '%s/sessions/--%s--' "$pi" "$(printf '%s' "${1#/}" | sed 's|/|-|g')"; }
 
+# opencode_usage <command> <argument>...: opencode-usage.py on opencode's data, which is
+# there only when the database is and python3 is.
+opencode_usage() {
+  [ -e "$opencode/opencode.db" ] && command -v python3 >/dev/null || return 0
+  python3 "$oc_usage" "$1" "$opencode" "${@:2}"
+}
+
 # Remember the orchestrator's current session.
 touch "$dir/sessions" || exit 1
 if [ -n "$terminal" ] && me=$(hc get "$terminal" --json 2>/dev/null); then
@@ -94,6 +112,10 @@ if [ -n "$terminal" ] && me=$(hc get "$terminal" --json 2>/dev/null); then
          | select(((.timestamp // "") | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch 0) * 1000 >= $created - 999)]
         | sort_by(.timestamp) | first | .id // empty' 2>/dev/null)
       for f in "$d"/*"$id".jsonl; do [ -n "$id" ] && [ -e "$f" ] && entry="pi $f"; done ;;
+    opencode*)
+      # Like pi: no pid to session map, so the earliest session in its folder that started after its terminal.
+      id=$(opencode_usage first "$cwd" "${created:-0}" 2>/dev/null)
+      [ -z "$id" ] || entry="opencode $id" ;;
   esac
   [ -z "$entry" ] || grep -qxF -e "$entry" "$dir/sessions" || echo "$entry" >>"$dir/sessions" || exit 1
 fi
@@ -145,15 +167,46 @@ publish() {
 
 # Nothing new since the last count, less than a minute ago: use it.
 stamp=$cache/.stamp
-trap 'rm -f "$stamp.$$" "$cache/.chunk.$$" "$cache/tokens.json.$$"' EXIT
+trap 'rm -f "$stamp.$$" "$cache/.chunk.$$" "$cache/tokens.json.$$" "$cache"/*.tsv.$$ "$cache"/*.at.$$' EXIT
 if [ -s "$cache/tokens.json" ] && [ -e "$stamp" ] && [ "$(<"$stamp")" = "${#files[@]}" ] &&
   [ -n "$(find "$stamp" -mmin -1 2>/dev/null)" ] &&
-  { [ ${#files[@]} -eq 0 ] || [ -z "$(find "${files[@]}" -newer "$stamp" -print -quit 2>/dev/null)" ]; }; then
+  { [ ${#files[@]} -eq 0 ] || [ -z "$(find "${files[@]}" -newer "$stamp" -print -quit 2>/dev/null)" ]; } &&
+  # opencode.db's WAL changes with every opencode session on the machine, so with one
+  # running this rarely holds; the full read below is cheap (a stamp query per session).
+  [ -z "$(find "$opencode" -maxdepth 1 -name 'opencode.db*' -newer "$stamp" -print -quit 2>/dev/null)" ]; then
   publish "$(<"$cache/tokens.json")"
   exit 0
 fi
 # Stamped before reading, so a file written while it reads is newer than the stamp.
 echo "${#files[@]}" >"$stamp.$$" || exit 1
+
+# opencode keeps every session in one database, so they are listed through it, as three
+# parallel lists: name, session id, stamp (which changes when a session gets a message).
+# The orchestrator's sessions, with their sub-sessions, then those in the run's worktrees.
+oc_names=() oc_ids=() oc_stamps=()
+add_oc() {
+  local name=$1 id dir stamp listed
+  shift
+  [ $# -gt 0 ] || return 0
+  listed=$(opencode_usage sessions "$@") || { echo "could not read opencode's database in $opencode" >&2; exit 1; }
+  while IFS=$'\t' read -r id dir stamp; do
+    [ -n "$id" ] || continue
+    oc_names+=("${name:-${dir##*/}}"); oc_ids+=("$id"); oc_stamps+=("$stamp")
+  done <<<"$listed"
+}
+patterns=()
+while read -r kind id; do
+  [ "$kind" != opencode ] || patterns+=("id:$id")
+done <"$dir/sessions"
+add_oc orchestrator ${patterns[@]+"${patterns[@]}"}
+patterns=()
+for r in $repos; do
+  patterns+=(${prefix:+"$worktrees/$r/$prefix"-*} "$worktrees/$r/$(branch_slug "$branch")")
+done
+add_oc "" "${patterns[@]}"
+for i in "${!oc_names[@]}"; do
+  [ "${oc_names[$i]}" != "$(branch_slug "$branch")" ] || oc_names[$i]=integration
+done
 
 # Usage rows "<id>\t<input>\t<output>\t<cache read>\t<cache write>" from transcript lines.
 parse() {
@@ -219,6 +272,31 @@ update() {
 
 for i in "${!files[@]}"; do
   update "${names[$i]}" "${kinds[$i]}" "${files[$i]}" || { echo "could not update the cache in $cache" >&2; exit 1; }
+done
+
+# An opencode session's cache is its rows, kept once seen, and an .at line in the same
+# shape as the files', with the session's stamp where the offset is: it is read again
+# only when the stamp changed or the run's start did.
+since_ms=0
+[ "$started" = - ] || since_ms=$(date -u -d "$started" +%s%3N 2>/dev/null) || since_ms=0
+for i in "${!oc_ids[@]}"; do
+  key=opencode_${oc_ids[$i]//[^A-Za-z0-9]/_}
+  at=$cache/$key.at
+  o_stamp=- o_since=-
+  [ ! -e "$at" ] || IFS=$'\t' read -r o_stamp _ _ o_since _ <"$at" || o_stamp=-
+  [ "$o_stamp" != "${oc_stamps[$i]}" ] || [ "$o_since" != "$started" ] || continue
+  [ "$o_since" = "$started" ] || : >"$cache/$key.tsv" || exit 1
+  # opencode writes an assistant message with no tokens and fills them in when the step
+  # ends, so a message seen again takes the larger of each kind; one gone from the read
+  # (deleted since) stays as cached. A failed read caches nothing and leaves the stamp.
+  rows=$(opencode_usage rows "${oc_ids[$i]}" "$since_ms") || { echo "could not read opencode's database in $opencode" >&2; exit 1; }
+  { cat "$cache/$key.tsv" 2>/dev/null; [ -z "$rows" ] || printf '%s\n' "$rows"; } |
+    awk -F'\t' '{ if (!($1 in id)) order[++n] = $1; id[$1]
+      for (k = 2; k <= 5; k++) if ($k + 0 > v[$1, k]) v[$1, k] = $k + 0 }
+      END { for (j = 1; j <= n; j++) { m = order[j]; print m "\t" v[m, 2] + 0 "\t" v[m, 3] + 0 "\t" v[m, 4] + 0 "\t" v[m, 5] + 0 } }' \
+      >"$cache/$key.tsv.$$" && mv "$cache/$key.tsv.$$" "$cache/$key.tsv" &&
+    printf '%s\t-\t-\t%s\t-\t%s\topencode\n' "${oc_stamps[$i]}" "$started" "${oc_names[$i]}" >"$at.$$" &&
+    mv "$at.$$" "$at" || { echo "could not update the cache in $cache" >&2; exit 1; }
 done
 
 # Every file ever cached, so one deleted since still counts; the orchestrator's first,
