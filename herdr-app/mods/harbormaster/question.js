@@ -96,14 +96,34 @@ export function parseQuestion(text) {
   };
 }
 
-// The need box's lines for a question, read from its summary alone: what is asked, and the
-// recommendation in short ("Recommends Merge now — t5's change is small"), or null without one.
+// The most a need box's Blocks line holds; past it, Details has the whole section.
+export const BLOCKS_MAX = 120;
+
+// ## Blocks in one short line ("t4, t5"): its lines joined, list markers and bold dropped, capped
+// at BLOCKS_MAX; `cut` when that left something out. null without a Blocks section.
+export function blocksLine(q) {
+  const text = (q?.blocks ?? "").split("\n").map((l) => plain(l.trim().replace(/^(?:\d+[.)]|[-*])\s+/, ""))).filter(Boolean).join("; ");
+  if (!text) return null;
+  const cut = text.length > BLOCKS_MAX || /\n\s*\n/.test(q.blocks.trim());
+  return { text: text.length > BLOCKS_MAX ? `${text.slice(0, BLOCKS_MAX - 1)}…` : text, cut };
+}
+
+// The need box's lines for a question, read from its summary alone: what is asked, the
+// recommendation in short ("Recommends Merge now — t5's change is small"), or null without one,
+// and what waits on the answer ("Blocks t4, t5"), the urgency cue, or null.
 export function needHead(q) {
   if (!q) return null;
   const rec = q.recommended !== null ? q.options[q.recommended] : null;
   const text = rec ? `${rec.label}${q.why ? ` — ${q.why}` : ""}` : q.why;
-  return { title: `Asks you: ${q.title}`, rec: text ? `Recommends ${text}` : null };
+  const blocks = blocksLine(q);
+  return { title: `Asks you: ${q.title}`, rec: text ? `Recommends ${text}` : null, blocks: blocks ? `Blocks ${blocks.text}` : null };
 }
+
+// Two texts that say the same, give or take case, spaces and end punctuation.
+const sameText = (a, b) => {
+  const n = (s) => plain(s ?? "").toLowerCase().replace(/\s+/g, " ").replace(/[.\s]+$/, "").trim();
+  return Boolean(n(a)) && n(a) === n(b);
+};
 
 // The question's sections as the need box's Details list them, [{label, text}], each whole
 // (line breaks kept), unknown sections last under their own heading and only when it has text; the options are buttons, so not here. A
@@ -116,7 +136,10 @@ export function questionSections(q, raw) {
     return rest ? [{ label: "Question", text: rest }] : [];
   }
   const rec = q.recommended !== null ? q.options[q.recommended] : null;
-  const recLine = rec ? `${rec.label}${q.why ? ` — ${q.why}` : ""}` : q.why;
+  // The options list stars the recommended one with its text, and the head says it in short:
+  // Recommended keeps only the why they don't say already, and any longer reason below it.
+  const recLine = rec ? (sameText(q.why, rec.text) ? "" : q.why) : q.why;
+  const blocks = blocksLine(q);
   return [
     // Text between the title and the first section has no label of its own.
     { label: "", text: q.before },
@@ -124,7 +147,8 @@ export function questionSections(q, raw) {
     { label: "Recommended", text: [recLine, q.recMore].filter(Boolean).join("\n\n") },
     { label: "Evidence", text: q.evidence },
     { label: "Risk", text: q.risk },
-    { label: "Blocks", text: q.blocks },
+    // The head's Blocks line says it whole unless it had to cut it.
+    { label: "Blocks", text: blocks?.cut ? q.blocks : "" },
     ...q.extra,
   ].filter((s) => s.text);
 }

@@ -21,7 +21,7 @@ import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingPro
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
 import { checkKind, ciTimes, prTtl } from "./attention.js";
-import { blockingRequest, blockingPending } from "./blocking.js";
+import { blockingRequest, blockingPending, ciRequest } from "./blocking.js";
 import { commentsArgs, commentSummary, commentsRequest, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
@@ -66,6 +66,9 @@ const SCRIPT = [
   `  for m in "$d"/inbox/*.message; do [ -e "$m" ] && head -n 1 "$m"; done | grep -a -E '${NOT_ANSWERS}' | tail -c 8000; printf '\\037'`,
   // The user's acceptances of proof as it is (Accept on a Proof row), capped.
   '  head -c 20000 "$d/proof-accepted.json" 2>/dev/null; printf \'\\037\'',
+  // The run's reports (shared/*report*.md, as a review or exploration leaves), for a finished
+  // run's Needs-you box.
+  '  ls "$d/shared" 2>/dev/null | grep -i "report.*\\.md$" | head -5; printf \'\\037\'',
   // The run's CPU and memory totals so far (resources.js adds each sample to them).
   '  head -c 1000000 "$d/.resources.json" 2>/dev/null',
   "done",
@@ -213,7 +216,7 @@ function parse(machine, stdout) {
 }
 
 function parseRun(machine, chunk) {
-  const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile, requests, acceptedFile] = chunk.split(US);
+  const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile, requests, acceptedFile, reportNames] = chunk.split(US);
   const orch = json(orchFile) ?? {};
   const status = json(statusFile) ?? {};
   const tasks = tasksOf(plan);
@@ -283,6 +286,8 @@ function parseRun(machine, chunk) {
       accepted: parseAccepted(acceptedFile),
       asks: pendingProofs(requests),
     },
+    // Its reports in shared/ (file names, as ls sorts them).
+    reports: (reportNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
     // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
     prefix: /^Prefix:\s*`?([\w-]+)/m.exec(plan ?? "")?.[1]?.toLowerCase() ?? null,
   };
@@ -507,6 +512,15 @@ function checks(rollup) {
   return c;
 }
 
+// A rollup's first failing check, {name, url}, for what a red CI's Needs-you line names and its
+// Open the failing check opens: a check run's name and details page, or a status's context and
+// target; null when none fails. url is null when GitHub gave none (the PR's checks tab then).
+export function firstFailing(rollup) {
+  const x = (rollup ?? []).find((c) => checkKind(c) === "fail");
+  if (!x) return null;
+  return { name: x.name || x.context || x.workflowName || null, url: x.detailsUrl || x.targetUrl || null };
+}
+
 // Each reviewer's standing review, as the GH mod reads it: a later comment doesn't
 // undo an approval or a change request. Leaves out the PR's author and bots.
 function standing(p) {
@@ -551,6 +565,7 @@ export function prSummary(p, repo) {
     reviewedAt,
     requested: (p.reviewRequests ?? []).map((r) => r?.login ?? r?.name ?? r?.slug).filter(Boolean),
     checks: checks(p.statusCheckRollup),
+    failed: firstFailing(p.statusCheckRollup),
     ci: ciTimes(p.statusCheckRollup),
     sha: p.headRefOid ?? null,
     // When anything on the PR last changed: its review comments are read again only then (withComments).
@@ -850,6 +865,12 @@ export function askProof(run, row) {
 // …)", the way an ask to prove is sent. `quiet` and `step` are the texts the row shows.
 export function askBlocking(run, { quiet, step = null }) {
   return messageRun(run, "harbormaster-blocking", blockingRequest({ quiet, step }));
+}
+
+// Asks the orchestrator to see to a red CI (Ask the orchestrator in a Needs-you box): the same
+// "what is blocking?" message, saying which PR and check failed (blocking.js ciRequest).
+export function askCi(run, { pr, check = null, url = null }) {
+  return messageRun(run, "harbormaster-blocking", ciRequest({ pr, check, url }));
 }
 
 // Asks the orchestrator to address the review comments on one of its PRs (Address comments on

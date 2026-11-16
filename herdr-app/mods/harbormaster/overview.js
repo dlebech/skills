@@ -1,8 +1,9 @@
 // The serious views: the runs overview (totals, what's waiting on you, captain, run cards) and the Crew block.
 
 import { div, svg } from "gpui-kit";
+import { openOverlay } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments } from "./data.js";
+import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCi } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
@@ -17,6 +18,7 @@ import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closabl
 import { blockingAsked, askSig } from "./blocking.js";
 import { commentsAsked, commentsSig, defaultMode, commentLines, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
+import { needActions, doLine } from "./needaction.js";
 
 // How each runPhase() reads on a card.
 const PHASE = {
@@ -318,6 +320,40 @@ function blockingAction(view, t, r, att, id, short = false) {
     });
 }
 
+// A red CI's "Ask the orchestrator" in a Needs-you box, or "asked…" while the ask waits: the same
+// "what is blocking?" message (blocking.js ciRequest), so it reads asked as Ask what's blocking does.
+function ciAction(view, t, r, action, id) {
+  if (!r?.dir || !r.localTerminal || r.away) return null;
+  const mine = blockAsked.get(r.key);
+  if (mine && mine.sig !== askSig(r)) blockAsked.delete(r.key);
+  if (blockingAsked(r, blockAsked.get(r.key))) {
+    return div().id(`ci-${id}`).flex_none().text_size(11).text_color(t.muted)
+      .tooltip("Asked its orchestrator to see to the red CI; waiting for its progress or status to change").child("asked…");
+  }
+  const pr = action.pr;
+  const url = pr?.failed?.url ?? pr?.url ?? null;
+  return actionButton(t, `ci-${id}`, action.label,
+    `A message in the run's inbox that wakes its orchestrator ("what is blocking? … CI red on #${pr?.number ?? "?"}…"): it fixes what is the run's to fix, or asks you`,
+    (cx) => {
+      blockAsked.set(r.key, { sig: askSig(r) });
+      view.actionError = null;
+      cx.notify();
+      cx.spawn(async (cx) => {
+        try {
+          const out = await askCi(r, { pr: pr?.number ?? null, check: action.check, url });
+          if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
+          else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
+        } catch (e) {
+          if (!e?.inInbox) blockAsked.delete(r.key);
+          view.actionError = `${r.branch}: ${e?.message ?? e}`;
+        }
+        view.redraw = true;
+        try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+        try { await view.load(cx); } catch { /* the next refresh shows it */ }
+      }, { owner: null });
+    });
+}
+
 // PRs asked to address their comments from here, by PR URL: {sig} (comments.js commentsSig at
 // the click). The unread message (run.commentsAsked) carries it across copies and reloads.
 const commentsAskedHere = new Map();
@@ -515,26 +551,77 @@ function cardHeader(view, t, r, f, meta) {
       : pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need));
 }
 
-// What a run needs you for, on its card and in its pane. Without a question: why, and a click
-// opens the orchestrator. With one: what it asks and the recommendation in short, then a
-// Details fold with the question's sections, a button per option and Reply, answered the way
-// Waiting on you answers (answerParts, sendAnswer: the run's inbox, then a wake). `where`
-// tells the card's and the pane's ids apart.
+// What a run needs you for (needaction.js needActions), with this render's attention: its
+// proof's pass count and its reports, for the lines that point at them.
+function needItemsOf(r, ctx, att = attOf(r, ctx)) {
+  if (att?.group !== "needs") return [];
+  const rows = hasProof(r) ? proofRows(r, stagesOf(r, ctx)) : null;
+  const proof = rows ? { tier: r.proof.tier?.tier ?? null, pass: proofCounts(rows).pass, total: rows.filter((k) => k.scoped).length } : null;
+  return needActions(att, { run: r, prs: prsOf(r) ?? [], now: Date.now(), proof, reports: (r.reports ?? []).map((n) => `shared/${n}`) });
+}
+
+// One of a need item's buttons (needaction.js action kinds). `where` is "card" or "pane": the
+// pane unfolds its own Proof section, the card opens the run's pane as a popup with it unfolded.
+function needButton(view, t, r, f, x, id, where, primary) {
+  const confirm = (action) => (cx) => { view.confirm = { key: r.key, action }; view.actionError = null; view.actionNote = null; cx.notify(); };
+  switch (x.kind) {
+    case "open": return actionButton(t, id, x.label, x.url, () => openUrl(x.url), primary);
+    case "focus": return actionButton(t, id, x.label, "Show its terminal", () => focusAgent(x.address), primary);
+    case "ask-ci": return ciAction(view, t, r, x, id);
+    case "ask-blocking": return blockingAction(view, t, r, f.att, id);
+    case "report": return pathLink(t, r, id, x.path, x.label);
+    case "close": return actionButton(t, id, x.label, ACTION.close.tip, confirm("close"), primary);
+    case "resume": return actionButton(t, id, x.label, ACTION.resume.tip, confirm("resume"), primary);
+    case "proof": return actionButton(t, id, x.label, where === "pane" ? "Show the Proof section, its first row to look at unfolded" : "Open this run's pane with its Proof unfolded", (cx) => {
+      if (where !== "pane") {
+        openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: { ...runProps(r), proof: true } });
+        return;
+      }
+      view.folds ??= new Map(); view.folds.set(`pf-${r.key}`, true);
+      const rows = proofRows(r, stagesOf(r, facts()));
+      const k = rows.find((y) => needsLook(y, isFinished(r))) ?? rows.find((y) => y.pending) ?? rows[0];
+      if (k) { view.proofRows ??= new Set(); view.proofRows.add(`${r.key}-${k.id}`); }
+      cx.notify();
+    }, primary);
+    default: return null;
+  }
+}
+
+// The need items as lines, each with its buttons; the first item's first button stands out.
+function needLines(view, t, r, f, items, where) {
+  return items.map((it, i) => v_flex().id(`needl-${where}-${r.key}-${i}`).gap(4)
+    .child(div().id(`needt-${where}-${r.key}-${i}`).text_size(12).text_color(t.foreground).when(Boolean(it.tip), (el) => el.tooltip(it.tip)).child(oneLine(it.line, 220)))
+    .when(it.actions.length > 0, (el) => el.child(h_flex().flex_wrap().gap(6).items_center()
+      .children(it.actions.map((x, j) => needButton(view, t, r, f, x, `need-${where}-${r.key}-${i}-${j}`, where, i === 0 && j === 0)).filter(Boolean)))));
+}
+
+// "Open the orchestrator", small: never the headline, since most reasons are done elsewhere.
+const orchLink = (t, r, f, id) => (f.orch === "gone" || !r.terminal ? null
+  : div().id(id).flex_none().text_size(11).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
+    .tooltip("Show its orchestrator's terminal").on_click((_e, cx) => { cx.stop_propagation(); focusAgent(r.terminal); }).child("Open the orchestrator"));
+
+// What a run needs you for, on its card and in its pane. Without a question: a line per reason
+// saying what to do and why, with the buttons that do it (needaction.js), and a small link to
+// the orchestrator. With one: what it asks, the recommendation in short and what it blocks, then
+// a Details fold with the question's sections, a button per option and Reply, answered the way
+// Waiting on you answers (answerParts, sendAnswer: the run's inbox, then a wake); any other
+// reason under it. `where` tells the card's and the pane's ids apart.
 function needBox(view, t, r, f, ctx, where) {
   const focus = (_e, cx) => { cx.stop_propagation(); if (f.orch !== "gone") focusAgent(r.terminal); };
   const it = r.ask ? decisionQueue([r], [], ctx).find((x) => x.kind === "run") : null;
+  const all = needItemsOf(r, ctx, f.att);
   const box = h_flex().id(`need-${where}-${r.key}`).gap(8).p(8).rounded(7).bg(t.blocked + "1c").items_start()
+    // Clicks on its buttons and links stay in the box, never the card's open-the-orchestrator.
+    .on_click((_e, cx) => cx.stop_propagation())
     .child(div().flex_none().text_color(t.blocked).font_bold().child(r.question ? "?" : "!"));
-  // Its orchestrator is gone: nothing to open, and Resume (with the run's actions) is the way on.
-  if (!it && f.orch === "gone") {
-    return box.child(v_flex().flex_1().min_w(0).gap(2)
-      .child(div().text_size(11).font_semibold().text_color(t.blocked).child("Needs you — its orchestrator is gone"))
-      .child(div().text_size(12).text_color(t.foreground).child(r.question ? (f.reason ?? "").slice(0, 220) : "Resume it to carry on, or park or close the run.")));
-  }
   if (!it) {
-    return box.cursor_pointer().on_click(focus).child(v_flex().flex_1().min_w(0).gap(2)
-      .child(div().text_size(11).font_semibold().text_color(t.blocked).child(r.question ? "Waiting for your answer — click to open the orchestrator" : "Needs you — click to open the orchestrator"))
-      .child(div().text_size(12).text_color(t.foreground).child((f.reason ?? "").slice(0, 220))));
+    // A question.md that did not parse into a title, or a reason the map has no line for: say it as is.
+    const items = all.length ? all : [{ key: "other", line: (f.reason ?? "needs you").slice(0, 220), actions: [] }];
+    const link = orchLink(t, r, f, `need-orch-${where}-${r.key}`);
+    return box.child(v_flex().flex_1().min_w(0).gap(6)
+      .child(div().text_size(11).font_semibold().text_color(t.blocked).child("Needs you"))
+      .children(needLines(view, t, r, f, items, where))
+      .when(Boolean(link), (el) => el.child(h_flex().child(link))));
   }
   const head = needHead(r.ask);
   const key = `q-${r.key}`;
@@ -571,10 +658,14 @@ function needBox(view, t, r, f, ctx, where) {
     .child(div().id(`qtitle-${where}-${r.key}`).cursor_pointer().text_size(12.5).font_medium().text_color(t.foreground)
       .tooltip(f.orch !== "gone" ? "Open the orchestrator" : "The orchestrator is gone: answer here, it waits in the run's inbox")
       .on_click(focus).child(oneLine(head.title, 300)))
+    // What waits on the answer, the urgency cue, right under what is asked.
+    .when(Boolean(head.blocks), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(oneLine(head.blocks, 160))))
     .when(Boolean(head.rec), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(oneLine(head.rec, 200))))
     .when(Boolean(a.note), (el) => el.child(a.note))
     .child(fold)
-    .when(Boolean(details), (el) => el.child(details)));
+    .when(Boolean(details), (el) => el.child(details))
+    // Anything else it needs you for (a red CI, a PR to merge), as without a question.
+    .children(needLines(view, t, r, f, all.filter((x) => x.key !== "question"), where)));
 }
 
 // The one-line notes under the progress: parked or closed, gone, waiting agents, unread messages.
@@ -622,7 +713,8 @@ function card(view, t, r, ctx, compact = false) {
   const facts = factsLine(t, r, prs, 12.5, f.att);
   // Not on a finished or put-away run's smaller card; a live card shows it even when narrow.
   const proof = r.phase !== "finished" && !r.away ? proofSummary(t, r) : null;
-  const blocking = blockingAction(view, t, r, f.att, `card-${r.key}`);
+  // A stalled run's Ask what's blocking is in its need box.
+  const blocking = need ? null : blockingAction(view, t, r, f.att, `card-${r.key}`);
   const comments = commentsAction(view, t, r, f.att, `card-${r.key}`);
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(8).p(12).pl(16).rounded(10).bg(t.surface)
     .border(1).border_color(need ? t.blocked + "88" : t.border).cursor_pointer()
@@ -1104,7 +1196,7 @@ function runDetail(view, t, r, ctx) {
   const workOf = new Map(stages.flatMap(({ agents, stage }, i) => agents.map((a) => [a.agent.address, { task: r.tasks[i], stage }])));
   const facts = factsLine(t, r, prs, 13, f.att);
   const notes = cardNotes(t, r, f);
-  const blocking = blockingAction(view, t, r, f.att, `pane-${r.key}`);
+  const blocking = need ? null : blockingAction(view, t, r, f.att, `pane-${r.key}`);
   const comments = commentsAction(view, t, r, f.att, `pane-${r.key}`);
   // Most important first: who and what, whether it needs you, when and its PR, then the PR
   // itself, proof, tasks, decisions and agents; tokens last, since they are about cost.
@@ -1235,7 +1327,10 @@ const runGone = (run) => orchestratorState(run, facts()) === "gone";
 
 // Why an item can't be answered from here, or null when it can.
 function noAnswer(it) {
-  if (it.kind === "attention") return "This run needs you without a question: click to open its orchestrator";
+  if (it.kind === "attention") {
+    const line = it.run ? needItemsOf(it.run, facts())[0]?.line : null;
+    return `${line ?? "This run needs you without a question"}. Nothing to answer here: click it to open its orchestrator`;
+  }
   if (it.kind === "decision" && !captainOf(facts()).terminal) {
     if (!it.run?.localTerminal) return "The captain isn't running and this decision names no run: start /herdr-app-captain to answer it";
     // Nobody reads a gone run's inbox, and this decision is about the run itself (resume, park or close).
@@ -1599,7 +1694,9 @@ export function crew(view, t) {
     const name = runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic);
     const edge = rowEdge(a);
     return row({
-      id: `crew-${term.address}`, detail: detail || "orchestrator", detailTip: rowTip(a, now).join("\n"),
+      id: `crew-${term.address}`, detail: detail || "orchestrator",
+      // Its last line says what to do (needaction.js), as the need box does.
+      detailTip: [...rowTip(a, now), r ? doLine(needItemsOf(r, ctx, a)) : null].filter(Boolean).join("\n"),
       // The run's tags as its pane's header shows them, then its number and topic; without a
       // topic, its branch. Without a run directory, its terminal's labels stand in.
       ...(() => {

@@ -1,0 +1,182 @@
+// What a Needs-you box says to do (needaction.js needActions), one line and its buttons per
+// reason, from real assess() results; the first failing check data.js keeps for it; and the
+// red-CI ask's message (blocking.js ciRequest).
+// Run: node --import ./loader.mjs --test needaction.test.mjs
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { assess } from "../../herdr-app/mods/harbormaster/attention.js";
+import { needActions, doLine, proofText, MAX_OPEN } from "../../herdr-app/mods/harbormaster/needaction.js";
+import { firstFailing, prSummary } from "../../herdr-app/mods/harbormaster/data.js";
+import { ciRequest, BLOCKING } from "../../herdr-app/mods/harbormaster/blocking.js";
+
+const MIN = 60000;
+const now = Date.parse("2026-11-16T12:00:00Z");
+const ago = (m) => now - m * MIN;
+
+const run = (o = {}) => ({
+  key: ":/r/skills/x", dir: "/r/skills/x", folder: "/home/u/projects/skills", repo: "skills", phase: "running",
+  statusLine: "running", progress: "t1 implementing", tasks: [], prs: [{ url: "u1" }], question: null, ask: null,
+  askedAt: null, away: null, updated: ago(60), started: ago(300), terminal: "w/orch", ...o,
+});
+const checks = (pass = 0, fail = 0, pending = 0) => ({ pass, fail, pending });
+const pr = (o = {}) => ({
+  number: 42, state: "OPEN", review: null, approvedBy: [], changesBy: [], requested: [], checks: checks(3),
+  url: "https://github.com/o/skills/pull/42", repo: "o/skills", ci: { startedAt: ago(90), finishedAt: ago(80) }, reviewedAt: null, ...o,
+});
+const read = (list) => ({ list, readable: true, why: null });
+// A run's attention, as attend.js gives it, and its box's items.
+const att = (r, list, o = {}) => assess(r, { orch: "idle", working: false, pr: read(list), now, ...o });
+const items = (r, list, o = {}, ctx = {}) => needActions(att(r, list, o), { run: r, prs: list, now, ...ctx });
+const kinds = (it) => it.actions.map((a) => a.kind);
+
+test("approved — merge names the PRs, who approved and when, with an Open button for each", () => {
+  const list = [pr({ approvedBy: ["mfalkenbrink"], review: "APPROVED", reviewedAt: ago(65) }),
+    pr({ number: 1372, url: "https://github.com/o/skills/pull/1372", approvedBy: ["mfalkenbrink"], review: "APPROVED", reviewedAt: ago(70) })];
+  const [it] = items(run({ folder: "/p/snevagten" }), list, { flow: "peer" });
+  assert.equal(it.key, "approved — merge");
+  assert.equal(it.line, "Merge #42 and #1372 · approved by mfalkenbrink 1h5m ago");
+  assert.deepEqual(it.actions, [
+    { kind: "open", label: "Open #42", url: list[0].url },
+    { kind: "open", label: "Open #1372", url: list[1].url },
+  ]);
+});
+
+test("approved with open comments says to address them or merge", () => {
+  const comments = { count: 3, bots: {}, items: [] };
+  const [it] = items(run(), [pr({ approvedBy: ["anna"], review: "APPROVED", comments })], { flow: "peer" });
+  assert.equal(it.line, "Approved by anna with 3 comments on #42: address them or merge");
+  assert.deepEqual(kinds(it), ["open"]);
+});
+
+test("review proof → merge points at the proof first, then the PR", () => {
+  const [it] = items(run(), [pr()], { flow: "self" }, { proof: { tier: 2, pass: 5, total: 10 } });
+  assert.equal(it.line, "Read the proof (T2 · 5/10 pass), then merge #42");
+  assert.deepEqual(it.actions.map((a) => a.label), ["Proof", "Open #42"]);
+  // Without proof to read, the PR is what there is to review.
+  const [bare] = items(run(), [pr()], { flow: "self" });
+  assert.equal(bare.line, "Review #42, then merge it");
+  assert.deepEqual(kinds(bare), ["open"]);
+});
+
+test("request review says why: a draft, or nobody requested", () => {
+  const [draft] = items(run(), [pr({ state: "DRAFT" })], { flow: "peer" });
+  assert.equal(draft.line, "Ask for a review on #42 (a draft)");
+  const [none] = items(run(), [pr()], { flow: "peer" });
+  assert.equal(none.line, "Ask for a review on #42 (nobody requested)");
+  assert.deepEqual(none.actions, [{ kind: "open", label: "Open #42", url: pr().url }]);
+});
+
+test("changes requested names who asked, with their comments, and opens the PR", () => {
+  const [it] = items(run(), [pr({ changesBy: ["anna"], review: "CHANGES_REQUESTED", reviewedAt: ago(30), comments: { count: 2, bots: {}, items: [] } })], { flow: "peer" });
+  assert.equal(it.line, "anna asked for changes on #42 · 2 comments · 30m ago");
+  assert.deepEqual(kinds(it), ["open"]);
+  // An unknown reviewer (GitHub's own decision only) is "A reviewer".
+  const [anon] = items(run(), [pr({ review: "CHANGES_REQUESTED" })], { flow: "peer" });
+  assert.match(anon.line, /^A reviewer asked for changes on #42/);
+});
+
+test("red CI names the first failing check, opens it and offers to ask the orchestrator", () => {
+  const red = pr({ checks: checks(2, 3), failed: { name: "lint", url: "https://github.com/o/skills/actions/runs/1" } });
+  const list = items(run(), [red], { flow: "self" });
+  assert.equal(list[0].key, "red-ci");
+  assert.equal(list[0].line, "CI failed on #42: lint (+2 more)");
+  assert.deepEqual(list[0].actions, [
+    { kind: "open", label: "Open the failing check", url: "https://github.com/o/skills/actions/runs/1" },
+    { kind: "ask-ci", label: "Ask the orchestrator", pr: red, check: "lint" },
+  ]);
+  // Its PR's label comes after it.
+  assert.equal(list[1].key, "review proof → merge");
+});
+
+test("red CI without a check URL opens the PR's checks tab; without a name says only CI failed", () => {
+  const [it] = items(run(), [pr({ checks: checks(0, 1), failed: { name: null, url: null } })], { flow: "self" });
+  assert.equal(it.line, "CI failed on #42");
+  assert.equal(it.actions[0].url, "https://github.com/o/skills/pull/42/checks");
+});
+
+test("a stalled run says how long it is quiet and at what, with Ask what's blocking", () => {
+  const r = run({ updated: ago(40) });
+  const [it] = needActions(assess(r, { orch: "idle", working: false, pr: read([]), now, stall: { quietMs: 34 * MIN, by: "quiet" } }), { run: r, now });
+  assert.equal(it.line, "Quiet 34m at t1 implementing: ask what's blocking it");
+  assert.deepEqual(kinds(it), ["ask-blocking"]);
+});
+
+test("finished with no PR: read the report, then close; without a report, only Close", () => {
+  const r = run({ phase: "finished", prs: [] });
+  const [it] = items(r, [], {}, { reports: ["/r/skills/x/shared/final-report.md"] });
+  assert.equal(it.line, "Finished: read its report, then close the run");
+  assert.deepEqual(it.actions, [{ kind: "report", label: "Report", path: "/r/skills/x/shared/final-report.md" }, { kind: "close", label: "Close" }]);
+  const [bare] = items(r, []);
+  assert.equal(bare.line, "Finished: read what it did, then close the run");
+  assert.deepEqual(kinds(bare), ["close"]);
+});
+
+test("a gone orchestrator says to resume, park or close, with Resume", () => {
+  const [it] = items(run(), [], { orch: "gone" });
+  assert.equal(it.key, "gone");
+  assert.deepEqual(kinds(it), ["resume"]);
+});
+
+test("a dialog names the agent it waits in and opens that agent", () => {
+  const r = run();
+  const [it] = needActions(assess(r, { orch: "blocked", pr: read([]), now }), { run: r, now, blocked: { name: "impl-x-t3", address: "w/t3" } });
+  assert.equal(it.line, "impl-x-t3 is waiting on a prompt");
+  assert.deepEqual(it.actions, [{ kind: "focus", label: "Open impl-x-t3", address: "w/t3" }]);
+  // Not known which: the orchestrator.
+  const [orch] = needActions(assess(r, { orch: "blocked", pr: read([]), now }), { run: r, now });
+  assert.equal(orch.line, "The orchestrator is waiting on a prompt");
+  assert.deepEqual(orch.actions, [{ kind: "focus", label: "Open the orchestrator", address: "w/orch" }]);
+});
+
+test("a plan waiting for the user without a question.md says its reason", () => {
+  const r = run({ phase: "waiting", statusLine: "waiting for user: pick a name" });
+  const [it] = items(r, []);
+  assert.equal(it.line, "Waiting for you: pick a name");
+  assert.deepEqual(kinds(it), ["focus"]);
+});
+
+test("missing data: a PR without a number or URL still reads, and gets no Open button", () => {
+  const [it] = items(run(), [pr({ number: null, url: null, approvedBy: [], review: "APPROVED" })], { flow: "peer" });
+  assert.equal(it.line, "Merge the PR · approved");
+  assert.deepEqual(it.actions, []);
+});
+
+test("several PRs: at most MAX_OPEN Open buttons", () => {
+  const list = [1, 2, 3, 4, 5].map((n) => pr({ number: n, url: `https://github.com/o/skills/pull/${n}` }));
+  const [it] = items(run(), list, { flow: "self" });
+  assert.equal(it.line, "Review #1, #2, #3, #4 and #5, then merge it");
+  assert.equal(it.actions.length, MAX_OPEN);
+});
+
+test("a run not in Needs you has no items; the Crew hover's line is the first item's", () => {
+  assert.deepEqual(items(run(), [pr({ requested: ["anna"] })], { flow: "peer" }), []);
+  assert.deepEqual(needActions(null), []);
+  const list = items(run(), [pr()], { flow: "peer" });
+  assert.equal(doLine(list), "Do: Ask for a review on #42 (nobody requested)");
+  assert.equal(doLine([]), null);
+});
+
+test("proofText: tier and pass count, either alone, or null", () => {
+  assert.equal(proofText({ tier: 2, pass: 5, total: 10 }), "T2 · 5/10 pass");
+  assert.equal(proofText({ tier: null, pass: 0, total: 3 }), "0/3 pass");
+  assert.equal(proofText({ tier: 1, pass: 0, total: 0 }), "T1");
+  assert.equal(proofText({ tier: null, pass: 0, total: 0 }), null);
+  assert.equal(proofText(null), null);
+});
+
+test("the first failing check: a check run's name and page, a status's context and target", () => {
+  assert.deepEqual(firstFailing([{ name: "ok", conclusion: "SUCCESS" }, { name: "lint", conclusion: "FAILURE", detailsUrl: "https://x/1" }]), { name: "lint", url: "https://x/1" });
+  assert.deepEqual(firstFailing([{ context: "ci/legacy", state: "ERROR", targetUrl: "https://x/2" }]), { name: "ci/legacy", url: "https://x/2" });
+  assert.deepEqual(firstFailing([{ conclusion: "FAILURE" }]), { name: null, url: null });
+  assert.equal(firstFailing([{ name: "ok", conclusion: "SUCCESS" }]), null);
+  assert.equal(firstFailing(null), null);
+  const s = prSummary({ number: 1, state: "OPEN", url: "https://github.com/o/r/pull/1", statusCheckRollup: [{ name: "test", conclusion: "FAILURE", detailsUrl: "https://x/3" }] });
+  assert.deepEqual(s.failed, { name: "test", url: "https://x/3" });
+});
+
+test("the red-CI ask is a what-is-blocking message naming the PR, the check and its page", () => {
+  const m = ciRequest({ pr: 42, check: "lint", url: "https://x/1" });
+  assert.ok(BLOCKING.test(m));
+  assert.equal(m.split("\n")[0], "what is blocking? Harbormaster sees CI red on #42 (failing: lint): https://x/1.");
+  assert.equal(ciRequest({ pr: null }).split("\n")[0], "what is blocking? Harbormaster sees CI red on the PR.");
+});
