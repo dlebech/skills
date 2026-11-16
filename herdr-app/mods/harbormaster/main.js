@@ -26,7 +26,8 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor"]);
 //   show-run:<branch | run dir | orchestrator terminal>   open it (no name: the newest unclosed run); one at a time
 //   close-popup                                            close it
 // Every shown Harbormaster copy hears a command, so the popup's id and time are in shared state and
-// a copy that sees the same command opened a moment ago leaves it alone. A popup nobody closed goes
+// a copy that sees the same command opened a moment ago leaves it alone (and one that lost a race closes its own).
+// The popup's own copy doesn't listen, so a Harbormaster copy that isn't the popup (the Crew block or the overview) must be shown. A popup nobody closed goes
 // after POPUP_LIMIT.
 const POPUP = "harbormaster.popup";
 const POPUP_LIMIT = 60000;
@@ -51,7 +52,10 @@ function showPopup(view, arg) {
     : [...pick].sort(newestFirst)[0];
   if (!r) { console.log(`harbormaster.show-run: no run matches "${arg}"`); return; }
   closePopup();
-  const id = openOverlay({ mod: "harbormaster", kind: "popup", width: 560, height: 700, props: runProps(r) });
+  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) });
+  // Another copy opened one for this same command first: keep theirs, so none is left untracked.
+  const won = shared(POPUP);
+  if (won && won.arg === arg && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }
   setShared(POPUP, { id, at: Date.now(), arg });
 }
 
@@ -81,7 +85,8 @@ export default class Harbormaster extends View {
     this.reply = InputState.new({ placeholder: "Your answer…" });
     this.reply.on("submit", (_e, cx) => submitReply(this, cx));
     if (!DATA_ROLES.has(role)) return;
-    if (!checking() && role !== "harbor") cx.spawn((cx) => listen(this, cx));
+    // The popup's own copy doesn't listen: a command that closed or replaced the popup would end it.
+    if (!checking() && role !== "harbor" && !(role === "run" && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
     this.refresh(cx);
     cx.timer.every(5000, (cx) => this.refresh(cx));
     // The harbor's scuttle target: data, not frames; .transition does the moving.

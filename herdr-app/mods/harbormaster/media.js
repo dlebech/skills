@@ -18,10 +18,16 @@ export function hash(s) {
   for (const c of String(s)) h = ((h * 33) ^ c.codePointAt(0)) >>> 0;
   return h.toString(36).padStart(7, "0");
 }
-const safe = (s) => String(s).replace(/[^\w.-]+/g, "_").slice(-60) || "file";
+const safe = (s) => String(s).replace(/[^\w.-]+/g, "_").replace(/^\.+/, "").slice(-60) || "file"; // never "." or ".."
 
-// A file named in proof.md: relative to the run directory, or a bare name in shared/proof/.
-export const mediaPath = (dir, rel) => (rel.startsWith("/") ? rel : `${dir}/${rel.includes("/") ? rel : `shared/proof/${rel}`}`);
+
+// A file named in proof.md: relative to the run directory, or a bare name in shared/proof/. Only files
+// under the run directory count: a name with `..` or an absolute path elsewhere throws.
+export function mediaPath(dir, rel) {
+  const path = rel.startsWith("/") ? rel : `${dir}/${rel.includes("/") ? rel : `shared/proof/${rel}`}`;
+  if (path.split("/").includes("..") || !path.startsWith(`${dir}/`)) throw new Error(`${rel} is not under the run directory`);
+  return path;
+}
 
 // The cache is a hidden folder, so saving into it doesn't reload the mod (Herdr skips
 // hidden files). One folder per run: <home>/mods/harbormaster/.cache/<machine|local>/<hash of the run dir>.
@@ -29,24 +35,30 @@ export const CACHE = "mods/harbormaster/.cache";
 export const runCacheDir = (home, machine, dir) => `${home}/${CACHE}/${safe(machine || "local")}/${hash(dir)}`;
 
 // Removes a run's cache folder. The case guard keeps the rm inside the cache.
-const DROP = 'case "$1" in */mods/harbormaster/.cache/*/*) rm -rf -- "$1";; esac; rmdir -- "${1%/*}" 2>/dev/null; exit 0';
+const DROP = 'case "$1" in *..*) exit 0;; esac; case "$1" in */mods/harbormaster/.cache/*/*) rm -rf -- "$1";; esac; rmdir -- "${1%/*}" 2>/dev/null; exit 0';
 export const dropCacheArgs = (home, machine, dir) => ["-c", DROP, "sh", runCacheDir(home, machine, dir)];
 
 const STAT = 'stat -c "%s %Y" "$1" 2>/dev/null || stat -f "%z %m" "$1"';
 // Older copies of the same file (another size or time) go once the new one is in; $3 is the file's key.
-const STALE = 'for f in "$1/$3"-*; do case "$f" in "$1/$2"*) ;; *) rm -f -- "$f";; esac; done';
+// Temporary files of a copy that died (over 10 minutes old) go too.
+const STALE = [
+  'for f in "$1/$3"-*; do case "$f" in "$1/$2"|"$1/$2".*) ;; *) rm -f -- "$f";; esac; done',
+  'find "$1" -maxdepth 1 \\( -name "*.tmp*" -o -name "*.b64.*" \\) -mmin +10 -exec rm -f -- {} + 2>/dev/null',
+].join("\n");
 // Keeps the file if the cache has it under this size and time; else cp.
 const LOCAL = [
   'mkdir -p "$1" || exit 1',
   '[ -s "$1/$2" ] && exit 0',
-  'cp -- "$4" "$1/$2.tmp$$" && mv -- "$1/$2.tmp$$" "$1/$2" || exit 1',
+  // $5 is the size stat saw: a file that changed since is not cached under a name that claims otherwise.
+  'if cp -- "$4" "$1/$2.tmp$$" && [ "$(wc -c < "$1/$2.tmp$$")" -eq "$5" ]; then mv -- "$1/$2.tmp$$" "$1/$2"; else rm -f -- "$1/$2.tmp$$"; exit 1; fi',
   STALE,
 ].join("\n");
 const HAVE = 'mkdir -p "$1" && [ -s "$1/$2" ]';
 const FROM_B64 = [
   'base64 -d < "$4" > "$1/$2.tmp$$" 2>/dev/null || base64 -D < "$4" > "$1/$2.tmp$$"; r=$?',
   'rm -f "$4"',
-  '[ $r = 0 ] && mv -- "$1/$2.tmp$$" "$1/$2" || exit 1',
+  // A cut-off or changed file decodes without error but is the wrong size.
+  'if [ $r = 0 ] && [ "$(wc -c < "$1/$2.tmp$$")" -eq "$5" ]; then mv -- "$1/$2.tmp$$" "$1/$2"; else rm -f -- "$1/$2.tmp$$"; echo "copy is not the size it should be" >&2; exit 1; fi',
   STALE,
 ].join("\n");
 
@@ -66,7 +78,7 @@ export function makeCopier({ exec, writeTextFile, home }) {
     const name = `${key}-${size}-${mtime}-${safe(rel.split("/").pop())}`;
     const out = { state: "ready", size, abs: `${folder}/${name}`, path: `${CACHE}/${safe(run.machine || "local")}/${hash(run.dir)}/${name}` };
     if (!on) {
-      const r = await exec("sh", ["-c", LOCAL, "sh", folder, name, key, src]);
+      const r = await exec("sh", ["-c", LOCAL, "sh", folder, name, key, src, String(size)]);
       if (r.code !== 0) throw new Error(r.stderr.trim() || "cp failed");
       return out;
     }
@@ -75,8 +87,9 @@ export function makeCopier({ exec, writeTextFile, home }) {
     if (b64.code !== 0) throw new Error(b64.stderr.trim() || `base64 failed on ${on}`);
     // writeTextFile only writes text, so the base64 goes in as a temporary file and is decoded.
     const tmp = `${folder}/${name}.b64.${Math.random().toString(36).slice(2, 8)}`;
-    await writeTextFile(tmp, b64.stdout, null);
-    const r = await exec("sh", ["-c", FROM_B64, "sh", folder, name, key, tmp]);
+    try { await writeTextFile(tmp, b64.stdout, null); }
+    catch (e) { await exec("rm", ["-f", tmp]).catch(() => {}); throw e; }
+    const r = await exec("sh", ["-c", FROM_B64, "sh", folder, name, key, tmp, String(size)]);
     if (r.code !== 0) throw new Error(r.stderr.trim() || "could not decode the copy");
     return out;
   };

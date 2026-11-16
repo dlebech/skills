@@ -87,7 +87,10 @@ function openViewer(run, files, index) {
 // A video opens in the system player. On this machine, the file itself; on another it is
 // copied first (up to the same size cap as images) and the copy opens.
 function playVideo(view, run, rel, cx) {
-  if (!run.machine) { openUrl(mediaPath(run.dir, rel)); return; }
+  if (!run.machine) {
+    try { openUrl(mediaPath(run.dir, rel)); } catch (e) { view.actionError = e.message; cx.notify(); }
+    return;
+  }
   view.actionNote = `Copying ${rel.split("/").pop()}…`;
   view.actionError = null;
   cx.notify();

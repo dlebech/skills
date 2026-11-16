@@ -174,7 +174,7 @@ machine is copied first (same limit) and the copy opens.
 
 ### Popup of a run's pane, for screenshots
 
-An agent that has to show a run's pane in a screenshot (the proving skill's T2 for a Herdr mod) opens it as a popup,
+An agent that has to show a run's pane in a screenshot (the proving skill's T2 for a Herdr mod) opens it as a brief centered dialog,
 without switching your space or tab, takes the shot and closes it:
 
 ```sh
@@ -185,7 +185,7 @@ herdr-app do 'harbormaster.close-popup'
 
 `show-run` with no name shows the newest run that isn't parked or closed. A popup is one at a time (a second
 `show-run` replaces it) and closes itself after a minute if nobody closes it. The commands reach a shown
-Harbormaster (the Crew block of `harbormaster-main`, or the open overview); with none on screen they do nothing.
+Harbormaster that isn't the dialog itself (the Crew block of `harbormaster-main`, or the open overview); with none on screen they do nothing. The dialog is a centered one, not a pointer popup, which has nowhere to appear without a pointer.
 
 ## Parked, resumed, and closed runs
 
