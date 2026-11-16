@@ -82,7 +82,10 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 - **Every 5 seconds per closed run with a space still on one of its worktree folders:** one `sh -c` that checks whether those folders still exist, so it closes only the spaces whose folder is gone.
 - **Live from herdr-core:** the terminal labels `role`, `run.status`, `run.type`, `run.topic`, `progress` and `run.prs`, and the `captain-watch` terminal.
 
-It writes to a run directory only when you press Park, Close or Delete, or answer a question: one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. An answer from the queue is a message there too (`<time>-<ms>-harbormaster.message`). Delete removes the run directory.
+- **When you answer from the queue:** a run's answer is a file in its `inbox/`, then `hc send` to wake its orchestrator (not when the orchestrator is gone or lost: the message only waits). A captain decision answered into a run's inbox is then removed from `.captain-decisions.json` in the runs root with `jq`, a temporary file and `mv`.
+- **When you press Compact on the budget question:** `hc send <orchestrator> /compact`, then a `sleep 2` loop (for at most 10 minutes) until the compaction is over, then the wake-up for the answer.
+
+It writes to a run directory only when you press Park, Close or Delete, or answer a question (and, for a captain decision answered into a run's inbox, to `.captain-decisions.json` in the runs root): one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. An answer from the queue is a message there too (`<time>-<ms>-harbormaster.message`). Delete removes the run directory.
 
 It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended; and for an open run on another machine: it renames the orchestrator's tab after the run's status, when the tab is unnamed or has one of the orchestrator's own `🐙` names, at most once a minute, opens a space for each integration worktree that has never had one, and finishes parking a run the captain parked there; and names a captain's tab on another machine `⚓ captain`.
 
@@ -119,8 +122,9 @@ are matched: [run-files.md](../skills/herdr-app-orchestrator/references/run-file
 
 ### Soft budget
 
-`set-status.sh --budget 2M` (also `500k`, `1.5M` or a plain number) gives a run a soft token budget,
-which the orchestrator sets when started with `budget=2M`. A run that has used it shows `31M / 30M tok` in
+`set-status.sh --budget 30M` (also `500k`, `1.5M` or a plain number) gives a run a soft token budget,
+which the orchestrator sets when started with `budget=30M`. Cache reads count in the total and dominate it: a
+run of a few tasks is tens of millions, so pick a budget in that range, not a few million. A run that has used it shows `31M / 30M tok` in
 the blocked colour on its card and a note in its Tokens section, from `status.json` alone. The
 orchestrator asks a budget question when it notices (Continue, Compact or Stop; at any autonomy level),
 which shows in Waiting on you like any other. A run over budget with no question open, whose orchestrator is gone, idle or done (not working, and not

@@ -569,7 +569,7 @@ function sendAnswer(view, it, text, cx, option = false) {
     return true;
   }
   const run = it.run;
-  if (!run?.localTerminal) return false;
+  if (!run?.localTerminal || noAnswer(it)) return false;
   view.actionError = null;
   // Marked before the write, so a second click meanwhile is ignored; undone if it fails.
   view.answered[it.id] = it.since ?? 0;
@@ -581,7 +581,10 @@ function sendAnswer(view, it, text, cx, option = false) {
       // The captain isn't there to clear its decision, so it goes with the answer.
       if (it.kind === "decision") await dropDecision(it.decision).catch(() => {});
     } catch (e) {
-      delete view.answered[it.id];
+      // Written but the wake failed: the answer is in the inbox, so it stays answered and
+      // a captain decision still goes (else each click would write another message).
+      if (e?.inInbox) { if (it.kind === "decision") await dropDecision(it.decision).catch(() => {}); }
+      else delete view.answered[it.id];
       view.actionError = `${run.branch}: ${e?.message ?? e}`;
     }
     view.redraw = true;
@@ -601,10 +604,17 @@ export function submitReply(view, cx) {
   cx.notify();
 }
 
+// A gone or lost orchestrator: an answer only waits in its inbox, and nothing is typed into its terminal.
+const runGone = (run) => orchestratorState(run, facts()) === "gone";
+
 // Why an item can't be answered from here, or null when it can.
 function noAnswer(it) {
   if (it.kind === "attention") return "This run needs you without a question: click to open its orchestrator";
-  if (it.kind === "decision" && !captainOf(facts()).terminal && !it.run?.localTerminal) return "The captain isn't running and this decision names no run: start /herdr-app-captain to answer it";
+  if (it.kind === "decision" && !captainOf(facts()).terminal) {
+    if (!it.run?.localTerminal) return "The captain isn't running and this decision names no run: start /herdr-app-captain to answer it";
+    // Nobody reads a gone run's inbox, and this decision is about the run itself (resume, park or close).
+    if (runGone(it.run)) return "This run is gone and the captain isn't running: start /herdr-app-captain, or use the run's own Resume, Park or Close";
+  }
   if (it.kind !== "decision" && !it.run?.localTerminal) return "This run's orchestrator isn't known: open the run to answer";
   return null;
 }
@@ -638,7 +648,7 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
       .when(Boolean(address), (el) => el.cursor_pointer().on_click(() => focusAgent(address)))
       .child(div().flex_none().text_size(14).child(it.kind === "decision" ? CAPTAIN : OCTOPUS))
       .child(v_flex().flex_1().min_w(0).gap(2)
-        .child(div().text_size(12.5).text_color(t.foreground).child(it.title.slice(0, 300)))
+        .child(div().text_size(12.5).text_color(t.foreground).child(oneLine(it.title, 300)))
         .child(div().truncate().text_size(11).text_color(t.dim).child(meta.filter(Boolean).join(" · ")))
         .when(Boolean(rec), (el) => el.child(line("Recommended", `${rec.label}${it.why ? ` — ${it.why}` : ""}`, t.accent)))
         .when(!rec && Boolean(it.why), (el) => el.child(line("Recommended", it.why, t.accent)))
@@ -672,10 +682,10 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
     return v_flex().id(it.id).gap(6).p(8).rounded(7).bg(t.surface)
       .child(h_flex().gap(8).items_start().child(body).when(Boolean(replyBtn), (el) => el.child(replyBtn)))
       .when(Boolean(buttons), (el) => el.child(buttons))
-      .when(answered, (el) => el.child(div().pl(22).text_size(11).text_color(t.muted).child(sent ? "Answered, waiting for the orchestrator" : "Message waiting for the orchestrator")))
+      .when(answered, (el) => el.child(div().pl(22).text_size(11).text_color(t.muted).child(it.run && runGone(it.run) ? "Waits in its inbox until the run is resumed" : sent ? "Answered, waiting for the orchestrator" : "Message waiting for the orchestrator")))
       .when(open, (el) => el.child(v_flex().gap(4)
         .child(Input.new(view.reply))
-        .child(div().text_size(10.5).text_color(t.dim).child(it.kind === "decision" && cap.terminal ? "Enter sends it to the captain, with this decision attached" : "Enter writes it to the run's inbox and tells its orchestrator"))));
+        .child(div().text_size(10.5).text_color(t.dim).child(it.kind === "decision" && cap.terminal ? "Enter sends it to the captain, with this decision attached" : it.run && runGone(it.run) ? "Enter writes it to the run's inbox, where it waits until the run is resumed" : "Enter writes it to the run's inbox and tells its orchestrator"))));
   };
   return v_flex().id("waiting").flex_none().gap(6).p(10).rounded(10).bg(t.blocked + "14").border(1).border_color(t.blocked + "66")
     .child(div().text_size(11.5).font_semibold().text_color(t.blocked).child(`Waiting on you · ${items.length}`))

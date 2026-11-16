@@ -291,12 +291,16 @@ contains "primary" "$out" primary
 echo "== watcher"
 out=$(watch_once)
 contains "waiting for user" "$out" "attention feature/x waiting for user: which db?"
-# Answered in the orchestrator's own tab: the question clears, and the watcher says so.
-# The orchestrator deletes question.md once it has the answer.
+# Answered through the inbox: the status goes back to running while question.md is still
+# there (the orchestrator is mid-way through clearing it). That is not a new question.
 "$orch/set-status.sh" "$dir" running
+out=$(watch_once)
+case $out in *"attention feature/x question:"*) echo "FAIL no question: attention while an answer waits: $out"; failed=1 ;; *) echo "ok   no question: attention while an answer waits" ;; esac
+contains "answered elsewhere" "$out" "cleared feature/x waiting for user: which db?"
+# The orchestrator deletes question.md once it has the answer: nothing more to report.
 rm "$dir/question.md"
 out=$(watch_once)
-contains "answered elsewhere" "$out" "cleared feature/x waiting for user: which db?"
+case $out in *"question:"*) echo "FAIL a cleared question: $out"; failed=1 ;; *) echo "ok   a cleared question is not reported again" ;; esac
 echo "Which db?" >"$dir/question.md"
 "$orch/set-status.sh" "$dir" "waiting for user: which db?"
 out=$(watch_once)

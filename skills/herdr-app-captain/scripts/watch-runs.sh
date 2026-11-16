@@ -110,8 +110,9 @@ while :; do
       esac
     fi
     # An open question is a reason of its own unless the plan status already carries
-    # it; its title is the one-line summary, so a new or reworded question is news.
-    if [ "$status" != finished ]; then
+    # it; its title is the one-line summary, so a new or reworded question is news. Not while
+    # an inbox message waits: that is the answer, and the orchestrator is still clearing the question.
+    if [ "$status" != finished ] && [ -z "$(unhandled_messages "$dir")" ]; then
       case $status in "waiting for user"*) ;; *)
         title=$(question_title "$dir")
         [ -z "$title" ] || reasons+=("question: $title") ;;

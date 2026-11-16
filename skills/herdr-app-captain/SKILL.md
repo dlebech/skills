@@ -48,7 +48,7 @@ When the user asks about one run, go deeper: per-task status, recent decisions, 
 When the user gives an instruction for a run:
 
 1. Identify the run. If the instruction could fit several, ask which.
-2. Write it, in the user's words with any context you add marked as yours, to `<run-directory>/inbox/.captain-<time>.tmp`, with `<time>` from `date +%s`, then `mv` it to `captain-<time>.message` in the same directory.
+2. Write it, in the user's words with any context you add marked as yours, to `<run-directory>/inbox/.captain-<time>.tmp`, with `<time>` from `date -u +%Y%m%dT%H%M%SZ`, then `mv` it to `<time>-captain.message` in the same directory.
 3. Wake the orchestrator: `hc send <terminal> "Read and act on <message-file>."`. Never send it to an orchestrator `runs.sh` shows gone or lost: a lost one's terminal is only a shell, which would run the text as a command. Leave the message in `inbox/` and ask the user whether to resume the run, whose new orchestrator reads it. This works idle or in a foreground wait. Exit code 9 means it is `blocked` on a dialog and cannot read: tell the user the message waits behind that dialog, which they answer in its tab, and send the wake-up once it clears.
 4. Check that the orchestrator picked it up (the message is renamed to `.handled`) the next time you look, and report what changed, from `decisions.md` or `plan.md`. A message still unhandled after a few minutes means the wake-up was lost; send it again.
 
