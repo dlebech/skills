@@ -1,0 +1,280 @@
+// Where to look next: which group a run is in (Needs you, Everything else, Done), its
+// next-step label from its pull requests and its project's review flow, its current step
+// and age, and whether it has stalled. Pure rules only, so the tests drive every one;
+// tracking.js keeps the times and stores they read, attend.js puts them together for a run.
+//
+// Reliability first: a run whose state cannot be read (gh failing, its machine offline, a
+// read gone stale) is never put in Needs you on the grounds it could not read. It goes
+// under Everything else with cantTell, shown grey. A question read from the run's own files
+// still counts: that file was read, whatever happened to the PR read.
+
+import { needsYou, needReason } from "./live.js";
+
+// No new progress line, no change in the run's agents and no new terminal output for this
+// long, and the run has stalled.
+export const STALL_MS = 30 * 60000;
+// A PR read older than this, for a run still open, no longer tells: its refresh is stuck.
+export const PR_READ_MAX_AGE = 10 * 60000;
+// A CI watch past this many times the repository's usual CI time has stalled.
+export const CI_STALL_FACTOR = 2;
+// The fewest finished CI runs a repository needs before its usual time is trusted.
+export const CI_MIN_SAMPLES = 3;
+
+// ---- review flow ----
+
+// Projects reviewed by a colleague on GitHub; every other one is "self" (the user reviews
+// the proof and merges). The user's own settings (tracking.js reviewFlows) override these.
+export const DEFAULT_FLOWS = { snevagten: "peer" };
+
+// The key a run's review flow is stored under: its repository folder's name
+// ("/home/david/projects/snevagten" → "snevagten"), else the run directory's folder segment.
+export const flowKey = (run) => (run?.folder ?? "").replace(/\/+$/, "").split("/").pop() || run?.repo || "";
+
+// "peer" | "self" for a run: the user's setting for its folder, else the built-in default, else self.
+export function reviewFlow(run, settings = {}) {
+  const key = flowKey(run);
+  const v = settings?.[key] ?? DEFAULT_FLOWS[key];
+  return v === "peer" ? "peer" : "self";
+}
+
+// ---- next-step labels ----
+
+// The labels, most urgent first: what the user must act on before what they wait on.
+// Changes requested first (work is blocked on a fix), then the merges one click away, then
+// the review the user has yet to ask for, then the reviewer they wait on, then cleanup.
+export const LABELS = ["changes requested", "approved — merge", "review proof → merge", "request review", "waiting for", "merged — close run"];
+// The labels that put a run in Needs you (when nothing is still working on it).
+const NEEDS_LABELS = new Set(["changes requested", "approved — merge", "review proof → merge", "request review"]);
+const rank = (label) => LABELS.indexOf(label);
+
+export const isOpenPr = (pr) => pr?.state === "OPEN" || pr?.state === "DRAFT";
+const isShut = (pr) => pr?.state === "MERGED" || pr?.state === "CLOSED";
+
+// One PR's next step: {label, rank, who}, or null when its state is unknown. `who` is the
+// requested reviewers' names for "waiting for".
+// Peer: a draft, or no reviewer requested and no standing review → request review; a change
+// request → changes requested; an approval → approved — merge; a reviewer requested who
+// has not answered → waiting for <name>; only comments, nobody requested → request review
+// (the review is back with the user). Self: changes requested if someone asked for them,
+// else review proof → merge. Merged or closed → merged — close run, either flow.
+export function prStep(pr, flow) {
+  if (isShut(pr)) return { label: "merged — close run", rank: rank("merged — close run"), who: [] };
+  if (!isOpenPr(pr)) return null;
+  const changes = pr.review === "CHANGES_REQUESTED" || pr.changesBy?.length > 0;
+  const step = (label, who = []) => ({ label, rank: rank(label), who });
+  if (flow !== "peer") return step(changes ? "changes requested" : "review proof → merge");
+  if (pr.state === "DRAFT") return step("request review");
+  if (changes) return step("changes requested");
+  if (pr.review === "APPROVED" || pr.approvedBy?.length > 0) return step("approved — merge");
+  if (pr.requested?.length > 0) return step("waiting for", pr.requested);
+  return step("request review");
+}
+
+// The run's next step from its PRs: the most urgent PR's {label, rank, who, count, same, pr},
+// where `count` is how many PRs the run has and `same` how many share that label; or null
+// without a PR (the run's own step applies) or when no PR's state is known.
+export function nextStep(prs, flow) {
+  const steps = (prs ?? []).map((pr) => ({ pr, s: prStep(pr, flow) })).filter((x) => x.s);
+  if (!steps.length) return null;
+  const top = steps.reduce((a, b) => (b.s.rank < a.s.rank ? b : a));
+  const same = steps.filter((x) => x.s.label === top.s.label);
+  const who = [...new Set(same.flatMap((x) => x.s.who))];
+  return { label: top.s.label, rank: top.s.rank, who, count: (prs ?? []).length, same: same.length, pr: top.pr };
+}
+
+// A next step as the Crew shows it: "waiting for anna, bo", then "· 3 PRs" with several PRs.
+export function nextStepText(step) {
+  if (!step) return "";
+  const label = step.label === "waiting for" ? `waiting for ${step.who.join(", ") || "a reviewer"}` : step.label;
+  return step.count > 1 ? `${label} · ${step.count} PRs` : label;
+}
+
+// ---- reading state ----
+
+// What a run's PR read tells: {list, readable, why}. `entry` is its harbormaster.prs entry
+// ({at, list, okAt, error}), or null before the first read. Unreadable when the run has PRs
+// but none was read yet, the last read failed for any PR (gh failing, offline), or the
+// entry is older than maxAge while the run is still open (the refresh is stuck).
+export function prRead(run, entry, now, maxAge = PR_READ_MAX_AGE) {
+  if (!run?.prs?.length) return { list: [], readable: true, why: null };
+  if (!entry) return { list: null, readable: false, why: "pull requests not read yet" };
+  const list = entry.list ?? [];
+  if (entry.error) return { list, readable: false, why: entry.error };
+  if (list.some((p) => p.state === "UNKNOWN" || p.stale)) return { list, readable: false, why: "a pull request could not be read" };
+  if (!run.away && now - (entry.at ?? 0) > maxAge) return { list, readable: false, why: "the pull request read is stale" };
+  return { list, readable: true, why: null };
+}
+
+// ---- CI ----
+
+// One check of a PR's statusCheckRollup: "pass" | "fail" | "pending".
+const PASS = ["SUCCESS", "NEUTRAL", "SKIPPED"];
+const FAIL = ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"];
+export function checkKind(x) {
+  const v = (x?.conclusion || x?.state || x?.status || "").toUpperCase();
+  return PASS.includes(v) ? "pass" : FAIL.includes(v) ? "fail" : "pending";
+}
+
+// A rollup's start and end in ms: the first check's start and, once none is pending, the
+// last one's completion. GitHub sends "0001-01-01T00:00:00Z" for a check not started yet.
+const time = (s) => { const t = Date.parse(s ?? ""); return t > 946684800000 ? t : null; };
+export function ciTimes(rollup) {
+  const list = rollup ?? [];
+  const starts = list.map((x) => time(x.startedAt)).filter(Boolean);
+  const ends = list.map((x) => time(x.completedAt)).filter(Boolean);
+  const pending = list.some((x) => checkKind(x) === "pending");
+  return { startedAt: starts.length ? Math.min(...starts) : null, finishedAt: !pending && ends.length ? Math.max(...ends) : null };
+}
+
+// The CI state across a run's open PRs: {state: "running" | "red" | "green" | null, pr,
+// startedAt, finishedAt}. Running wins over red (a fix may be on its way), red over green.
+export function ciState(prs) {
+  const open = (prs ?? []).filter((p) => isOpenPr(p) && p.checks);
+  const total = (p) => p.checks.pass + p.checks.fail + p.checks.pending;
+  const running = open.find((p) => p.checks.pending > 0);
+  if (running) return { state: "running", pr: running, startedAt: running.ci?.startedAt ?? null, finishedAt: null };
+  const red = open.find((p) => p.checks.fail > 0);
+  if (red) return { state: "red", pr: red, startedAt: red.ci?.startedAt ?? null, finishedAt: red.ci?.finishedAt ?? null };
+  const green = open.find((p) => total(p) > 0);
+  if (green) return { state: "green", pr: green, startedAt: green.ci?.startedAt ?? null, finishedAt: green.ci?.finishedAt ?? null };
+  return { state: null, pr: null, startedAt: null, finishedAt: null };
+}
+
+// A repository's usual CI time in ms: the median of its recorded CI durations (ms), or null
+// with fewer than CI_MIN_SAMPLES, when there is no baseline to call a CI watch long.
+export function usualCi(samples) {
+  const s = (samples ?? []).filter((x) => Number.isFinite(x) && x > 0).sort((a, b) => a - b);
+  if (s.length < CI_MIN_SAMPLES) return null;
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+// ---- the current step and its age ----
+
+// "34m", "1h12m", "2d3h"; under a minute "0m".
+export function ageText(ms) {
+  const m = Math.max(0, Math.floor((ms ?? 0) / 60000));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h${m % 60}m` : `${Math.floor(h / 24)}d${h % 24}h`;
+}
+
+// What changes a run's step: its progress line and its plan's task states. tracking.js
+// keeps when this last changed.
+export const stepSig = (run) => [run?.progress ?? "", ...(run?.tasks ?? []).map((k) => `${k.id}:${k.state}`)].join("\n");
+
+// Keeps `since` while `sig` stays the same: {sig, since}. A first sight takes `seed` (the
+// best guess at when it last changed, such as status.json's updated), else now.
+export function trackSince(prev, sig, now, seed = null) {
+  if (!prev) return { sig, since: seed && seed <= now ? seed : now };
+  return prev.sig === sig ? prev : { sig, since: now };
+}
+
+const VERB = { implement: "implementing", review: "in review", fix: "fixing" };
+
+// The run's current step, {text, since}: tasks at work ("t3 implementing", "+N" for more),
+// else CI running on a PR ("CI on #42", since its first check started), else its progress
+// line, else its phase. `stages` are the tasks' shown stages (data.js shownStage), in
+// run.tasks order; `since` is when the progress line or task states last changed.
+export function stepOf(run, { prs = [], stages = [], since = null, now = Date.now() } = {}) {
+  const active = (run?.tasks ?? []).map((k, i) => ({ k, stage: stages[i] })).filter((x) => VERB[x.stage]);
+  if (active.length) {
+    const [first] = active;
+    return { text: `${first.k.id} ${VERB[first.stage]}${active.length > 1 ? ` +${active.length - 1}` : ""}`, since };
+  }
+  const ci = ciState(prs);
+  if (ci.state === "running") return { text: `CI on ${ci.pr.number ? `#${ci.pr.number}` : "the PR"}`, since: ci.startedAt ?? since };
+  const text = run?.progress || run?.statusLine || run?.phase || "";
+  return { text, since: since ?? now };
+}
+
+// "CI on #42 · 34m".
+export const stepText = (step, now = Date.now()) => (step?.text ? (step.since ? `${step.text} · ${ageText(now - step.since)}` : step.text) : "");
+
+// ---- stalled ----
+
+// Whether the run has stalled: {quietMs, by: "quiet" | "ci"}, or false. Quiet: no change in
+// its step, its agents or their terminal output for STALL_MS (lastActivity, the latest of
+// them; null when not known yet, which never stalls). CI: a CI run on an open PR past
+// CI_STALL_FACTOR times the repository's usual CI time (ciUsual, ms; null: no baseline, no
+// CI stall). Only a running run stalls: a finished, waiting, blocked, parked or closed one,
+// or one with an open question, already shows why it waits.
+export function stalled(run, { now, lastActivity = null, prs = [], ciUsual = null, orch = null } = {}) {
+  if (!run || run.away || run.phase === "finished" || needsYou(run, orch)) return false;
+  const ci = ciState(prs);
+  if (ci.state === "running" && ci.startedAt && ciUsual && now - ci.startedAt > CI_STALL_FACTOR * ciUsual) {
+    return { quietMs: now - ci.startedAt, by: "ci" };
+  }
+  if (lastActivity && now - lastActivity >= STALL_MS) return { quietMs: now - lastActivity, by: "quiet" };
+  return false;
+}
+
+// "quiet 34m", for a stalled run.
+export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` : "");
+
+// ---- the group ----
+
+// Which group a run is in, and why. `run` is data.js's run, or null when its files could not
+// be read (its machine is offline, or the orchestrator has no run directory). Input:
+//   orch      the orchestrator's status (live.js orchestratorState), or null when unknown
+//   working   true while the orchestrator or any of its agents is working
+//   pr        prRead() of the run
+//   flow      reviewFlow() of the run
+//   stall     stalled() of the run
+//   stages, since   for stepOf
+//   filesOk   false when the run's files are a stale read (its machine did not answer)
+//   now
+// Returns {group: "needs" | "else" | "done", cantTell, why, reasons: [{key, text, since}],
+// next (nextStep), step (stepOf), stall, waitSince (ms: the longest-waiting reason's anchor,
+// for sorting; oldest first)}. Reason keys: question, stalled, red-ci, and the next-step
+// labels in Needs you; working, ci-running, waiting-for, idle, cant-tell elsewhere.
+export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, filesOk = true, now = Date.now() } = {}) {
+  const readable = Boolean(run) && filesOk !== false;
+  const prs = pr?.readable ? pr.list : [];
+  const step = stepOf(run, { prs, stages, since, now });
+  const base = { cantTell: false, why: null, next: null, step, stall: false, reasons: [] };
+  const out = (group, extra) => {
+    const r = { ...base, ...extra, group };
+    const anchors = r.reasons.map((x) => x.since).filter(Boolean);
+    r.waitSince = anchors.length ? Math.min(...anchors) : step.since ?? run?.updated ?? run?.started ?? null;
+    return r;
+  };
+  // A blocked orchestrator is a live fact, read from the window, so it counts without its files.
+  if (!readable) {
+    if (orch === "blocked") return out("needs", { reasons: [{ key: "question", text: "blocked on a dialog", since: null }] });
+    return out("else", { cantTell: true, why: run ? "its machine did not answer" : "its run files could not be read", reasons: [{ key: "cant-tell", text: "can't tell", since: null }] });
+  }
+  if (run.away?.how === "closed") return out("done", {});
+  const reasons = [];
+  if (needsYou(run, orch)) reasons.push({ key: "question", text: needReason(run, orch), since: run.askedAt ?? run.updated ?? null });
+  if (!pr?.readable) {
+    // The question was read from its file, so it still counts; nothing is said on PR grounds.
+    if (reasons.length) return out("needs", { reasons, cantTell: true, why: pr?.why ?? null });
+    return out("else", { cantTell: true, why: pr?.why ?? null, reasons: [{ key: "cant-tell", text: "can't tell", since: null }] });
+  }
+  const next = nextStep(prs, flow);
+  base.next = next;
+  // Done: every PR merged or closed, and nothing still at work or asking.
+  if (prs.length && prs.every(isShut) && !working && !reasons.length) return out("done", { next });
+  if (stall) reasons.push({ key: "stalled", text: quietText(stall), since: now - stall.quietMs });
+  const ci = ciState(prs);
+  // PR grounds only once nothing works on the run any more and CI is not running: while it
+  // works, it is the run's turn, not the user's.
+  if (!working && ci.state !== "running") {
+    const settled = Math.max(run.updated ?? 0, ci.finishedAt ?? 0) || null;
+    if (ci.state === "red") reasons.push({ key: "red-ci", text: `red CI on #${ci.pr.number}`, since: ci.finishedAt ?? settled });
+    if (next && NEEDS_LABELS.has(next.label)) {
+      const reviewed = next.label === "changes requested" || next.label === "approved — merge" ? next.pr.reviewedAt ?? null : null;
+      reasons.push({ key: next.label, text: nextStepText(next), since: reviewed ?? settled });
+    }
+  }
+  if (reasons.length) return out("needs", { reasons, next, stall });
+  const why = working ? { key: "working", text: "agents working" }
+    : ci.state === "running" ? { key: "ci-running", text: "CI running" }
+    : next?.label === "waiting for" ? { key: "waiting-for", text: nextStepText(next) }
+    : { key: "idle", text: "idle" };
+  return out("else", { reasons: [{ ...why, since: step.since }], next });
+}
+
+// Longest wait first: the older waitSince sorts first; an unknown one last.
+export const byWait = (a, b) => (a.waitSince ?? Infinity) - (b.waitSince ?? Infinity);

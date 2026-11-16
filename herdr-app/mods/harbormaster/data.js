@@ -20,6 +20,8 @@ import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, proveRequest, withAcceptance, resultLine } from "./proof.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
+import { checkKind, ciTimes } from "./attention.js";
+import { observeRuns, recordCi } from "./tracking.js";
 import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f", GS = "\u001d";
@@ -337,7 +339,7 @@ function marker(how, text) {
 // The cache is module state, so it outlives every copy. A read whose task is cancelled
 // (its view closed) never settles, so a read pending longer than STALE_READ is given up
 // and a new one started; the abandoned one, should it ever settle, is ignored.
-let cache = { at: 0, runs: [], decisions: [], errors: [], pending: null, pendingAt: 0 };
+let cache = { at: 0, runs: [], decisions: [], errors: [], failed: [], pending: null, pendingAt: 0 };
 const STALE_READ = 45000;
 let reads = 0;
 
@@ -353,7 +355,7 @@ export function loadRuns() {
   cache.pending = (async () => {
     const names = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
     if (!names.includes(null)) names.unshift(null);
-    const runs = [], decisions = [], errors = [], answered = new Set(), samples = [];
+    const runs = [], decisions = [], errors = [], failed = [], answered = new Set(), samples = [];
     await Promise.all(names.map(async (on) => {
       try {
         const out = await exec("sh", ["-c", SCRIPT], { on });
@@ -364,13 +366,16 @@ export function loadRuns() {
         answered.add(on ?? "");
       } catch (e) {
         errors.push(`${on ?? "this machine"}: ${e?.message ?? e}`);
+        failed.push(on);
       }
     }));
     runs.sort((a, b) => (a.machine ?? "").localeCompare(b.machine ?? "") || a.dir.localeCompare(b.dir));
     decisions.sort((a, b) => (a.asked ?? 0) - (b.asked ?? 0));
     if (read !== reads) return cache;
-    cache = { at: Date.now(), runs, decisions, errors, pending: null, pendingAt: 0 };
+    // `failed`: the machines (null for this one) whose runs could not be read this time.
+    cache = { at: Date.now(), runs, decisions, errors, failed, pending: null, pendingAt: 0 };
     const ctx = facts();
+    observeRuns(runs, ctx, answered);
     for (const [on, sample] of samples) ingest(on, sample);
     recordRuns(runs.filter((r) => !r.away && orchestratorState(r, ctx) !== "gone"), (r) => runTerminals(r, ctx), answered).catch(() => {});
     for (const r of runs) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
@@ -459,7 +464,8 @@ export function taskCounts(run) {
 
 // ---- pull requests (gh), cached in shared state so every copy and layout reuses them ----
 
-const PR_FIELDS = "number,title,state,isDraft,reviewDecision,reviews,author,statusCheckRollup,url,headRefName,body";
+// reviewRequests for "waiting for <name>"; headRefOid so each CI run is recorded once (tracking.js recordCi).
+export const PR_FIELDS = "number,title,state,isDraft,reviewDecision,reviews,reviewRequests,author,statusCheckRollup,url,headRefName,headRefOid,body";
 // Run key → when its refresh started. Like a run read, a refresh whose task is cancelled
 // never ends, so one older than PR_STALE no longer holds the run back.
 const prBusy = new Map();
@@ -471,12 +477,7 @@ const isOpen = (pr) => pr.state === "OPEN" || pr.state === "DRAFT";
 
 function checks(rollup) {
   const c = { pass: 0, fail: 0, pending: 0 };
-  for (const x of rollup ?? []) {
-    const v = (x.conclusion || x.state || x.status || "").toUpperCase();
-    if (["SUCCESS", "NEUTRAL", "SKIPPED"].includes(v)) c.pass++;
-    else if (["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(v)) c.fail++;
-    else c.pending++;
-  }
+  for (const x of rollup ?? []) c[checkKind(x)]++;
   return c;
 }
 
@@ -491,7 +492,10 @@ function standing(p) {
     by[who] = r.state;
   }
   const with_ = (state) => Object.keys(by).filter((who) => by[who] === state);
-  return { approvedBy: with_("APPROVED"), changesBy: with_("CHANGES_REQUESTED") };
+  // When the latest of those reviews came, for how long the run has waited on the user since.
+  const counted = (p.reviews ?? []).filter((r) => by[r.author?.login] && r.state !== "PENDING");
+  const times = counted.map((r) => Date.parse(r.submittedAt ?? "")).filter(Boolean);
+  return { approvedBy: with_("APPROVED"), changesBy: with_("CHANGES_REQUESTED"), reviewedAt: times.length ? Math.max(...times) : null };
 }
 
 // The first line of a PR body's `## Merge danger` section ("Two-way door — …"), or null.
@@ -506,8 +510,11 @@ export function mergeDanger(body) {
 // What the views need from `gh pr view --json` output. GitHub only sets reviewDecision
 // where the repo requires a review, so the review comes from the reviews themselves,
 // falling back to reviewDecision ("Review needed") when nobody has approved or objected.
-function prSummary(p, repo) {
-  const { approvedBy, changesBy } = standing(p);
+// `requested`: the reviewers asked and yet to answer (a user's login, a team's name);
+// GitHub drops one from reviewRequests once they review. `ci`: when its checks started and,
+// once none is pending, finished (attention.js ciTimes).
+export function prSummary(p, repo) {
+  const { approvedBy, changesBy, reviewedAt } = standing(p);
   return {
     number: p.number,
     title: p.title,
@@ -515,7 +522,11 @@ function prSummary(p, repo) {
     review: changesBy.length ? "CHANGES_REQUESTED" : approvedBy.length ? "APPROVED" : p.reviewDecision || null,
     approvedBy,
     changesBy,
+    reviewedAt,
+    requested: (p.reviewRequests ?? []).map((r) => r?.login ?? r?.name ?? r?.slug).filter(Boolean),
     checks: checks(p.statusCheckRollup),
+    ci: ciTimes(p.statusCheckRollup),
+    sha: p.headRefOid ?? null,
     url: p.url,
     danger: mergeDanger(p.body),
     repo: repo ?? (/github\.com\/([^/]+\/[^/]+)\//.exec(p.url ?? "")?.[1] ?? null),
@@ -533,12 +544,21 @@ export function prsOf(run) {
   return shared("harbormaster.prs")?.[run.key]?.list ?? null;
 }
 
+// The run's whole PR read, {at, okAt, error, list, related}, or null before the first: for
+// attention.js prRead, which needs to know whether the list can be trusted.
+export function prEntryOf(run) {
+  return shared("harbormaster.prs")?.[run.key] ?? null;
+}
+
 // The run's related PRs: shown beside its issues, never counted as its own.
 export function relatedOf(run) {
   return shared("harbormaster.prs")?.[run.key]?.related ?? run.related.map((p) => unknownPr(p.url, p.repo));
 }
 
 // Refreshes a run's PRs when stale: every 60 s while the run is open, every 15 min once closed.
+// A PR gh could not read keeps its last summary, marked `stale`, or is unknownPr; the
+// entry's `error` says why (null when every PR was read) and `okAt` is the last read
+// that got them all, so a failing gh shows as "can't tell" instead of old data passing as new.
 export async function refreshPrs(run, closed = false) {
   const have = (shared("harbormaster.prs") ?? {})[run.key];
   const ttl = closed ? 15 * 60000 : 60000;
@@ -546,24 +566,31 @@ export async function refreshPrs(run, closed = false) {
   const started = Date.now();
   prBusy.set(run.key, started);
   try {
-    const view = async (recorded) => {
+    let error = null;
+    const view = async (recorded, before) => {
       const out = [];
       for (const pr of recorded) {
         if (!pr.url) continue;
-        const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch(() => null);
+        const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
         const p = res?.code === 0 ? json(res.stdout) : null;
-        if (p) out.push(prSummary(p, pr.repo));
-        else out.push(unknownPr(pr.url, pr.repo));
+        if (p) { out.push(prSummary(p, pr.repo)); continue; }
+        error ??= `gh could not read ${pr.url}: ${(res?.stderr || res?.stdout || `exit ${res?.code}`).trim().split("\n")[0].slice(0, 200)}`;
+        const old = before?.find((x) => x.url === pr.url && x.state !== "UNKNOWN");
+        out.push(old ? { ...old, stale: true } : unknownPr(pr.url, pr.repo));
       }
       return out;
     };
-    const related = await view(run.related);
-    const list = await view(run.prs);
+    const related = await view(run.related, have?.related);
+    const relatedError = error;
+    error = null;
+    const list = await view(run.prs, have?.list);
     const next = { ...(shared("harbormaster.prs") ?? {}) };
-    next[run.key] = { at: Date.now(), list, related };
+    const at = Date.now();
+    next[run.key] = { at, okAt: error ? have?.okAt ?? null : at, error, relatedError, list, related };
     // Forget runs that are gone.
     for (const key of Object.keys(next)) if (cache.runs.length && !cache.runs.some((r) => r.key === key)) delete next[key];
     setShared("harbormaster.prs", next);
+    recordCi(list);
   } finally {
     if (prBusy.get(run.key) === started) prBusy.delete(run.key);
   }
