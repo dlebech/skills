@@ -17,6 +17,14 @@ export function blockingRequest({ quiet, step = null }) {
     + "Asked from Harbormaster: if you need me, write question.md and ask; else carry on and update your progress line.";
 }
 
+// The same message for a red CI (a Needs-you box's Ask the orchestrator): which PR's CI failed,
+// its first failing check and where to read it. The orchestrator acts on it as on any "what is
+// blocking?": it fixes what is the run's to fix, or asks with a question.
+export function ciRequest({ pr, check = null, url = null }) {
+  return `what is blocking? Harbormaster sees CI red on ${pr ? `#${pr}` : "the PR"}${check ? ` (failing: ${check})` : ""}${url ? `: ${url}` : ""}.\n`
+    + "Asked from Harbormaster: fix it if it is the run's to fix (as a task, reviewed as usual) and update your progress line; if you need me, write question.md and ask.";
+}
+
 // Whether a "what is blocking?" message is among the first lines of the run's unhandled
 // inbox messages (data.js reads them with the level requests).
 export const blockingPending = (lines) => (lines ?? "").split("\n").some((l) => BLOCKING.test(l.trim()));
