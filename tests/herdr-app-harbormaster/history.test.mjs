@@ -7,7 +7,10 @@ import { spawnSync, spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildLine, writeHistory, writeHistoryBeforeDelete, HISTORY } from "../../herdr-app/mods/harbormaster/history.js";
+import { buildLine, writeHistory, writeHistoryBeforeDelete, HISTORY, tune } from "../../herdr-app/mods/harbormaster/history.js";
+
+tune.oldGap = 0; // runs here are all "old": closed before this process started
+tune.retry = 0;
 
 const timing = {
   version: 1, start: "2026-11-16T08:00:00Z", end: "2026-11-16T09:00:00Z", wall: 3600,
@@ -162,4 +165,90 @@ test("a held lock refuses, a stale one is broken, writers at once leave no torn 
     assert.equal(all.length, wrote);
     for (const l of all) JSON.parse(l);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("closed runs older than the start are taken one per gap per machine", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hm-hist-"));
+  try {
+    withExec();
+    tune.oldGap = 3600000;
+    const a = { ...mkRun(root, "old1"), machine: "lazy" }, b = { ...mkRun(root, "old2"), machine: "lazy" };
+    assert.equal(await writeHistory(a, "closed"), true);
+    assert.equal(await writeHistory(b, "closed"), false, "not due yet");
+    tune.oldGap = 0;
+    assert.equal(await writeHistory(b, "closed"), true);
+    assert.equal(lines(root).length, 2);
+  } finally { tune.oldGap = 0; rmSync(root, { recursive: true, force: true }); }
+});
+
+test("timing reads go one at a time", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hm-hist-"));
+  try {
+    let now = 0, peak = 0;
+    globalThis.__herdrExec = async (cmd, args) => {
+      if (args[1] !== HISTORY) { peak = Math.max(peak, ++now); await new Promise((r) => setTimeout(r, 20)); now--; return { code: 0, stdout: JSON.stringify(timing), stderr: "" }; }
+      const r = spawnSync(cmd, args, { encoding: "utf8" });
+      return { code: r.status, stdout: r.stdout, stderr: r.stderr };
+    };
+    await Promise.all(["q1", "q2", "q3"].map((n) => writeHistory(mkRun(root, n), "closed")));
+    assert.equal(lines(root).length, 3);
+    assert.equal(peak, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a closed run whose logs are gone is written without timing on the second failure", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hm-hist-"));
+  try {
+    const counts = withExec(null);
+    const run = mkRun(root, "gone");
+    assert.equal(await writeHistory(run, "closed"), false);
+    assert.equal(await writeHistory(run, "closed"), true);
+    assert.equal(JSON.parse(lines(root)[0]).wall, null);
+    const n = counts.timing;
+    await writeHistory(run, "closed");
+    assert.equal(counts.timing, n, "no more reads");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("one resources row goes to one timing agent only", () => {
+  const dup = { ...timing, agents: [timing.agents[1], { ...timing.agents[1], name: "rss-t1b" }], tasks: [timing.tasks[0]] };
+  const l = buildLine({ dir: "/x/a/b", key: "k" }, dup, resources, null, 1);
+  assert.deepEqual(l.agents.map((a) => a.cpu_s), [60, null]);
+  assert.equal(l.tasks[0].cpu_s, 60);
+});
+
+test("a stale parentless terminal does not become the orchestrator's row", () => {
+  const res = { agents: { old: { parent: null, cpu_s: 5, last_ms: 1 }, cur: { parent: null, cpu_s: 9, last_ms: 2 } } };
+  const l = buildLine({ dir: "/x/a/b", key: "k" }, timing, res, null, 1);
+  assert.equal(l.agents[0].cpu_s, 9);
+});
+
+test("deleteRun waits for the history, then deletes; a history that never answers still lets it go", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hm-hist-"));
+  const { deleteRun, deleteRuns } = await import("../../herdr-app/mods/harbormaster/data.js");
+  try {
+    const order = [];
+    globalThis.__herdrExec = async (cmd, args) => {
+      if (args[1] === HISTORY) { order.push(args[4]); const r = spawnSync(cmd, args, { encoding: "utf8" }); return { code: r.status, stdout: r.stdout, stderr: r.stderr }; }
+      if (String(args[1]).includes("not a run directory")) { order.push("delete"); return { code: 0, stdout: "", stderr: "" }; }
+      return { code: 0, stdout: JSON.stringify(timing), stderr: "" };
+    };
+    const run = { ...mkRun(root, "d1"), branch: "d1" };
+    await deleteRun(run);
+    assert.deepEqual(order, ["check", "append", "delete"]);
+    assert.equal(lines(root).length, 1);
+    // Never answers: the delete goes ahead after the wait, and a second delete does not wait again.
+    tune.deleteWait = 30;
+    globalThis.__herdrExec = async (cmd, args) => {
+      if (args[1] === HISTORY) return new Promise(() => {});
+      if (String(args[1]).includes("not a run directory")) { order.push("delete2"); return { code: 0, stdout: "", stderr: "" }; }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const r2 = mkRun(root, "d2"), r3 = mkRun(root, "d3");
+    const t0 = Date.now();
+    const failed = await deleteRuns([r2, r3]);
+    assert.deepEqual(failed, []);
+    assert.equal(order.filter((x) => x === "delete2").length, 2);
+    assert.ok(Date.now() - t0 < 1000);
+  } finally { tune.deleteWait = 90000; rmSync(root, { recursive: true, force: true }); }
 });

@@ -963,6 +963,8 @@ export async function deleteRun(run) {
 // Deletes several closed runs, one at a time per machine and the machines at once, each as
 // deleteRun does, guards and all. Returns the runs it could not delete, each with why.
 export async function deleteRuns(runs) {
+  // Start every history write first, so the waits overlap instead of adding up per run.
+  await Promise.all(runs.map((r) => writeHistoryBeforeDelete(r)));
   const byMachine = new Map();
   for (const r of runs) byMachine.set(r.machine ?? "", [...(byMachine.get(r.machine ?? "") ?? []), r]);
   const failed = [];

@@ -19,9 +19,15 @@ export function buildLine(run, timing, resources, closedMs, now = Date.now()) {
   const resNames = Object.keys(res);
   // A timing agent's resources: by the name its brief gave it, else its worktree name; the
   // orchestrator is the one terminal that has no parent among the others.
+  // A row goes to one timing agent only (a restarted agent can have two), and a resumed run
+  // can have several parentless terminals: the orchestrator is the one seen last.
+  const taken = new Set();
   const matchRes = (a) => {
-    if (a.role === "orchestrator") return resNames.find((n) => !res[n].parent || !res[res[n].parent]) ?? null;
-    return [a.label, a.name].find((n) => n && res[n]) ?? null;
+    const n = a.role === "orchestrator"
+      ? resNames.filter((x) => !taken.has(x) && (!res[x].parent || !res[res[x].parent])).sort((p, q) => (res[q].last_ms ?? 0) - (res[p].last_ms ?? 0))[0]
+      : [a.label, a.name].find((x) => x && res[x] && !taken.has(x));
+    if (n) taken.add(n);
+    return n ?? null;
   };
   const agents = (timing?.agents ?? []).map((a) => {
     const r = res[matchRes(a)];
@@ -100,22 +106,46 @@ const frag = (key, value) => JSON.stringify(key) + ":" + JSON.stringify(value);
 
 // Runs written, by "<run key>|<closed>" (or the run key alone for a delete without a
 // closed marker), and the writes under way, so a poll that sees the same closed run again
-// does nothing. A run whose timing could not be read is tried again after RETRY ms.
+// does nothing. A run whose timing could not be read is tried again after RETRY ms, and
+// written without timing on its FAILS-th failure, so a run whose logs are gone stops costing.
 const done = new Set();
 const pending = new Map();
 const failedAt = new Map();
-const RETRY = 5 * 60000;
+const fails = new Map();
+// Timings, in ms; a test sets them.
+export const tune = { retry: 5 * 60000, oldGap: 60000, deleteWait: 90000 };
+const FAILS = 2;
+
+// Reading timing is the costly part (every transcript of the run), so one at a time per
+// machine; and closed runs already closed when Harbormaster started (all of them, on the
+// first poll after an install) are taken one a minute per machine, not all at once.
+const queue = new Map();
+const lastOld = new Map();
+const startedAt = Date.now();
+const inQueue = (machine, fn) => {
+  const prev = queue.get(machine ?? "") ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  queue.set(machine ?? "", next.catch(() => {}));
+  return next;
+};
 
 // Appends the run's line unless it is there: true once written or found, false when not
-// (timing unreadable and `force` unset, or the write failed). `how`: "closed" for a run
-// Harbormaster saw closed, "delete" just before it goes (writes even without timing).
+// (timing unreadable, a lazy one not due yet, or the write failed). `how`: "closed" for a
+// run Harbormaster saw closed, "delete" just before it goes (writes even without timing).
 export function writeHistory(run, how) {
   const closedMs = run.away?.how === "closed" ? run.away.at : null;
   const id = closedMs ? `${run.key}|${closedMs}` : run.key;
   if (done.has(id) || (closedMs && done.has(run.key))) return Promise.resolve(true);
   if (pending.has(id)) return pending.get(id);
-  if (how === "closed" && Date.now() - (failedAt.get(id) ?? 0) < RETRY) return Promise.resolve(false);
-  const p = (async () => {
+  if (how === "closed") {
+    if (Date.now() - (failedAt.get(id) ?? 0) < tune.retry) return Promise.resolve(false);
+    if (closedMs && closedMs < startedAt) {
+      const m = run.machine ?? "";
+      if (Date.now() - (lastOld.get(m) ?? 0) < tune.oldGap) return Promise.resolve(false);
+      lastOld.set(m, Date.now());
+    }
+  }
+  const p = inQueue(run.machine, async () => {
     const parts = [frag("run", run.dir), run.started ? frag("started", iso(run.started)) : "", closedMs ? frag("closed", iso(closedMs)) : ""];
     const on = { on: run.machine };
     // A closing already recorded costs one grep, not a timing read.
@@ -124,11 +154,14 @@ export function writeHistory(run, how) {
     if (seen.code !== 0) return false;
     // The first read of a big run parses every transcript, so loadTiming allows it long.
     const timing = await loadTiming(run, { maxAge: 10 * 60000 });
-    if (!timing && how === "closed") return false;
+    if (!timing && how === "closed" && (fails.get(id) ?? 0) + 1 < FAILS) {
+      fails.set(id, (fails.get(id) ?? 0) + 1);
+      return false;
+    }
     const line = JSON.stringify(buildLine(run, timing, resourcesOf(run), closedMs ?? Date.now()));
     const out = await exec("sh", ["-c", HISTORY, "sh", run.dir, "append", ...parts, ...chunks(line)], on);
     return out.code === 0 || out.code === 5;
-  })().catch(() => false).then((ok) => {
+  }).catch(() => false).then((ok) => {
     pending.delete(id);
     if (ok) done.add(id); else failedAt.set(id, Date.now());
     return ok;
@@ -138,9 +171,11 @@ export function writeHistory(run, how) {
 }
 
 // Before a run's directory goes: waits for the write, but only so long, then lets the
-// delete go ahead.
-export async function writeHistoryBeforeDelete(run, timeout = 90000) {
+// delete go ahead (and does not wait again for the same run).
+const gaveUp = new Set();
+export async function writeHistoryBeforeDelete(run) {
+  if (gaveUp.has(run.key)) return false;
   let timer;
-  const late = new Promise((resolve) => { timer = setTimeout(() => resolve(false), timeout); });
+  const late = new Promise((resolve) => { timer = setTimeout(() => { gaveUp.add(run.key); resolve(false); }, tune.deleteWait); });
   try { return await Promise.race([writeHistory(run, "delete"), late]); } finally { clearTimeout(timer); }
 }

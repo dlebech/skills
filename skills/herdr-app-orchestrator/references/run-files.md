@@ -278,6 +278,10 @@ known is `null`:
 
 - A run's key is `run` + `started`. A line is added once per closing (`closed` differs): a run resumed and
   closed again gets a second line, and readers keep the last line per key.
+- A run closed, resumed and deleted while open (never closed again) has no line for its second stretch: the
+  delete finds the first closing's line and writes nothing.
+- A closed run already closed when Harbormaster started is written at most one a minute per machine, one
+  timing read at a time; one whose logs cannot be read is written without timing on its second failure.
 - Agents are matched between timing (worktree names, labels like `impl-x-t1`) and resources (terminal names)
   by label or name; the orchestrator is the terminal with no parent. A task's `cpu_s` is its agents' sum and
   its `peak_rss_mb` the largest of theirs.
