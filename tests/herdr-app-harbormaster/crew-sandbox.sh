@@ -24,6 +24,14 @@
 #   unreadable-pr finished, PR in a repo that does not exist (gh fails)   -> Everything else, can't tell
 #   quiet-run     running, "t2 implementing", no PR, nothing moves       -> idle, then stalled
 #                 ("quiet Nm", Needs you, Ask) 30 minutes after the app started (module memory)
+# For the Needs-you box's lines and buttons (t11), read-only gh views of real PRs:
+#   approved-merge  finished, folder "snevagten" (peer), snevagten/snelogin#1308 and #1372,
+#                   approved by a colleague                               -> approved — merge
+#   red-ci        finished, cli/cli#14927 (a public PR with a failing check) -> red CI, then
+#                 review proof → merge
+#   review-proof  finished, dlebech/wapi-beatbox#1, proof.md T2 1/2 pass  -> review proof → merge
+#   report-run    finished, no PR, shared/final-report.md                 -> finished — read and close
+#   asks-question running, question.md with Options, Recommended and Blocks -> a question box
 # Hide a run from the Crew with `hc label <t> role=` and bring it back with role=orchestrator.
 #
 # Needs xvfb-run, ImageMagick's import (root only), jq, gh, python3 and libXtst. The window lands
@@ -74,7 +82,7 @@ make_runs() {
   # branch status type topic started-UTC tasks t1-state t2-state [set-status args...]
   local first=1
   mkrun() {
-    local branch=$1 status=$2 type=$3 topic=$4 started=$5 tasks=$6 s1=$7 s2=$8 out term tab d=$S/runs/skills/$1
+    local branch=$1 status=$2 type=$3 topic=$4 started=$5 tasks=$6 s1=$7 s2=$8 out term tab d=$S/runs/skills/$1 f=${RUN_FOLDER:-$folder}
     shift 8
     if [ $first = 1 ]; then
       first=0
@@ -85,7 +93,7 @@ make_runs() {
     fi
     tab=$(hc get "$term" --json | jq -r '.labels["herdr.tab"]')
     mkdir -p "$d/inbox" "$d/shared"
-    jq -n --arg t "$term" --arg tab "$tab" --arg f "$folder" --arg b "$branch" --arg s "$started" \
+    jq -n --arg t "$term" --arg tab "$tab" --arg f "$f" --arg b "$branch" --arg s "$started" \
       '{terminal: $t, tab_id: $tab, folder: $f, branch: $b, kind: "claude", started: $s}' >"$d/orchestrator.json"
     echo "# $topic" >"$d/spec.md"
     printf 'Status: %s\nPrefix: `x`\n\n## Tasks\n\n### t1 build — %s\n- Proof: T1 — tests\n\n### t2 polish — %s\n- Proof: T1 — tests\n' "$status" "$s1" "$s2" >"$d/plan.md"
@@ -101,6 +109,38 @@ make_runs() {
   mkrun unreadable-pr finished fix "Unreadable PR" "${day}T09:05:00Z" 2/2 merged merged --progress "PR #1 up" \
     --pr dlebech/no-such-repo-nyo https://github.com/dlebech/no-such-repo-nyo/pull/1
   mkrun quiet-run running feat "Quiet run" "${day}T10:30:00Z" 1/2 merged implementing --progress "t2 implementing"
+  RUN_FOLDER=$S/work/snevagten mkrun approved-merge finished feat "Approved merge" "${day}T07:00:00Z" 2/2 merged merged --progress "PRs approved" \
+    --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1308 --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1372
+  mkrun red-ci finished fix "Red CI" "${day}T07:30:00Z" 2/2 merged merged --progress "PR up, CI red" \
+    --pr cli/cli https://github.com/cli/cli/pull/14927
+  mkrun review-proof finished feat "Review proof" "${day}T08:00:00Z" 2/2 merged merged --progress "PR up with proof" \
+    --pr dlebech/wapi-beatbox https://github.com/dlebech/wapi-beatbox/pull/1
+  printf '# Proof: review-proof\nTier: T2\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\n\n## t2 polish\nTier: T1\nChecked: tests\nResult: fail — 1 of 9 fails\n' >"$S/runs/skills/review-proof/proof.md"
+  mkrun report-run finished rev "Report run" "${day}T05:00:00Z" 2/2 merged merged --progress "review written"
+  printf '# Review report\n\nAll good.\n' >"$S/runs/skills/report-run/shared/final-report.md"
+  mkrun asks-question running feat "Asks question" "${day}T09:30:00Z" 1/2 merged implementing --progress "waiting on a decision"
+  cat >"$S/runs/skills/asks-question/question.md" <<'Q'
+# Which groups should Crew use instead of "Everything else"?
+
+## Question
+"Everything else" says nothing about what the runs in it are doing.
+
+## Options
+1. **Working / Waiting on others**: split by whether a person is awaited
+2. **Keep it**: no change
+
+## Recommended
+Working / Waiting on others: split by whether a person is awaited
+
+## Evidence
+The user's feedback 3 tonight.
+
+## Risk
+Low; labels only.
+
+## Blocks
+t4 shots, t5 docs
+Q
 }
 
 case $cmd in
