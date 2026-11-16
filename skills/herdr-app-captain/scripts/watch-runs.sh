@@ -12,6 +12,8 @@
 #   attention <branch> <reason>    <run-directory>
 #   cleared <branch> <reason>      <run-directory>
 #   update <branch> pr <url>       <run-directory>
+#   attention machine <name> cannot be read    <name>:
+# and "cleared" for the last once that machine can be read again (runs.sh says why).
 # Every line is the whole update: the captain reads the run's files for detail.
 # Reasons: the plan's "waiting for user" or "blocked" status, a question.md (its
 # title, for a new or reworded one), finished, the
@@ -46,6 +48,8 @@ prs_flag=$root/.captain-seen-prs
 mkdir -p "$root"
 chmod 700 "$root"
 touch "$seen_file" "$idle_file"
+copies=$(mktemp -d)
+trap 'rm -rf "$copies"' EXIT
 
 # Events arrive on fd 4. A restarted stream is checked right away, since it may
 # have missed some.
@@ -86,46 +90,80 @@ while :; do
   now=$(date +%s)
   current=()
   idle=()
-  while IFS= read -r run_info <&3; do
-    dir=$(dirname "$run_info")
-    IFS=$'\x1f' read -r branch _ terminal _ < <(run_facts "$run_info")
-    # The user put it away; resuming deletes the marker and brings it back.
-    [ -z "$(run_marker "$dir")" ] || continue
-    status=$(plan_status "$dir")
-    reasons=()
-
-    case $status in # the statuses lib.sh lists
-      "waiting for user"* | blocked*) reasons+=("$status") ;;
-      finished) reasons+=("finished") ;;
+  copy_of= # "<address>\t<copy>" lines, for the runs of other machines
+  # Each other machine's runs, read at once (lib.sh's run_sources). One that cannot be
+  # read keeps what was reported for it (carried below), so it neither repeats nor clears.
+  rm -rf "$copies" && mkdir -p "$copies"
+  unread=
+  # An unreadable machine is an event of its own, so the captain knows its runs are not
+  # watched; it clears once the machine can be read again.
+  if ! sources=$(run_sources "$copies"); then
+    unread=" *"
+    current+=("attention machines cannot be read (hc machine ls failed)	*:")
+  fi
+  while IFS=$'\x1f' read -r machine from there <&5; do
+    case $from in !*)
+      unread+=" $machine"
+      current+=("attention machine $machine cannot be read	$machine:")
+      continue ;;
     esac
-    if [ "$status" != finished ]; then
-      case $(terminal_state "$terminals" "$terminal") in
-        "" | lost) reasons+=("orchestrator gone") ;;
-        blocked) reasons+=("orchestrator blocked on a dialog") ;;
-        idle | done)
-          since=$(awk -F '\t' -v d="$dir" '$2 == d { print $1; exit }' "$idle_file")
-          since=${since:-$now}
-          idle+=("$since	$dir")
-          [ $((now - since)) -ge "$idle_grace" ] && reasons+=("orchestrator idle") ;;
+    while IFS= read -r run_info <&3; do
+      dir=$(dirname "$run_info")
+      IFS=$'\x1f' read -r branch _ terminal _ < <(run_facts "$run_info")
+      [ -z "$machine" ] || [ -z "$terminal" ] || terminal=$machine/$terminal
+      address=$(run_address "$machine" "$there${dir#"$from"}")
+      [ -z "$machine" ] || copy_of+="$address"$'\t'"$dir"$'\n'
+      # The user put it away; resuming deletes the marker and brings it back.
+      [ -z "$(run_marker "$dir")" ] || continue
+      status=$(plan_status "$dir")
+      reasons=()
+
+      case $status in # the statuses lib.sh lists
+        "waiting for user"* | blocked*) reasons+=("$status") ;;
+        finished) reasons+=("finished") ;;
       esac
-    fi
-    # An open question is a reason of its own unless the plan status already carries
-    # it; its title is the one-line summary, so a new or reworded question is news. Not while
-    # an inbox message waits: that is the answer, and the orchestrator is still clearing the question.
-    # Level requests, asks to prove and asks what is blocking are no answers, so they do not hide the question.
-    if [ "$status" != finished ] && [ -z "$(answer_messages "$dir")" ]; then
-      case $status in "waiting for user"*) ;; *)
-        title=$(question_title "$dir")
-        [ -z "$title" ] || reasons+=("question: $title") ;;
-      esac
-    fi
-    for r in ${reasons[@]+"${reasons[@]}"}; do current+=("attention $branch $r	$dir"); done
-    # PRs are news, not a call for the user: one line each, once. A finished run's
-    # "finished" line already says its PRs are up.
-    [ "$status" = finished ] || while IFS= read -r url; do
-      [ -z "$url" ] || current+=("update $branch pr $url	$dir")
-    done < <(jq -r '(.prs // [])[]?.url // empty' "$dir/status.json" 2>/dev/null)
-  done 3< <(run_infos)
+      if [ "$status" != finished ]; then
+        case $(terminal_state "$terminals" "$terminal") in
+          "" | lost) reasons+=("orchestrator gone") ;;
+          blocked) reasons+=("orchestrator blocked on a dialog") ;;
+          idle | done)
+            since=$(awk -F '\t' -v d="$address" '$2 == d { print $1; exit }' "$idle_file")
+            since=${since:-$now}
+            idle+=("$since	$address")
+            [ $((now - since)) -ge "$idle_grace" ] && reasons+=("orchestrator idle") ;;
+        esac
+      fi
+      # An open question is a reason of its own unless the plan status already carries
+      # it; its title is the one-line summary, so a new or reworded question is news. Not while
+      # an inbox message waits: that is the answer, and the orchestrator is still clearing the question.
+      # Level requests, asks to prove and asks what is blocking are no answers, so they do not hide the question.
+      if [ "$status" != finished ] && [ -z "$(answer_messages "$dir")" ]; then
+        case $status in "waiting for user"*) ;; *)
+          title=$(question_title "$dir")
+          [ -z "$title" ] || reasons+=("question: $title") ;;
+        esac
+      fi
+      for r in ${reasons[@]+"${reasons[@]}"}; do current+=("attention $branch $r	$address"); done
+      # PRs are news, not a call for the user: one line each, once. A finished run's
+      # "finished" line already says its PRs are up.
+      [ "$status" = finished ] || while IFS= read -r url; do
+        [ -z "$url" ] || current+=("update $branch pr $url	$address")
+      done < <(jq -r '(.prs // [])[]?.url // empty' "$dir/status.json" 2>/dev/null)
+    done 3< <(run_infos "$from")
+  done 5<<<"$sources"
+  # carried <address>: whether it is on a machine that could not be read this time.
+  carried() {
+    case $1 in /*) return 1 ;; esac
+    case "$unread " in *" * "* | *" ${1%%:*} "*) return 0 ;; esac
+    return 1
+  }
+  while IFS= read -r line; do
+    case $line in "attention machine"*) continue ;; esac # added above while still true
+    [ -n "$line" ] && carried "${line##*	}" && current+=("$line")
+  done <"$seen_file"
+  while IFS= read -r line; do
+    [ -n "$line" ] && carried "${line##*	}" && idle+=("$line")
+  done <"$idle_file"
 
   # Remember only what is still true, so a cleared event can fire again.
   printf '%s\n' ${idle[@]+"${idle[@]}"} | sed '/^$/d' >"$idle_file"
@@ -146,13 +184,19 @@ while :; do
   for line in ${new[@]+"${new[@]}"}; do reported+=${line#*$'\t'}$'\n'; done
   while IFS= read -r line; do
     case $line in
+      "attention machine"*)
+        printf '%s\n' ${current[@]+"${current[@]}"} | grep -qxF -- "$line" || new+=("cleared ${line#attention }")
+        continue ;;
       "attention "*" waiting for user"* | "attention "*" blocked"* | "attention "*" question: "* | "attention "*" orchestrator blocked on a dialog"*) ;;
       *) continue ;;
     esac
     printf '%s\n' ${current[@]+"${current[@]}"} | grep -qxF -- "$line" && continue
-    dir=${line##*	}
-    [ -d "$dir" ] && [ -z "$(run_marker "$dir")" ] || continue
-    printf '%s\n' "$reported" | grep -qxF -- "$dir" && continue
+    address=${line##*	}
+    # Where its files are read: its directory here, or the copy of another machine's.
+    dir=$address
+    case $address in /*) ;; *) dir=$(awk -F '\t' -v a="$address" '$1 == a { print $2; exit }' <<<"$copy_of") ;; esac
+    [ -n "$dir" ] && [ -d "$dir" ] && [ -z "$(run_marker "$dir")" ] || continue
+    printf '%s\n' "$reported" | grep -qxF -- "$address" && continue
     new+=("cleared ${line#attention }")
   done <"$seen_file"
   printf '%s\n' ${current[@]+"${current[@]}"} | sed '/^$/d' >"$seen_file"
