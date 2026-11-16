@@ -2,7 +2,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, decisionQueue, answerRun, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
+import { stats, decisionQueue, answerRun, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText } from "./context.js";
@@ -51,6 +51,10 @@ function reviewText(pr) {
   return null;
 }
 
+// A PR's Merge danger on its row: red for a one-way door, dim for the rest; the tooltip has the whole line.
+const dangerTag = (t, pr) => div().flex_none().text_size(11).text_color(oneWay(pr.danger) ? t.blocked : t.dim)
+  .tooltip(pr.danger).child(oneWay(pr.danger) ? "One-way door" : "Two-way door");
+
 function prRow(t, pr, i) {
   const tone = PR_TONE[pr.state] ?? "dim";
   const c = pr.checks;
@@ -64,6 +68,7 @@ function prRow(t, pr, i) {
     .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(pr.title ?? pr.url))
     .when(Boolean(checkText), (el) => el.child(div().flex_none().text_size(11).text_color(t[checkTone]).child(checkText)))
     .when(Boolean(review), (el) => el.child(div().flex_none().text_size(11).text_color(t[review[1]]).child(review[0])))
+    .when(Boolean(pr.danger), (el) => el.child(dangerTag(t, pr)))
     .child(pill(t, pr.state === "DRAFT" ? "Draft" : pr.state[0] + pr.state.slice(1).toLowerCase(), tone));
 }
 
@@ -327,7 +332,8 @@ function prDetail(t, pr, i, related = false) {
       .child(h_flex().flex_wrap().gap_x(10).text_size(11).text_color(t.dim)
         .child(div().child(`${pr.repo ?? shortRef(pr.url)}${pr.number ? ` #${pr.number}` : ""}`))
         .when(Boolean(checkText), (el) => el.child(div().text_color(t[checkTone]).child(checkText)))
-        .when(Boolean(review), (el) => el.child(div().text_color(t[review[1]]).child(review[0])))))
+        .when(Boolean(review), (el) => el.child(div().text_color(t[review[1]]).child(review[0]))))
+      .when(Boolean(pr.danger), (el) => el.child(div().text_size(11).text_color(oneWay(pr.danger) ? t.blocked : t.dim).child(`Merge danger: ${pr.danger}`))))
     .when(Boolean(state), (el) => el.child(pill(t, state, tone)));
 }
 

@@ -10,16 +10,18 @@ argument-hint: "[PR number, defaults to current branch's PR]"
    - GitLab (`glab` installed and logged in): `glab mr view $ARGUMENTS` and `glab mr diff $ARGUMENTS`.
    - Otherwise: `git log` and `git diff` for the current branch against the default branch (`origin/HEAD`, else `main`). There is no existing body to keep.
    - If the body already has `## For humans` / `## For AI` sections, rewrite them in place rather than nesting new ones.
+   - If it has `## Evidence` and `## Merge danger` sections, keep them word for word; do not rewrite, merge or drop them.
 2. Write `## For humans`:
    - One sentence on what changed and why.
-   - At most 4 bullets: user-visible effects, what's unaffected, deploy/manual steps.
+   - At most 4 bullets: user-visible effects, what's unaffected, deploy/manual steps. When the body has `## Merge danger`, one bullet is `Merge danger: <its first line>`.
    - No file paths, class names or config keys unless the reader has to act on them.
 3. Write `## For AI`:
    - Full detail: files, packages, config values, the reasoning behind non-obvious choices, what's deliberately not touched, test plan.
    - Keep everything useful from the existing body; drop nothing.
    - Base claims on the diff; don't invent behavior or test results that aren't there.
-4. Keep the existing attribution footer (if any) at the very end, after both sections.
-5. Apply the new body and print the PR/MR URL:
+4. Order: `## For humans`, then `## Evidence` and `## Merge danger` if the body had them (unchanged), then `## For AI`.
+5. Keep the existing attribution footer (if any) at the very end, after both sections.
+6. Apply the new body and print the PR/MR URL:
    - GitHub: `gh pr edit <number> --body-file -` (pipe the body via stdin).
    - GitLab: `glab mr update <number> --description "<body>"`.
    - Local git only: print the body in a fenced markdown block for the user to paste.
