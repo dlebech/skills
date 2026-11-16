@@ -138,3 +138,13 @@ test("needLine says why a run needs you, and nothing outside Needs you", () => {
   assert.equal(needLine(a), "red CI on #42 · review proof → merge");
   assert.equal(needLine(at(run(), { working: true })), null);
 });
+
+test("a finished run waiting on a reviewer says so on its pill, in a neutral colour", () => {
+  const a = at(run({ phase: "finished" }), { flow: "peer", pr: read([pr({ requested: ["anna"] }), pr({ number: 43, requested: ["anna"] })]) });
+  assert.equal(a.group, "else");
+  assert.deepEqual(badgeOf(a, true), { label: "waiting for anna · 2 PRs", tone: "muted" });
+  // A run still running keeps its phase.
+  assert.equal(badgeOf(a, false), null);
+  // Can't tell: no label to show, so the pill keeps "Finished".
+  assert.equal(badgeOf(at(run({ phase: "finished" }), { pr: { list: null, readable: false, why: "gh failed" } }), true), null);
+});

@@ -70,11 +70,13 @@ export function rowTip(a, now = Date.now()) {
 }
 
 // A run card's pill when it should say what comes next, as the Crew does: {label, tone} for
-// a run in Needs you (red) or Done (done's colour) with a next-step label, else null (the
-// card keeps its phase: running, parked, closed…).
-export function badgeOf(a) {
-  if (!a?.next || (a.group !== "needs" && a.group !== "done")) return null;
-  return { label: nextStepText(a.next), tone: a.group === "needs" ? "blocked" : "done" };
+// a run with a next-step label that is in Needs you (red) or Done (done's colour), or that
+// is finished (`finished`: its phase), in a neutral colour, since a label beats "Finished";
+// else null (the card keeps its phase: running, parked, closed…).
+export function badgeOf(a, finished = false) {
+  if (!a?.next) return null;
+  const tone = a.group === "needs" ? "blocked" : a.group === "done" ? "done" : finished ? "muted" : null;
+  return tone ? { label: nextStepText(a.next), tone } : null;
 }
 
 // Why a run is in Needs you, in one line ("red CI on #42 · review proof → merge"), or null.

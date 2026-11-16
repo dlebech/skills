@@ -285,9 +285,10 @@ function runFacts(r, ctx) {
   const att = attOf(r, ctx);
   const need = needsYouNow(r, ctx);
   let badge = (parked ? PHASE.parked : r.away?.how === "closed" ? PHASE.closed : PHASE[r.phase]) ?? PHASE.unknown;
-  // A run in Needs you or Done says what comes next instead, as its Crew card does
-  // ("approved — merge"); a parked or closed one keeps saying so.
-  if (!r.away && badgeOf(att)) badge = badgeOf(att);
+  // A run in Needs you or Done, or a finished one, says what comes next instead, as its Crew
+  // card does ("approved — merge", "waiting for anna"); a parked or closed one keeps saying so.
+  const next = !r.away && badgeOf(att, r.phase === "finished");
+  if (next) badge = next;
   return {
     orch, parked, need, badge, att,
     closed: isClosed(r, ctx),
