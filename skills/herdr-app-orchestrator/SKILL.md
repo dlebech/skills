@@ -108,6 +108,7 @@ Keep the plan in `plan.md`. Its first line is `Status: <one line>`, kept current
 - dependencies on other tasks;
 - the files or subsystem it is expected to touch;
 - a validation command or observable result;
+- its proof: a `Proof: T<0-3> — <the evidence that shows it is done>` line. If you can't name the evidence, the task isn't scoped yet. Propose the run's `Proof tier:` in `plan.md` under `Prefix:`; the user can override it (formats in `references/run-files.md`);
 - whether it can safely run in parallel;
 - its status (planned, implementing, in review, fixing, merged) and its branch, worktree, and agent names.
 

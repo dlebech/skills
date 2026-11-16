@@ -17,7 +17,8 @@ and it keeps nothing the files do not.
 | `decisions.md` | orchestrator | anyone | The decisions log: what was decided, by whom, why. |
 | `question.md` | orchestrator | Harbormaster, captain, you | The open question to you, if any (below). Removed once answered. |
 | `inbox/*.message` | anyone who answers or instructs | orchestrator | Messages to the orchestrator (below). The orchestrator renames a message it has read to `.handled`. |
-| `shared/` | orchestrator, agents | orchestrator, agents | Briefs, findings, reports. Not committed. |
+| `shared/` | orchestrator, agents | orchestrator, agents | Briefs, findings, reports. Not committed. `shared/proof/` holds captured proof. |
+| `proof.md` | orchestrator, `proving` skill | Harbormaster, you | Per-task proof results (below). Not committed. |
 | `parked`, `closed` | captain, Harbormaster, orchestrator | everyone | You put the run away. One line, `<UTC time>\t<plan status then>`; `init-run.sh` deletes them when an orchestrator resumes the run. |
 
 The root also holds `.captain-decisions.json`, the captain's own open decisions (below).
@@ -58,6 +59,41 @@ be answered from its summary alone:
   label (case-insensitive) or number, and may add why after a `:` or ` — `.
 - A file with none of these `## ` sections is a free-form question, as older runs wrote
   them: it is shown as it is and can only be answered with free text.
+
+## plan.md: proof lines and tier
+
+Proof is a review aid: each task names the evidence that shows it is done, when it is
+planned. A task you cannot name evidence for is not scoped yet. Harbormaster reads the lines
+below and shows them in the run's Proof section.
+
+- Below `Status:` and `Prefix:`, `Proof tier: T<n>` is the run's tier, the orchestrator's
+  proposal. When the user overrides it the line reads `Proof tier: T<n> (set by user)`.
+  Without the line, the run's tier is the highest of its tasks'.
+- Every task has a proof line, in any of the task shapes Harbormaster reads: `- Proof: T1 — <the
+  evidence>` under a heading task, a `proof` column in a task table, or `Proof: T1 — …` inside
+  a list item under `## Tasks`. The tier is `T0` to `T3`; the text after the dash is the evidence.
+- Tiers: `T0` CI or the local test suite is green (the default); `T1` T0 plus test output for the
+  changed behaviour; `T2` T1 plus screenshots or a recording; `T3` T2 plus a guided demo.
+
+## proof.md and shared/proof/
+
+`<run>/proof.md` and the files in `<run>/shared/proof/` are the captured proof, written by
+whoever captures it (the `proving` skill, if available). They are never committed: the PR
+describes them in text. Harbormaster lists the file names (up to 40) and reads `proof.md`:
+
+```markdown
+# Proof: <branch>
+Tier: T2
+
+## <task id> <task name>
+Tier: T1
+Checked: <what was checked>
+Result: pass | fail | partial — <one line>
+Files: shared/proof/<file>, shared/proof/<file>
+```
+
+A task's `## ` section is matched to the task by its id; its `Result` shows beside the task's
+evidence in the Proof section. A run with no `proof.md` shows its plan's evidence only.
 
 ## inbox/: answering and instructing
 

@@ -75,7 +75,7 @@ Harbormaster is built for that:
 
 The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks mods to list those, so here they are:
 
-- **Every 5 seconds, per machine:** one `sh -c` script. It prints the captain's open decisions, `.captain-decisions.json` in the runs root, then for each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json`, `plan.md`, `question.md` and its modification time (`stat`), and the `parked` and `closed` markers, and counts the unhandled `inbox/*.message` files.
+- **Every 5 seconds, per machine:** one `sh -c` script. It prints the captain's open decisions, `.captain-decisions.json` in the runs root, then for each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json`, `plan.md`, `question.md` and its modification time (`stat`), and the `parked` and `closed` markers, counts the unhandled `inbox/*.message` files, and prints `proof.md` and the names of the files in `shared/proof/` (at most 40).
 - **Every minute per open run (running or finished), every 15 minutes per closed one:** `gh pr view <url>` for each PR and related PR in `status.json`, on the run's machine. A run shows only the PRs its orchestrator recorded there. The results are kept in Herdr's shared state (`harbormaster.prs`), so every copy of the mod and every layout uses the same ones.
 - **When you press Park or Close:** `git worktree list` in the run's folder, to find the integration worktrees whose spaces to close.
 - **Every 30 seconds per open run on another machine, with its orchestrator there:** the same `git worktree list`, to find the integration worktrees to open spaces for. The worktrees it has opened or seen open are kept in Herdr's shared state (`harbormaster.worktrees`).
@@ -85,6 +85,18 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 It writes to a run directory only when you press Park, Close or Delete, or answer a question: one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. An answer from the queue is a message there too (`<time>-<ms>-harbormaster.message`). Delete removes the run directory.
 
 It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended; and for an open run on another machine: it renames the orchestrator's tab after the run's status, when the tab is unnamed or has one of the orchestrator's own `🐙` names, at most once a minute, opens a space for each integration worktree that has never had one, and finishes parking a run the captain parked there; and names a captain's tab on another machine `⚓ captain`.
+
+## Proof
+
+A run's pane has a Proof section. Its title is the run's tier, `Proof · T2` (`(set by user)` when
+the plan says so), from plan.md's `Proof tier:` line, else the highest tier among the tasks. Each
+task is a row: its tier, its evidence from the task's `Proof:` line, and, when `proof.md` has a
+section for it, what was checked and a pass, fail or partial pill. A task with no `Proof:` line is
+flagged "Not scoped", and the section's title counts them. Two links open `proof.md` and the
+`shared/proof/` folder; for a run on another machine they are shown as paths, since nothing here
+can open a file there. In the runs overview, a run's card carries a small tier tag by its name
+(hover for how many tasks are not scoped) and "n unscoped" in its meta line. The formats are in
+[run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
 ## Parked, resumed, and closed runs
 
