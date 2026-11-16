@@ -55,13 +55,12 @@ const withUsage = (t, id, u, whose, more = null) => (el) => {
 
 const usageLine = (label, u) => (u ? `${label}: ${Math.round(u.cpu)}% · ${memText(u.rssKb)}` : null);
 
-// Motion here is stepped, never smooth: spin() and loop() redraw the whole window about 30 times
-// a second for as long as one is drawn, which measured as most of the window's CPU (about 30 CPU s
-// a minute in a software-rendered window, against about 1 without them). frames() redraws only
-// when its text changes, here 5 times a second, and blocked and active marks hold still.
-const SPIN = ["◐", "◓", "◑", "◒"];
+// A working agent's status is a ring spun natively, like Herdr's own Agents list (spin(900)). The Agents
+// list already redraws the window while any agent works, so the ring rides on those frames: measured in a
+// software-rendered window it cost about 1.2 CPU s/min less than stepped text frames (proof t19-spinner).
+// Other motion holds still: loop() pulses redraw the whole window about 30 times a second.
 function statusDot(t, status) {
-  if (status === "working") return div().w(11).flex_none().text_size(11).text_color(t.working).frames(SPIN, 200);
+  if (status === "working") return svg("mods/harbormaster/spinner.svg").size(11).flex_none().text_color(t.working).spin(900);
   if (status === "blocked") return div().size(8).flex_none().rounded(4).bg(t.blocked).border(1.5).border_color(t.blocked + "66");
   if (status === "gone") return div().size(8).flex_none().rounded(4).border(1.5).border_color(t.dim);
   if (status === "idle") return div().size(8).flex_none().rounded(4).border(1.5).border_color(t.idle ?? t.dim);
