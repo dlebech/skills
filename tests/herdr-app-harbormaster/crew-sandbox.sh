@@ -24,6 +24,12 @@
 #   unreadable-pr finished, PR in a repo that does not exist (gh fails)   -> Everything else, can't tell
 #   quiet-run     running, "t2 implementing", no PR, nothing moves       -> idle, then stalled
 #                 ("quiet Nm", Needs you, Ask) 30 minutes after the app started (module memory)
+#   busy-run      running, both tasks implementing, its orchestrator reporting working (OSC 7501),
+#                 status.json dated 75 minutes back                      -> Working, spinner, "t1 implementing 1h15m · +1 task"
+#   review-wait   finished, folder "snevagten" (peer), cli/cli#14846 with a reviewer requested
+#                                                                         -> Waiting on others, "review from BagToad"
+#   asks-you      waiting for user, no PR                                -> Needs you, red, with its wait age
+#   gone-run      running, its orchestrator terminal killed              -> Needs you, "orchestrator gone", a row of its own
 # Hide a run from the Crew with `hc label <t> role=` and bring it back with role=orchestrator.
 #
 # Needs xvfb-run, ImageMagick's import (root only), jq, gh, python3 and libXtst. The window lands
@@ -74,13 +80,14 @@ make_runs() {
   # branch status type topic started-UTC tasks t1-state t2-state [set-status args...]
   local first=1
   mkrun() {
-    local branch=$1 status=$2 type=$3 topic=$4 started=$5 tasks=$6 s1=$7 s2=$8 out term tab d=$S/runs/skills/$1
+    local branch=$1 status=$2 type=$3 topic=$4 started=$5 tasks=$6 s1=$7 s2=$8 out term tab d=$S/runs/skills/$1 state=${ORCH_STATE:-}
     shift 8
     if [ $first = 1 ]; then
       first=0
       term=$(hc ls --json | jq -r '.terminals[0].address')
     else
-      out=$(herdr-app do tab.new --space "$space" --name "$branch" --argv "[\"sh\",\"-c\",\"echo fake orchestrator $branch; exec sleep infinity\"]" --focus false)
+      # ORCH_STATE: what the fake orchestrator reports as its status (OSC 7501), e.g. working.
+      out=$(herdr-app do tab.new --space "$space" --name "$branch" --argv "[\"sh\",\"$S/fake-orch.sh\",\"$branch\",\"$state\"]" --focus false)
       term=$(jq -r .terminal <<<"$out")
     fi
     tab=$(hc get "$term" --json | jq -r '.labels["herdr.tab"]')
@@ -93,6 +100,7 @@ make_runs() {
     hc label "$term" role=orchestrator >/dev/null
     echo "$branch: $term"
   }
+  printf '%s\n' 'echo "fake orchestrator $1"' '[ -z "$2" ] || printf "\033]7501;state=%s\007" "$2"' 'exec sleep infinity' >"$S/fake-orch.sh"
   local day; day=$(date -u +%Y-%m-%d)
   mkrun run-stats finished feat "Run stats" "${day}T08:10:00Z" 2/2 merged merged --progress "PR #42 up" \
     --pr dlebech/skills https://github.com/dlebech/skills/pull/42
@@ -101,6 +109,20 @@ make_runs() {
   mkrun unreadable-pr finished fix "Unreadable PR" "${day}T09:05:00Z" 2/2 merged merged --progress "PR #1 up" \
     --pr dlebech/no-such-repo-nyo https://github.com/dlebech/no-such-repo-nyo/pull/1
   mkrun quiet-run running feat "Quiet run" "${day}T10:30:00Z" 1/2 merged implementing --progress "t2 implementing"
+  ORCH_STATE=working mkrun busy-run running feat "Busy run" "${day}T07:00:00Z" 0/2 implementing implementing --progress "both tasks under way"
+  # Dated back, so the first sight of its tasks (seeded by status.json's updated) shows an age.
+  local f=$S/runs/skills/busy-run/status.json
+  jq --arg u "$(date -u -d '75 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" '.updated = $u' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+  folder=$S/work/snevagten
+  mkdir -p "$folder" && git -C "$folder" init -q
+  mkrun review-wait finished fix "Review wait" "${day}T05:00:00Z" 2/2 merged merged --progress "PR up for review" \
+    --pr cli/cli https://github.com/cli/cli/pull/14846
+  folder=$S/work/skills
+  mkdir -p "$S/runs/skills/asks-you"
+  printf '# Which database should t2 use?\n\n## Question\nPostgres or SQLite?\n\n## Options\n1. Postgres\n2. SQLite\n\n## Recommended\n1, it is what production runs.\n' >"$S/runs/skills/asks-you/question.md"
+  mkrun asks-you "waiting for user: which database?" feat "Asks you" "${day}T09:40:00Z" 1/2 merged planned --progress "t2 waits on a choice"
+  mkrun gone-run running feat "Gone run" "${day}T04:00:00Z" 1/2 merged implementing --progress "t2 implementing"
+  hc kill "$(jq -r .terminal "$S/runs/skills/gone-run/orchestrator.json")" >/dev/null
 }
 
 case $cmd in

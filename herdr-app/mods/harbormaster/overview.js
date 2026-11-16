@@ -274,8 +274,16 @@ function actionRow(view, t, r, orch, closed, counts) {
 // at work or briefly idle takes the border's: fine needs no colour.
 // Rows add their own alpha to the edge colour ("…14"), so it must be opaque: theme colours
 // such as border can carry alpha (#ffffff18), which would make "#ffffff1814", not a colour.
-const opaque = (c) => (typeof c === "string" && /^#[0-9a-f]{8}$/i.test(c) ? c.slice(0, 7) : c);
-const edgeColor = (t, edge) => opaque(edge === "amber" ? AMBER(t) : edge === "review" ? t.ansi6 ?? t.accent : edge === "neutral" ? t.border : t[edge] ?? t.border);
+// Such a colour is laid over the sidebar's own (`bg`) as it would show there, so a faint border
+// stays faint rather than turning into its full, unfaded colour.
+const hex = (c, i) => parseInt(c.slice(i, i + 2), 16);
+function opaque(c, bg = null) {
+  if (typeof c !== "string" || !/^#[0-9a-f]{8}$/i.test(c)) return c;
+  if (typeof bg !== "string" || !/^#[0-9a-f]{6}/i.test(bg)) return c.slice(0, 7);
+  const a = hex(c, 7) / 255;
+  return `#${[1, 3, 5].map((i) => Math.round(hex(c, i) * a + hex(bg, i) * (1 - a)).toString(16).padStart(2, "0")).join("")}`;
+}
+const edgeColor = (t, edge) => opaque(edge === "amber" ? AMBER(t) : edge === "review" ? t.ansi6 ?? t.accent : edge === "neutral" ? t.border : t[edge] ?? t.border, t.chrome);
 
 // ---- ask what's blocking, the review flow, close all merged ----
 
@@ -1645,7 +1653,9 @@ export function crew(view, t) {
     const open = () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) });
     return row({
       id: `crew-run-${r.key}`, detail: lead, detailTip: rowTip(a, now).join("\n"),
-      type: runTypeTag(t, r, `crew-run-${r.key}`), tags: levelTags(view, t, r, `crew-run-${r.key}`, true),
+      // No level tags: with no orchestrator, nobody would act on a level request, and the narrow
+      // sidebar keeps "orchestrator gone" beside Resume.
+      type: runTypeTag(t, r, `crew-run-${r.key}`),
       title: name.title, tip: [name.tip, startedTip(r.started), "No orchestrator: click for its card"].filter(Boolean).join("\n"),
       tone, status: "gone", address: null, run: r, open, edge: edgeColor(t, rowEdge(a)),
       action: actionButton(t, `crew-run-${r.key}-open`, "Resume", "Open its card: Resume there starts a new orchestrator that picks the run up", () => open()),
