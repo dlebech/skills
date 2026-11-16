@@ -47,7 +47,10 @@ Tier: T1
 Checked: <what was checked>
 Result: pass | fail | partial — <one line>
 Files: shared/proof/<file>, shared/proof/<file>
+Ran: <short sha> <command> — <result>
 ```
+
+Record every test, lint or build run as a `Ran:` line with the sha it ran against (`git rev-parse --short HEAD`, clean tree); the result is `pass` or `fail: <one line>`. Reuse a line only when its sha is HEAD, the tree is clean and it starts with `pass`; otherwise rerun.
 
 ## 5. The PR's Evidence section
 

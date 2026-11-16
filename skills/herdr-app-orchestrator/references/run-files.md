@@ -75,7 +75,7 @@ below and shows them in the run's Proof section.
 - Every task has a proof line, in any of the task shapes Harbormaster reads: `- Proof: T1 — <the
   evidence>` under a heading task, a `proof` column in a task table, or `Proof: T1 — …` inside
   a list item under `## Tasks`. The tier is `T0` to `T3`; the text after the dash is the evidence.
-- Tiers: `T0` CI or the local test suite is green (the default); `T1` T0 plus test output for the
+- Tiers: `T0` CI or the local test suite is green (the default, so not by itself a sign that a task needs no review); `T1` T0 plus test output for the
   changed behaviour; `T2` T1 plus screenshots or a recording; `T3` T2 plus a guided demo.
 
 ## proof.md and shared/proof/
@@ -93,7 +93,13 @@ Tier: T1
 Checked: <what was checked>
 Result: pass | fail | partial — <one line>
 Files: shared/proof/<file>, shared/proof/<file>
+Ran: <short sha> <command> — <result>
 ```
+
+`Ran:` (one line per test, lint or build run, repeatable) records the commit a run was made against, so
+reviewers and the orchestrator reuse it instead of rerunning it on the same sha; see
+[speed.md](speed.md). The result is `pass` or `fail: <one line>`. Reuse a line only when its sha
+equals the branch's HEAD, the tree is clean and the result starts with `pass`; otherwise rerun.
 
 A task's `## ` section is matched to the task by its id; its `Result` shows beside the task's
 evidence in the Proof section. A run with no `proof.md` shows its plan's evidence only.
@@ -176,17 +182,30 @@ that used the same prefix, is not this run's):
   the orchestrator works in the repository's checkout, whose folder other sessions share. Its
   sub-agents' transcripts count too. pi has no pid to session map, so a pi orchestrator is best effort:
   `pi <file>` is the earliest session in its folder whose header names that folder and that started
-  after its terminal did; a session started there with `/new` later is missed.
+  after its terminal did; a session started there with `/new` later is missed. opencode is the same
+  (`opencode <session id>`, in a terminal whose `status.app` starts with `opencode`), with the
+  session's sub-sessions counted too.
 - **Agents**: every session in the run's worktrees, `~/.herdr/worktrees/<repo>/<prefix>-*` for each
   repository in plan.md's `Repos:` (or the run's folder) and the integration worktree, found by Claude
   Code's (`~/.claude/projects/<folder with each character other than A-Z a-z 0-9 - as ->/`, with
   `<session>/subagents/*.jsonl`) and pi's (`~/.pi/agent/sessions/--<folder with / as ->--/`) folder
-  naming, so they are found after the worktrees are removed. Each is named by its worktree
+  naming, so they are found after the worktrees are removed. opencode keeps every session in one
+  SQLite database, `~/.local/share/opencode/opencode.db` (`OPENCODE_DATA_DIR` moves it), and each
+  session names its folder, so its sessions are listed by folder the same way. It is read, read-only,
+  by `scripts/opencode-usage.py`, which needs `python3` (there is often no `sqlite3` program); without
+  either, opencode adds nothing. Both of opencode's table generations are read (`session` + `message`,
+  `session_v2` + `session_message`); its older JSON files in `storage/` are not. Each is named by its worktree
   (`pda-t3`), the integration worktree's as `integration`.
 - **Each response once**: Claude Code writes one line per content block of a response, each with the
   same usage, so it counts each `message.id` once (they are one to one with `requestId`), across files
   too, as a resumed session repeats earlier messages; pi by session file and entry id, since pi's
-  8-character entry ids repeat across sessions.
+  8-character entry ids repeat across sessions; opencode by message id. opencode's reasoning tokens
+  count as output, and a compaction is a call like any other.
+
+opencode's database is not append-only, so its sessions are cached differently: `.tokens/opencode_<session>.tsv`
+holds the session's rows and its `.at` line holds a stamp (the newest message's update time and the
+message count) where the offset is. A session is read again, whole, only when its stamp changes, and rows
+once cached stay, so a message opencode deletes later still counts.
 
 `.tokens/` keeps, per session file, the usage rows read so far and an `.at` line: how far it read, the
 file's inode and mtime, the run start used, a checksum of its first 4 kB and of the 256 bytes before
