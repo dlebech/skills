@@ -140,14 +140,18 @@ logs that already exist: the orchestrator's and every agent's Claude Code, pi or
 found as `tokens.sh` finds them (so after the agents and their worktrees are gone too). The
 orchestrator spends nothing on it. Each tool call is sorted into a category (test, lint/typecheck,
 build, install, CI wait, agent wait, review, git, other), the time between tool calls is model
-time, and the orchestrator waiting for an answer to its `question.md` is user wait. It gives the
-run's wall time and its time per category, per agent (with its role: impl, rev, fix) and per task,
-as JSON (the format is at the top of the script); agents work in parallel, so their sums exceed
-the wall time. Each session's result is cached in the run's `.timing/` folder, so an unchanged run
-is read again in well under a second. `timing.js` runs it on the run's own machine.
+time, and the orchestrator waiting for an answer to its `question.md` is user wait. It gives, as
+JSON (the format is at the top of the script), the run's wall time; `critical_path`, where that
+time went: the orchestrator's own time by category plus its idle time, which add up to its part of
+the wall time; and the effort: time per category, per agent (with its role: impl, rev, fix) and
+per task, whose sums exceed the wall time, as agents work in parallel. Each transcript's events and
+result are cached in the run's `.timing/` folder, so an unchanged run is read again in well under a
+second, and a live run's transcripts are read only from where the last read stopped. `timing.js`
+runs it on the run's own machine.
 
 The rules that sort tool calls are a small table, `herdr-app/mods/harbormaster/categories.tsv`:
-one rule a line, a category, a tool name pattern and a command pattern, the first match wins. Edit
+one rule a line, a category, a tool name pattern and a command pattern, the first match wins. A
+call gets one category: of the commands in a shell call, the first that is not git or other. Edit
 it in the repository and run `install.sh` again (an edit in the installed copy is overwritten on the
 next install).
 

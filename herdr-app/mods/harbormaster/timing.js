@@ -29,8 +29,10 @@ const cache = new Map();
 // The last breakdown read for a run, or null: for drawing without waiting.
 export const cachedTiming = (run) => cache.get(run.key)?.value ?? null;
 
-// The run's breakdown, read at most every `maxAge` ms (timing.sh's own cache makes a
-// reread of an unchanged run cheap, but it still forks jq for every session file).
+// The run's breakdown, read at most every `maxAge` ms. timing.sh's own cache makes a
+// reread of an unchanged run cheap and reads only what a live run's transcripts added,
+// but the result of a session that changed is worked out again from all its events, so
+// keep live runs at a minute or more.
 // Resolves with null when it cannot be read; never rejects.
 export function loadTiming(run, { maxAge = 60000 } = {}) {
   const hit = cache.get(run.key);
@@ -39,7 +41,9 @@ export function loadTiming(run, { maxAge = 60000 } = {}) {
   const pending = (async () => {
     const [script, table] = await Promise.all([shipped("timing.sh"), shipped("categories.tsv")]);
     if (!script || table == null) return null;
-    const out = await exec("sh", ["-c", script, "sh", run.dir, table], { on: run.machine, timeout: 120000 });
+    // The first read of a big run parses every transcript; timing.sh keeps what it has
+    // read as it goes, so even a read cut short by the timeout makes the next one quicker.
+    const out = await exec("sh", ["-c", script, "sh", run.dir, table], { on: run.machine, timeout: hit?.value ? 120000 : 600000 });
     if (out.code !== 0) return null;
     return JSON.parse(out.stdout);
   })().catch(() => null).then((value) => {

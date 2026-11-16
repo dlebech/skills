@@ -52,7 +52,9 @@
 #     it to an answer: an input naming an inbox/*.message, one starting "Answer to", or
 #     plain text from a person, not a <tagged> message from hc or the harness; or a call
 #     that removes question.md), else agent_wait while any agent is in a turn, else
-#     idle. An agent's idle time is not counted.
+#     idle. Only this run's question.md counts (a Write to it, or a shell command whose
+#     target, with the call's own VAR= settings, ~ and $HOME expanded, is it); a
+#     question.md elsewhere, as a demo, is not. An agent's idle time is not counted.
 #   - agent_wait: for the orchestrator, waiting on its agents (`hc wait`, `sleep`
 #     while polling, its idle time while agents work); for any other agent, waiting on
 #     its own sub-agents or background jobs (an Agent call, `hc wait`).
@@ -103,6 +105,8 @@ dir=${1%/}
 table=$2
 [ "$table" != - ] || table=$(cat)
 [ -e "$dir/orchestrator.json" ] || { echo "no orchestrator.json in $dir" >&2; exit 1; }
+# Absolute, as the paths a call writes are compared with it.
+dir=$(cd "$dir" && pwd -P) || exit 1
 claude=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
 pi=${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}
 opencode=${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}
@@ -325,11 +329,22 @@ def classify($rules; $orc): (.tool // "") as $tool | parts as $parts
   | [$parts[] | . as $p | ([$rs[] | . as $r | select($p | test($r.text; "i")) | .cat] | first) // "other"] as $cats
   | ([$cats[] | select(. != "git" and . != "other")] | first)
     // (if any($cats[]; . == "git") then "git" else "other" end);
-# Does a call write the run question.md (not an agent "<name>-question.md"), or remove it?
-def asks: if (.tool // "") | test("^(write|edit|multiedit)$"; "i") then (.text // "") | test("(^|/)question\\.md$")
-  elif (.tool // "") | shell then any(parts[]; test("^(mv|cp|tee)\\b.*[/\\s]question\\.md\\b|>\\s*\\S*/\\.?question\\.(md|tmp)\\b"))
-  else false end;
-def unasks: ((.tool // "") | shell) and any(parts[]; test("^rm\\b.*[/\\s]question\\.md\\b"));
+# The question.md files a shell call writes (w) or removes (r), with the variables it
+# sets ("R=/x; mv $R/.question.tmp $R/question.md") and ~ or $HOME expanded.
+def vars: [match("(?:^|[\\s;&|(])([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|\u0027[^\u0027]*\u0027|[^\\s;&|]*)"; "g")
+  | {key: .captures[0].string, value: (.captures[1].string | gsub("^[\"\u0027]|[\"\u0027]$"; ""))}] | from_entries;
+def expand($v): gsub("\\$\\{?(?<n>[A-Za-z_][A-Za-z0-9_]*)\\}?"; $v[.n] // (if .n == "HOME" then $home else "$" + .n end)) | sub("^~"; $home);
+def qfind($raw; $parts): ($raw | vars) as $v
+  | {w: [$parts[] | select(test("^(mv|cp|tee)\\b.*question\\.md\\b|>\\s*\\S*question\\.(md|tmp)\\b"))
+          | [match("\\S*question\\.(md|tmp)\\b"; "g").string] | last | expand($v)],
+     r: [$parts[] | select(test("^rm\\b.*question\\.md\\b")) | [match("\\S*question\\.md\\b"; "g").string] | last | expand($v)]};
+def qinfo: .q // (if (.tool // "" | shell) and ((.text // "") | test("question\\.(md|tmp)")) then qfind(.text; parts) else {w: [], r: []} end);
+# Is a path the question.md of this run (or the .question.tmp written before it)? A demo
+# or a question of another run is not this run waiting.
+def inrun: sub("/\\.?question\\.(md|tmp)$"; "") == $rundir;
+def asks: if (.tool // "") | test("^(write|edit|multiedit)$"; "i") then (.text // "") == ($rundir + "/question.md")
+  else any(qinfo.w[]; inrun) end;
+def unasks: any(qinfo.r[]; inrun);
 # Does an input answer the open question: an inbox message, "Answer to", or a person
 # typing (not a <tagged> message from hc or the harness, nor a compaction summary)?
 def answer: test("/inbox/\\S+\\.message|^\\s*Answer to")
@@ -381,7 +396,8 @@ fromjson? | select(type == "object" and .isSidechain != true) | (.timestamp // "
 | if .type == "assistant" then
     ((.message.content // []) | if type == "array" then .[] else empty end | select(.type == "tool_use")
       | {t: $t, e: "call", id: .id, tool: .name}
-        + if (.name // "" | shell) then {parts: (.input | about | commands)} else {text: (.input | about | .[0:500])} end),
+        + if (.name // "" | shell) then (.input | about) as $raw | ($raw | commands) as $p
+            | {parts: $p} + (if $raw | test("question\\.(md|tmp)") then {q: qfind($raw; $p)} else {} end) else {text: (.input | about | .[0:500])} end),
     {t: $t, e: "model"},
     (if (.message.stop_reason // "") | IN("end_turn", "stop_sequence") then {t: $t, e: "end"} else empty end)
   elif .type == "user" then
@@ -399,7 +415,8 @@ fromjson? | select(type == "object" and .type == "message") | (.timestamp // "" 
   elif $m.role == "assistant" then
     (($m.content // []) | if type == "array" then .[] else empty end | select(.type == "toolCall")
       | {t: $t, e: "call", id: .id, tool: .name}
-        + if (.name // "" | shell) then {parts: (.arguments | about | commands)} else {text: (.arguments | about | .[0:500])} end),
+        + if (.name // "" | shell) then (.arguments | about) as $raw | ($raw | commands) as $p
+            | {parts: $p} + (if $raw | test("question\\.(md|tmp)") then {q: qfind($raw; $p)} else {} end) else {text: (.arguments | about | .[0:500])} end),
     {t: $t, e: "model"},
     (if ($m.stopReason // "") | IN("stop", "aborted", "error") then {t: $t, e: "end"} else empty end)
   elif $m.role == "toolResult" then {t: $t, e: "result", id: $m.toolCallId}
@@ -409,7 +426,7 @@ fromjson? | select(type == "object" and .type == "message") | (.timestamp // "" 
 CLAUDE_PAT='"type": *"(assistant|user|queue-operation)"'
 PI_PAT='"type": *"message"'
 
-jqs() { jq --arg table "$table" --argjson since "${since:-0}" --argjson until "${until:-null}" "$@"; }
+jqs() { jq --arg rundir "$dir" --arg home "$HOME" --arg table "$table" --argjson since "${since:-0}" --argjson until "${until:-null}" "$@"; }
 since=$(printf '%s\n' "$started" | jqs -R "$LIB"' ms // 0') || exit 1
 until=$(printf '%s\n' "$closed" | jqs -R "$LIB"' ms') || exit 1
 # What every cached result depends on besides its file: a change to this logic or the
