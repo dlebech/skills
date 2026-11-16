@@ -948,11 +948,12 @@ function foldLine(view, t, key, tip, items) {
 }
 
 // A PR as a row with room to spare: its whole title, then repo, checks and review.
-function prDetail(t, pr, i, related = false) {
+// `away`: the run is parked or closed, so failing checks are dim, not red (tell.js prFacts).
+function prDetail(t, pr, i, related = false, away = false) {
   const tone = PR_TONE[pr.state] ?? "dim";
   const c = pr.checks ?? {};
   const checkText = c.fail ? `✗ ${c.fail} failing` : c.pending ? `… ${c.pending} running` : c.pass ? `✓ ${c.pass} checks` : null;
-  const checkColor = c.fail ? t.blocked : c.pending ? t.dim : PASS(t);
+  const checkColor = c.fail ? (away ? t.dim : t.blocked) : c.pending ? t.dim : PASS(t);
   const review = reviewText(pr);
   const state = prStateText(pr);
   return h_flex().id(`prd-${related ? "rel" : "own"}-${i}-${pr.url}`).gap(8).items_start().p(8).rounded(7).bg(t.raised + "88").cursor_pointer()
@@ -1307,11 +1308,11 @@ function runDetail(view, t, r, ctx) {
       .when(Boolean(comments), (e) => e.child(div().pt(2).child(comments)))))
     // Who reviews means nothing before there is a PR to review: the toggle comes with the first.
     .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests", r.away || !prs.length ? null : flowToggle(t, r, `pane-${r.key}`))
-      .children(prs.map((p, i) => prDetail(t, p, i)))
+      .children(prs.map((p, i) => prDetail(t, p, i, false, Boolean(r.away))))
       .when(prs.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet"))))
     .when(r.issues.length + related.length > 0, (el) => el.child(section(t, "Issues and related PRs")
       .children(r.issues.map((url) => issueRow(t, url)))
-      .children(related.map((p, i) => prDetail(t, p, i, true)))))
+      .children(related.map((p, i) => prDetail(t, p, i, true, Boolean(r.away))))))
     .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(view, t, r, stages)))
     .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
