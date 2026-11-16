@@ -65,7 +65,9 @@ export function parseQuestion(text) {
   const structured = SECTIONS.some((k) => parts[k]);
   const options = structured ? optionsOf(body("options")) : [];
   const rec = recommendedIndex(body("recommended"), options);
-  const why = body("recommended").split("\n").find((l) => l.trim())?.replace(/^[^:—–]*[:—–]\s*/, "").trim() ?? "";
+  // Only what follows a separator is why: a bare "2" or label has none.
+  const first = body("recommended").split("\n").find((l) => l.trim()) ?? "";
+  const why = /[:—–]/.test(first) ? first.replace(/^[^:—–]*[:—–]\s*/, "").trim() : "";
   return {
     title,
     structured,
@@ -77,6 +79,35 @@ export function parseQuestion(text) {
     risk: body("risk"),
     blocks: body("blocks"),
   };
+}
+
+// The need box's lines for a question, read from its summary alone: what is asked, and the
+// recommendation in short ("Recommends Merge now — t5's change is small"), or null without one.
+export function needHead(q) {
+  if (!q) return null;
+  const rec = q.recommended !== null ? q.options[q.recommended] : null;
+  const text = rec ? `${rec.label}${q.why ? ` — ${q.why}` : ""}` : q.why;
+  return { title: `Asks you: ${q.title}`, rec: text ? `Recommends ${text}` : null };
+}
+
+// The question's sections as the need box's Details list them, [{label, text}], each whole
+// (line breaks kept) and only when it has text; the options are buttons, so not here. A
+// free-form question (`raw` is question.md's text) is its text below the title line.
+export function questionSections(q, raw) {
+  if (!q) return [];
+  if (!q.structured) {
+    const lines = (raw ?? "").replace(/\r\n?/g, "\n").split("\n");
+    const rest = lines.slice(lines.findIndex((l) => l.trim()) + 1).join("\n").trim();
+    return rest ? [{ label: "Question", text: rest }] : [];
+  }
+  const rec = q.recommended !== null ? q.options[q.recommended] : null;
+  return [
+    { label: "Question", text: q.question },
+    { label: "Recommended", text: rec ? `${rec.label}${q.why ? ` — ${q.why}` : ""}` : q.why },
+    { label: "Evidence", text: q.evidence },
+    { label: "Risk", text: q.risk },
+    { label: "Blocks", text: q.blocks },
+  ].filter((s) => s.text);
 }
 
 // The message an answer writes to a run's inbox (run-files.md): the answer to the question
