@@ -15,7 +15,7 @@ and it keeps nothing the files do not.
 | `plan.md` | orchestrator | everyone | First line `Status: <one line>` (`running`, `waiting for user: <summary>`, `blocked: <reason>`, `finished`), then `Prefix:` and the tasks with their states. |
 | `status.json` | `set-status.sh`, `tokens.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated, tokens}`. Outlives the orchestrator. `set-status.sh` keeps fields other scripts write. |
 | `sessions` | `tokens.sh` | `tokens.sh` | Every session the orchestrator's terminal has had, one `<kind> <session id or file>` a line (below). |
-| `.tokens/` | `tokens.sh` | `tokens.sh` | Its cache: each session file's parsed usage and how far it was read. Safe to delete. |
+| `.tokens/` | `tokens.sh` | `tokens.sh` | Its cache: each session file's parsed usage and how far it was read (below). |
 | `decisions.md` | orchestrator | anyone | The decisions log: what was decided, by whom, why (the line format is below). |
 | `question.md` | orchestrator | Harbormaster, captain, you | The open question to you, if any (below). Removed once answered. |
 | `inbox/*.message` | anyone who answers or instructs | orchestrator | Messages to the orchestrator (below). The orchestrator renames a message it has read to `.handled`. |
@@ -152,8 +152,10 @@ A line that does not read as `<UTC time> <topic>: <decision> — <why>` is shown
 
 ## Tokens: status.json `tokens`, sessions and .tokens/
 
-`set-status.sh` runs `scripts/tokens.sh <run-directory>` after every publish (quietly: a failure never
-stops the status; run it by hand to see why). It writes `status.json`'s `tokens`:
+`set-status.sh` runs `scripts/tokens.sh --print <run-directory>` on every publish and merges what it
+prints in its own write of `status.json` (quietly: a failed count never stops the status, and keeps the
+last one; run `tokens.sh <run-directory>` by hand to see why, which also writes the count). It is
+`status.json`'s `tokens`:
 
 ```json
 {"total": 26222515, "input": 588, "output": 212199, "cache_read": 25133155, "cache_write": 876573,
@@ -162,28 +164,40 @@ stops the status; run it by hand to see why). It writes `status.json`'s `tokens`
 ```
 
 `total` is the sum of the four kinds, as Harbormaster's context size is; `by_agent` lists the
-orchestrator first, then agents by size. What it counts, from the session files on this computer:
+orchestrator first, then agents by size. A count only grows: one lower than the count already in
+`status.json` is never written. What it counts, from the session files on this computer, and only
+messages from orchestrator.json's `started` on (what a session said before the run, or an older run
+that used the same prefix, is not this run's):
 
-- **The orchestrator**: each session listed in `sessions`. On every run it asks `hc get <terminal>` for
-  the orchestrator's pid, reads the session id from Claude Code's `~/.claude/sessions/<pid>.json`, and
-  appends `claude <id>` if new; for pi, which has no such map, the newest session in its folder,
-  `pi <file>`. So a resumed orchestrator's earlier sessions still count, although the orchestrator works
-  in the repository's checkout, whose folder other sessions share. Its sub-agents' transcripts count too.
+- **The orchestrator**: each session listed in `sessions`. On every count it asks `hc get <terminal>`
+  for the orchestrator's pid, reads the session id from Claude Code's `~/.claude/sessions/<pid>.json`,
+  and appends `claude <id>` if new. So a resumed orchestrator's earlier sessions still count, although
+  the orchestrator works in the repository's checkout, whose folder other sessions share. Its
+  sub-agents' transcripts count too. pi has no pid to session map, so a pi orchestrator is best effort:
+  `pi <file>` is the earliest session in its folder whose header names that folder and that started
+  after its terminal did; a session started there with `/new` later is missed.
 - **Agents**: every session in the run's worktrees, `~/.herdr/worktrees/<repo>/<prefix>-*` for each
   repository in plan.md's `Repos:` (or the run's folder) and the integration worktree, found by Claude
   Code's (`~/.claude/projects/<folder with each character other than A-Z a-z 0-9 - as ->/`, with
   `<session>/subagents/*.jsonl`) and pi's (`~/.pi/agent/sessions/--<folder with / as ->--/`) folder
-  naming, so they are found after the worktrees are removed. Only messages from orchestrator.json's
-  `started` on count, so an older run that used the same prefix is not. Each is named by its worktree
+  naming, so they are found after the worktrees are removed. Each is named by its worktree
   (`pda-t3`), the integration worktree's as `integration`.
 - **Each response once**: Claude Code writes one line per content block of a response, each with the
   same usage, so it counts each `message.id` once (they are one to one with `requestId`), across files
-  too, as a resumed session repeats earlier messages; pi by its entry `id`.
+  too, as a resumed session repeats earlier messages; pi by session file and entry id, since pi's
+  8-character entry ids repeat across sessions.
 
-`.tokens/` keeps, per session file, the usage rows read so far and how far it read (size, inode, and
-the run start used); a rerun reads only bytes added since, up to the last whole line, and rereads a
-file that was replaced or shrank. Harbormaster reads only `status.json`, so the numbers show for runs
-on other machines and stay after the orchestrator is gone.
+`.tokens/` keeps, per session file, the usage rows read so far and an `.at` line: how far it read, the
+file's inode and mtime, the run start used, a checksum of its first 4 kB and of the 256 bytes before
+that point, and the agent's name. A rerun reads only bytes added since, up to the last whole line, and
+rereads a file that was replaced, shrank or was rewritten. The count sums every cached file, so a
+session file deleted later (Claude Code removes old ones after `cleanupPeriodDays`, 30 by default)
+still counts. When no session file is newer than the last count and none came or went, a count less
+than a minute old is reused as is (`.tokens/tokens.json`, `.tokens/.stamp`). Deleting `.tokens/` is
+safe while the session files are there. Writes to `status.json` go through `lib.sh`'s
+`status_update`, under a lock (`.status.lock`), so `set-status.sh` and `tokens.sh` publishing at once
+do not undo each other. Harbormaster reads only `status.json`, so the numbers show for runs on other
+machines and stay after the orchestrator is gone.
 
 ## .captain-decisions.json
 

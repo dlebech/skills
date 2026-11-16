@@ -15,11 +15,34 @@ status_read() {
     { echo "$1/status.json is not a JSON object; fix or remove it" >&2; return 1; }
 }
 
-# status_merge <run-directory> <json-object>: sets the object's keys in status.json,
-# keeping the other fields; atomic, through a temporary file of its own.
-status_merge() {
-  local old tmp=$1/.status-merge.$$.tmp
-  old=$(status_read "$1") || return 1
-  jq -n --argjson old "$old" --argjson new "$2" '$old + $new' >"$tmp" && mv "$tmp" "$1/status.json" ||
-    { rm -f "$tmp"; return 1; }
+# status_update <run-directory> <jq filter> [<jq argument>...]: rewrites status.json as
+# the filter makes it from the current one (`.`, {} when there is none), atomically and
+# under a lock, so two scripts publishing at once cannot undo each other's write.
+status_update() {
+  local dir=$1 filter=$2 old tmp=$1/.status.$$.tmp rc=0
+  shift 2
+  status_lock "$dir"
+  old=$(status_read "$dir") &&
+    jq -n --argjson old "$old" "$@" "\$old | $filter" >"$tmp" && mv "$tmp" "$dir/status.json" || rc=1
+  rm -f "$tmp"
+  status_unlock "$dir"
+  return $rc
 }
+
+# The lock status_update holds: a file bash creates only if it is not there (set -C,
+# an exclusive create; mkdir is not atomic in every coreutils: uutils' lets two racing
+# calls both succeed). A holder only runs one jq, so a lock still there after 5 s is
+# left over from a killed script and taken over.
+status_lock() {
+  local tries=0
+  until (set -C; : >"$1/.status.lock") 2>/dev/null; do
+    tries=$((tries + 1))
+    [ $tries -lt 50 ] || { rm -f "$1/.status.lock"; tries=0; }
+    sleep 0.1
+  done
+}
+status_unlock() { rm -f "$1/.status.lock"; }
+
+# Sets `tokens` from $tokens (tokens.sh's count), unless it is null or lower than the
+# count already there: a count only grows, so a lower one means sessions went missing.
+STATUS_TOKENS_FILTER='if $tokens != null and ($tokens.total // 0) >= (.tokens.total // 0) then .tokens = $tokens else . end'

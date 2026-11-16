@@ -104,8 +104,10 @@ How many tokens a run has used, across its orchestrator and every agent it ran, 
 `skills/herdr-app-orchestrator/scripts/tokens.sh` into the run's `status.json` (`tokens`). The
 orchestrator does not run it itself: `set-status.sh` runs it on every publish, and later runs read only
 what the session files gained since, so it stays cheap. It reads Claude Code's and pi's own session
-files on the orchestrator's computer, including those of agents already killed and worktrees already
-removed, and those of an orchestrator resumed in a new terminal. A run's card shows the total in its
+files on the orchestrator's computer, from the run's start on, including those of agents already
+killed and worktrees already removed, those of an orchestrator resumed in a new terminal (best effort
+for a pi orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
+down. A run's card shows the total in its
 meta line (`26M tok`); the run pane has a **Tokens** section with the split by kind (output, cache
 read, cache write, input; exact counts on hover) and each agent's share as a bar, the orchestrator
 first, then the agents by size, named by their worktree (`pda-t3`). The narrow Crew block leaves it
