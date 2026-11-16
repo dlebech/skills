@@ -124,7 +124,9 @@ function runRow(view, t, s, maxTokens) {
       .child(div().truncate().text_size(11).text_color(t.dim).child(meta)))
     .child(div().flex_none().text_size(12).text_color(t.foreground).child(s.timed ? durationText(s.wall) : "reading…"));
   const figures = h_flex().gap(8).items_center().pl(19).text_size(11)
-    .child(div().flex_1().min_w(0).child(catBar(t, `run-${s.key}-cp`, s.critical_path)))
+    // A run whose orchestrator's session was not found has a wall time and nothing to split it by.
+    .child(div().flex_1().min_w(0).child(s.timed && !catTotal(s.critical_path)
+      ? div().text_color(t.dim).child("no time data") : catBar(t, `run-${s.key}-cp`, s.critical_path)))
     .child(div().flex_none().w(44).text_color(t.dim).child(s.tokens ? tokenText(s.tokens.total) : "—"))
     .child(div().flex_none().w(72).child(tokenBar(t, `run-${s.key}-tok`, s.tokens, maxTokens)))
     .child(div().id(`run-${s.key}-res`).flex_none().w(150).truncate().text_color(t.dim)
