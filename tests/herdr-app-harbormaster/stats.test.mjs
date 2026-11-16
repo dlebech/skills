@@ -4,7 +4,7 @@
 // Run: node --import ./loader.mjs --test stats.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseHistory, summaryOf, mergeRuns, acrossRuns, liveGroups, taskOfName, cats, addCats, catTotal, tokenParts } from "../../herdr-app/mods/harbormaster/statsdata.js";
+import { parseHistory, summaryOf, mergeRuns, acrossRuns, liveGroups, isRunProp, taskOfName, cats, addCats, catTotal, tokenParts } from "../../herdr-app/mods/harbormaster/statsdata.js";
 
 const line = (o) => JSON.stringify({ v: 1, folder: "/p/skills", branch: "b", type: "feat", started: "2026-11-01T10:00:00Z", wall: 100, critical_path: { model: 60, idle: 40 }, ...o });
 
@@ -164,14 +164,24 @@ test("acrossRuns: sums critical paths, by group, biggest first; runs without tim
 
 test("liveGroups: crews with their agents, the rest after, only terminals the snapshot has", () => {
   const u = (cpu, rssKb) => ({ cpu, rssKb, own: { cpu, rssKb }, programs: [] });
-  const snap = { terminals: { o1: u(10, 1000), a1: u(80, 2000), a2: u(5, 10), x9: u(30, 5), y1: u(1, 1) } };
+  const snap = { terminals: { o1: u(10, 1000), a1: u(80, 2000), a2: u(5, 10), x9: u(30, 5), y1: u(0.5, 1) } };
   const groups = liveGroups([
     { title: "Run one", root: "o1", name: "orc", members: [{ address: "a1", name: "impl-x-t1" }, { address: "gone", name: "z" }] },
     { title: "Empty", root: "nope", members: [] },
   ], snap, { x9: "stray" });
-  assert.deepEqual(groups.map((g) => [g.title, g.rows.map((r) => r.name), g.cpu]), [
-    ["Run one", ["orc", "impl-x-t1"], 90],
-    ["Not in a run", ["stray", "a2", "y1"], 36],
+  // Idle terminals in no run (under 1% and 100 MB) are counted, not listed.
+  assert.deepEqual(groups.map((g) => [g.title, g.rows.map((r) => r.name), g.cpu, g.hidden]), [
+    ["Run one", ["orc", "impl-x-t1"], 90, undefined],
+    ["Not in a run", ["stray", "a2"], 35.5, { count: 1, cpu: 0.5, rssKb: 1 }],
   ]);
+  assert.equal(groups[1].rows[0].term, "stray");
   assert.deepEqual(liveGroups([], {}), []);
+});
+
+test("isRunProp: a run directory, with ~ or a trailing slash", () => {
+  const s = { run: "/home/u/.herdr/hc-orchestration/skills/x" };
+  assert.ok(isRunProp(s, "/home/u/.herdr/hc-orchestration/skills/x/"));
+  assert.ok(isRunProp(s, "~/.herdr/hc-orchestration/skills/x"));
+  assert.ok(!isRunProp(s, "~/.herdr/hc-orchestration/skills/xy"));
+  assert.ok(!isRunProp(s, null));
 });

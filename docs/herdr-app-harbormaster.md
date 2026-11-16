@@ -58,7 +58,7 @@ To see a run's PRs, related PRs, issues and tasks while you work in its orchestr
 
 To use the Crew block in a layout of your own, add a block with `{ "mod": "harbormaster", "props": { "role": "crew" } }`.
 
-To see where time, tokens and CPU go, click **Stats** at the top of the overview. It opens the stats view in a tab of its own named Stats (or shows the one already open). To put it in a layout or pane of your own, use `{ "mod": "harbormaster", "props": { "role": "stats" } }`. See [Stats](#stats).
+To see where time, tokens and CPU go, click **Stats** at the top of the overview. It opens the stats view in a tab of its own named Stats (or shows the one already open). To put it in a layout or pane of your own, use `{ "mod": "harbormaster", "props": { "role": "stats" } }`. Add `"run": "<run directory>"` (`~` allowed) to open it on one run: that run first, unfolded, with its tasks unfolded. See [Stats](#stats).
 
 ## Another computer, connected over ssh
 
@@ -201,7 +201,8 @@ section folds with a click on its title.
 - **CPU and memory now.** Every agent terminal from the last 5-second sample, under its orchestrator (and
   the captain), with CPU % (100% is one core), memory, and its busiest commands; then the terminals in no
   run, then **Other processes**: the busiest processes outside every agent (a browser, Docker, Herdr
-  itself), so fan noise can be explained. Hover a row for the agent's own share and each program.
+  itself), so fan noise can be explained. Hover a row for the agent's own share and each program, and
+  its terminal's name. Terminals in no run under 1% CPU and 100 MB (idle shells) are one "+N more" line.
 - **Runs.** Per run: its wall time, a bar of where it went, its tokens (a bar as wide as its share of
   the largest run's: fresh tokens, that is input, output and cache writes, in blue, cache reads in green;
   exact numbers on hover), and its CPU time and memory peak (all its agents together). Click a run for

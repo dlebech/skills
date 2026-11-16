@@ -6,15 +6,17 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { CATEGORIES, cachedTiming, durationText } from "./timing.js";
 import { resourcesOf, resourceSnapshot, otherProcesses, memText } from "./resources.js";
-import { summaryOf, mergeRuns, acrossRuns, liveGroups, cachedHistory, tokenParts, catTotal } from "./statsdata.js";
+import { summaryOf, mergeRuns, acrossRuns, liveGroups, cachedHistory, tokenParts, catTotal, isRunProp } from "./statsdata.js";
 import { facts, orchestratorsOf, workersOf, captainOf } from "./live.js";
+import { props } from "herdr";
 import { tokenText } from "./context.js";
 import { runName, withTip, typeTag, ago, plural } from "./ui.js";
 
 // Each category's colour, from the theme, so light and dark both work; idle is the track's.
 const COLOR = {
   model: (t) => t.accent, test: (t) => t.ansi2, lint: (t) => t.ansi3, build: (t) => t.ansi5, install: (t) => t.ansi6,
-  ci_wait: (t) => t.ansi4, agent_wait: (t) => t.ansi12 ?? t.ansi4, review: (t) => t.ansi13 ?? t.ansi5, git: (t) => t.ansi11 ?? t.ansi3,
+  // agent_wait is usually the biggest part, so it gets a colour far from model's accent.
+  ci_wait: (t) => t.ansi4, agent_wait: (t) => t.ansi13 ?? t.ansi5, review: (t) => t.ansi1, git: (t) => t.ansi11 ?? t.ansi3,
   user_wait: (t) => t.blocked, other: (t) => t.muted, idle: (t) => t.border,
 };
 const LABEL = { ...Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label])), idle: "idle" };
@@ -54,10 +56,11 @@ function tokenBar(t, id, tokens, max) {
   if (!p) return div().flex_1().min_w(0);
   const all = p.fresh + p.cached;
   const exact = (n) => n.toLocaleString("en");
-  const tip = `${exact(tokens.total)} tokens\nfresh ${exact(p.fresh)}: input ${exact(tokens.input)}, output ${exact(tokens.output)}, cache write ${exact(tokens.cache_write)}\ncache read ${exact(p.cached)}`;
+  const tip = `${exact(tokens.total)} tokens (${pctText(p.fresh, all)} fresh)\nfresh ${exact(p.fresh)}: input ${exact(tokens.input)}, output ${exact(tokens.output)}, cache write ${exact(tokens.cache_write)}\ncache read ${exact(p.cached)}`;
   return div().id(id).flex_1().min_w(0).h(6).tooltip(tip)
     .child(h_flex().h_full().rounded(3).overflow_hidden().w(`${Math.max(1, pct(all, max)).toFixed(2)}%`)
-      .child(div().h_full().w(`${pct(p.fresh, all).toFixed(2)}%`).bg(FRESH(t)))
+      // Fresh tokens are a few % of a run's: kept visible at a few pixels.
+      .child(div().h_full().flex_none().w(`${pct(p.fresh, all).toFixed(2)}%`).when(p.fresh > 0, (el) => el.min_w(3)).bg(FRESH(t)))
       .child(div().h_full().flex_1().bg(CACHED(t))));
 }
 
@@ -202,7 +205,7 @@ function liveSection(view, t) {
   const cap = captainOf(ctx).terminal;
   if (cap) crews.push({ title: "Captain", root: cap.address, name: "captain", members: workersOf(cap.address, ctx).map((w) => ({ address: w.address, name: w.name })) });
   for (const o of orchestratorsOf(ctx)) {
-    crews.push({ title: o.labels?.["run.topic"] || o.name || o.address, root: o.address, name: o.name || "orchestrator",
+    crews.push({ title: o.labels?.["run.topic"] || o.name || o.address, root: o.address, name: "orchestrator",
       members: workersOf(o.address, ctx).map((w) => ({ address: w.address, name: w.name })) });
   }
   const names = Object.fromEntries(Object.keys(snap.terminals ?? {}).map((a) => [a, nameOf(a)]));
@@ -229,8 +232,10 @@ function liveSection(view, t) {
         .child(div().flex_none().w(48).child("memory")).child(div().flex_1().child("its busiest commands")))
       .children(groups.flatMap((g, gi) => [head(`lg-${gi}`, g.title, g.cpu, g.rssKb),
         ...g.rows.map((r) => row(`lr-${r.address}`, r.name, r.cpu, r.rssKb, progText(r),
-          [`${r.name} (${r.address})`, r.own ? `the agent itself: ${Math.round(r.own.cpu)}% · ${memText(r.own.rssKb)}` : null,
-            ...r.programs.map((g) => `${g.name}${g.count > 1 ? ` ×${g.count}` : ""}: ${Math.round(g.cpu)}% · ${memText(g.rssKb)}`)].filter(Boolean).join("\n")))]))
+          [`${r.name} (${[r.term !== r.name ? r.term : null, r.address].filter(Boolean).join(", ")})`, r.own ? `the agent itself: ${Math.round(r.own.cpu)}% · ${memText(r.own.rssKb)}` : null,
+            ...r.programs.map((g) => `${g.name}${g.count > 1 ? ` ×${g.count}` : ""}: ${Math.round(g.cpu)}% · ${memText(g.rssKb)}`)].filter(Boolean).join("\n"))),
+        ...(g.hidden ? [div().pl(8).h(18).text_size(11).text_color(t.dim)
+          .child(`+${g.hidden.count} more, under 1% and 100M each: ${Math.round(g.hidden.cpu)}% · ${memText(g.hidden.rssKb)} together`)] : [])]))
       .when(other.length > 0, (el) => el.child(head("lg-other", "Other processes", other.reduce((s, p) => s + p.cpu, 0), other.reduce((s, p) => s + p.rssKb, 0)))
         .children(other.map((p) => row(`lo-${p.machine ?? ""}-${p.pid}`, p.name, p.cpu, p.rssKb, [p.program !== p.name ? p.program : null, p.machine, `pid ${p.pid}`].filter(Boolean).join(" · "), null))))
       .when(groups.length === 0 && other.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child("No sample yet (Linux and macOS only)."))));
@@ -244,14 +249,29 @@ export function statsRuns(view) {
   return mergeRuns(open, cachedHistory());
 }
 
+// props().run, a run directory: that run first and open, with its tasks open, once each (so
+// they can still be folded by hand). For opening the view on one run, and for screenshots.
+function focusRun(view, runs) {
+  const dir = props()?.run;
+  if (!dir) return runs;
+  const mine = runs.filter((s) => isRunProp(s, dir));
+  view.statsOpen ??= new Set();
+  view.statsFocused ??= new Set();
+  const open = (key) => { if (!view.statsFocused.has(key)) { view.statsFocused.add(key); view.statsOpen.add(key); } };
+  for (const s of mine) { open(s.key); for (const k of s.tasks) open(`${s.key}#${k.id}`); }
+  return [...mine, ...runs.filter((s) => !mine.includes(s))];
+}
+
 export function statsView(view, t) {
-  const runs = statsRuns(view);
+  const runs = focusRun(view, statsRuns(view));
   return v_flex().id("stats").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .child(h_flex().flex_none().px(14).pt(10).pb(6).gap(8).items_center()
       .child(div().text_size(13).font_semibold().text_color(t.foreground).child("Stats"))
       .child(div().text_size(11).text_color(t.dim).child("time, tokens, CPU and memory, from logs the runs already leave")))
     .child(v_flex().id("stats-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
       .child(across(view, t, runs))
-      .child(liveSection(view, t))
-      .child(runsSection(view, t, runs)));
+      // Opened on one run, the runs come before the live table, so that run is in view.
+      .when(!props()?.run, (el) => el.child(liveSection(view, t)))
+      .child(runsSection(view, t, runs))
+      .when(Boolean(props()?.run), (el) => el.child(liveSection(view, t))));
 }

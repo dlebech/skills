@@ -172,21 +172,31 @@ export function acrossRuns(runs, by = "all") {
 
 // The live CPU table: each orchestrator (and the captain) with its agents, then the agents in
 // no crew, from the live snapshot; rows only for terminals the snapshot has.
-// `crews` [{ title, root: address, members: [{address, name}] }]; `snapshot` resourceSnapshot().
+// `crews` [{ title, root: address, name, members: [{address, name}] }]; `snapshot` resourceSnapshot().
+// Terminals in no crew below LOOSE_MIN (idle shells, mostly) are not rows: the group's `hidden`
+// counts them, { count, cpu, rssKb }.
+export const LOOSE_MIN = { cpu: 1, rssKb: 100 * 1024 };
 export function liveGroups(crews, snapshot, names = {}) {
   const terms = obj(snapshot?.terminals);
   const used = new Set();
   const row = (address, name) => {
     used.add(address);
     const u = terms[address];
-    return u ? { address, name: name || address, cpu: u.cpu, rssKb: u.rssKb, own: u.own, programs: u.programs ?? [] } : null;
+    return u ? { address, name: name || address, term: names[address] ?? null, cpu: u.cpu, rssKb: u.rssKb, own: u.own, programs: u.programs ?? [] } : null;
   };
   const groups = crews.map((c) => {
     const rows = [row(c.root, c.name), ...c.members.map((m) => row(m.address, m.name))].filter(Boolean);
     return { title: c.title, rows, cpu: rows.reduce((s, r) => s + r.cpu, 0), rssKb: rows.reduce((s, r) => s + r.rssKb, 0) };
   }).filter((g) => g.rows.length);
   const loose = Object.keys(terms).filter((a) => !used.has(a)).map((a) => row(a, names[a])).filter(Boolean).sort((x, y) => y.cpu - x.cpu || y.rssKb - x.rssKb);
-  if (loose.length) groups.push({ title: "Not in a run", rows: loose, cpu: loose.reduce((s, r) => s + r.cpu, 0), rssKb: loose.reduce((s, r) => s + r.rssKb, 0) });
+  if (loose.length) {
+    const busy = loose.filter((r) => r.cpu >= LOOSE_MIN.cpu || r.rssKb >= LOOSE_MIN.rssKb);
+    const quiet = loose.filter((r) => !busy.includes(r));
+    groups.push({
+      title: "Not in a run", rows: busy, cpu: loose.reduce((s, r) => s + r.cpu, 0), rssKb: loose.reduce((s, r) => s + r.rssKb, 0),
+      hidden: quiet.length ? { count: quiet.length, cpu: quiet.reduce((s, r) => s + r.cpu, 0), rssKb: quiet.reduce((s, r) => s + r.rssKb, 0) } : null,
+    });
+  }
   return groups;
 }
 
@@ -234,4 +244,11 @@ export function refreshTimings(runs, onEach = () => {}) {
     }
   })().catch(() => {}).finally(() => { timingBusy = null; });
   return timingBusy;
+}
+
+// Does a run's summary match the stats view's `run` prop (a run directory, maybe with ~)?
+export function isRunProp(s, dir) {
+  if (!dir) return false;
+  const d = String(dir).replace(/\/+$/, "");
+  return s.run === d || (d.startsWith("~/") && s.run.endsWith(d.slice(1)));
 }
