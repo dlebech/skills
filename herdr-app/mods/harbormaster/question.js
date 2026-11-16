@@ -5,15 +5,17 @@
 // The sections a structured question.md has, lower-cased, as the keys they are read under.
 const SECTIONS = ["question", "options", "recommended", "evidence", "risk", "blocks"];
 
-const clean = (s) => s.replace(/[*_`]/g, "").trim();
+// Only a bold pair around the start is dropped: `_`, `*` and backticks inside a title or
+// label are part of it (branch names, file names, code), and answers quote it back.
+const unbold = (s) => s.replace(/^(\*\*|__)(.+?)\1/, "$2").trim();
 
 // "**Label**: what happens", "Label: what happens", "Label — what happens" → {label, text}.
 function optionOf(item) {
   const bold = /^\*\*(.+?)\*\*[\s:—–-]*(.*)$/s.exec(item) ?? /^__(.+?)__[\s:—–-]*(.*)$/s.exec(item);
   if (bold) return { label: bold[1].replace(/[:\s]+$/, ""), text: bold[2].trim() };
   const split = /^(.+?)(?::\s+|\s[—–]\s+)(.*)$/s.exec(item);
-  if (split) return { label: clean(split[1]), text: split[2].trim() };
-  return { label: clean(item), text: "" };
+  if (split) return { label: unbold(split[1]), text: split[2].trim() };
+  return { label: unbold(item), text: "" };
 }
 
 // The numbered or bulleted items under ## Options; a line that is not an item continues the one above.
@@ -30,7 +32,7 @@ function optionsOf(body) {
 // Which option ## Recommended names, by its first line: a number ("2", "Option 2"), else a
 // label, case-insensitive, either side containing the other. -1 when none fits.
 function recommendedIndex(body, options) {
-  const first = clean(body.split("\n").find((l) => l.trim()) ?? "");
+  const first = unbold(body.split("\n").find((l) => l.trim()) ?? "");
   const lead = first.replace(/[:—–].*$/s, "").trim().toLowerCase();
   if (!lead) return -1;
   const n = /^(?:option\s+)?#?(\d+)\.?$/.exec(lead);
@@ -51,7 +53,7 @@ export function parseQuestion(text) {
   if (!text?.trim()) return null;
   const lines = text.split("\n");
   const head = lines.find((l) => l.trim());
-  const title = clean(head.replace(/^#+\s*/, "")) || head.trim();
+  const title = head.replace(/^#+\s*/, "").trim() || head.trim();
   const parts = {};
   let key = null;
   for (const line of lines) {

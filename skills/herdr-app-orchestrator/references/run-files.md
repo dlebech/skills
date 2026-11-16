@@ -64,7 +64,7 @@ be answered from its summary alone:
 Anyone who answers a question, or tells the orchestrator something (Harbormaster, the
 captain, you by hand), writes one file:
 
-`inbox/<UTC yyyymmddThhmmssZ>-<source>.message`, written to `inbox/.<name>.tmp` and then moved,
+`inbox/<UTC yyyymmddThhmmssZ>-<source>.message` (Harbormaster adds milliseconds, `…Z-<ms>-<source>`, so two answers in a second don't collide), written to `inbox/.<name>.tmp` and then moved,
 so it is never read half-written. For an answer, the text is
 
 ```
@@ -95,4 +95,4 @@ The captain's own open decisions, kept by `herdr-app-captain/scripts/decisions.s
 `id`, `question`, `run` and `asked` are always there; the other keys are the same sections
 as a `question.md` and are optional, so older entries stay valid. Harbormaster shows them in
 its queue with the runs' questions. An answer goes to the captain's input when it is
-running, and otherwise, when the decision names a run, to that run's `inbox/`.
+running, and otherwise, when the decision names a run, to that run's `inbox/`; Harbormaster then removes the decision from this file itself, since no captain is there to.

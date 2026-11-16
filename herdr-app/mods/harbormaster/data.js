@@ -514,8 +514,9 @@ const POST = 'd=$1 f=$2; mkdir -p "$d/inbox" && printf "%s\\n" "$3" >"$d/inbox/.
 // once that is answered. Throws when the message could not be written, or the wake failed
 // (the message then still waits in the inbox).
 async function tellOrchestrator(run, source, text) {
-  const stamp = new Date().toISOString().replace(/[-:]|\.\d+/g, "");
-  const file = `${stamp}-${source}.message`;
+  // Milliseconds after the seconds, so two answers in one second are two files.
+  const now = new Date().toISOString();
+  const file = `${now.replace(/[-:]|\.\d+/g, "")}-${now.slice(20, 23)}-${source}.message`;
   const out = await exec("sh", ["-c", POST, "sh", run.dir, file, text], { on: run.machine });
   if (out.code !== 0) throw new Error(out.stderr || "could not write to its inbox");
   const sent = await exec("hc", ["send", run.localTerminal, `Read and act on ${run.dir}/inbox/${file}.`], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
@@ -523,6 +524,11 @@ async function tellOrchestrator(run, source, text) {
   if (sent.code !== 0) throw new Error(`the message is in its inbox, but its orchestrator could not be told: ${(sent.stderr || sent.stdout || "hc send failed").trim()}`);
   return { blocked: false };
 }
+
+// Removes a captain decision from .captain-decisions.json on its machine, atomically, once
+// its answer went to a run's inbox instead of the captain: nobody else would clear it.
+const DROP = 'f="${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}/.captain-decisions.json"; [ -s "$f" ] && jq --arg id "$1" \'map(select(.id != $id))\' "$f" >"$f.tmp" && mv "$f.tmp" "$f"';
+export const dropDecision = (d) => exec("sh", ["-c", DROP, "sh", d.id], { on: d.machine });
 
 // Answers a run's question (or a captain decision that names the run) from the queue:
 // `answer` is an option's label or the person's own words.

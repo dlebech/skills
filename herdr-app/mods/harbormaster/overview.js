@@ -2,7 +2,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, decisionQueue, answerRun, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
+import { stats, decisionQueue, answerRun, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText } from "./context.js";
@@ -442,11 +442,17 @@ function sendAnswer(view, it, text, cx) {
   const run = it.run;
   if (!run?.localTerminal) return false;
   view.actionError = null;
+  // Marked before the write, so a second click meanwhile is ignored; undone if it fails.
+  view.answered[it.id] = it.since ?? 0;
   cx.spawn(async (cx) => {
     try {
       await answerRun(run, it.title, text);
-      view.answered[it.id] = it.since ?? true;
-    } catch (e) { view.actionError = `${run.branch}: ${e?.message ?? e}`; }
+      // The captain isn't there to clear its decision, so it goes with the answer.
+      if (it.kind === "decision") await dropDecision(it.decision).catch(() => {});
+    } catch (e) {
+      delete view.answered[it.id];
+      view.actionError = `${run.branch}: ${e?.message ?? e}`;
+    }
     view.redraw = true;
     try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
     try { await view.load(cx); } catch { /* the next refresh shows it */ }
@@ -483,12 +489,13 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
   if (!items.length) return null;
   for (const id of Object.keys(view.answered)) {
     const it = items.find((x) => x.id === id);
-    if (!it || it.since !== view.answered[id]) delete view.answered[id];
+    if (!it || (it.since ?? 0) !== view.answered[id]) delete view.answered[id];
   }
   const row = (it) => {
     const open = view.replying === it.id;
     // A message waiting in the run's inbox counts too: someone else (the captain, by hand) answered.
-    const answered = view.answered[it.id] !== undefined || Boolean(it.answered);
+    const sent = view.answered[it.id] !== undefined;
+    const answered = sent || Boolean(it.answered);
     const why = noAnswer(it);
     const address = it.kind === "decision" ? cap.terminal?.address : it.run?.terminal;
     const meta = [it.kind === "decision" ? "captain asks" : null, it.run?.branch ?? (it.decision?.run ?? "").split("/").pop(),
@@ -526,8 +533,8 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
     return v_flex().id(it.id).gap(6).p(8).rounded(7).bg(t.surface)
       .child(h_flex().gap(8).items_start().child(body).when(Boolean(replyBtn), (el) => el.child(replyBtn)))
       .when(Boolean(buttons), (el) => el.child(buttons))
-      .when(answered, (el) => el.child(div().pl(22).text_size(11).text_color(t.muted).child("Answered, waiting for the orchestrator")))
-      .when(open && !answered, (el) => el.child(v_flex().gap(4)
+      .when(answered, (el) => el.child(div().pl(22).text_size(11).text_color(t.muted).child(sent ? "Answered, waiting for the orchestrator" : "Message waiting for the orchestrator")))
+      .when(open, (el) => el.child(v_flex().gap(4)
         .child(Input.new(view.reply))
         .child(div().text_size(10.5).text_color(t.dim).child(it.kind === "decision" && cap.terminal ? "Enter sends it to the captain, with this decision attached" : "Enter writes it to the run's inbox and tells its orchestrator"))));
   };
