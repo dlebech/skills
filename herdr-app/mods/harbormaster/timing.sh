@@ -85,8 +85,9 @@
 # An agent's role and label come from its first prompt, "You are <role>-<name>".
 #
 # Cost: in the run's .timing/ folder (TIMING_CACHE moves it), per transcript, the events
-# read from it so far (<key>.ev) and how far it was read (<key>.at: offset, inode, logic
-# checksum, a checksum of its start and of the bytes before the offset), so a growing
+# read from it so far, each call already classified (<key>.ev), and how far it was read
+# (<key>.at: offset, inode, the logic and table checksums, a checksum of its start and
+# of the bytes before the offset), so a growing
 # transcript is read only from where it stopped, in chunks of TIMING_CHUNK bytes (16 MB),
 # each kept as soon as it is read, so a run cut short still makes progress; and its result
 # (<key>.json), with what it depends on (<key>.sig: the file's size, inode and mtime, the
@@ -372,7 +373,7 @@ def summary($meta):
        else . end)
       | (if .ss == null and $e.e != "end" then .ss = $e.t | .idle = false else . end)
       | if $e.e == "input" then (if .q and ($e.text // "" | answer) then .q = false else . end)
-        elif $e.e == "call" then .open[$e.id] = {t: $e.t, cat: ($e | classify($rules; $orc))}
+        elif $e.e == "call" then .open[$e.id] = {t: $e.t, cat: ($e.cat // ($e | classify($rules; $orc)))}
           | (if $orc and ($e | asks) then .q = true elif $orc and ($e | unasks) then .q = false else . end)
         elif $e.e == "result" then del(.open[$e.id])
         elif $e.e == "end" then .open = {} | (if .ss != null then .spans += [[.ss, $e.t]] else . end) | .ss = null | .idle = true
@@ -389,15 +390,17 @@ def summary($meta):
      cats: $cats, spans: .spans, waits: (if $orc then .waits else [] end)};
 '
 
-# One transcript line → events. A shell call keeps its commands, already split, not
-# its text, which may be a long here-document.
+# One transcript line → events, with $rules and $orc set. A call is classified here, once,
+# as it is read; a shell call keeps its commands, already split, not its text, which may
+# be a long here-document.
 CLAUDE='
 fromjson? | select(type == "object" and .isSidechain != true) | (.timestamp // "" | ms) as $t | select($t != null)
 | if .type == "assistant" then
     ((.message.content // []) | if type == "array" then .[] else empty end | select(.type == "tool_use")
       | {t: $t, e: "call", id: .id, tool: .name}
         + if (.name // "" | shell) then (.input | about) as $raw | ($raw | commands) as $p
-            | {parts: $p} + (if $raw | test("question\\.(md|tmp)") then {q: qfind($raw; $p)} else {} end) else {text: (.input | about | .[0:500])} end),
+            | {parts: $p} + (if $raw | test("question\\.(md|tmp)") then {q: qfind($raw; $p)} else {} end) else {text: (.input | about | .[0:500])} end
+      | .cat = classify($rules; $orc)),
     {t: $t, e: "model"},
     (if (.message.stop_reason // "") | IN("end_turn", "stop_sequence") then {t: $t, e: "end"} else empty end)
   elif .type == "user" then
@@ -416,7 +419,8 @@ fromjson? | select(type == "object" and .type == "message") | (.timestamp // "" 
     (($m.content // []) | if type == "array" then .[] else empty end | select(.type == "toolCall")
       | {t: $t, e: "call", id: .id, tool: .name}
         + if (.name // "" | shell) then (.arguments | about) as $raw | ($raw | commands) as $p
-            | {parts: $p} + (if $raw | test("question\\.(md|tmp)") then {q: qfind($raw; $p)} else {} end) else {text: (.arguments | about | .[0:500])} end),
+            | {parts: $p} + (if $raw | test("question\\.(md|tmp)") then {q: qfind($raw; $p)} else {} end) else {text: (.arguments | about | .[0:500])} end
+      | .cat = classify($rules; $orc)),
     {t: $t, e: "model"},
     (if ($m.stopReason // "") | IN("stop", "aborted", "error") then {t: $t, e: "end"} else empty end)
   elif $m.role == "toolResult" then {t: $t, e: "result", id: $m.toolCallId}
@@ -432,7 +436,8 @@ until=$(printf '%s\n' "$closed" | jqs -R "$LIB"' ms') || exit 1
 # What every cached result depends on besides its file: a change to this logic or the
 # table makes every session be read again.
 logic=$(printf '%s' "$LIB$CLAUDE$PI$OPENCODE$CLAUDE_PAT$PI_PAT" | cksum | cut -d' ' -f1)
-context="$started|$closed|$prefix|$(printf '%s' "$table" | cksum | cut -d' ' -f1)|$logic"
+tablesum=$(printf '%s' "$table" | cksum | cut -d' ' -f1)
+context="$started|$closed|$prefix|$tablesum|$logic"
 
 stat_of() { stat -c '%s %i %Y' "$1" 2>/dev/null || stat -f '%z %i %m' "$1" 2>/dev/null; }
 # Moves a finished file into the cache whole, so a reader never sees half of it.
@@ -446,18 +451,19 @@ signature() {
   { head -c "$h" "$1"; tail -c +$(($2 - t + 1)) "$1" | head -c "$t"; } | cksum | cut -d' ' -f1
 }
 
-# events <file> <key> <kind> <size> <inode>: brings <key>.ev up to date, reading only
-# what was added since, up to the last whole line, a chunk at a time; rereads a file that
-# was replaced, shrank or rewritten, or when the logic changed.
+# events <file> <key> <kind> <size> <inode> <orchestrator: true|false>: brings <key>.ev
+# up to date, reading only what was added since, up to the last whole line, a chunk at a
+# time; rereads a file that was replaced, shrank or rewritten, or when the logic or the
+# table changed (the calls are classified as they are read).
 events() {
   case $3 in
     claude) prog=$CLAUDE pat=$CLAUDE_PAT ;;
     pi) prog=$PI pat=$PI_PAT ;;
     *) return 1 ;;
   esac
-  ev=$cache/$2.ev at=$cache/$2.at off=0
+  ev=$cache/$2.ev at=$cache/$2.at off=0 evlogic="$logic.$tablesum.$6"
   if [ -e "$ev" ] && [ -e "$at" ] && read -r o_off o_inode o_logic o_sig <"$at" &&
-    [ "$o_inode" = "$5" ] && [ "$o_logic" = "$logic" ] && [ "$o_off" -le "$4" ] &&
+    [ "$o_inode" = "$5" ] && [ "$o_logic" = "$evlogic" ] && [ "$o_off" -le "$4" ] &&
     [ "$(signature "$1" "$o_off")" = "$o_sig" ]; then
     off=$o_off
   else
@@ -477,10 +483,11 @@ events() {
         continue
       fi
     fi
-    head -c "$n" "$tmp/chunk" | { grep -aE "$pat" || :; } | jqs -cR "$LIB $prog" >"$tmp/ev" || return 1
+    head -c "$n" "$tmp/chunk" | { grep -aE "$pat" || :; } |
+      jqs -ncR --argjson orc "$6" "$LIB rules as \$rules | inputs | $prog" >"$tmp/ev" || return 1
     cat "$tmp/ev" >>"$ev" || return 1
     off=$((off + n)) lim=$chunk
-    printf '%s %s %s %s\n' "$off" "$5" "$logic" "$(signature "$1" "$off")" >"$tmp/at" && keep "$tmp/at" "$at" || return 1
+    printf '%s %s %s %s\n' "$off" "$5" "$evlogic" "$(signature "$1" "$off")" >"$tmp/at" && keep "$tmp/at" "$at" || return 1
   done
 }
 
@@ -497,7 +504,9 @@ while IFS="$(printf '\t')" read -r name kind f; do
   fi
   set -- $st
   meta=$(jq -nc --arg name "$name" --arg kind "$kind" --arg file "$f" '{name: $name, kind: $kind, file: $file}')
-  if events "$f" "$key" "$kind" "$1" "$2" &&
+  orc=false
+  [ "$name" != orchestrator ] || orc=true
+  if events "$f" "$key" "$kind" "$1" "$2" "$orc" &&
     jqs -sc --argjson meta "$meta" "$LIB summary(\$meta)" "$cache/$key.ev" >"$tmp/one" && [ -s "$tmp/one" ]; then
     keep "$tmp/one" "$cache/$key.json" && printf '%s\n' "$sig" >"$tmp/sig" && keep "$tmp/sig" "$cache/$key.sig"
     cat "$cache/$key.json" >>"$out"

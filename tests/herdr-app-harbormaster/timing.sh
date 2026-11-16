@@ -223,6 +223,10 @@ check "cache written" yes "$( [ -n "$(ls "$run/.timing"/*.sig 2>/dev/null)" ] &&
 # Unchanged: the same result, from the cache, with the table on stdin.
 again=$(sh "$script" "$run" - <"$table")
 check "rerun from cache" "$(q 'del(.updated)')" "$(printf '%s' "$again" | jq -c 'del(.updated)')"
+# Calls are classified as they are read: a changed table reclassifies them.
+retabled=$(sh "$script" "$run" "$(printf 'build\t^bash$\t^sleep\\b\n'; cat "$table")")
+check "table change reclassifies" '[30,null]' "$(printf '%s' "$retabled" | jq -c '.agents[] | select(.label == "impl-dx-t5") | [.categories.build, .categories.other]')"
+sh "$script" "$run" "$(cat "$table")" >/dev/null
 # Read in 300-byte chunks (most lines are longer): the same result.
 small=$(TIMING_CACHE=$T/small TIMING_CHUNK=300 sh "$script" "$run" "$(cat "$table")")
 check "small chunks" "$(q 'del(.updated)')" "$(printf '%s' "$small" | jq -c 'del(.updated)')"
