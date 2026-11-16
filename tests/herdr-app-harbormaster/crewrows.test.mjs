@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assess, STALL_MS } from "../../herdr-app/mods/harbormaster/attention.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine } from "../../herdr-app/mods/harbormaster/crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote } from "../../herdr-app/mods/harbormaster/crewrows.js";
 
 const MIN = 60000;
 const now = Date.parse("2026-11-16T12:00:00Z");
@@ -107,8 +107,27 @@ test("waiting on a reviewer: the label, then the step", () => {
   const a = at(run({ phase: "finished", progress: "done" }), { flow: "peer", pr: read([pr({ requested: ["anna"] })]) });
   assert.equal(a.group, "else");
   const l = rowLead(a, now);
-  assert.equal(l.lead, "waiting for anna");
+  assert.equal(l.lead, "review from anna");
   assert.equal(l.rest, "done · 20m");
+});
+
+test("a review wait has a colour of its own, and its hover names the reviewers and the PRs", () => {
+  const a = at(run({ phase: "finished", progress: "done" }), { flow: "peer",
+    pr: read([pr({ number: 1799, requested: ["mfalkenbrink"] }), pr({ number: 1372, url: "u2", requested: ["mfalkenbrink"] })]) });
+  assert.equal(a.group, "else");
+  assert.equal(rowLead(a, now).lead, "review from mfalkenbrink · 2 PRs");
+  assert.equal(rowEdge(a), "review");
+  assert.equal(rowTip(a, now)[0], "Waiting for mfalkenbrink to review PR #1799 and #1372, since 20m ago");
+  const two = at(run({ phase: "finished" }), { flow: "peer", pr: read([pr({ requested: ["anna", "bo"] })]) });
+  assert.match(rowTip(two, now)[0], /^Waiting for anna and bo to review PR #42/);
+});
+
+test("amber and the working colour only for stalls and work: an idle run is neutral", () => {
+  const idle = at(run({ phase: "running" }), { flow: "peer", pr: read([]) , orch: "idle" });
+  assert.equal(idle.reasons[0].key, "idle");
+  assert.equal(rowEdge(idle), "neutral");
+  const ci = at(run(), { pr: read([pr({ checks: { pass: 1, fail: 0, pending: 2 }, ci: { startedAt: ago(34), finishedAt: null } })]) });
+  assert.equal(rowEdge(ci), "working");
 });
 
 test("Done shows merged — close run with the PR count", () => {
@@ -142,9 +161,32 @@ test("needLine says why a run needs you, and nothing outside Needs you", () => {
 test("a finished run waiting on a reviewer says so on its pill, in a neutral colour", () => {
   const a = at(run({ phase: "finished" }), { flow: "peer", pr: read([pr({ requested: ["anna"] }), pr({ number: 43, requested: ["anna"] })]) });
   assert.equal(a.group, "else");
-  assert.deepEqual(badgeOf(a, true), { label: "waiting for anna · 2 PRs", tone: "muted" });
+  assert.deepEqual(badgeOf(a, true), { label: "review from anna · 2 PRs", tone: "muted" });
   // A run still running keeps its phase.
   assert.equal(badgeOf(a, false), null);
   // Can't tell: no label to show, so the pill keeps "Finished".
   assert.equal(badgeOf(at(run({ phase: "finished" }), { pr: { list: null, readable: false, why: "gh failed" } }), true), null);
+});
+
+test("Close all merged takes only Done runs whose PRs are all merged or closed, open, without a question, not busy", () => {
+  const merged = (o = {}) => ({ r: run({ phase: "finished", ...o }), a: null });
+  const rows = [merged({ key: "a" }), merged({ key: "b" }), merged({ key: "c", away: { how: "closed", at: ago(5) } }), merged({ key: "d" })]
+    .map((x) => ({ ...x, a: at(x.r, { pr: read([pr({ state: "MERGED" })]) }) }));
+  rows.push({ r: null, a: rows[0].a });
+  rows[3].r.question = "?";
+  // A question keeps it out of Done altogether; closableDone also refuses it.
+  rows[3].a = { ...rows[0].a };
+  assert.deepEqual(closableDone(rows).map((r) => r.key), ["a", "b"]);
+  assert.deepEqual(closableDone(rows, { b: { label: "Closing…" } }).map((r) => r.key), ["a"]);
+  // Not Done, or Done only because it is closed: never.
+  assert.deepEqual(closableDone([{ r: run(), a: at(run(), { pr: read([pr()]) }) }]), []);
+});
+
+test("an empty Needs you says nothing is for you, only while there are orchestrators", () => {
+  const needs = GROUPS[0];
+  assert.equal(emptyNote(needs, [], 2), "nothing for you right now 🎉");
+  assert.equal(emptyNote(needs, [{}], 2), null);
+  assert.equal(emptyNote(needs, [], 0), null);
+  assert.equal(emptyNote(GROUPS[1], [], 2), null);
+  assert.equal(emptyNote(GROUPS[2], [], 2), null);
 });

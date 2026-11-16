@@ -158,11 +158,18 @@ export const ciUsualOf = (repo) => usualCi((shared(CI_KEY)?.[repo] ?? []).map((x
 // The user's review flow per repository folder: {[folder name]: "peer" | "self"}.
 export const reviewFlows = () => shared(FLOWS_KEY) ?? {};
 
-// Sets a folder's review flow ("peer" | "self"), or with null goes back to the default.
-export function setReviewFlow(key, flow) {
-  if (!key) return;
-  const next = { ...reviewFlows() };
+// The flows store with a folder's flow set ("peer" | "self"), or with anything else removed
+// (back to the default). The same store for no key.
+export function withFlow(store, key, flow) {
+  if (!key) return store;
+  const next = { ...(store ?? {}) };
   if (flow === "peer" || flow === "self") next[key] = flow;
   else delete next[key];
-  setShared(FLOWS_KEY, next);
+  return next;
+}
+
+// Sets a folder's review flow ("peer" | "self"), or with null goes back to the default. Every
+// run of that folder reads it at its next render.
+export function setReviewFlow(key, flow) {
+  if (key) setShared(FLOWS_KEY, withFlow(reviewFlows(), key, flow));
 }

@@ -40,11 +40,11 @@ test("the review flow defaults to self, snevagten to peer, and a setting overrid
 
 // ---- labels ----
 
-test("peer labels: request review, waiting for, changes requested, approved — merge", () => {
+test("peer labels: request review, review from, changes requested, approved — merge", () => {
   assert.equal(prStep(pr({ state: "DRAFT", requested: ["anna"] }), "peer").label, "request review");
   assert.equal(prStep(pr(), "peer").label, "request review");
   const w = prStep(pr({ requested: ["anna"] }), "peer");
-  assert.deepEqual([w.label, w.who], ["waiting for", ["anna"]]);
+  assert.deepEqual([w.label, w.who], ["review from", ["anna"]]);
   assert.equal(prStep(pr({ review: "CHANGES_REQUESTED", changesBy: ["anna"] }), "peer").label, "changes requested");
   assert.equal(prStep(pr({ review: "APPROVED", approvedBy: ["anna"] }), "peer").label, "approved — merge");
   // A later reviewer requested does not hide an approval or a change request.
@@ -70,8 +70,8 @@ test("several PRs: the most urgent label plus a count", () => {
   assert.deepEqual([s.label, s.count, s.same, s.pr.number], ["approved — merge", 3, 1, 3]);
   assert.equal(nextStepText(s), "approved — merge · 3 PRs");
   const w = nextStep([pr({ number: 1, requested: ["anna"] }), pr({ number: 2, requested: ["bo", "anna"] })], "peer");
-  assert.equal(nextStepText(w), "waiting for anna, bo · 2 PRs");
-  assert.equal(nextStepText(nextStep([pr({ requested: ["anna"] })], "peer")), "waiting for anna");
+  assert.equal(nextStepText(w), "review from anna, bo · 2 PRs");
+  assert.equal(nextStepText(nextStep([pr({ requested: ["anna"] })], "peer")), "review from anna");
 });
 
 // ---- reading state ----
@@ -139,7 +139,7 @@ test("Everything else: agents working, a reviewer requested and not answered, CI
   // Working wins over PR grounds and red CI: it is the run's turn.
   assert.equal(assess(r, { working: true, pr: read([pr({ checks: checks(0, 1) })]), now }).group, "else");
   const wf = settled(run({ phase: "finished" }), [pr({ requested: ["anna"] })], { flow: "peer" });
-  assert.deepEqual([wf.group, wf.reasons[0].key, wf.reasons[0].text], ["else", "waiting-for", "waiting for anna"]);
+  assert.deepEqual([wf.group, wf.reasons[0].key, wf.reasons[0].text], ["else", "waiting-for", "review from anna"]);
   const ci = settled(run({ phase: "finished" }), [pr({ checks: checks(2, 0, 1), ci: { startedAt: ago(10), finishedAt: null } })], { flow: "self" });
   assert.deepEqual([ci.group, ci.reasons[0].key], ["else", "ci-running"]);
   assert.equal(settled(run({ prs: [] }), []).reasons[0].key, "idle");
@@ -327,14 +327,14 @@ test("a closed run's PRs, read every 15 minutes, do not go stale between reads",
 test("peer: a reviewer asked again waits, even after their change request or approval", () => {
   const again = pr({ review: "CHANGES_REQUESTED", changesBy: ["anna"], requested: ["anna"] });
   const s = prStep(again, "peer");
-  assert.deepEqual([s.label, s.who], ["waiting for", ["anna"]]);
-  assert.equal(prStep(pr({ review: "APPROVED", approvedBy: ["anna"], requested: ["anna"] }), "peer").label, "waiting for");
+  assert.deepEqual([s.label, s.who], ["review from", ["anna"]]);
+  assert.equal(prStep(pr({ review: "APPROVED", approvedBy: ["anna"], requested: ["anna"] }), "peer").label, "review from");
   // Someone else's change request still stands.
   assert.equal(prStep(pr({ changesBy: ["anna", "bo"], requested: ["anna"] }), "peer").label, "changes requested");
   // The repo's reviewDecision counts when no reviewer's review stands and nobody is asked.
   assert.equal(prStep(pr({ review: "CHANGES_REQUESTED" }), "peer").label, "changes requested");
   const g = settled(run({ phase: "finished" }), [again], { flow: "peer" });
-  assert.deepEqual([g.group, g.reasons[0].text], ["else", "waiting for anna"]);
+  assert.deepEqual([g.group, g.reasons[0].text], ["else", "review from anna"]);
 });
 
 test("an offline machine's runs are carried, marked stale, and read as can't tell", () => {

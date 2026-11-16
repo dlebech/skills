@@ -2,7 +2,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
+import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
@@ -12,8 +12,10 @@ import { oneLine } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf } from "./attend.js";
-import { stepText, quietText } from "./attention.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine } from "./crewrows.js";
+import { stepText, quietText, flowState, flowSetting } from "./attention.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote } from "./crewrows.js";
+import { blockingAsked, askSig } from "./blocking.js";
+import { reviewFlows, setReviewFlow } from "./tracking.js";
 
 // How each runPhase() reads on a card.
 const PHASE = {
@@ -264,6 +266,130 @@ function actionRow(view, t, r, orch, closed, counts) {
       (cx) => set(cx, { key: r.key, action: a }), a === "resume")));
 }
 
+// A Crew row's edge colour from its name (crewrows.js rowEdge): a review wait is cyan, a calm
+// colour apart from Done's blue, the grey of can't tell and the amber of work and stalls; a
+// run with nothing going on takes the border's.
+const edgeColor = (t, edge) => (edge === "amber" ? AMBER(t) : edge === "review" ? t.ansi6 ?? t.accent : edge === "neutral" ? t.border : t[edge] ?? t.border);
+
+// ---- ask what's blocking, the review flow, close all merged ----
+
+// Runs asked what is blocking from here, by run key: {sig} (blocking.js askSig at the click).
+// Shared by the Crew, the cards and the panes of this copy; the ask's unread message in the
+// inbox (run.blockingAsked) carries it across copies and reloads.
+const blockAsked = new Map();
+
+// A stalled run's "Ask what's blocking" (`short`: "Ask", for the narrow Crew row), or "asked…"
+// while the ask waits: its message is unread, or nothing moved since it was asked here. Null for
+// a run that is not stalled, is put away, or whose orchestrator is not known here.
+function blockingAction(view, t, r, att, id, short = false) {
+  if (!r?.dir || !r.localTerminal || r.away || !att?.stall) return null;
+  const mine = blockAsked.get(r.key);
+  if (mine && mine.sig !== askSig(r)) blockAsked.delete(r.key);
+  if (blockingAsked(r, blockAsked.get(r.key))) {
+    return div().id(`blk-${id}`).flex_none().text_size(11).text_color(AMBER(t))
+      .tooltip("Asked its orchestrator what is blocking; waiting for its progress or status to change").child("asked…");
+  }
+  const quiet = quietText(att.stall).replace(/^quiet /, "");
+  const step = stepText(att.step) || null;
+  return actionButton(t, `blk-${id}`, short ? "Ask" : "Ask what's blocking",
+    `Ask what's blocking: a message in the run's inbox that wakes its orchestrator ("what is blocking? … quiet for ${quiet}…"); it asks you with a question if it needs you, else carries on`,
+    (cx) => {
+      blockAsked.set(r.key, { sig: askSig(r) });
+      view.actionError = null;
+      cx.notify();
+      cx.spawn(async (cx) => {
+        try {
+          const out = await askBlocking(r, { quiet, step });
+          if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
+          else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
+        } catch (e) {
+          // Written but not woken: the ask is in the inbox, so it stays asked.
+          if (!e?.inInbox) blockAsked.delete(r.key);
+          view.actionError = `${r.branch}: ${e?.message ?? e}`;
+        }
+        view.redraw = true;
+        try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+        try { await view.load(cx); } catch { /* the next refresh shows it */ }
+      }, { owner: null });
+    });
+}
+
+// Who reviews the run's pull requests, peer (a colleague on GitHub) or self (you, from the
+// proof), as a two-way toggle with the folder's default marked. A click sets it for the whole
+// repository folder (tracking.js setReviewFlow), so every run of it changes at once; picking
+// the default removes the setting.
+function flowToggle(t, r, id) {
+  const st = flowState(r, reviewFlows());
+  const tip = (f) => `${f === "peer" ? "Peer: a colleague reviews on GitHub (request review, review from, approved — merge)" : "Self: you review the proof and merge (review proof → merge)"}.
+`
+    + `For every run in ${st.key}${f === st.fallback ? "; the default for it" : ""}.`;
+  const seg = (f) => {
+    const on = st.flow === f;
+    return div().id(`flow-${id}-${f}`).flex_none().px(7).h(18).flex().items_center().rounded(4).text_size(10.5)
+      .bg(on ? t.selected : t.raised).text_color(on ? t.foreground : t.dim).when(on, (e) => e.font_semibold())
+      .tooltip(tip(f))
+      .when(!on, (e) => e.cursor_pointer().hover((s) => s.text_color(t.foreground))
+        .on_click((_e, cx) => { cx.stop_propagation(); setReviewFlow(st.key, flowSetting(f, st.fallback)); cx.notify(); }))
+      .child(f === st.fallback ? `${f} (default)` : f);
+  };
+  return h_flex().id(`flow-${id}`).flex_none().gap(3).items_center().text_size(10.5).text_color(t.dim)
+    .child(div().flex_none().pr(2).child("Review")).child(seg("self")).child(seg("peer"));
+}
+
+// Close all merged, from the Crew's Done heading: closes each run as its card's Close does
+// (data.js putAway), one at a time, after the heading asked, naming how many.
+const CLOSE_ALL_KEY = "done:close-all";
+function closeAll(view, runs, ctx, cx) {
+  if (!runs.length) return;
+  const at = Date.now();
+  const batch = { label: `Closing ${plural(runs.length, "merged run")}…`, at, branch: "merged runs", limit: 2 * 60000 + runs.length * 30000 };
+  view.busy[CLOSE_ALL_KEY] = batch;
+  for (const r of runs) view.busy[r.key] = { label: "Closing…", at, branch: r.branch, limit: batch.limit };
+  const orchs = new Map(runs.map((r) => [r.key, orchestratorState(r, ctx)]));
+  // As a card's action: owned by no view, notifying through cx.spawn's cx.
+  cx.spawn(async (cx) => {
+    const failed = [], notes = [];
+    for (const r of runs) {
+      try {
+        const note = await putAway(r, "closed", orchs.get(r.key));
+        if (note && /blocked/.test(note)) notes.push(`${r.branch}: ${note}`);
+      } catch (e) { failed.push(`${r.branch} (${e?.message ?? e})`); }
+      if (view.busy[r.key]?.at === at) delete view.busy[r.key];
+    }
+    if (view.busy[CLOSE_ALL_KEY]?.at === at) delete view.busy[CLOSE_ALL_KEY];
+    const done = runs.length - failed.length;
+    view.actionNote = [done ? `Closing ${plural(done, "merged run")}: their orchestrators clean up and close their tabs.` : null, ...notes].filter(Boolean).join("\n") || null;
+    if (failed.length) view.actionError = `${failed.length} not closed: ${failed.join("; ")}`;
+    view.redraw = true;
+    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+    try { await view.load(cx); } catch { /* the next refresh shows it */ }
+  }, { owner: null });
+}
+
+// The Done heading's right side: Close all merged, its question once clicked, or what it is doing.
+function closeAllControl(view, t, rows, ctx) {
+  const busy = view.busy?.[CLOSE_ALL_KEY];
+  if (busy) return { button: div().flex_none().text_size(10.5).font_normal().text_color(t.muted).child(busy.label), confirm: null };
+  const runs = closableDone(rows, view.busy ?? {});
+  if (!runs.length) return { button: null, confirm: null };
+  const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
+  if (view.confirm?.key !== CLOSE_ALL_KEY) {
+    return { button: actionButton(t, "close-all-merged", "Close all merged",
+      `Close ${plural(runs.length, "run")} whose pull requests are all merged or closed, as each card's Close does`,
+      (cx) => set(cx, { key: CLOSE_ALL_KEY })), confirm: null };
+  }
+  const names = runs.map((r) => r.branch).join(", ");
+  return {
+    button: null,
+    confirm: v_flex().id("close-all-confirm").flex_none().gap(6).p(8).rounded(7).bg(t.raised)
+      .child(div().text_size(12).text_color(t.foreground)
+        .child(`Close ${plural(runs.length, "merged run")} (${names})? Each orchestrator pushes what isn't pushed, deletes the worktrees and closes its tab; branches and PRs stay.`))
+      .child(h_flex().gap(6)
+        .child(actionButton(t, "close-all-yes", `Close ${runs.length}`, null, (cx) => { set(cx, null); closeAll(view, runs, ctx, cx); }, true))
+        .child(actionButton(t, "close-all-no", "Cancel", null, (cx) => set(cx, null)))),
+  };
+}
+
 // What card() and runDetail() both show: the run's state, its links and the header row.
 // Each run's attention (attend.js), once per facts() snapshot: the overview's header, its
 // order and every card read it, and a render takes one snapshot.
@@ -286,7 +412,7 @@ function runFacts(r, ctx) {
   const need = needsYouNow(r, ctx);
   let badge = (parked ? PHASE.parked : r.away?.how === "closed" ? PHASE.closed : PHASE[r.phase]) ?? PHASE.unknown;
   // A run in Needs you or Done, or a finished one, says what comes next instead, as its Crew
-  // card does ("approved — merge", "waiting for anna"); a parked or closed one keeps saying so.
+  // card does ("approved — merge", "review from anna"); a parked or closed one keeps saying so.
   const next = !r.away && badgeOf(att, r.phase === "finished");
   if (next) badge = next;
   return {
@@ -369,6 +495,7 @@ function card(view, t, r, ctx, compact = false) {
   const facts = factsLine(t, r, prs, 12.5, f.att);
   // Not on a finished or put-away run's smaller card; a live card shows it even when narrow.
   const proof = r.phase !== "finished" && !r.away ? proofSummary(t, r) : null;
+  const blocking = blockingAction(view, t, r, f.att, `card-${r.key}`);
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(8).p(12).pl(16).rounded(10).bg(t.surface)
     .border(1).border_color(need ? t.blocked + "88" : t.border).cursor_pointer()
     .hover((s) => s.bg(t.raised)).on_click(focus)
@@ -378,11 +505,13 @@ function card(view, t, r, ctx, compact = false) {
     .when(Boolean(facts), (el) => el.child(facts))
     .when(Boolean(r.progress), (el) => el.child(progressLine(t, r, f.att)))
     .children(cardNotes(t, r, f))
+    .when(Boolean(blocking), (el) => el.child(h_flex().child(blocking)))
     .when(Boolean(proof), (el) => el.child(h_flex().id(`proof-${r.key}`).flex_wrap().items_center().gap(6).px(2).text_size(11.5).when(Boolean(proof.tip), (e) => e.tooltip(proof.tip))
       .child(div().flex_none().text_size(11).font_semibold().text_color(t.dim).child("Proof"))
       .child(h_flex().flex_wrap().items_center().children(joined(t, proof.parts)))))
     .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts, f.stages)))
     .when(links.length > 0, (el) => el.child(h_flex().flex_wrap().gap(6).children(links)))
+    .when(prs.length > 0 && !r.away, (el) => el.child(flowToggle(t, r, `card-${r.key}`)))
     .when(prs.length === 0 && related.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(11).text_color(t.dim).child("No pull request yet")))
     .child(actionRow(view, t, r, orch, closed, counts));
 }
@@ -832,6 +961,7 @@ function runDetail(view, t, r, ctx) {
   const workOf = new Map(stages.flatMap(({ agents, stage }, i) => agents.map((a) => [a.agent.address, { task: r.tasks[i], stage }])));
   const facts = factsLine(t, r, prs, 13, f.att);
   const notes = cardNotes(t, r, f);
+  const blocking = blockingAction(view, t, r, f.att, `pane-${r.key}`);
   // Most important first: who and what, whether it needs you, when and its PR, then the PR
   // itself, proof, tasks, decisions and agents; tokens last, since they are about cost.
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(14).p(14).pl(18).rounded(10).bg(t.surface)
@@ -840,11 +970,12 @@ function runDetail(view, t, r, ctx) {
     .child(div().id(`head-${r.key}`).cursor_pointer().on_click(() => orch !== "gone" && focusAgent(r.terminal))
       .child(cardHeader(view, t, r, f, runMeta(r, f))))
     .when(need, (el) => el.child(div().id(`need-${r.key}`).cursor_pointer().on_click(() => focusAgent(r.terminal)).child(needBox(t, r, f))))
-    .when(Boolean(facts) || Boolean(r.progress) || notes.length > 0, (el) => el.child(v_flex().gap(4)
+    .when(Boolean(facts) || Boolean(r.progress) || notes.length > 0 || Boolean(blocking), (el) => el.child(v_flex().gap(4)
       .when(Boolean(facts), (e) => e.child(facts))
       .when(Boolean(r.progress), (e) => e.child(progressLine(t, r, f.att)))
-      .children(notes)))
-    .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests")
+      .children(notes)
+      .when(Boolean(blocking), (e) => e.child(h_flex().pt(2).child(blocking)))))
+    .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests", r.away ? null : flowToggle(t, r, `pane-${r.key}`))
       .children(prs.map((p, i) => prDetail(t, p, i)))
       .when(prs.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet"))))
     .when(r.issues.length + related.length > 0, (el) => el.child(section(t, "Issues and related PRs")
@@ -1235,7 +1366,7 @@ export function crew(view, t) {
   // Only the captain has a mark (a small one): the rest are all orchestrators. The context size
   // and the run's token total are in the row's hover, which leaves the width to the tags. The
   // hover is on its two lines of text, not the whole row, so it never covers a tag's own card.
-  const row = ({ id, mark = null, type = null, tags = [], title, tip = null, detail, tone, detailTip = null, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null, usage = null, whose = "", more = null }) => {
+  const row = ({ id, mark = null, type = null, tags = [], title, tip = null, detail, tone, detailTip = null, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null, usage = null, whose = "", more = null, action = null }) => {
     const hover = [title, tip, contextTip(view, address, run)].filter(Boolean).join("\n");
     const color = tone === "amber" ? AMBER(t) : t[tone] ?? t.dim;
     return h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
@@ -1256,6 +1387,7 @@ export function crew(view, t) {
           .child(div().text_size(11).child(CRAB)).child(String(crabs))))
         .child(div().id(`${id}-detail`).flex_1().min_w(0).truncate().text_size(11).text_color(color).tooltip(detailTip ? `${detailTip}\n\n${hover}` : hover).child(detail))))
     .map(withUsage(t, id, usage, whose, more))
+    .when(Boolean(action), (el) => el.child(action))
     .child(statusDot(t, status));
   };
   const rows = [];
@@ -1300,12 +1432,15 @@ export function crew(view, t) {
       more: usageLine("The whole run, with its agents", treeUsage([term.address, ...crewOf.map((w) => w.address)])),
       // Clicking a run's orchestrator also opens that run's card beside it, while it's there.
       open: () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(term.address, runProps(r)) : focusAgent(term.address)),
-      edge: (edge === "amber" ? AMBER(t) : t[edge]) ?? t.border,
+      edge: edgeColor(t, edge),
+      // A stalled run: Ask what's blocking, or "asked…" while that waits.
+      action: blockingAction(view, t, r, a, `crew-${term.address}`, true),
     });
   };
   // Needs you, Everything else and Done, each longest wait first; Done folded until opened
   // (view.folds, as the pane's folds). Its heading leaves room on the right for an action.
   const groups = groupRows(orchestrators);
+  const closing = closeAllControl(view, t, groups.done, ctx);
   const groupHead = (g, n) => {
     const head = h_flex().id(`crew-group-${g.key}`).flex_none().gap(5).px(4).pt(6).items_center()
       .text_size(10.5).font_semibold().text_color(g.key === "needs" ? t.blocked : t.dim);
@@ -1315,12 +1450,20 @@ export function crew(view, t) {
       .on_click((_e, cx) => { view.folds ??= new Map(); view.folds.set(`crew-${g.key}`, !open); cx.notify(); })
       .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(10).flex_none())
       .child(`${g.title} · ${n}`))
-      .child(div().flex_1());
+      .child(div().flex_1())
+      // Close all merged: Done's own action, shown folded or not.
+      .when(g.key === "done" && Boolean(closing.button), (el) => el.child(closing.button));
   };
   for (const g of GROUPS) {
     const list = groups[g.key];
+    const none = emptyNote(g, list, orchestrators.length);
+    // Needs you with nothing in it: one calm line in its place, styled as a heading.
+    if (none) rows.push(h_flex().id(`crew-group-${g.key}`).flex_none().gap(5).px(4).pt(6).items_center().min_w(0).text_size(10.5)
+      .child(div().flex_none().font_semibold().text_color(t.dim).child(g.title))
+      .child(div().min_w(0).truncate().text_color(PASS(t)).child(none)));
     if (!list.length) continue;
     rows.push(groupHead(g, list.length));
+    if (g.key === "done" && closing.confirm) rows.push(closing.confirm);
     if (!g.folded || isOpen(view, `crew-${g.key}`)) rows.push(...list.map(orchRow));
   }
   // Adrift: agents outside the crew, on any machine.
@@ -1339,5 +1482,7 @@ export function crew(view, t) {
       .when(rows.length === 0, (el) => el.child(div().px(4).text_size(11.5).text_color(t.dim).child("No captain or orchestrators. Start one with /herdr-app-captain.")))
       .children(rows)
       .when(drifters.length > 0, (el) => el.child(div().flex_none().px(4).pt(6).text_size(10.5).font_semibold().text_color(t.dim).child(`Adrift · ${drifters.length}`)))
-      .children(drifters.map(stray)));
+      .children(drifters.map(stray))
+      .when(Boolean(view.actionNote), (el) => el.child(div().flex_none().px(4).pt(4).text_size(11).text_color(t.muted).child(view.actionNote)))
+      .when(Boolean(view.actionError), (el) => el.child(div().flex_none().px(4).pt(4).text_size(11).text_color(t.blocked).child(view.actionError))));
 }

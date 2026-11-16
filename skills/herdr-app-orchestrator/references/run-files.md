@@ -193,7 +193,26 @@ a `- [user]` line in `decisions.md`, renames the message `.handled` and acts on 
 a finished run means proving its done tasks to the new tier, which sets the run back to running.
 Until `status.json` or `plan.md` shows the level, while the message is unhandled, the tag reads
 `T3 requested…`. A level request does not count as an answer to an open `question.md`. Neither
-does an ask to prove (`prove <task> to T<n>: …`, see [Accepting proof](#accepting-proof-or-asking-for-it)).
+does an ask to prove (`prove <task> to T<n>: …`, see [Accepting proof](#accepting-proof-or-asking-for-it))
+or an ask what is blocking (below).
+
+### Asking what is blocking
+
+A run Harbormaster sees as stalled (no new progress line, no change in its agents and no new
+terminal output for 30 minutes, or CI past twice the repository's usual time) offers **Ask what's
+blocking** on its Crew row and pane. It writes a message (source `harbormaster-blocking`, woken like
+an answer) whose first line starts `what is blocking?`:
+
+```
+what is blocking? Harbormaster sees this run quiet for 34m (step: CI on #42 · 50m).
+Asked from Harbormaster: if you need me, write question.md and ask; else carry on and update your progress line.
+```
+
+The orchestrator looks at what its run waits on. If it needs the user, it asks with `question.md`
+(section 6); otherwise it unsticks what it can (a stuck agent, a CI watch that hung) and updates
+its progress line with `set-status.sh --progress`, so the user sees it move. Either way it renames
+the message `.handled`. Until the run's progress line, task states or status change, or while the
+message is unhandled, the row reads `asked…`.
 
 An orchestrator that is gone or lost is never woken (its terminal is gone, or only a shell, which would run the wake-up as a command): the message waits, and Harbormaster says so ("waits in its inbox until the run is resumed"). The resumed orchestrator reads waiting messages in name order, so an answer is not lost.
 
