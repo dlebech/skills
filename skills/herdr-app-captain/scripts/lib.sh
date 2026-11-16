@@ -76,6 +76,13 @@ is_shell() {
   esac
 }
 
+# question_title <run-dir>: question.md's one-line summary: its "# " title, else its
+# first non-empty line, on one line and cut to 100 characters. Empty without a question.
+question_title() {
+  [ -s "$1/question.md" ] || return 0
+  awk 'NF { sub(/^# +/, ""); gsub(/[\t\r]+/, " "); print substr($0, 1, 100); exit }' "$1/question.md"
+}
+
 # unhandled_messages <run-dir>: one inbox message path per line.
 unhandled_messages() {
   local f

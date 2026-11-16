@@ -259,9 +259,12 @@ echo "== watcher"
 out=$(watch_once)
 contains "waiting for user" "$out" "attention feature/x waiting for user: which db?"
 # Answered in the orchestrator's own tab: the question clears, and the watcher says so.
+# The orchestrator deletes question.md once it has the answer.
 "$orch/set-status.sh" "$dir" running
+rm "$dir/question.md"
 out=$(watch_once)
 contains "answered elsewhere" "$out" "cleared feature/x waiting for user: which db?"
+echo "Which db?" >"$dir/question.md"
 "$orch/set-status.sh" "$dir" "waiting for user: which db?"
 out=$(watch_once)
 contains "asked again" "$out" "attention feature/x waiting for user: which db?"
