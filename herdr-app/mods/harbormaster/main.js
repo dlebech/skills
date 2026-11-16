@@ -100,7 +100,7 @@ async function listen(view, cx) {
       if (name === "show-run") showPopup(view, arg?.trim() ?? "");
       else if (name === "show-stats") showStats(view, arg?.trim() ?? "");
       else if (name === "show-overview") showView("overview", "cards", 560, 900);
-      else if (name === "show-crew") showView("crew", "crew", 360, 900);
+      else if (name === "show-crew") showView("crew", "crew", 360, 640);
       else if (name === "close-popup") closePopup();
       cx.notify();
     } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }
