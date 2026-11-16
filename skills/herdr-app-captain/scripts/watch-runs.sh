@@ -11,7 +11,10 @@
 # exits:
 #   attention <branch> <reason>    <run-directory>
 #   cleared <branch> <reason>      <run-directory>
-# Reasons: the plan's "waiting for user" or "blocked" status, finished, the
+#   update <branch> pr <url>       <run-directory>
+# Every line is the whole update: the captain reads the run's files for detail.
+# Reasons: the plan's "waiting for user" or "blocked" status, a question.md (its
+# title, for a new or reworded one), finished, the
 # orchestrator terminal gone or blocked on a dialog, or the orchestrator idle for two
 # minutes while its plan is unfinished. Parked and closed runs (their markers) raise
 # nothing. An event is reported once; it can fire again after it clears. A reported
@@ -105,7 +108,19 @@ while :; do
           [ $((now - since)) -ge "$idle_grace" ] && reasons+=("orchestrator idle") ;;
       esac
     fi
+    # An open question is a reason of its own unless the plan status already carries
+    # it; its title is the one-line summary, so a new or reworded question is news.
+    if [ "$status" != finished ]; then
+      case $status in "waiting for user"*) ;; *)
+        title=$(question_title "$dir")
+        [ -z "$title" ] || reasons+=("question: $title") ;;
+      esac
+    fi
     for r in ${reasons[@]+"${reasons[@]}"}; do current+=("attention $branch $r	$dir"); done
+    # PRs are news, not a call for the user: one line each, once.
+    while IFS= read -r url; do
+      [ -z "$url" ] || current+=("update $branch pr $url	$dir")
+    done < <(jq -r '(.prs // [])[]?.url // empty' "$dir/status.json" 2>/dev/null)
   done 3< <(run_infos)
 
   # Remember only what is still true, so a cleared event can fire again.
@@ -123,7 +138,7 @@ while :; do
   for line in ${new[@]+"${new[@]}"}; do reported+=${line#*$'\t'}$'\n'; done
   while IFS= read -r line; do
     case $line in
-      "attention "*" waiting for user"* | "attention "*" blocked"* | "attention "*" orchestrator blocked on a dialog"*) ;;
+      "attention "*" waiting for user"* | "attention "*" blocked"* | "attention "*" question: "* | "attention "*" orchestrator blocked on a dialog"*) ;;
       *) continue ;;
     esac
     printf '%s\n' ${current[@]+"${current[@]}"} | grep -qxF -- "$line" && continue

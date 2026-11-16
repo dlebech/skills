@@ -27,7 +27,9 @@ Run `<skill-dir>/scripts/runs.sh`. It reads every run directory under `~/.herdr/
 
 Runs of the older `herdr-orchestrator` skill live in the Herdr TUI and do not appear here.
 
-Each run directory holds `spec.md` (the goal), `plan.md` (tasks and their status), `status.json` (the facts above, which outlive the orchestrator, so `runs.sh --all` still gives a closed run's PRs), `decisions.md`, `question.md` (the orchestrator's open question to the user, if any), `inbox/` (relayed messages), and `shared/` (briefs, findings). Read them for detail rather than asking the orchestrator; it is busy. The files and their formats are in `herdr-app-orchestrator`'s [references/run-files.md](../herdr-app-orchestrator/references/run-files.md); they work without you running.
+Each run directory holds `spec.md` (the goal), `plan.md` (tasks and their status), `status.json` (the facts above, which outlive the orchestrator, so `runs.sh --all` still gives a closed run's PRs), `decisions.md`, `question.md` (the orchestrator's open question to the user, if any), `inbox/` (relayed messages), and `shared/` (briefs, findings). The files and their formats are in `herdr-app-orchestrator`'s [references/run-files.md](../herdr-app-orchestrator/references/run-files.md); they work without you running.
+
+**The files are your memory.** Read `status.json`, `question.md` and `plan.md` when you need a run's facts (on a watcher line, or when asked), rather than asking the orchestrator, which is busy, or keeping reports in your context. Remember nothing about a run between turns that its files say. You can be cleared or compacted at any time without losing anything: afterwards re-read this skill, run `runs.sh`, and run `decisions.sh ls`.
 
 ## Report
 
@@ -63,6 +65,10 @@ A question you ask gets buried when alerts and reports follow it, so keep every 
 - When the user answers, or it no longer applies (they chose something else, or the run moved on), remove it with `decisions.sh done <id>` before you act on it. A message that starts `Re decision "<id>" (...):` is the user answering that decision from Harbormaster's Reply box: treat the rest as the answer to it.
 - While any are open, end every reply with them, oldest first, in one short line each, such as `Still waiting on you: move #1097 to In Progress? (asked 40m ago)`, however much else came in between.
 - When you start, run `decisions.sh ls`. Entries left by an earlier captain session are still the user's to decide: include them in your first report. Drop one yourself only when it plainly no longer applies (its run is closed, or `runs.sh` shows the thing already done), and say that you did.
+
+## Answer routine questions
+
+Only for a run whose `status.json` has `autonomy` `L1` or `L2`; a missing one is `L0`, and L0 runs you never answer. When its `question.md` has a `## Recommended` option, no one-way door in `## Risk`, and is not a direction or design call, answer with that option as in Relay instructions (an `inbox/` message, then the wake-up), and say what you answered in your reply to the user. Anything else stays in the user's queue, as before.
 
 ## Park, resume, or close a run
 
@@ -125,12 +131,12 @@ attention <branch> <reason>	<run-directory>
 cleared <branch> <reason>	<run-directory>
 ```
 
-Its header lists the reasons. `cleared` means a question or dialog it reported earlier is gone, usually because the user answered it in the orchestrator's tab. A run that has a new event of its own instead, such as finished or orchestrator gone, gets only that event. It reports each event once, and remembers across restarts, so restart it freely.
+A new PR is one more line, `update <branch> pr <url>	<run-directory>`. Each line is the whole update: its reason carries a question's title (`question: <title>`), and the details are in the run's files. Its header lists the reasons. `cleared` means a question or dialog it reported earlier is gone, usually because the user answered it in the orchestrator's tab. A run that has a new event of its own instead, such as finished or orchestrator gone, gets only that event. It reports each event once, and remembers across restarts, so restart it freely.
 
 When the wait ends:
 
 1. Read its output with `hc read --lines 50 captain-watch`, then remove it with `hc rm captain-watch`.
-2. Look at each run it names, as in Report, so the alert says what is needed and not only that something is.
+2. Open the run's files for each run it names (Report), so the alert says what is needed and not only that something is.
 3. Tell the user in a few lines, needs-you first. For a `cleared` run, say in one line that its question was answered and what it is doing now, from `decisions.md` or `plan.md`, so your earlier "needs you" does not stand; if you had already relayed that answer yourself, the line is enough, without a report. Ending your turn marks your tab, and the app plays its sound and shows a toast if they are looking elsewhere.
 4. Start the watcher and its wait again, every time, without asking, even when every run has finished. New runs need it, and stopping is the user's call.
 
