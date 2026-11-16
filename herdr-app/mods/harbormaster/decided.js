@@ -6,8 +6,9 @@
 // `<time> <topic>: <decision> — <why>` keeps its text in `raw` and puts it in `decision`.
 export function parseDecided(line) {
   const raw = String(line ?? "").replace(/^\s*[-*]\s*\[decided\]\s*/i, "").trim();
-  const m = /^(\d{4}-\d\d-\d\dT[\d:.]+Z?)\s+(.*)$/.exec(raw);
-  const at = m ? Date.parse(m[1]) || null : null;
+  const m = /^(\d{4}-\d\d-\d\d[T ][\d:.]+Z?)\s+(.*)$/.exec(raw);
+  // A time without a Z is UTC too, as the format says.
+  const at = m ? Date.parse(/Z$/.test(m[1]) ? m[1] : `${m[1].replace(" ", "T")}Z`) || null : null;
   const body = m && at ? m[2] : raw;
   const t = /^([^:]{1,60}):\s+(.+)$/s.exec(body);
   if (!at && !t) return { at: null, topic: null, decision: raw, why: null, raw };
