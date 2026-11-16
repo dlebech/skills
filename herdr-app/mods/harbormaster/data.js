@@ -11,6 +11,7 @@
 
 import { exec, machines, spaces, shared, setShared, run as command } from "herdr";
 import { parseQuestion, answerMessage } from "./question.js";
+import { parseDecidedLines } from "./decided.js";
 import { proofOf, runTier, parseProofMd } from "./proof.js";
 import { orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
@@ -36,7 +37,9 @@ const SCRIPT = [
   '  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && n=$((n+1)); done; printf "%s\\037" "$n"',
   // proof.md (a "+" before it when there is one), then the names of the files in shared/proof/, capped.
   '  [ -e "$d/proof.md" ] && { printf +; head -c 12000 "$d/proof.md"; }; printf \'\\037\'',
-  '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40',
+  '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
+  // decisions.md: the last 20 lines the orchestrator logged as its own decisions, capped.
+  '  grep -a "^- \\[decided\\] " "$d/decisions.md" 2>/dev/null | tail -n 20 | tail -c 8000',
   "done",
 ].join("\n");
 
@@ -160,7 +163,7 @@ function parseDecisions(machine, text) {
 
 function parse(machine, stdout) {
   return stdout.split(RS).slice(1).filter((s) => s.trim()).map((chunk) => {
-    const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames] = chunk.split(US);
+    const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile] = chunk.split(US);
     const orch = json(orchFile) ?? {};
     const status = json(statusFile) ?? {};
     const tasks = tasksOf(plan);
@@ -187,6 +190,10 @@ function parse(machine, stdout) {
       // What kind of run: feat, fix, rev or expl (set-status.sh --type).
       type: status.type ?? null,
       topic: status.topic ?? null,
+      // How much the orchestrator decides itself (set-status.sh --autonomy); a missing one is L0.
+      autonomy: /^L[0-2]$/.test(status.autonomy) ? status.autonomy : "L0",
+      // Decisions it made itself, newest first (decisions.md).
+      decided: parseDecidedLines(decidedFile),
       progress: status.progress ?? null,
       merged: status.tasks?.merged ?? null,
       planned: status.tasks?.planned ?? null,

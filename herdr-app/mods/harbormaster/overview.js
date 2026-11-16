@@ -4,8 +4,9 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, decisionQueue, answerRun, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
-import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
+import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag } from "./ui.js";
 import { tokenText } from "./context.js";
+import { decidedText } from "./decided.js";
 import { oneLine } from "./question.js";
 
 // How each runPhase() reads on a card.
@@ -254,6 +255,7 @@ function cardHeader(view, t, r, f, meta) {
     .child(v_flex().flex_1().min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)
         .when(Boolean(r.type), (el) => el.child(typeTag(t, r.type)))
+        .child(autonomyTag(t, `auto-${r.key}`, r.autonomy))
         .when(Boolean(r.proof.tier), (el) => el.child(tierTag(t, `tier-${r.key}`, r.proof.tier.tier, `Proof tier${r.proof.tier.byUser ? " (set by user)" : ""}${r.tasks.some((k) => !k.proof) ? `; ${plural(r.tasks.filter((k) => !k.proof).length, "task")} not scoped` : ""}`)))
         .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(13.5).text_color(t.foreground), runName(r.branch, r.topic)))
         .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
@@ -307,12 +309,18 @@ function card(view, t, r, ctx, compact = false) {
     .when(Boolean(r.progress), (el) => el.child(div().text_size(12.5).text_color(t.foreground).child(r.progress)))
     .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts, f.stages)))
     .children(cardNotes(t, r, f))
+    .when(r.decided.length > 0, (el) => el.child(decidedLine(t, r)))
     .when(prs.length > 0 || links.length > 0, (el) => el.child(v_flex().gap(1).text_size(12)
       .children(prs.map((p, i) => prRow(t, p, i)))
       .when(links.length > 0, (el) => el.child(h_flex().flex_wrap().gap(6).px(6).pt(2).children(links)))))
     .when(prs.length === 0 && related.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(11).text_color(t.dim).child("No pull request yet")))
     .child(actionRow(view, t, r, orch, closed, counts));
 }
+
+// What the orchestrator decided for you: on the overview card one line, the newest
+// decision and how many there are; the pane lists them (decidedSection).
+const decidedLine = (t, r) => div().truncate().text_size(11.5).text_color(t.dim).tooltip(r.decided.map(decidedText).join("\n"))
+  .child(`Decided for you · ${r.decided.length}: ${decidedText(r.decided[0])}`);
 
 // ---- one run on its own, as the pane pinned beside its orchestrator ----
 
@@ -357,6 +365,31 @@ function pathLink(t, r, id, rel, label) {
     .hover((s) => s.text_color(t.foreground)).tooltip(`Open ${r.dir}/${rel}`)
     .on_click((_e, cx) => { cx.stop_propagation(); openUrl(`${r.dir}/${rel}`); })
     .child(div().child("▤")).child(label);
+}
+
+// "Decided for you": the latest 3 decisions the orchestrator made itself, newest first,
+// the rest after "+N more". A line that did not parse shows as its raw text.
+function decidedSection(view, t, r) {
+  const open = view.decidedOpen?.has(r.key);
+  const shown = open ? r.decided : r.decided.slice(0, 3);
+  const more = r.decided.length - shown.length;
+  const row = (d, i) => h_flex().id(`dec-${r.key}-${i}`).gap(8).items_start().px(2).text_size(11.5)
+    .child(div().flex_none().w(46).text_color(t.dim).child(d.at ? ago(d.at) : "—"))
+    .child(v_flex().flex_1().min_w(0)
+      .child(div().text_color(t.foreground).child(d.topic ? `${d.topic}: ${d.decision}` : d.decision))
+      .when(Boolean(d.why), (el) => el.child(div().text_size(11).text_color(t.dim).child(d.why))));
+  const toggle = (label) => div().id(`dec-more-${r.key}`).px(2).text_size(11).text_color(t.muted).cursor_pointer()
+    .hover((s) => s.text_color(t.foreground)).child(label)
+    .on_click((_e, cx) => {
+      cx.stop_propagation();
+      view.decidedOpen ??= new Set();
+      if (open) view.decidedOpen.delete(r.key); else view.decidedOpen.add(r.key);
+      cx.notify();
+    });
+  return section(t, `Decided for you · ${r.decided.length}`)
+    .children(shown.map(row))
+    .when(more > 0, (el) => el.child(toggle(`+${more} more`)))
+    .when(open && r.decided.length > 3, (el) => el.child(toggle("Show fewer")));
 }
 
 // The Proof section: the run's tier, each task's tier and evidence with its result from
@@ -438,6 +471,7 @@ function runDetail(view, t, r, ctx) {
       .children(related.map((p, i) => prDetail(t, p, i, true)))))
     .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
+    .when(r.decided.length > 0, (el) => el.child(decidedSection(view, t, r)))
     .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(t, r)))
     .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
       .children(workers.map((w) => workerRow(t, w, ctx, workOf.get(w.address), w.parent !== r.terminal)))))
