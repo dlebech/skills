@@ -92,7 +92,12 @@ Tier: T1
 Checked: <what was checked>
 Result: pass | fail | partial — <one line>
 Files: shared/proof/<file>, shared/proof/<file>
+Ran: <short sha> <command> — <result>
 ```
+
+`Ran:` (one line per test, lint or build run, repeatable) records the commit a run was made against, so
+reviewers and the orchestrator reuse it instead of rerunning it on the same sha; see
+[speed.md](speed.md). A failing run is `— fail: <one line>`.
 
 A task's `## ` section is matched to the task by its id; its `Result` shows beside the task's
 evidence in the Proof section. A run with no `proof.md` shows its plan's evidence only.

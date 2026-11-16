@@ -354,8 +354,8 @@ export function taskStage(state) {
   return null;
 }
 
-// The stage an agent works on, from its role in its name: impl-, rev-, fix-.
-const ROLE_STAGE = { impl: "implement", rev: "review", fix: "fix" };
+// The stage an agent works on, from its role in its name: impl-, rev-, fix-, grunt-.
+const ROLE_STAGE = { impl: "implement", rev: "review", fix: "fix", grunt: "implement" };
 
 // A task's live agents among the orchestrator's own (not their helpers, such as a dev
 // server), by name: <role>-<prefix>-<task id or name>, with an optional -<round>. Without
@@ -370,7 +370,7 @@ export function taskAgents(task, run, ctx) {
   const order = ["review", "fix", "implement"];
   return ctx.terminals
     .filter((t) => t.parent === run.terminal && t.state === "live" && t.name)
-    .map((t) => ({ agent: t, m: /^(impl|rev|fix)-(.+)$/.exec(t.name.toLowerCase()) }))
+    .map((t) => ({ agent: t, m: /^(impl|rev|fix|grunt)-(.+)$/.exec(t.name.toLowerCase()) }))
     .filter(({ m }) => m && fits(m[2]))
     .map(({ agent, m }) => ({ agent, stage: ROLE_STAGE[m[1]] }))
     .sort((a, b) => order.indexOf(a.stage) - order.indexOf(b.stage));
