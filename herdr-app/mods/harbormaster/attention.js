@@ -1,12 +1,12 @@
-// Where to look next: which group a run is in (Needs you, Everything else, Done), its
-// next-step label from its pull requests and its project's review flow, its current step
-// and age, and whether it has stalled. Pure rules only, so the tests drive every one;
+// Where to look next: which group a run is in (Needs you, Working, Waiting on others, Can't
+// tell, Done), its next-step label from its pull requests and its project's review flow, its
+// current step and age, and whether it has stalled. Pure rules only, so the tests drive every one;
 // tracking.js keeps the times and stores they read, attend.js puts them together for a run.
 //
 // Reliability first: a run whose state cannot be read (gh failing, its machine offline, a
 // read gone stale) is never put in Needs you on the grounds it could not read. It goes
-// under Everything else with cantTell, shown grey. A question read from the run's own files
-// still counts: that file was read, whatever happened to the PR read.
+// under Can't tell (group "cant", cantTell), shown grey. A question read from the run's own
+// files still counts: that file was read, whatever happened to the PR read.
 
 import { needsYou, needReason } from "./live.js";
 
@@ -265,10 +265,12 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 //   stages, since   for stepOf
 //   filesOk   false when the run's files are a stale read (its machine did not answer)
 //   now
-// Returns {group: "needs" | "else" | "done", cantTell, why, reasons: [{key, text, since}],
+// Returns {group: "needs" | "working" | "waiting" | "cant" | "done", cantTell, why, reasons: [{key, text, since}],
 // next (nextStep), step (stepOf), stall, waitSince (ms: the longest-waiting reason's anchor,
 // for sorting; oldest first)}. Reason keys: question, stalled, red-ci, and the next-step
-// labels in Needs you; working, ci-running, waiting-for, idle, cant-tell elsewhere.
+// labels in Needs you; working, ci-running, idle in Working (idle: briefly quiet, not
+// stalled yet); waiting-for in Waiting on others; cant-tell in Can't tell. A Needs you run
+// may still have cantTell: a question read from its files, its PRs unreadable.
 export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, filesOk = true, now = Date.now() } = {}) {
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
@@ -286,7 +288,7 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   // A blocked orchestrator is a live fact, read from the window, so it counts without its files.
   if (!readable) {
     if (orch === "blocked") return out("needs", { reasons: [{ key: "question", text: "blocked on a dialog", since: null }] });
-    return out("else", { cantTell: true, why: run ? "its machine did not answer" : "its run files could not be read", reasons: [{ key: "cant-tell", text: "can't tell", since: null }] });
+    return out("cant", { cantTell: true, why: run ? "its machine did not answer" : "its run files could not be read", reasons: [{ key: "cant-tell", text: "can't tell", since: null }] });
   }
   if (run.away?.how === "closed") return out("done", {});
   const reasons = [];
@@ -294,7 +296,7 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   if (!pr?.readable) {
     // The question was read from its file, so it still counts; nothing is said on PR grounds.
     if (reasons.length) return out("needs", { reasons, cantTell: true, why: pr?.why ?? null });
-    return out("else", { cantTell: true, why: pr?.why ?? null, reasons: [{ key: "cant-tell", text: "can't tell", since: null }] });
+    return out("cant", { cantTell: true, why: pr?.why ?? null, reasons: [{ key: "cant-tell", text: "can't tell", since: null }] });
   }
   const next = nextStep(prs, flow);
   base.next = next;
@@ -317,8 +319,19 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
     : ci.state === "running" ? { key: "ci-running", text: "CI running" }
     : next?.label === "review from" ? { key: "waiting-for", text: nextStepText(next) }
     : { key: "idle", text: "idle" };
-  return out("else", { reasons: [{ ...why, since: step.since }], next });
+  return out(why.key === "waiting-for" ? "waiting" : "working", { reasons: [{ ...why, since: step.since }], next });
 }
 
 // Longest wait first: the older waitSince sorts first; an unknown one last.
 export const byWait = (a, b) => (a.waitSince ?? Infinity) - (b.waitSince ?? Infinity);
+
+// The status a run's dot shows (Crew row, card, pane): its orchestrator's own status lifted by
+// its agents', since the orchestrator sits idle between its turns while its agents implement.
+// Blocked if it or any agent is blocked on a dialog, else working if it or any agent works (or,
+// with `ciRunning`, while CI runs: the run is at work, just not in a terminal), else its own.
+export function runDot(own, agents = [], { ciRunning = false } = {}) {
+  const all = [own, ...agents];
+  if (all.includes("blocked")) return "blocked";
+  if (all.includes("working") || (ciRunning && own !== "gone")) return "working";
+  return own;
+}

@@ -1,7 +1,7 @@
 // How the Crew block shows a run's attention (crewrows.js): groups, order, detail line, edge and hover.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assess, STALL_MS } from "../../herdr-app/mods/harbormaster/attention.js";
+import { assess, runDot, STALL_MS } from "../../herdr-app/mods/harbormaster/attention.js";
 import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote } from "../../herdr-app/mods/harbormaster/crewrows.js";
 
 const MIN = 60000;
@@ -20,23 +20,28 @@ const pr = (o = {}) => ({
 const read = (list) => ({ list, readable: true, why: null });
 const at = (r, o = {}) => assess(r, { orch: "idle", working: false, pr: read([pr()]), now, since: ago(20), ...o });
 
-test("groups come in order Needs you, Everything else, Done, and only Done folds", () => {
-  assert.deepEqual(GROUPS.map((g) => g.key), ["needs", "else", "done"]);
+test("groups come in order Needs you, Working, Waiting on others, Can't tell, Done, and only Done folds", () => {
+  assert.deepEqual(GROUPS.map((g) => g.key), ["needs", "working", "waiting", "cant", "done"]);
+  assert.deepEqual(GROUPS.map((g) => g.title), ["Needs you", "Working", "Waiting on others", "Can't tell", "Done"]);
   assert.deepEqual(GROUPS.filter((g) => g.folded).map((g) => g.key), ["done"]);
 });
 
-test("groupRows sorts each group longest wait first and puts a row without a result under else", () => {
+test("groupRows sorts each group longest wait first and puts a row without a result under Can't tell", () => {
   const rows = [
     { id: "new", a: { group: "needs", waitSince: ago(5) } },
     { id: "old", a: { group: "needs", waitSince: ago(50) } },
     { id: "unknown", a: { group: "needs", waitSince: null } },
-    { id: "w", a: { group: "else", waitSince: ago(1) } },
+    { id: "w", a: { group: "working", waitSince: ago(1) } },
+    { id: "r", a: { group: "waiting", waitSince: ago(1) } },
+    { id: "c", a: { group: "cant", waitSince: ago(1) } },
     { id: "none", a: null },
     { id: "d", a: { group: "done", waitSince: ago(1) } },
   ];
   const g = groupRows(rows);
   assert.deepEqual(g.needs.map((x) => x.id), ["old", "new", "unknown"]);
-  assert.deepEqual(g.else.map((x) => x.id), ["w", "none"]);
+  assert.deepEqual(g.working.map((x) => x.id), ["w"]);
+  assert.deepEqual(g.waiting.map((x) => x.id), ["r"]);
+  assert.deepEqual(g.cant.map((x) => x.id), ["c", "none"]);
   assert.deepEqual(g.done.map((x) => x.id), ["d"]);
 });
 
@@ -73,13 +78,14 @@ test("stalled with red CI as well stays red", () => {
   assert.equal(rowLead(a, now).tone, "blocked");
 });
 
-test("can't tell is grey, under Everything else, with why in the hover", () => {
+test("can't tell is grey, in a group of its own, with why in the hover", () => {
   const a = at(run(), { pr: { list: null, readable: false, why: "gh: could not resolve host" } });
-  assert.equal(a.group, "else");
+  assert.equal(a.group, "cant");
   assert.deepEqual(rowLead(a, now), { lead: "can't tell", rest: null, tone: "dim" });
   assert.equal(rowEdge(a), "dim");
   assert.ok(rowTip(a, now).includes("Can't tell: gh: could not resolve host"));
   const offline = at(run(), { filesOk: false });
+  assert.equal(offline.group, "cant");
   assert.equal(rowLead(offline, now).lead, "can't tell");
   assert.ok(rowTip(offline, now).includes("Can't tell: its machine did not answer"));
 });
@@ -92,7 +98,7 @@ test("a question with unreadable PRs still needs you, and the hover says what ca
 
 test("while agents work, the step and its age lead", () => {
   const a = at(run({ tasks: [{ id: "t3", state: "implementing" }] }), { working: true, stages: ["implement"], since: ago(72) });
-  assert.equal(a.group, "else");
+  assert.equal(a.group, "working");
   assert.deepEqual(rowLead(a, now), { lead: "t3 implementing · 1h12m", rest: null, tone: "muted" });
   assert.equal(rowEdge(a), "working");
   assert.ok(rowTip(a, now).includes("Current step: t3 implementing, for 1h12m"));
@@ -105,7 +111,7 @@ test("CI running leads with CI on the PR and its age", () => {
 
 test("waiting on a reviewer: the label, then the step", () => {
   const a = at(run({ phase: "finished", progress: "done" }), { flow: "peer", pr: read([pr({ requested: ["anna"] })]) });
-  assert.equal(a.group, "else");
+  assert.equal(a.group, "waiting");
   const l = rowLead(a, now);
   assert.equal(l.lead, "review from anna");
   assert.equal(l.rest, "done · 20m");
@@ -114,7 +120,7 @@ test("waiting on a reviewer: the label, then the step", () => {
 test("a review wait has a colour of its own, and its hover names the reviewers and the PRs", () => {
   const a = at(run({ phase: "finished", progress: "done" }), { flow: "peer",
     pr: read([pr({ number: 1799, requested: ["mfalkenbrink"] }), pr({ number: 1372, url: "u2", requested: ["mfalkenbrink"] })]) });
-  assert.equal(a.group, "else");
+  assert.equal(a.group, "waiting");
   assert.equal(rowLead(a, now).lead, "review from mfalkenbrink · 2 PRs");
   assert.equal(rowEdge(a), "review");
   assert.equal(rowTip(a, now)[0], "Waiting for mfalkenbrink to review PR #1799 and #1372, since 20m ago");
@@ -125,7 +131,10 @@ test("a review wait has a colour of its own, and its hover names the reviewers a
 test("amber and the working colour only for stalls and work: an idle run is neutral", () => {
   const idle = at(run({ phase: "running" }), { flow: "peer", pr: read([]) , orch: "idle" });
   assert.equal(idle.reasons[0].key, "idle");
+  assert.equal(idle.group, "working");
   assert.equal(rowEdge(idle), "neutral");
+  // Briefly idle, not stalled yet: its step and age show how quiet it is.
+  assert.equal(rowLead(idle, now).lead, "watching CI · 20m");
   const ci = at(run(), { pr: read([pr({ checks: { pass: 1, fail: 0, pending: 2 }, ci: { startedAt: ago(34), finishedAt: null } })]) });
   assert.equal(rowEdge(ci), "working");
 });
@@ -160,7 +169,7 @@ test("needLine says why a run needs you, and nothing outside Needs you", () => {
 
 test("a finished run waiting on a reviewer says so on its pill, in a neutral colour", () => {
   const a = at(run({ phase: "finished" }), { flow: "peer", pr: read([pr({ requested: ["anna"] }), pr({ number: 43, requested: ["anna"] })]) });
-  assert.equal(a.group, "else");
+  assert.equal(a.group, "waiting");
   assert.deepEqual(badgeOf(a, true), { label: "review from anna · 2 PRs", tone: "muted" });
   // A run still running keeps its phase.
   assert.equal(badgeOf(a, false), null);
@@ -189,4 +198,35 @@ test("an empty Needs you says nothing is for you, only while there are orchestra
   assert.equal(emptyNote(needs, [], 0), null);
   assert.equal(emptyNote(GROUPS[1], [], 2), null);
   assert.equal(emptyNote(GROUPS[2], [], 2), null);
+});
+
+test("the group split: working (agents, CI, briefly idle), waiting on a reviewer, can't tell", () => {
+  const ciPr = pr({ checks: { pass: 1, fail: 0, pending: 2 }, ci: { startedAt: ago(34), finishedAt: null } });
+  const cases = [
+    [at(run(), { working: true }), "working", "working"],
+    [at(run(), { pr: read([ciPr]) }), "working", "ci-running"],
+    [at(run(), { pr: read([]) }), "working", "idle"],
+    [at(run({ phase: "finished" }), { flow: "peer", pr: read([pr({ requested: ["anna"] })]) }), "waiting", "waiting-for"],
+    [at(run(), { pr: { list: null, readable: false, why: "gh failed" } }), "cant", "cant-tell"],
+    [at(run(), { filesOk: false }), "cant", "cant-tell"],
+    [assess(null, { now }), "cant", "cant-tell"],
+  ];
+  for (const [a, group, key] of cases) assert.deepEqual([a.group, a.reasons[0].key], [group, key]);
+  // Agents working beat a reviewer request: it is the run's turn.
+  assert.equal(at(run(), { working: true, flow: "peer", pr: read([pr({ requested: ["anna"] })]) }).group, "working");
+  // Unreadable state never goes under Needs you on that account, and never mixes into Working.
+  assert.equal(at(run(), { working: true, pr: { list: null, readable: false, why: "x" } }).group, "cant");
+});
+
+test("a run's dot works while its orchestrator or any agent works, and is blocked if any is blocked", () => {
+  // The regression: the orchestrator idle between turns while five agents implement.
+  assert.equal(runDot("idle", ["working", "working", "working", "working", "working"]), "working");
+  assert.equal(runDot("working", []), "working");
+  assert.equal(runDot("idle", ["idle", "done"]), "idle");
+  assert.equal(runDot("idle", ["working", "blocked"]), "blocked");
+  assert.equal(runDot("blocked", ["working"]), "blocked");
+  assert.equal(runDot("idle", [], { ciRunning: true }), "working");
+  assert.equal(runDot("gone", [], { ciRunning: true }), "gone");
+  assert.equal(runDot("gone", ["working"]), "working");
+  assert.equal(runDot("done"), "done");
 });

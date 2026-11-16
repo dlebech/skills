@@ -132,32 +132,32 @@ test("Needs you: a stalled run", () => {
   assert.deepEqual([a.group, a.reasons[0].key, a.reasons[0].text, a.waitSince], ["needs", "stalled", "quiet 45m", ago(45)]);
 });
 
-test("Everything else: agents working, a reviewer requested and not answered, CI running, idle", () => {
+test("Working (agents, CI running, idle) and Waiting on others (a reviewer requested and not answered)", () => {
   const r = run();
   const w = assess(r, { orch: "working", working: true, pr: read([pr()]), now, flow: "peer" });
-  assert.deepEqual([w.group, w.reasons[0].key], ["else", "working"]);
+  assert.deepEqual([w.group, w.reasons[0].key], ["working", "working"]);
   // Working wins over PR grounds and red CI: it is the run's turn.
-  assert.equal(assess(r, { working: true, pr: read([pr({ checks: checks(0, 1) })]), now }).group, "else");
+  assert.equal(assess(r, { working: true, pr: read([pr({ checks: checks(0, 1) })]), now }).group, "working");
   const wf = settled(run({ phase: "finished" }), [pr({ requested: ["anna"] })], { flow: "peer" });
-  assert.deepEqual([wf.group, wf.reasons[0].key, wf.reasons[0].text], ["else", "waiting-for", "review from anna"]);
+  assert.deepEqual([wf.group, wf.reasons[0].key, wf.reasons[0].text], ["waiting", "waiting-for", "review from anna"]);
   const ci = settled(run({ phase: "finished" }), [pr({ checks: checks(2, 0, 1), ci: { startedAt: ago(10), finishedAt: null } })], { flow: "self" });
-  assert.deepEqual([ci.group, ci.reasons[0].key], ["else", "ci-running"]);
+  assert.deepEqual([ci.group, ci.reasons[0].key], ["working", "ci-running"]);
   assert.equal(settled(run({ prs: [] }), []).reasons[0].key, "idle");
 });
 
 test("can't tell: gh failing, never in Needs you on PR grounds", () => {
   const fin = run({ phase: "finished" });
   const a = assess(fin, { orch: "idle", pr: { list: [pr({ approvedBy: ["a"], stale: true })], readable: false, why: "gh could not read u1" }, now, flow: "peer" });
-  assert.deepEqual([a.group, a.cantTell, a.why, a.reasons[0].key], ["else", true, "gh could not read u1", "cant-tell"]);
+  assert.deepEqual([a.group, a.cantTell, a.why, a.reasons[0].key], ["cant", true, "gh could not read u1", "cant-tell"]);
   const red = assess(fin, { orch: "idle", pr: { list: [pr({ checks: checks(0, 2) })], readable: false, why: "stale" }, now });
-  assert.equal(red.group, "else");
+  assert.equal(red.group, "cant");
 });
 
 test("can't tell: the machine is offline or the run files are a stale read", () => {
   const off = assess(run(), { orch: "idle", pr: read([pr({ approvedBy: ["a"] })]), filesOk: false, now, flow: "peer" });
-  assert.deepEqual([off.group, off.cantTell], ["else", true]);
+  assert.deepEqual([off.group, off.cantTell], ["cant", true]);
   const none = assess(null, { orch: null, now });
-  assert.deepEqual([none.group, none.cantTell], ["else", true]);
+  assert.deepEqual([none.group, none.cantTell], ["cant", true]);
   // A dialog on screen is a live fact: it still needs you.
   assert.equal(assess(null, { orch: "blocked", now }).group, "needs");
 });
@@ -167,7 +167,7 @@ test("Done: every PR merged or closed and nothing at work; a closed run", () => 
   const d = settled(fin, [pr({ state: "MERGED" }), pr({ number: 43, state: "CLOSED" })]);
   assert.deepEqual([d.group, d.next.label, d.next.count, d.waitSince], ["done", "merged — close run", 2, ago(100)]);
   // Still working (a next PR may come), or asking: not done.
-  assert.equal(assess(run(), { working: true, pr: read([pr({ state: "MERGED" })]), now }).group, "else");
+  assert.equal(assess(run(), { working: true, pr: read([pr({ state: "MERGED" })]), now }).group, "working");
   assert.equal(settled(run({ question: "q?", ask: { title: "q?" } }), [pr({ state: "MERGED" })]).group, "needs");
   assert.equal(assess(run({ away: { how: "closed", at: ago(1) } }), { pr: read([]), now }).group, "done");
   // No PR at all is never done.
@@ -334,7 +334,7 @@ test("peer: a reviewer asked again waits, even after their change request or app
   // The repo's reviewDecision counts when no reviewer's review stands and nobody is asked.
   assert.equal(prStep(pr({ review: "CHANGES_REQUESTED" }), "peer").label, "changes requested");
   const g = settled(run({ phase: "finished" }), [again], { flow: "peer" });
-  assert.deepEqual([g.group, g.reasons[0].text], ["else", "review from anna"]);
+  assert.deepEqual([g.group, g.reasons[0].text], ["waiting", "review from anna"]);
 });
 
 test("an offline machine's runs are carried, marked stale, and read as can't tell", () => {
@@ -350,7 +350,7 @@ test("an offline machine's runs are carried, marked stale, and read as can't tel
   assert.equal(filesFresh(a, now, { at: ago(3), failed: [] }), false, "a poll over 2 minutes old");
   // Even its waiting plan, read before the machine went away, is not Needs you now.
   const g = assess(carried[0], { orch: null, pr: read([]), filesOk: filesFresh(carried[0], now, cache), now });
-  assert.deepEqual([g.group, g.cantTell], ["else", true]);
+  assert.deepEqual([g.group, g.cantTell], ["cant", true]);
 });
 
 test("a re-run failed job is aged from its re-run, not from the first checks", () => {

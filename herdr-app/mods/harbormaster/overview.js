@@ -12,7 +12,7 @@ import { oneLine, needHead, questionSections, paragraphs, plain, replyId, replyI
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf } from "./attend.js";
-import { stepText, quietText, flowState, flowSetting } from "./attention.js";
+import { stepText, quietText, flowState, flowSetting, runDot } from "./attention.js";
 import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
@@ -408,6 +408,12 @@ function attOf(r, ctx) {
 // dialog, or what its PRs or a stall wait on you for); never a parked or closed run.
 const needsYouNow = (r, ctx) => !r.away && (needsYou(r, orchestratorState(r, ctx)) || attOf(r, ctx).group === "needs");
 
+// A run's dot (Crew row, card, pane): working while its orchestrator or any of its agents
+// works, or its CI runs; blocked while any is blocked on a dialog (attention.js runDot). The
+// orchestrator's own status alone sits idle between its turns while five agents implement.
+const runStatus = (own, workers, att, ctx) =>
+  runDot(own, workers.map((w) => agentStatus(w, ctx)), { ciRunning: att?.reasons?.[0]?.key === "ci-running" });
+
 function runFacts(r, ctx) {
   const orch = orchestratorState(r, ctx);
   const parked = isParked(r);
@@ -418,14 +424,16 @@ function runFacts(r, ctx) {
   // card does ("approved — merge", "review from anna"); a parked or closed one keeps saying so.
   const next = !r.away && badgeOf(att, r.phase === "finished");
   if (next) badge = next;
+  const workers = workersOf(r.terminal, ctx);
   return {
     orch, parked, need, badge, att,
+    dot: runStatus(orch, workers, att, ctx),
     closed: isClosed(r, ctx),
     reason: needReason(r, orch) ?? needLine(att),
     counts: taskCounts(r),
     prs: prsOf(r) ?? r.prs.map((p) => unknownPr(p.url, p.repo)),
     related: relatedOf(r),
-    workers: workersOf(r.terminal, ctx),
+    workers,
     stages: stagesOf(r, ctx),
   };
 }
@@ -442,7 +450,7 @@ function cardHeader(view, t, r, f, meta) {
       .child(metaLine(t, r, meta)))
     .map(withContext(view, t, `run-${r.key}`, r.terminal))
     .child(runPin(t, `pin-${r.key}`, r, f.orch))
-    .child(statusDot(t, f.orch))
+    .child(statusDot(t, f.dot))
     .child(pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need));
 }
 
@@ -1507,8 +1515,8 @@ export function crew(view, t) {
   }
   const orchRow = ({ term, r, state, a }) => {
     const labels = term.labels ?? {};
-    const status = agentStatus(term, ctx);
     const crewOf = workersOf(term.address, ctx);
+    const status = runStatus(agentStatus(term, ctx), crewOf, a, ctx);
     const workers = crewOf.length;
     // Why it is in its group (its reasons, the next-step label or the step and its age) leads,
     // then when it started, which tells apart runs with the same name; it is short, so a narrow
@@ -1538,8 +1546,9 @@ export function crew(view, t) {
       action: blockingAction(view, t, r, a, `crew-${term.address}`, true),
     });
   };
-  // Needs you, Everything else and Done, each longest wait first; Done folded until opened
-  // (view.folds, as the pane's folds). Its heading leaves room on the right for an action.
+  // Needs you, Working, Waiting on others, Can't tell and Done, each longest wait first; Done
+  // folded until opened (view.folds, as the pane's folds). Its heading leaves room on the
+  // right for an action.
   const groups = groupRows(orchestrators);
   const closing = closeAllControl(view, t, groups.done, ctx);
   const groupHead = (g, n) => {
