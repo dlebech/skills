@@ -494,7 +494,7 @@ const tierTag = (t, id, tier, tip) => div().id(id).flex_none().text_size(10).fon
 // with a tier, its proof tier. `r` may be a stand-in for a run without a directory
 // ({type, autonomy} from its terminal's labels): its tags then only say what they are.
 // `short`, for the narrow Crew block, writes a pending request "T3…" instead of "T3 requested…".
-// The type tag on its own, so a Crew row can put its crab count right after it.
+// The type tag on its own, apart from the level tags.
 const runTypeTag = (t, r, id) => (r.type ? typeTag(t, r.type, `type-${id}`) : null);
 function levelTags(view, t, r, id, short = false) {
   return [
@@ -1140,15 +1140,15 @@ export function crew(view, t) {
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
     .when(Boolean(mark), (el) => el.child(div().flex_none().text_size(12).child(mark)))
     .child(v_flex().flex_1().min_w(0)
-      // The title gets the whole first line; the type tag, the worker count and the level
-      // tags (a pending request short, "T3…") lead the second, in that order, so a narrow
-      // sidebar truncates the detail first, then the level tags, before the type and crabs.
+      // The title gets the whole first line; the type tag, the level tags (a pending request
+      // short, "T3…") and then the worker count lead the second, so the tags stay put while
+      // workers come and go. All are short and fixed, so a narrow sidebar truncates the detail.
       .child(div().id(`${id}-title`).min_w(0).truncate().text_size(12.5).font_semibold().text_color(t.foreground).tooltip(hover).child(title))
       .child(h_flex().gap(6).items_center().min_w(0)
         .when(Boolean(type), (el) => el.child(type))
+        .children(tags)
         .when(crabs > 0, (el) => el.child(h_flex().flex_none().gap(3).items_center().text_size(11).text_color(t.muted)
           .child(div().text_size(11).child(CRAB)).child(String(crabs))))
-        .children(tags)
         .child(div().id(`${id}-detail`).flex_1().min_w(0).truncate().text_size(11).text_color(t[tone] ?? t.dim).tooltip(hover).child(detail))))
     .map(withUsage(t, id, usage, whose, more))
     .child(statusDot(t, status));
