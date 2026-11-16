@@ -6,7 +6,7 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
 want=$(node -e '
 const fs = require("fs");
-const rows = fs.readFileSync("skills/proving/SKILL.md", "utf8").split("\n").map((l) => /^\| T([0-3]) \| (.*) \|\s*$/.exec(l)).filter(Boolean);
+const rows = fs.readFileSync("skills/proving/SKILL.md", "utf8").split("\n").map((l) => /^\| T(\\d+) \| (.*) \|\s*$/.exec(l)).filter(Boolean);
 if (rows.length !== 4) { console.error("SKILL.md: expected 4 tier rows, got " + rows.length); process.exit(1); }
 console.log(JSON.stringify(rows.map((m) => m[2])));')
 got=$(node --input-type=module -e '

@@ -126,8 +126,8 @@ export const tokenText = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1).replace(/\.0$
 // The headline for a run's tokens: what was fresh (input, output, cache writes) first, then
 // the cache reads, which are billed at about a tenth and dominate the total:
 // "2.9M tok (+89.5M cached)". `tk` has total, input, output, cacheRead, cacheWrite (or
-// snake_case); `split` false marks a count from before the split, which has only a total
-// and reads "<total> tok". Without cache reads it is just "2.9M tok".
+// snake_case); a count from before the split has only a total and reads "<total> tok":
+// a per-agent count says so with `split: false`, the run's total by having all its parts zero. Without cache reads it is just "2.9M tok".
 const tkParts = (tk) => {
   const cached = Number(tk.cacheRead ?? tk.cache_read) || 0;
   const write = Number(tk.cacheWrite ?? tk.cache_write) || 0;
@@ -137,7 +137,8 @@ export function tokenHeadline(tk) {
   const p = tkParts(tk);
   if (tk.split === false || (tk.total > 0 && p.input + p.output + p.write + p.cached === 0)) return `${tokenText(tk.total)} tok`;
   const fresh = p.input + p.output + p.write;
-  return p.cached > 0 ? `${tokenText(fresh)} tok (+${tokenText(p.cached)} cached)` : `${tokenText(fresh)} tok`;
+  const f = fresh > 0 && fresh < 1000 ? "<1k" : tokenText(fresh);
+  return p.cached > 0 ? `${f} tok (+${tokenText(p.cached)} cached)` : `${f} tok`;
 }
 
 // The full breakdown, for the hover over the headline. Budgets count the total.

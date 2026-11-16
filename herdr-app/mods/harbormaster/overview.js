@@ -37,7 +37,7 @@ const withContext = (view, t, id, address, run = null) => (el) => {
   if (!c) return el;
   return el.child(div().id(`${id}-ctx`).flex_none().text_size(10.5).text_color(t.dim).child(tokenText(c.tokens))
     .tooltip(`Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`
-      + (run?.tokens ? `\nRun total: ${tokenHeadline(run.tokens)}, all its agents` : "")));
+      + (run?.tokens ? `\nRun total: ${tokenHeadline(run.tokens)} (${run.tokens.total.toLocaleString("en")} in all), all its agents` : "")));
 };
 
 // A small "85% · 2.1G" badge for an agent and the commands it runs, above resources.js's HOT
@@ -321,9 +321,9 @@ const metaLine = (t, r, meta) => {
   const line = h_flex().min_w(0).text_size(11.5).text_color(t.dim);
   if (at < 0) return div().truncate().text_size(11.5).text_color(t.dim).child(meta);
   const over = overBudget(r);
-  const tip = over ? `${tokenDetail(r.tokens)}\nOver its soft budget of ${r.budget.toLocaleString("en")} tokens` : tokenDetail(r.tokens);
+  const tip = !r.budget ? tokenDetail(r.tokens) : `${tokenDetail(r.tokens)}\n${over ? "Over its" : "Under its"} soft budget of ${r.budget.toLocaleString("en")} tokens`;
   return line.child(div().flex_none().child(meta.slice(0, at)))
-    .child((over ? div().id(`over-${r.key}`).text_color(t.blocked).font_semibold() : div().id(`tokmeta-${r.key}`)).flex_none().tooltip(tip).child(tok))
+    .child((over ? div().id(`over-${r.key}`).text_color(t.blocked).font_semibold() : div().id(`tokmeta-${r.key}`)).min_w(0).truncate().tooltip(tip).child(tok))
     .child(div().truncate().child(meta.slice(at + tok.length)));
 };
 const runEdge = (t, f) => (f.need ? t.blocked : t[f.badge.tone] ?? t.border);

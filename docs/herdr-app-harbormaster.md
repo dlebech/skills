@@ -215,7 +215,7 @@ section folds with a click on its title.
   run, then **Other processes**: the busiest processes outside every agent (a browser, Docker, Herdr
   itself), so fan noise can be explained. Hover a row for the agent's own share and each program, and
   its terminal's name. Terminals in no run under 1% CPU and 100 MB (idle shells) are one "+N more" line.
-- **Runs.** Per run: its wall time, a bar of where it went, its tokens (a bar as wide as its share of
+- **Runs.** Per run: its wall time, a bar of where it went, its tokens (the column shows the full total, since it is too narrow for the card's fresh-first headline; a bar as wide as its share of
   the largest run's, as on run cards: fresh tokens, that is input, output and cache writes, in blue, cache reads in green;
   exact numbers on hover), and its CPU time and memory peak (all its agents together). Click a run for
   the categories with shares, the effort (all agents' time, more than the wall time as they work in

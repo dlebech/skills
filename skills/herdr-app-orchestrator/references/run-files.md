@@ -307,7 +307,7 @@ Every `set-status.sh` call checks it after the token count. When `tokens.total >
 `budget_asked` is not this budget, it records `budget_asked: <budget>` and prints one line:
 `over budget: <total> of <budget> tokens; ask the budget question (run-files.md)`. It prints once per
 budget value, so raising the budget arms it again. It never writes `question.md` (one may be open).
-Harbormaster marks a run over budget from `status.json` alone (`31M / 30M tok`, in the blocked colour),
+Harbormaster marks a run over budget from `status.json` alone (`2.9M tok (+28M cached) · 31M/30M budget`, in the blocked colour),
 even when the orchestrator is gone.
 
 On that line the orchestrator asks this question, at any autonomy level (it is always yours to decide,
