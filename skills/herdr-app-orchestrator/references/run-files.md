@@ -159,8 +159,8 @@ terminal label `run.autonomy`; the run card shows it as a tag. L3 (auto-merge) i
 ```
 
 `[decided]` is a decision the orchestrator made itself, `[user]` one you made (the orchestrator logs one when it acts on your answer, section 6 of its skill). Harbormaster reads the
-last 60 lines of either kind and shows them as "Decided for you": one summary line (`Decided for you · 20 by the
-orchestrator, 1 from you · latest: <the newest line>`), which on the pane expands to the list, newest first.
+last 60 lines of either kind and shows them in the run pane's **Decisions** section: the latest three, then a fold (`All 21 · 20 by the
+orchestrator, 1 from you`) that lists the rest, newest first.
 A line that does not read as `<UTC time> <topic>: <decision> — <why>` is shown as its raw text.
 
 ## Tokens: status.json `tokens`, sessions and .tokens/
@@ -307,7 +307,7 @@ Every `set-status.sh` call checks it after the token count. When `tokens.total >
 `budget_asked` is not this budget, it records `budget_asked: <budget>` and prints one line:
 `over budget: <total> of <budget> tokens; ask the budget question (run-files.md)`. It prints once per
 budget value, so raising the budget arms it again. It never writes `question.md` (one may be open).
-Harbormaster marks a run over budget from `status.json` alone (`2.9M tok (+28M cached) · 31M/30M budget`, in the blocked colour),
+Harbormaster marks a run over budget from `status.json` alone (`over budget 31M/30M` in its card's and pane's header, in the blocked colour),
 even when the orchestrator is gone.
 
 On that line the orchestrator asks this question, at any autonomy level (it is always yours to decide,

@@ -115,7 +115,7 @@ what the session files gained since, so it stays cheap. It reads Claude Code's, 
 files on the orchestrator's computer, from the run's start on, including those of agents already
 killed and worktrees already removed, those of an orchestrator resumed in a new terminal (best effort
 for a pi or opencode orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
-down. The orchestrator's context tooltip ("Run total") leads with the fresh tokens and shows the cache reads beside them (`2.9M tok (+89.5M cached)`); a count from before the split reads `26M tok`. A run's card and pane header show tokens only once over the soft budget (`over budget 92M/100M`, in red). The run pane has a **Tokens** section, last since it is about cost, with one line of totals: fresh tokens (input, output and cache writes) in cyan, the output part of them in magenta, cache reads in grey and the total in bold, colours kept apart from the status ones. Hovering it shows the full breakdown (total, input, output, cache writes, cache reads, and that cache reads are billed at about a tenth of input). Clicking it folds out each agent's share as a bar, fresh in cyan over cache reads in grey, with the exact numbers on
+down. The orchestrator's context tooltip ("Run total") leads with the fresh tokens and shows the cache reads beside them (`2.9M tok (+89.5M cached)`); a count from before the split reads `26M tok`, and the Tokens line shows only its total. A run's card and pane header show tokens only once over the soft budget (`over budget 92M/100M`, in red). The run pane has a **Tokens** section, last since it is about cost, with one line of totals: fresh tokens (input, output and cache writes) in cyan, the output part of them in magenta, cache reads in grey and the total in bold, colours kept apart from the status ones. Hovering it shows the full breakdown (total, input, output, cache writes, cache reads, and that cache reads are billed at about a tenth of input). Clicking it folds out each agent's share as a bar, fresh in cyan over cache reads in grey, with the exact numbers on
 hover (`fresh 1,234,567 (in 12, out 3,456, cache write 1,230,000) · cache read 28,000,000`), the orchestrator
 first, then the agents by size, named by their worktree (`pda-t3`). The narrow Crew block leaves it
 out; hovering an orchestrator's context size there shows the run total too. The total (and so the budget) counts any of input,
@@ -128,8 +128,8 @@ are matched: [run-files.md](../skills/herdr-app-orchestrator/references/run-file
 
 `set-status.sh --budget 30M` (also `500k`, `1.5M` or a plain number) gives a run a soft token budget,
 which the orchestrator sets when started with `budget=30M`. Cache reads count in the total and dominate it: a
-run of a few tasks is tens of millions, so pick a budget in that range, not a few million. A run that has used it shows `2.9M tok (+28M cached) · 31M/30M budget` in
-the blocked colour (the budget is compared with the full total, fresh plus cached) on its card and a note in its Tokens section, from `status.json` alone. The
+run of a few tasks is tens of millions, so pick a budget in that range, not a few million. A run that has used it shows `over budget 31M/30M` in
+the blocked colour (the budget is compared with the full total, fresh plus cached) in its card's and pane's header and a note in its Tokens section, from `status.json` alone. The
 orchestrator asks a budget question when it notices (Continue, Compact or Stop; at any autonomy level),
 which shows in Waiting on you like any other. A run over budget with no question open, whose orchestrator is gone, idle or done (not working, and not
 needing you for another reason), and whose question is not marked answered (`--budget-answered`), gets the same
@@ -267,9 +267,9 @@ Esc or ✕ to close. A video opens in the system player. A file over 6 MB is not
 large to preview".
 With every task listed, two links open `proof.md` and the
 `shared/proof/` folder; for a run on another machine they are shown as paths, since nothing here
-can open a file there. In the runs overview, a run's card shows the same verdict as a line (not for a finished run's
+can open a file there. In the runs overview, a run's card shows the same verdict as a line (not once the run is finished, parked or closed;
 smaller card) and a small tier tag by its name
-(hover for what the tier means, from the table in `skills/proving/SKILL.md`, and how many tasks are not scoped; the verdict line and each task row have the same hover) and "n unscoped" in its meta line. The formats are in
+(hover for what the tier means, from the table in `skills/proving/SKILL.md`, and how many tasks are not scoped; the verdict line, on the card and in the pane, and each task row have the same hover) and "n unscoped" in its meta line. The formats are in
 [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
 ### Where the screenshots come from

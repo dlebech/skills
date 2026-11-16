@@ -315,7 +315,8 @@ function card(view, t, r, ctx, compact = false) {
   ];
   const focus = () => orch !== "gone" && focusAgent(r.terminal);
   const facts = factsLine(t, r, prs, 12.5);
-  const proof = !compact ? proofSummary(t, r) : null;
+  // Not on a finished or put-away run's smaller card; a live card shows it even when narrow.
+  const proof = r.phase !== "finished" && !r.away ? proofSummary(t, r) : null;
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(8).p(12).pl(16).rounded(10).bg(t.surface)
     .border(1).border_color(need ? t.blocked + "88" : t.border).cursor_pointer()
     .hover((s) => s.bg(t.raised)).on_click(focus)
@@ -325,7 +326,7 @@ function card(view, t, r, ctx, compact = false) {
     .when(Boolean(facts), (el) => el.child(facts))
     .when(Boolean(r.progress), (el) => el.child(progressLine(t, r)))
     .children(cardNotes(t, r, f))
-    .when(Boolean(proof), (el) => el.child(h_flex().flex_wrap().items_center().gap(6).px(2).text_size(11.5)
+    .when(Boolean(proof), (el) => el.child(h_flex().id(`proof-${r.key}`).flex_wrap().items_center().gap(6).px(2).text_size(11.5).when(Boolean(proof.tip), (e) => e.tooltip(proof.tip))
       .child(div().flex_none().text_size(11).font_semibold().text_color(t.dim).child("Proof"))
       .child(h_flex().flex_wrap().items_center().children(joined(t, proof.parts)))))
     .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts, f.stages)))
@@ -368,7 +369,7 @@ function factsLine(t, r, prs, size = 13) {
     // A one-way door is worth seeing before the PR card (and the overview card has no PR rows).
     if (p.danger && oneWay(p.danger)) items.push({ text: "one-way door", color: t.blocked, bold: true });
     const review = reviewText(p);
-    if (review && review[1] !== "dim") items.push({ text: review[0], color: review[1] === "done" ? PASS(t) : t[review[1]] });
+    if (review) items.push({ text: review[0], color: review[1] === "done" ? PASS(t) : t[review[1]] });
   });
   if (items.length === 0) return null;
   return h_flex().flex_wrap().items_center().text_size(size).font_medium().text_color(t.foreground).children(joined(t, items));
@@ -404,7 +405,9 @@ function proofSummary(t, r) {
     md?.cut && { text: "proof.md cut", color: t.dim },
     checks && { text: `checks ${checks}`, color: checks === "green" ? PASS(t) : checks === "red" ? t.blocked : t.dim },
   ].filter(Boolean);
-  return { parts, rows, scoped, finished };
+  if (parts.length === 0) return null;
+  const tip = tier ? `${tierTip(tier.tier)}${unscoped ? `\n${plural(unscoped, "task")} not scoped` : ""}` : null;
+  return { parts, rows, scoped, finished, tip };
 }
 
 // ---- one run on its own, as the pane pinned beside its orchestrator ----
@@ -505,7 +508,9 @@ function tokensSection(view, t, r) {
       .child(div().h_full().flex_none().bg(FRESH).w(pct(a.split ? fresh(a) : a.total)))
       .child(div().h_full().flex_none().bg(t.dim).w(pct(a.split ? a.cacheRead : 0))))
     .child(div().flex_none().w(44).text_color(t.dim).child(tokenText(a.total)));
-  const items = [
+  // A count from before the split has only a total: show just that.
+  const split = input + output + cacheWrite + cacheRead > 0;
+  const items = !split ? [{ text: `total ${tokenText(total)}`, bold: true }] : [
     { text: `fresh ${tokenText(input + output + cacheWrite)}`, color: FRESH },
     { text: `of it out ${tokenText(output)}`, color: OUT },
     { text: `cache read ${tokenText(cacheRead)}`, color: t.muted },
@@ -562,7 +567,7 @@ function proofSection(view, t, r) {
   };
   const shown = open ? s.rows : s.rows.filter(problem);
   return section(t, "Proof")
-    .child(foldLine(view, t, key, open ? "Show only the tasks that need a look" : `Show every task's proof (${s.rows.length})`, s.parts))
+    .child(foldLine(view, t, key, `${s.tip ? `${s.tip}\n` : ""}${open ? "Show only the tasks that need a look" : `Show every task's proof (${s.rows.length})`}`, s.parts))
     .when(s.scoped.length > 0, (el) => el.child(h_flex().gap(2).h(5).px(2).children(s.scoped.map((k) => div().flex_1().h_full().rounded(2).bg(colorOf(k))))))
     .children(shown.map(row))
     .when(open, (el) => el.child(h_flex().flex_wrap().gap(6).px(2).pt(2).items_center()
