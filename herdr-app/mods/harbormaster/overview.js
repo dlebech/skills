@@ -27,12 +27,14 @@ function pill(t, text, tone, solid = false) {
 }
 
 // Adds how full an agent's context is, "144k", with the exact count on hover; nothing
-// when unknown. For .map() on the row it goes in.
-const withContext = (view, t, id, address) => (el) => {
+// when unknown. For an orchestrator, `run` adds the run's token total to the tooltip,
+// where a narrow row has room for it. For .map() on the row it goes in.
+const withContext = (view, t, id, address, run = null) => (el) => {
   const c = view.contexts?.[address];
   if (!c) return el;
   return el.child(div().id(`${id}-ctx`).flex_none().text_size(10.5).text_color(t.dim).child(tokenText(c.tokens))
-    .tooltip(`Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`));
+    .tooltip(`Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`
+      + (run?.tokens ? `\nRun total: ${run.tokens.total.toLocaleString("en")} tokens, all its agents` : "")));
 };
 
 function statusDot(t, status) {
@@ -287,7 +289,7 @@ function cardNotes(t, r, f) {
 }
 
 const unscopedOf = (r) => (r.proof.tier ? r.tasks.filter((k) => !k.proof).length : 0);
-const runMeta = (r, f) => [r.repo, f.workers.length ? plural(f.workers.length, "agent") : null, unscopedOf(r) ? `${unscopedOf(r)} unscoped` : null, r.updated ? ago(r.updated) : null].filter(Boolean).join(" · ");
+const runMeta = (r, f) => [r.repo, f.workers.length ? plural(f.workers.length, "agent") : null, r.tokens ? `${tokenText(r.tokens.total)} tok` : null, unscopedOf(r) ? `${unscopedOf(r)} unscoped` : null, r.updated ? ago(r.updated) : null].filter(Boolean).join(" · ");
 const runEdge = (t, f) => (f.need ? t.blocked : t[f.badge.tone] ?? t.border);
 const relatedTip = (p) => [p.number ? p.title : null, prStateText(p), p.url].filter(Boolean).join(" · ");
 
@@ -392,6 +394,23 @@ function decidedSection(view, t, r) {
     .when(open && r.decided.length > 3, (el) => el.child(toggle("Show fewer")));
 }
 
+// "Tokens": what the run has used, across its orchestrator and every agent it ran,
+// each one's share as a bar, and the split by kind on hover.
+function tokensSection(t, r) {
+  const { total, input, output, cacheRead, cacheWrite, byAgent, updated } = r.tokens;
+  const exact = (n) => `${n.toLocaleString("en")} tokens`;
+  const row = (a) => h_flex().id(`tok-${r.key}-${a.name}`).gap(8).items_center().px(2).h(18).text_size(11.5).tooltip(exact(a.total))
+    .child(div().flex_none().w(96).truncate().text_color(a.name === "orchestrator" ? t.foreground : t.muted).child(a.name))
+    .child(div().flex_1().min_w(0).h(5).rounded(3).bg(t.raised)
+      .child(div().h_full().rounded(3).bg(t.accent ?? t.muted).w(`${Math.max(1, (100 * a.total) / total).toFixed(1)}%`)))
+    .child(div().flex_none().w(44).text_color(t.dim).child(tokenText(a.total)));
+  return section(t, `Tokens · ${tokenText(total)}`, updated && `counted ${ago(updated)}`)
+    .child(div().id(`tok-${r.key}`).px(2).text_size(11).text_color(t.dim)
+      .tooltip(`${exact(total)}: input ${input.toLocaleString("en")}, output ${output.toLocaleString("en")}, cache read ${cacheRead.toLocaleString("en")}, cache write ${cacheWrite.toLocaleString("en")}`)
+      .child(`output ${tokenText(output)} · cache read ${tokenText(cacheRead)} · cache write ${tokenText(cacheWrite)} · input ${tokenText(input)}`))
+    .children(byAgent.map(row));
+}
+
 // The Proof section: the run's tier, each task's tier and evidence with its result from
 // proof.md, tasks not scoped yet flagged, and links to proof.md and shared/proof/.
 function proofSection(t, r) {
@@ -473,6 +492,7 @@ function runDetail(view, t, r, ctx) {
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
     .when(r.decided.length > 0, (el) => el.child(decidedSection(view, t, r)))
     .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(t, r)))
+    .when(Boolean(r.tokens), (el) => el.child(tokensSection(t, r)))
     .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
       .children(workers.map((w) => workerRow(t, w, ctx, workOf.get(w.address), w.parent !== r.terminal)))))
     .child(actionRow(view, t, r, orch, closed, counts));
@@ -821,7 +841,7 @@ export function crew(view, t) {
     .sort((a, b) => (a.state === "finished") - (b.state === "finished"));
   // The focused agent, or the crew agent beside a focused Harbormaster pane.
   const current = currentAgent(ctx, [cap.terminal?.address, ...orchestrators.map((o) => o.term.address)].filter(Boolean));
-  const row = ({ id, emoji, type = null, title, tip = null, detail, tone, status, address, edge, open = () => focusAgent(address), crabs = 0 }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
+  const row = ({ id, emoji, type = null, title, tip = null, detail, tone, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
     .rounded(7).bg(address === current ? edge + "33" : edge + "14").cursor_pointer().hover((st) => st.bg(address === current ? edge + "40" : edge + "26"))
     .when(address === current, (el) => el.border(1).border_color(edge + "aa"))
     .on_click(open)
@@ -836,7 +856,7 @@ export function crew(view, t) {
         .when(crabs > 0, (el) => el.child(h_flex().flex_none().gap(3).items_center().text_size(11).text_color(t.muted)
           .child(div().text_size(11).child(CRAB)).child(String(crabs))))
         .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail))))
-    .map(withContext(view, t, id, address))
+    .map(withContext(view, t, id, address, run))
     .child(statusDot(t, status));
   const rows = [];
   if (cap.terminal) {
@@ -871,7 +891,7 @@ export function crew(view, t) {
       // The run's type, then its number and topic; without a topic, its branch.
       type: labels["run.type"] || r?.type || null,
       ...runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic),
-      tone: need ? "blocked" : "muted", status, address: term.address, crabs: state === "finished" ? 0 : workers,
+      tone: need ? "blocked" : "muted", status, address: term.address, crabs: state === "finished" ? 0 : workers, run: r,
       // Clicking a run's orchestrator also opens that run's card beside it, while it's there.
       open: () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(term.address, runProps(r)) : focusAgent(term.address)),
       edge: (need ? t.blocked : state === "finished" ? t.done : t.working) ?? t.border,

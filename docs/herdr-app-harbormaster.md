@@ -75,7 +75,7 @@ Harbormaster is built for that:
 
 The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks mods to list those, so here they are:
 
-- **Every 5 seconds, per machine:** one `sh -c` script. It prints the captain's open decisions, `.captain-decisions.json` in the runs root, then for each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json`, `plan.md`, `question.md` and its modification time (`stat`), and the `parked` and `closed` markers, counts the unhandled `inbox/*.message` files, and prints `proof.md` and the names of the files in `shared/proof/` (at most 40), and the last 20 `- [decided]` lines of `decisions.md` (`grep`, `tail`, capped at 8 kB).
+- **Every 5 seconds, per machine:** one `sh -c` script. It prints the captain's open decisions, `.captain-decisions.json` in the runs root, then for each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json` (with the token totals `tokens.sh` counted; Harbormaster never reads session files for them), `plan.md`, `question.md` and its modification time (`stat`), and the `parked` and `closed` markers, counts the unhandled `inbox/*.message` files, and prints `proof.md` and the names of the files in `shared/proof/` (at most 40), and the last 20 `- [decided]` lines of `decisions.md` (`grep`, `tail`, capped at 8 kB).
 - **Every minute per open run (running or finished), every 15 minutes per closed one:** `gh pr view <url>` for each PR and related PR in `status.json`, on the run's machine. A run shows only the PRs its orchestrator recorded there. A PR's `## Merge danger` first line (from its body) is kept with the result and shown on its row: red for a one-way door, dim for a two-way one (see `skills/herdr-app-orchestrator/references/run-files.md`). The results are kept in Herdr's shared state (`harbormaster.prs`), so every copy of the mod and every layout uses the same ones.
 - **When you press Park or Close:** `git worktree list` in the run's folder, to find the integration worktrees whose spaces to close.
 - **Every 30 seconds per open run on another machine, with its orchestrator there:** the same `git worktree list`, to find the integration worktrees to open spaces for. The worktrees it has opened or seen open are kept in Herdr's shared state (`harbormaster.worktrees`).
@@ -97,6 +97,25 @@ type tag and agent count keep their room. Every decision an orchestrator makes i
 the newest as one line, "Decided for you · 4: …", with all of them in the tooltip; the run pane lists
 the latest 3 with when they were made and why, and "+N more" shows up to 20. A line that does not
 parse is shown as its raw text. Formats: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
+
+## Tokens
+
+How many tokens a run has used, across its orchestrator and every agent it ran, counted by
+`skills/herdr-app-orchestrator/scripts/tokens.sh` into the run's `status.json` (`tokens`). The
+orchestrator does not run it itself: `set-status.sh` runs it on every publish, and later runs read only
+what the session files gained since, so it stays cheap. It reads Claude Code's and pi's own session
+files on the orchestrator's computer, from the run's start on, including those of agents already
+killed and worktrees already removed, those of an orchestrator resumed in a new terminal (best effort
+for a pi orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
+down. A run's card shows the total in its
+meta line (`26M tok`); the run pane has a **Tokens** section with the split by kind (output, cache
+read, cache write, input; exact counts on hover) and each agent's share as a bar, the orchestrator
+first, then the agents by size, named by their worktree (`pda-t3`). The narrow Crew block leaves it
+out; hovering an orchestrator's context size there shows the run total too. A token is any of input,
+output, cache read and cache write, so the total is dominated by cache reads: it measures how much the
+run has processed, not what it cost. Harbormaster itself reads only `status.json`, so the numbers show
+for a run on another machine and stay once the orchestrator is gone. How runs, sessions and messages
+are matched: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
 ## Proof
 
@@ -135,7 +154,7 @@ Parking leaves the run directory, worktrees, branches and PRs in place, and the 
 | `herdr-app/mods/harbormaster/live.js` | Live facts from herdr-core (status, workers, captain, panes) and the focus, pin and open-link actions |
 | `herdr-app/mods/harbormaster/ui.js` | Emoji, program icons, zoom, and text formatting |
 | `herdr-app/mods/harbormaster/overview.js` | The runs overview (totals, captain, run cards) and the Crew block |
-| `herdr-app/mods/harbormaster/context.js` | Each crew agent's context size, from its session file |
+| `herdr-app/mods/harbormaster/context.js` | Each crew agent's context size, from its session file, and `tokenText` (`1.2M`) |
 | `herdr-app/mods/harbormaster/harbor.js` | The sea, the reefs, the captain's boat, the rail and the pane headers |
 | `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, spinner, chevrons. All original, CC0 like the rest of this repository |
 | `herdr-app/layouts/harbormaster-sea.json` (+ `.svg` preview) | The sea layout. `harbormaster-main` is made by `install.sh` |
