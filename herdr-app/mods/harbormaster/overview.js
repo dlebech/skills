@@ -55,9 +55,14 @@ const withUsage = (t, id, u, whose, more = null) => (el) => {
 
 const usageLine = (label, u) => (u ? `${label}: ${Math.round(u.cpu)}% · ${memText(u.rssKb)}` : null);
 
+// Motion here is stepped, never smooth: spin() and loop() redraw the whole window about 30 times
+// a second for as long as one is drawn, which measured as most of the window's CPU (about 30 CPU s
+// a minute in a software-rendered window, against about 1 without them). frames() redraws only
+// when its text changes, here 5 times a second, and blocked and active marks hold still.
+const SPIN = ["◐", "◓", "◑", "◒"];
 function statusDot(t, status) {
-  if (status === "working") return svg("mods/harbormaster/spinner.svg").size(11).flex_none().text_color(t.working).spin(900);
-  if (status === "blocked") return div().size(8).flex_none().rounded(4).bg(t.blocked).loop("opacity", { from: 0.35, to: 1, period: 1100 });
+  if (status === "working") return div().w(11).flex_none().text_size(11).text_color(t.working).frames(SPIN, 200);
+  if (status === "blocked") return div().size(8).flex_none().rounded(4).bg(t.blocked).border(1.5).border_color(t.blocked + "66");
   if (status === "gone") return div().size(8).flex_none().rounded(4).border(1.5).border_color(t.dim);
   if (status === "idle") return div().size(8).flex_none().rounded(4).border(1.5).border_color(t.idle ?? t.dim);
   return div().size(8).flex_none().rounded(4).bg(t[status] ?? t.dim);
@@ -111,7 +116,7 @@ function linkChip(t, id, url, icon, tip) {
 const prStateText = (pr) => (pr.state === "UNKNOWN" ? null : pr.state === "DRAFT" ? "Draft" : pr.state[0] + pr.state.slice(1).toLowerCase());
 
 // A task's life-cycle stages (data.js taskStage) as they read and color, and which
-// pulse because an agent is at it. Review takes the accent, fixing the implementer's
+// are marked because an agent is at it. Review takes the accent, fixing the implementer's
 // second pass a color of its own, so implementing and reviewing tasks tell apart.
 const STAGE = {
   planned: { label: "Planned", color: (t) => t.border },
@@ -149,7 +154,8 @@ function taskStrip(t, r, counts, stages, names = true) {
       const color = task ? taskColor(t, task, stages[i].stage) : i < counts.merged ? t.done : t.border;
       return div().id(`seg-${r.key}-${i}`).flex_1().h_full().rounded(3).bg(color)
         .when(Boolean(task), (el) => el.tooltip([[task.id, task.name].filter(Boolean).join(" "), stageText(task, stages[i].stage)].filter(Boolean).join(" · ")))
-        .when(Boolean(task) && pulse(stages[i].stage, task), (el) => el.loop("opacity", { from: 0.45, to: 1, period: 1400 }));
+        // An agent is at it: a light edge, still (see statusDot for why not a pulse).
+        .when(Boolean(task) && pulse(stages[i].stage, task), (el) => el.border(1).border_color(t.foreground + "88"));
     })))
     .when(names, (el) => el.child(div().text_size(11).text_color(t.dim).child(tasksText(r, counts, stages))));
 }

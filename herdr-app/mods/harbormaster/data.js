@@ -170,72 +170,91 @@ function parseDecisions(machine, text) {
   });
 }
 
+// The last parse of each run, by its machine, directory and files' text (all but
+// .resources.json, which changes with every sample). Most polls find every run as it was, and
+// then hand back the same object: no parsing, and the views see by identity that nothing changed.
+let parsed = new Map();
 function parse(machine, stdout) {
-  return stdout.split(RS).slice(1).filter((s) => s.trim()).map((chunk) => {
-    const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile, resourcesFile] = chunk.split(US);
-    const orch = json(orchFile) ?? {};
-    const status = json(statusFile) ?? {};
-    const tasks = tasksOf(plan);
-    const statusLine = /^Status:\s*(.*)$/m.exec(plan ?? "")?.[1]?.trim() ?? null;
-    const folder = orch.folder ?? status.folder ?? "";
-    const parts = dir.split("/");
-    setStored(`${machine ?? ""}:${dir}`, resourcesFile);
-    const onMachine = (id) => (id ? (machine ? `${machine}/${id}` : id) : null);
-    return {
-      key: `${machine ?? ""}:${dir}`,
-      machine,
-      dir,
-      repo: parts.at(-2) ?? folder.split("/").pop(),
-      folder,
-      branch: orch.branch ?? status.branch ?? parts.at(-1),
-      terminal: onMachine(orch.terminal),
-      // The terminal as its own machine names it, for hc run there (`on: machine`),
-      // which does not know the window's name for itself.
-      localTerminal: orch.terminal ?? null,
-      tab: onMachine(orch.tab_id),
-      kind: orch.kind ?? null,
-      away: marker("closed", closedFile) ?? marker("parked", parkedFile),
-      statusLine,
-      phase: runPhase(statusLine ?? status.status),
-      // What kind of run: feat, fix, rev or expl (set-status.sh --type).
-      type: status.type ?? null,
-      topic: status.topic ?? null,
-      // How much the orchestrator decides itself (set-status.sh --autonomy); a missing one is L0.
-      autonomy: /^L[0-2]$/.test(status.autonomy) ? status.autonomy : "L0",
-      // Decisions it made itself, newest first (decisions.md).
-      decided: parseDecidedLines(decidedFile),
-      progress: status.progress ?? null,
-      merged: status.tasks?.merged ?? null,
-      planned: status.tasks?.planned ?? null,
-      issues: status.issues ?? [],
-      prs: (status.prs ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
-      // PRs the run is about but did not open, such as the one a review-only run reviews.
-      related: (status.related ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
-      waiting: status.waiting ?? [],
-      tokens: tokensOf(status.tokens),
-      // The soft token budget (set-status.sh --budget), or null; `over` once tokens.total reaches it.
-      budget: Number(status.budget) > 0 ? Number(status.budget) : null,
-      // The budget the question was answered for (set-status.sh --budget-answered).
-      budgetAnswered: Number(status.budget_answered) || null,
-      updated: status.updated ? Date.parse(status.updated) : null,
-      // When the run was created (init-run.sh); null for runs from before it recorded that.
-      started: Date.parse(orch.started ?? "") || null,
-      question: question?.trim() || null,
-      // The question read into its sections (question.js), and when it was asked, in ms.
-      ask: parseQuestion(question),
-      askedAt: Number(asked?.trim()) * 1000 || null,
-      unhandled: Number(inbox?.trim() || 0),
-      tasks,
-      // The run's proof: its tier, proof.md's results by task id, and the file names in shared/proof/.
-      proof: {
-        tier: runTier(plan, tasks),
-        md: /^[+!]/.test(proofFile ?? "") ? { ...parseProofMd(proofFile.slice(1)), cut: proofFile[0] === "!" } : null,
-        files: (proofNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
-      },
-      // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
-      prefix: /^Prefix:\s*`?([\w-]+)/m.exec(plan ?? "")?.[1]?.toLowerCase() ?? null,
-    };
+  const keep = new Map();
+  const runs = stdout.split(RS).slice(1).filter((s) => s.trim()).map((chunk) => {
+    const cut = chunk.lastIndexOf(US);
+    const files = cut < 0 ? chunk : chunk.slice(0, cut);
+    const key = `${machine ?? ""}:${chunk.slice(0, chunk.indexOf(US))}`;
+    setStored(key, cut < 0 ? "" : chunk.slice(cut + 1));
+    const hit = parsed.get(key);
+    const run = hit?.files === files ? hit.run : parseRun(machine, chunk);
+    keep.set(key, { files, run });
+    return run;
   });
+  // Runs of other machines stay; this machine's are now exactly the ones just read.
+  for (const [key, v] of parsed) if (!key.startsWith(`${machine ?? ""}:`) && !keep.has(key)) keep.set(key, v);
+  parsed = keep;
+  return runs;
+}
+
+function parseRun(machine, chunk) {
+  const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile] = chunk.split(US);
+  const orch = json(orchFile) ?? {};
+  const status = json(statusFile) ?? {};
+  const tasks = tasksOf(plan);
+  const statusLine = /^Status:\s*(.*)$/m.exec(plan ?? "")?.[1]?.trim() ?? null;
+  const folder = orch.folder ?? status.folder ?? "";
+  const parts = dir.split("/");
+  const onMachine = (id) => (id ? (machine ? `${machine}/${id}` : id) : null);
+  return {
+    key: `${machine ?? ""}:${dir}`,
+    machine,
+    dir,
+    repo: parts.at(-2) ?? folder.split("/").pop(),
+    folder,
+    branch: orch.branch ?? status.branch ?? parts.at(-1),
+    terminal: onMachine(orch.terminal),
+    // The terminal as its own machine names it, for hc run there (`on: machine`),
+    // which does not know the window's name for itself.
+    localTerminal: orch.terminal ?? null,
+    tab: onMachine(orch.tab_id),
+    kind: orch.kind ?? null,
+    away: marker("closed", closedFile) ?? marker("parked", parkedFile),
+    statusLine,
+    phase: runPhase(statusLine ?? status.status),
+    // What kind of run: feat, fix, rev or expl (set-status.sh --type).
+    type: status.type ?? null,
+    topic: status.topic ?? null,
+    // How much the orchestrator decides itself (set-status.sh --autonomy); a missing one is L0.
+    autonomy: /^L[0-2]$/.test(status.autonomy) ? status.autonomy : "L0",
+    // Decisions it made itself, newest first (decisions.md).
+    decided: parseDecidedLines(decidedFile),
+    progress: status.progress ?? null,
+    merged: status.tasks?.merged ?? null,
+    planned: status.tasks?.planned ?? null,
+    issues: status.issues ?? [],
+    prs: (status.prs ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
+    // PRs the run is about but did not open, such as the one a review-only run reviews.
+    related: (status.related ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
+    waiting: status.waiting ?? [],
+    tokens: tokensOf(status.tokens),
+    // The soft token budget (set-status.sh --budget), or null; `over` once tokens.total reaches it.
+    budget: Number(status.budget) > 0 ? Number(status.budget) : null,
+    // The budget the question was answered for (set-status.sh --budget-answered).
+    budgetAnswered: Number(status.budget_answered) || null,
+    updated: status.updated ? Date.parse(status.updated) : null,
+    // When the run was created (init-run.sh); null for runs from before it recorded that.
+    started: Date.parse(orch.started ?? "") || null,
+    question: question?.trim() || null,
+    // The question read into its sections (question.js), and when it was asked, in ms.
+    ask: parseQuestion(question),
+    askedAt: Number(asked?.trim()) * 1000 || null,
+    unhandled: Number(inbox?.trim() || 0),
+    tasks,
+    // The run's proof: its tier, proof.md's results by task id, and the file names in shared/proof/.
+    proof: {
+      tier: runTier(plan, tasks),
+      md: /^[+!]/.test(proofFile ?? "") ? { ...parseProofMd(proofFile.slice(1)), cut: proofFile[0] === "!" } : null,
+      files: (proofNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
+    },
+    // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
+    prefix: /^Prefix:\s*`?([\w-]+)/m.exec(plan ?? "")?.[1]?.toLowerCase() ?? null,
+  };
 }
 
 // The run's token use, as tokens.sh counted it into status.json: totals and each

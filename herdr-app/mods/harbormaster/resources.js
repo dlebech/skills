@@ -267,7 +267,13 @@ export const sampleVersion = () => version;
 // Each run's .resources.json as the last poll read it, by run key. Kept here, not on the run
 // objects, so the views (which redraw when a run changes) do not redraw on every sample.
 const stored = new Map();
-export const setStored = (key, text) => stored.set(key, parseJson(text));
+// The text each was parsed from: a file as it was last poll is not parsed again.
+const storedText = new Map();
+export const setStored = (key, text) => {
+  if (storedText.get(key) === text && stored.has(key)) return;
+  storedText.set(key, text);
+  stored.set(key, parseJson(text));
+};
 // For t4/t8: a run's totals (the file's shape is in run-files.md), or null before its first sample.
 export const resourcesOf = (run) => stored.get(run.key) ?? null;
 
@@ -412,7 +418,9 @@ export async function recordRuns(runs, termsOf, sampled) {
     const prev = stored.get(r.key) ?? null;
     if (prev && now - (prev.sampled_ms ?? 0) < MIN_WRITE_GAP) return;
     const next = mergeRun(prev, terms, live.terminals, now, info.os);
-    const out = await exec("sh", ["-c", WRITE, "sh", r.dir, String(prev?.sampled_ms ?? 0), ...chunks(JSON.stringify(next))], { on: r.machine }).catch(() => null);
-    if (out?.code === 0) stored.set(r.key, next);
+    const text = JSON.stringify(next);
+    const out = await exec("sh", ["-c", WRITE, "sh", r.dir, String(prev?.sampled_ms ?? 0), ...chunks(text)], { on: r.machine }).catch(() => null);
+    // The next poll reads back exactly this text, which then needs no parsing.
+    if (out?.code === 0) { stored.set(r.key, next); storedText.set(r.key, text); }
   }));
 }

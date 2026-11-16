@@ -50,13 +50,19 @@ export function loadTiming(run, { maxAge = 60000 } = {}) {
     // read as it goes, so even a read cut short by the timeout makes the next one quicker.
     const out = await exec("sh", ["-c", script, "sh", run.dir, table], { on: run.machine, timeout: hit?.value ? 120000 : 600000 });
     if (out.code !== 0) return null;
-    return JSON.parse(out.stdout);
-  })().catch(() => null).then((value) => {
+    // The same output as last time keeps the same object, so the stats view, which redraws
+    // when a run's breakdown changes, does not redraw for a reread that found nothing new.
+    // timing.sh stamps "updated" with the time of the read, so that field is left out of the comparison.
+    const text = out.stdout.replace(/"updated":\s*"[^"]*"\s*}\s*$/, "}");
+    if (hit?.text === text && hit.value) return { value: hit.value, text };
+    return { value: JSON.parse(out.stdout), text };
+  })().catch(() => null).then((read) => {
     // A failed read keeps the last good breakdown.
-    cache.set(run.key, { at: Date.now(), value: value ?? hit?.value ?? null, pending: null });
-    return value ?? hit?.value ?? null;
+    const value = read?.value ?? hit?.value ?? null;
+    cache.set(run.key, { at: Date.now(), value, text: read ? read.text : hit?.text ?? null, pending: null });
+    return value;
   });
-  cache.set(run.key, { at: hit?.at ?? 0, value: hit?.value ?? null, pending });
+  cache.set(run.key, { at: hit?.at ?? 0, value: hit?.value ?? null, text: hit?.text ?? null, pending });
   return pending;
 }
 
