@@ -177,15 +177,16 @@ export function foldQuiet(items, nameOf = (x) => x.name) {
 
 // The live table from liveGroups(): groups hottest first, each one's rows hottest first. A run
 // whose only row is its orchestrator is the group line alone (`solo`, that row): the run row
-// says it. Runs under QUIET_CPU fold into `quiet`.
+// says it. Runs (groups with a root) under QUIET_CPU fold into `quiet`; "Not in a run" is no
+// run, so it stays a line of its own.
 export function liveTable(groups) {
   const shaped = groups.map((g) => {
     const rows = [...g.rows].sort(byCpu);
     const solo = rows.length === 1 && g.root && rows[0].address === g.root ? rows[0] : null;
     return { ...g, rows: solo ? [] : rows, solo };
   });
-  const { busy, quiet } = foldQuiet(shaped, (g) => g.title);
-  return { groups: busy, quiet };
+  const { busy, quiet } = foldQuiet(shaped.filter((g) => g.root), (g) => g.title);
+  return { groups: [...busy, ...shaped.filter((g) => !g.root)].sort(byCpu), quiet };
 }
 
 // Processes outside the agents, one row per program name and machine: "firefox ×3" sums its
@@ -204,14 +205,19 @@ export function groupProcesses(other) {
 // The hottest agent right now, from liveGroups(): { name, cpu, rssKb, mostly } or null when
 // nothing reaches QUIET_CPU. `mostly` names what its CPU goes to: one program when it has at
 // least half, else the two biggest ("lint and browser"), the agent's own process "the agent itself".
+// A run's root row is named after its role ("orchestrator"), so it is named with its run's
+// title: "Sunday match orchestrator".
 export function hottest(groups) {
-  const rows = groups.flatMap((g) => g.rows);
-  const top = [...rows].sort(byCpu)[0];
+  const rows = groups.flatMap((g) => g.rows.map((r) => ({ r, g })));
+  const pick = rows.sort((a, b) => byCpu(a.r, b.r))[0];
+  const top = pick?.r;
   if (!top || top.cpu < QUIET_CPU) return null;
+  const g = pick.g;
+  const name = g.root && top.address === g.root && g.title && g.title.toLowerCase() !== top.name.toLowerCase() ? `${g.title} ${top.name}` : top.name;
   const parts = [...(top.own ? [{ name: "the agent itself", cpu: top.own.cpu }] : []), ...top.programs.map((p) => ({ name: p.name, cpu: p.cpu }))]
     .filter((p) => p.cpu >= QUIET_CPU).sort((a, b) => b.cpu - a.cpu);
   const mostly = !parts.length ? null : parts[0].cpu >= top.cpu / 2 || parts.length === 1 ? parts[0].name : `${parts[0].name} and ${parts[1].name}`;
-  return { name: top.name, cpu: top.cpu, rssKb: top.rssKb, mostly };
+  return { name, cpu: top.cpu, rssKb: top.rssKb, mostly };
 }
 
 // "Hottest: impl-xweek-ui 44%, mostly browser".

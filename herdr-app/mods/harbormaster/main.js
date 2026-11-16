@@ -70,7 +70,7 @@ function showStats(view, arg) {
   if (cur && cur.arg === key && Date.now() - cur.at < 2000) return;
   const r = arg ? view.runs.find((x) => [x.branch, x.dir, x.key].includes(arg)) : null;
   closePopup();
-  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 1100, height: 820, props: r ? { role: "stats", run: r.dir } : { role: "stats" } });
+  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 1100, height: 1000, props: r ? { role: "stats", run: r.dir } : { role: "stats" } });
   const won = shared(POPUP);
   if (won && won.arg === key && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }
   setShared(POPUP, { id, at: Date.now(), arg: key });

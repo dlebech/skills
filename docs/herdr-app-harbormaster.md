@@ -211,12 +211,13 @@ did each run cost. Numbers are right-aligned in fixed columns so they line up; d
 
 - **Now.** The CPU and memory of all agents together, large, and the hottest agent in plain words:
   "Hottest: impl-xweek-ui 44%, mostly browser" (the program with half its CPU or more, else the two
-  biggest). Something outside the agents that is busier still is named after it. CPU % counts one core as
-  100% (on hover).
+  biggest; an orchestrator is named with its run, "Sunday match orchestrator"). Something outside the
+  agents that is busier still is named after it. CPU % counts one core as 100% (on hover). Until the
+  first sample that can rate CPU (two polls) it says "sampling…".
 - **CPU and memory now.** Every agent terminal from the last 5-second sample, under its run (and the
   captain), hottest first, with CPU %, a small CPU bar, memory, and what it is busy with (its programs of
   1% or more, repeated ones as "firefox ×3"). A run whose only agent is its orchestrator is one line.
-  Runs under 1% CPU fold into one "N quiet runs" line that names them; click it to list them. Then the
+  Runs under 1% CPU each fold into one "N quiet runs" line that names them; click it to list them. The
   terminals in no run (idle shells under 1% and 100 MB counted, not listed), then **Other processes**: the
   busiest processes outside every agent (a browser, Docker, Herdr itself), one line per program, folded
   the same way, so fan noise can be explained. Hover a row for the agent's own share, each program, its

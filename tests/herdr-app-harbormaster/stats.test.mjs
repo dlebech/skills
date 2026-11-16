@@ -306,3 +306,29 @@ test("tokenShort: the card's fresh-first headline, short", () => {
   assert.equal(tokenShort({ total: 500, input: 200, output: 300, cache_read: 0, cache_write: 0 }), "<1k");
   assert.equal(tokenShort({ total: 1_200_000, input: 0, output: 0, cache_read: 0, cache_write: 0 }), "1.2M");
 });
+
+test("liveTable: only runs fold into quiet runs; Not in a run stays its own line", () => {
+  const snap = { terminals: { o1: term("o1", 0.3, 100), o2: term("o2", 0.2, 100), loose: term("loose", 0.5, 200 * 1024), o3: term("o3", 5, 100) } };
+  const groups = liveGroups([
+    { title: "Road routes", root: "o1", name: "orchestrator", members: [] },
+    { title: "Diesel", root: "o2", name: "orchestrator", members: [] },
+    { title: "Busy", root: "o3", name: "orchestrator", members: [] },
+  ], snap, { loose: "t4db" });
+  const { groups: shown, quiet } = liveTable(groups);
+  assert.deepEqual(shown.map((g) => g.title), ["Busy", "Not in a run"]);
+  assert.deepEqual(quiet.names, ["Road routes", "Diesel"]);
+  assert.equal(quiet.count, 2);
+});
+
+test("hottest: a run's orchestrator is named with its run", () => {
+  const snap = { terminals: { o1: term("o1", 40, 100, [], { cpu: 40, rssKb: 100 }), w1: term("w1", 3, 100) } };
+  const groups = liveGroups([{ title: "Sunday match", root: "o1", name: "orchestrator", members: [{ address: "w1", name: "impl-x" }] }], snap);
+  assert.equal(hottestText(hottest(groups)), "Hottest: Sunday match orchestrator 40%, mostly the agent itself");
+  // The captain's root row is "captain" in the "Captain" crew: not "Captain captain".
+  const cap = liveGroups([{ title: "Captain", root: "o1", name: "captain", members: [] }], snap);
+  assert.equal(hottest(cap).name, "captain");
+  // A worker keeps its own name.
+  const w = liveGroups([{ title: "Sunday match", root: "o1", name: "orchestrator", members: [{ address: "w1", name: "impl-x" }] }],
+    { terminals: { o1: term("o1", 1, 1), w1: term("w1", 30, 1) } });
+  assert.equal(hottest(w).name, "impl-x");
+});

@@ -112,10 +112,11 @@ function nowLine(t, live) {
     .child(div().text_size(BIG).font_semibold().text_color(t.foreground).child(text))
     .child(div().text_size(BODY).text_color(t.muted).child(unit));
   return h_flex().flex_none().gap(22).px(14).py(10).mx(10).rounded(10).bg(t.surface).items_center().flex_wrap()
-    .child(big(`${Math.round(live.cpu)}%`, "CPU in agents", CORE_TIP, "now-cpu"))
-    .child(big(memText(live.rssKb), "memory in agents", "Memory of every agent terminal and what it started", "now-mem"))
+    // Before the first sample (memory) and the first rated one (CPU), no figure is better than 0.
+    .child(big(live.rated ? `${Math.round(live.cpu)}%` : "—", "CPU in agents", CORE_TIP, "now-cpu"))
+    .child(big(live.snap.at ? memText(live.rssKb) : "—", "memory in agents", "Memory of every agent terminal and what it started", "now-mem"))
     .child(h_flex().flex_1().min_w(0).gap(6).items_baseline().text_size(TITLE)
-      .child(h ? h_flex().items_baseline()
+      .child(!live.rated ? div().text_color(t.muted).child("sampling…") : h ? h_flex().items_baseline()
         .child(div().text_color(t.muted).child("Hottest:\u00a0"))
         .child(div().font_semibold().text_color(h.cpu >= HOT.cpu ? t.working : t.foreground).child(`${h.name} ${Math.round(h.cpu)}%`))
         .when(Boolean(h.mostly), (el) => el.child(div().text_color(t.muted).child(`,\u00a0mostly ${h.mostly}`)))
@@ -183,7 +184,7 @@ function runRow(view, t, s) {
   const split = timeSplit(s.critical_path);
   // A run whose orchestrator's session was not found has a wall time and nothing to split it by.
   const bar = !s.timed ? note(t, "reading…") : !split.working ? note(t, "no time data yet")
-    : h_flex().id(`run-${s.key}-bar`).w_full().items_center().tooltip(`${durationText(split.working)} working · ${durationText(split.idle)} idle`)
+    : h_flex().id(`run-${s.key}-bar`).w_full().items_center().tooltip(`${durationText(split.working)} working · ${durationText(Math.max(0, s.wall - split.working))} idle`)
       .child(catBar(t, `run-${s.key}-cp`, s.critical_path, 8, s.wall > 0 ? Math.min(1, split.working / s.wall) : 1));
   const head = h_flex().id(`run-${s.key}`).gap(10).items_center().h(26).cursor_pointer().text_size(BODY).on_click((_e, cx) => toggle(cx))
     .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
@@ -216,7 +217,7 @@ function runDetail(view, t, s) {
   return v_flex().gap(6).pl(21 + COL.tag).pt(2).pb(8)
     .when(split.working > 0, (el) => el.child(legend(t, `run-${s.key}`, s.critical_path)))
     .when(!s.timed, (el) => el.child(line("Its time is being read from its session logs…")))
-    .when(s.timed && split.working > 0, (el) => el.child(line(`Wall time ${durationText(s.wall)}: ${durationText(split.working)} working, ${durationText(split.idle)} idle`)))
+    .when(s.timed && split.working > 0, (el) => el.child(line(`Wall time ${durationText(s.wall)}: ${durationText(split.working)} working, ${durationText(Math.max(0, s.wall - split.working))} idle`)))
     .when(effort > 0, (el) => el.child(line(`Effort: ${durationText(effort)} of agent time (agents work in parallel, so more than the wall time)`)))
     .when(Boolean(s.tokens), (el) => el.child(line(`Tokens: ${tokenHeadline(s.tokens)}, ${tokenText(s.tokens.total)} in total`)))
     .when(Boolean(res), (el) => el.child(line(`CPU time ${cpuShort(res.cpu_s)}${res.estimated ? " (estimated)" : ""} · memory peak ${mbText(res.peak_rss_mb)}, average ${mbText(res.avg_rss_mb)}`
@@ -312,6 +313,7 @@ function liveData() {
   const topOther = procs.busy[0];
   return {
     snap, groups, table: liveTable(groups), procs, hot,
+    rated: Object.values(snap.machines ?? {}).some((m) => m.rated),
     cpu: groups.reduce((n, g) => n + g.cpu, 0), rssKb: groups.reduce((n, g) => n + g.rssKb, 0),
     // Something outside the agents busier than the hottest of them is named too.
     outside: topOther && topOther.cpu >= QUIET_CPU && topOther.cpu > (hot?.cpu ?? 0) ? topOther : null,
@@ -319,7 +321,9 @@ function liveData() {
 }
 
 // What a terminal's CPU goes to, its programs of 1% or more: "lint 128%, browser ×3 12%".
-const progText = (programs) => programs.filter((g) => g.cpu >= QUIET_CPU).slice(0, 3)
+// The agent's own process is in it too, as the Now line's "mostly the agent itself" counts it.
+const progText = (r) => [...(r.own ? [{ name: "the agent itself", cpu: r.own.cpu, count: 1 }] : []), ...r.programs]
+  .filter((g) => g.cpu >= QUIET_CPU).sort((a, b) => b.cpu - a.cpu).slice(0, 3)
   .map((g) => `${g.name}${g.count > 1 ? ` ×${g.count}` : ""} ${Math.round(g.cpu)}%`).join(", ");
 
 function liveSection(view, t, live) {
@@ -338,8 +342,8 @@ function liveSection(view, t, live) {
   const rowTip = (r) => [`${r.name} (${[r.term !== r.name ? r.term : null, r.address].filter(Boolean).join(", ")})`, r.own ? `the agent itself: ${Math.round(r.own.cpu)}% · ${memText(r.own.rssKb)}` : null,
     ...r.programs.map((g) => `${g.name}${g.count > 1 ? ` ×${g.count}` : ""}: ${Math.round(g.cpu)}% · ${memText(g.rssKb)}`)].filter(Boolean).join("\n");
   const group = (g, gi) => [
-    line(`lg-${gi}`, g.title, g.cpu, g.rssKb, g.solo ? progText(g.solo.programs) : null, g.solo ? rowTip(g.solo) : null, { head: true, sum: !g.solo }),
-    ...g.rows.map((r) => line(`lr-${r.address}`, r.name, r.cpu, r.rssKb, progText(r.programs), rowTip(r), { indent: 14 })),
+    line(`lg-${gi}`, g.title, g.cpu, g.rssKb, g.solo ? progText(g.solo) : null, g.solo ? rowTip(g.solo) : null, { head: true, sum: !g.solo }),
+    ...g.rows.map((r) => line(`lr-${r.address}`, r.name, r.cpu, r.rssKb, progText(r), rowTip(r), { indent: 14 })),
     ...(g.hidden ? [div().pl(14).h(20).flex().items_center().text_size(NOTE).text_color(t.dim)
       .child(`+${g.hidden.count} idle ${g.hidden.count === 1 ? "terminal" : "terminals"}: ${Math.round(g.hidden.cpu)}% · ${memText(g.hidden.rssKb)} together`)] : []),
   ];
@@ -347,7 +351,7 @@ function liveSection(view, t, live) {
   const proc = (p) => line(`lo-${p.machine ?? ""}-${p.name}`, p.count > 1 ? `${p.name} ×${p.count}` : p.name, p.cpu, p.rssKb,
     [p.program !== p.name ? p.program : null, p.machine].filter(Boolean).join(" · "),
     `${p.name}: ${plural(p.count, "process", "processes")} (pid ${p.pids.join(", ")})`, { indent: 14 });
-  const rated = Object.values(snap.machines ?? {}).some((m) => m.rated);
+  const rated = live.rated;
   const other = [...procs.busy, ...(procs.quiet?.items ?? [])];
   return section(view, t, "live", "CPU and memory now", snap.at ? `sampled ${ago(snap.at)}` : null, () =>
     v_flex().gap(1)
@@ -358,14 +362,14 @@ function liveSection(view, t, live) {
       .children(table.groups.flatMap(group))
       .when(Boolean(table.quiet), (el) => el
         .child(foldLine(view, t, "live-quiet", quietOpen, plural(table.quiet.count, "quiet run"), table.quiet.cpu, table.quiet.rssKb)
-          .child(div().flex_1().min_w(0).truncate().text_size(NOTE + 0.5).text_color(t.muted).child(`under 1% CPU: ${table.quiet.names.join(", ")}`)))
+          .child(div().flex_1().min_w(0).truncate().text_size(NOTE + 0.5).text_color(t.muted).child(`under 1% CPU each: ${table.quiet.names.join(", ")}`)))
         .when(quietOpen, (e2) => e2.children(table.quiet.items.flatMap((g, i) => group(g, `q${i}`)))))
       .when(other.length > 0, (el) => el
         .child(line("lg-other", "Other processes", other.reduce((n, p) => n + p.cpu, 0), other.reduce((n, p) => n + p.rssKb, 0), "outside every agent: the browser, Herdr itself, …", null, { head: true }))
         .children(procs.busy.map(proc))
         .when(Boolean(procs.quiet), (e2) => e2
           .child(foldLine(view, t, "live-quiet-other", otherOpen, plural(procs.quiet.count, "quiet one"), procs.quiet.cpu, procs.quiet.rssKb, 14)
-            .child(div().flex_1().min_w(0).truncate().text_size(NOTE + 0.5).text_color(t.muted).child(procs.quiet.names.join(", "))))
+            .child(div().flex_1().min_w(0).truncate().text_size(NOTE + 0.5).text_color(t.muted).child(`under 1% CPU each: ${procs.quiet.names.join(", ")}`)))
           .when(otherOpen, (e3) => e3.children(procs.quiet.items.map(proc)))))
       .when(live.groups.length === 0 && other.length === 0, (el) => el.child(div().px(2).text_size(BODY).text_color(t.dim).child("No sample yet (Linux and macOS only)."))));
 }
