@@ -226,28 +226,32 @@ every 5 s while the run is open and its orchestrator is there; the orchestrator 
 JSON object, `sampled_ms` always its first key:
 
 ```json
-{"sampled_ms": 1794830000000, "version": 1, "os": "linux", "estimated": false,
+{"sampled_ms": 1794830000000, "version": 2, "os": "linux", "estimated": false,
  "samples": 720, "seconds": 3600, "cpu_s": 812.4, "peak_rss_mb": 3120.5, "avg_rss_mb": 1840.2, "rss_mbs": 6624720,
  "programs": {"test runner": {"cpu_s": 210.3}, "short-lived": {"cpu_s": 40.1}},
  "agents": {
    "impl-rss-t7": {"terminals": ["t53c"], "parent": "orc-skills-stats", "first_ms": 0, "last_ms": 0, "seconds": 1800,
      "cpu_s": 300.2, "own_cpu_s": 120.0, "peak_rss_mb": 900.1, "avg_rss_mb": 610.4,
      "programs": {"test runner": {"cpu_s": 150.0, "peak_rss_mb": 400.0, "avg_rss_mb": 80.2}},
-     "raw": {"terms": {}, "done_ms": {}, "rss_mbs": 0, "prog_mbs": {}, "prog_peak": {}}}}}
+     "raw": {"terms": {}, "own_ms": 0, "done_ms": {}, "rss_mbs": 0, "prog_mbs": {}, "prog_peak": {}}}}}
 ```
 
 - `agents` is keyed by terminal name (its address without one): the orchestrator, its agents and the
   terminals they started with `hc run`, each with its `parent`'s name, so the task is in the name
-  (`impl-<prefix>-<task>`). `own_cpu_s` is the agent's own process; `programs` its commands, by program;
-  `short-lived` the CPU of commands no poll saw alive (shorter than 5 s), the rest of `cpu_s`.
-- CPU seconds come from cumulative counters, kept as the largest value seen per terminal and process, so a
-  sample counted twice adds nothing. Memory is in MB of RSS: `peak_*` the largest sample, `avg_*` weighted by
+  (`impl-<prefix>-<task>`). `own_cpu_s` is the agent's own process; `programs` its commands, by program,
+  each with the CPU of its own workers that exited (a test runner's or a build's forks count for it);
+  `short-lived` the agent's own commands no poll saw alive (shorter than 5 s). `cpu_s` is their sum.
+- CPU seconds come from cumulative counters, kept as the largest value seen per process, so a
+  sample counted twice adds nothing and a total never goes down. A process that leaves the tree without
+  being reaped in it (a detached server, reparented to init) keeps what it had used until then; what it
+  uses afterwards is not counted. A file of another `version` is started afresh. Memory is in MB of RSS: `peak_*` the largest sample, `avg_*` weighted by
   the time since the sample before, at most 15 s (the app may have been closed). The run's own peak and
   average are of the sum of its agents at each sample. `seconds` is the time samples cover.
 - `estimated: true` (macOS): no exited commands are known, so CPU totals are what the polls saw.
 - `raw` is the bookkeeping these come from; read the other fields.
 - Writes go to a temporary file and `mv`, under a `.resources.json.lock` directory, and only when the file
   still has the `sampled_ms` the poll read, so two windows polling at once cannot interleave or count twice.
+  `raw` keeps per-process bookkeeping only for terminals still alive, so the file grows with agents, not time.
 
 ## Soft budget
 

@@ -45,7 +45,7 @@ const SCRIPT = [
   // decisions.md: the last 20 lines the orchestrator logged as its own decisions, capped.
   '  grep -a "^- \\[decided\\] " "$d/decisions.md" 2>/dev/null | tail -n 20 | tail -c 8000; printf \'\\037\'',
   // The run's CPU and memory totals so far (resources.js adds each sample to them).
-  '  head -c 200000 "$d/.resources.json" 2>/dev/null',
+  '  head -c 1000000 "$d/.resources.json" 2>/dev/null',
   "done",
   SAMPLER,
 ].join("\n");

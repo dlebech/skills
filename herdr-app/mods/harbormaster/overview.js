@@ -38,18 +38,20 @@ const withContext = (view, t, id, address, run = null) => (el) => {
       + (run?.tokens ? `\nRun total: ${run.tokens.total.toLocaleString("en")} tokens, all its agents` : "")));
 };
 
-// A small "85% · 2.1G" badge for an agent (or an orchestrator and its agents) above
-// resources.js's HOT limits, so a busy machine can be explained at a glance; nothing otherwise.
-// The tooltip names what uses it: the agent itself and its busiest programs.
-const withUsage = (t, id, u, whose) => (el) => {
+// A small "85% · 2.1G" badge for an agent and the commands it runs, above resources.js's HOT
+// limits, so a busy machine can be explained at a glance; nothing otherwise. The tooltip names
+// what uses it: the agent itself and its busiest programs, and `more` (a run's total) after them.
+const withUsage = (t, id, u, whose, more = null) => (el) => {
   const text = hotText(u);
   if (!text) return el;
   const progs = (u.programs ?? []).slice(0, 4).map((g) => `${g.name}: ${Math.round(g.cpu)}% · ${memText(g.rssKb)}`);
   const tip = [`${whose}: ${Math.round(u.cpu)}% CPU (100% is one core), ${memText(u.rssKb)} memory`,
-    u.own ? `the agent itself: ${Math.round(u.own.cpu)}% · ${memText(u.own.rssKb)}` : null, ...progs].filter(Boolean).join("\n");
+    u.own ? `the agent itself: ${Math.round(u.own.cpu)}% · ${memText(u.own.rssKb)}` : null, ...progs, more].filter(Boolean).join("\n");
   return el.child(div().id(`${id}-use`).flex_none().px(5).rounded(4).text_size(10).font_semibold()
     .bg(t.working + "22").text_color(t.working).tooltip(tip).child(text));
 };
+
+const usageLine = (label, u) => (u ? `${label}: ${Math.round(u.cpu)}% · ${memText(u.rssKb)}` : null);
 
 function statusDot(t, status) {
   if (status === "working") return svg("mods/harbormaster/spinner.svg").size(11).flex_none().text_color(t.working).spin(900);
@@ -890,7 +892,7 @@ export function crew(view, t) {
     .sort((a, b) => (a.state === "finished") - (b.state === "finished"));
   // The focused agent, or the crew agent beside a focused Harbormaster pane.
   const current = currentAgent(ctx, [cap.terminal?.address, ...orchestrators.map((o) => o.term.address)].filter(Boolean));
-  const row = ({ id, emoji, type = null, title, tip = null, detail, tone, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null, usage = null, whose = "" }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
+  const row = ({ id, emoji, type = null, title, tip = null, detail, tone, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null, usage = null, whose = "", more = null }) => h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
     .rounded(7).bg(address === current ? edge + "33" : edge + "14").cursor_pointer().hover((st) => st.bg(address === current ? edge + "40" : edge + "26"))
     .when(address === current, (el) => el.border(1).border_color(edge + "aa"))
     .on_click(open)
@@ -905,7 +907,7 @@ export function crew(view, t) {
         .when(crabs > 0, (el) => el.child(h_flex().flex_none().gap(3).items_center().text_size(11).text_color(t.muted)
           .child(div().text_size(11).child(CRAB)).child(String(crabs))))
         .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t[tone] ?? t.dim).child(detail))))
-    .map(withUsage(t, id, usage, whose))
+    .map(withUsage(t, id, usage, whose, more))
     .map(withContext(view, t, id, address, run))
     .child(statusDot(t, status));
   const rows = [];
@@ -944,7 +946,9 @@ export function crew(view, t) {
       type: labels["run.type"] || r?.type || null,
       ...runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic),
       tone: need ? "blocked" : "muted", status, address: term.address, crabs: state === "finished" ? 0 : workers, run: r,
-      usage: treeUsage([term.address, ...crewOf.map((w) => w.address)]), whose: "The orchestrator, its agents and their commands",
+      // Badged on its own, like any agent: a run's agents together pass 2 GB while nothing is busy.
+      usage: liveUsage(term.address), whose: "The orchestrator and its commands",
+      more: usageLine("The whole run, with its agents", treeUsage([term.address, ...crewOf.map((w) => w.address)])),
       // Clicking a run's orchestrator also opens that run's card beside it, while it's there.
       open: () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(term.address, runProps(r)) : focusAgent(term.address)),
       edge: (need ? t.blocked : state === "finished" ? t.done : t.working) ?? t.border,

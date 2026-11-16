@@ -14,7 +14,6 @@
 // The live snapshot is module state: liveUsage(), treeUsage(), otherProcesses().
 
 import { exec } from "herdr";
-import { orchestratorsOf, workersOf } from "./live.js";
 
 // When a row gets a badge: above either limit. Calm otherwise.
 export const HOT = { cpu: 50, rssKb: 2 * 1024 * 1024 };
@@ -49,7 +48,8 @@ export function programOf(name, args = "") {
 // ---- the sampler: sh, run on each machine, its output after a \x1d ----
 // Prints, one per line:
 //   S <os> <seconds: uptime on Linux, epoch on macOS>
-//   P <pid> <terminal id or -> <is terminal root 0|1> <own cpu ms> <exited children cpu ms> <rss kB> <start> <cpu % or -> <name>\t<args>
+//   P <pid> <ppid> <terminal id or -> <is terminal root 0|1> <own cpu ms> <exited children cpu ms> <rss kB> <start> <cpu % or -> <name>\t<args>
+// <start> tells a reused pid apart: ms after boot on Linux, ps's lstart on macOS.
 // Only processes in a terminal's tree, and others above OTHER_MIN.
 
 // The tree walk shared by both systems: term[pid] = id for terminal roots; tid(p) its terminal.
@@ -64,7 +64,7 @@ function out(p, t, args) {
   t = tid(p, 0)
   if (t == "-" && rss[p] == 0) return
   if (t == "-" && own[p] + kid[p] < ${OTHER_MIN.cpuSeconds * 1000} && rss[p] < ${OTHER_MIN.rssMb * 1024}) return
-  printf "P %s %s %d %d %d %d %s %s %s\\t%s\\n", p, t, (p in term), own[p], kid[p], rss[p], st[p], pc[p], nm[p], args
+  printf "P %s %s %s %d %d %d %d %s %s %s\\t%s\\n", p, pp[p], t, (p in term), own[p], kid[p], rss[p], st[p], pc[p], nm[p], args
 }`;
 
 // Linux: one awk reads every /proc/<pid>/stat (getline, so a process that exits midway is
@@ -88,7 +88,7 @@ BEGIN {
     cm[p] = substr(line, o + 1, RLENGTH - o - 1)
     n = split(substr(line, RLENGTH + 2), a, " ")
     pp[p] = a[2]; own[p] = int((a[12] + a[13]) * 1000 / hz); kid[p] = int((a[14] + a[15]) * 1000 / hz)
-    st[p] = a[20]; rss[p] = int(a[22] * pg / 1024); pc[p] = "-"
+    st[p] = int(a[20] * 1000 / hz); rss[p] = int(a[22] * pg / 1024); pc[p] = "-"
   }
   ARGC = 1
   for (p in pp) if (cm[pp[p]] == "herdr-core") {
@@ -109,14 +109,15 @@ ${AWK_TREE}`;
 
 // macOS: one ps for every process, then one more for the environment of herdr-core's
 // children. Lines up to "ENV" are the first, the rest the second. `time` is the process's own
-// CPU time, [[dd-]hh:]mm:ss.cc; exited children are not known.
+// CPU time, [[dd-]hh:]mm:ss.cc; exited children are not known. lstart, five words, tells a
+// reused pid apart.
 export const MAC_AWK = `
 function ms(s, n, x, i, t) { gsub(/-/, ":", s); n = split(s, x, ":"); t = 0; for (i = 1; i <= n; i++) t = t * (i == n - 2 && n == 4 ? 24 : 60) + x[i]; return int(t * 1000) }
 $0 == "ENV" { env = 1; next }
 env { if (match($0, /HC_TERMINAL_ID=[A-Za-z0-9_.-]+/)) term[$1] = substr($0, RSTART + 15, RLENGTH - 15); next }
 {
-  p = $1; pp[p] = $2; rss[p] = $3; own[p] = ms($4); kid[p] = 0; pc[p] = $5; st[p] = 0
-  c = $0; sub(/^ *[0-9]+ +[0-9]+ +[0-9]+ +[0-9:.-]+ +[0-9.]+ +/, "", c)
+  p = $1; pp[p] = $2; rss[p] = $3; own[p] = ms($4); kid[p] = 0; pc[p] = $5; st[p] = $6 "_" $7 "_" $8 "_" $9 "_" $10
+  c = $0; sub(/^ *[0-9]+ +[0-9]+ +[0-9]+ +[0-9:.-]+ +[0-9.]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +/, "", c)
   nm[p] = c; sub(/.*\\//, "", nm[p]); gsub(/[ \\t]/, "_", nm[p])
 }
 END { print "S darwin " now; for (p in pp) out(p, 0, "") }
@@ -127,7 +128,7 @@ export const SAMPLER = [
   "if [ -r /proc/self/stat ]; then",
   `  LC_ALL=C awk -v hz="$(getconf CLK_TCK 2>/dev/null)" -v pg="$(getconf PAGESIZE 2>/dev/null)" '${LINUX_AWK.replace(/'/g, "'\\''")}' /proc/[0-9]*/stat 2>/dev/null`,
   'elif [ "$(uname)" = Darwin ]; then',
-  "  t=$(ps -axww -o pid=,ppid=,rss=,time=,%cpu=,comm= 2>/dev/null)",
+  "  t=$(ps -axww -o pid=,ppid=,rss=,time=,%cpu=,lstart=,comm= 2>/dev/null)",
   "  k=$(printf '%s\\n' \"$t\" | awk '$NF ~ /(^|\\/)herdr-core$/ {h[$1]=1} {pp[$1]=$2} END {for (p in pp) if (pp[p] in h) printf \"%s,\", p}')",
   `  { printf '%s\\nENV\\n' "$t"; [ -n "$k" ] && ps -Eww -o pid=,command= -p "\${k%,}" 2>/dev/null; } | LC_ALL=C awk -v now="$(date +%s)" '${MAC_AWK.replace(/'/g, "'\\''")}'`,
   "fi",
@@ -135,7 +136,7 @@ export const SAMPLER = [
 
 // ---- reading a sample ----
 
-// The sampler's output → { os, at (s), procs: [{pid, tid, root, ownMs, kidMs, rssKb, start, pcpu, name, args}] }, or null.
+// The sampler's output → { os, at (s), procs: [{pid, ppid, tid, root, ownMs, kidMs, rssKb, start, pcpu, name, args}] }, or null.
 export function parseSample(text) {
   let os = null, at = null;
   const procs = [];
@@ -144,10 +145,10 @@ export function parseSample(text) {
     if (!line.startsWith("P ")) continue;
     const tab = line.indexOf("\t");
     const head = (tab < 0 ? line : line.slice(0, tab)).split(" ");
-    if (head.length < 10) continue;
-    const [, pid, tid, root, own, kid, rss, start, pcpu, name] = head;
+    if (head.length < 11) continue;
+    const [, pid, ppid, tid, root, own, kid, rss, start, pcpu, name] = head;
     procs.push({
-      pid, tid: tid === "-" ? null : tid, root: root === "1", ownMs: Number(own) || 0, kidMs: Number(kid) || 0,
+      pid, ppid, tid: tid === "-" ? null : tid, root: root === "1", ownMs: Number(own) || 0, kidMs: Number(kid) || 0,
       rssKb: Number(rss) || 0, start, pcpu: pcpu === "-" ? null : Number(pcpu) || 0, name, args: tab < 0 ? "" : line.slice(tab + 1).trim(),
     });
   }
@@ -166,21 +167,28 @@ const addr = (machine, tid) => (machine ? `${machine}/${tid}` : tid);
 
 // Builds each terminal's usage from one machine's sample, with CPU % from the poll before:
 // { address, os, cpu (% of one core), rssKb, totalMs (tree CPU so far), ownMs, own: {cpu, rssKb},
-//   programs: [{name, cpu, rssKb, count}], pids: [{key, program, ms}] }; and the machine's top others.
+//   programs: [{name, cpu, rssKb, count}], pids: [{key, parent (its key), root, program, ownMs, kidMs}] };
+// and the machine's top others.
+// A poll less than MIN_RATE_S after the one before (a reload right after an action) is skipped,
+// so CPU % is never measured over a few ticks; the next one is measured from the older poll.
+const MIN_RATE_S = 2;
 export function ingest(machine, text) {
   const m = machine ?? "";
   const s = parseSample(text);
   if (!s) { previous.delete(m); delete live.machines[m]; return null; }
   const before = previous.get(m);
   const dt = before && before.os === s.os ? s.at - before.at : 0;
+  if (dt > 0 && dt < MIN_RATE_S) return null;
   const cpuNow = new Map();
   const terms = {}, other = [];
+  const keyOf = new Map(s.procs.map((p) => [p.pid, `${p.pid}:${p.start}`]));
   for (const p of s.procs) {
-    const key = `${p.pid}:${p.start}`;
+    const key = keyOf.get(p.pid);
     const total = p.ownMs + p.kidMs;
     cpuNow.set(key, total);
-    // macOS gives ps's own %cpu; Linux the share of the time between the two polls.
-    const was = before?.cpu.get(key);
+    // macOS gives ps's own %cpu; Linux the share of the time between the two polls. A process
+    // started since the poll before used all its time in between.
+    const was = before?.cpu.get(key) ?? (dt > 0 && s.os === "linux" && Number(p.start) / 1000 > before.at ? 0 : undefined);
     const cpu = p.pcpu ?? (dt > 0 && was !== undefined ? Math.max(0, (total - was) / (dt * 10)) : 0);
     if (!p.tid) {
       if (p.rssKb > 0) other.push({ machine: m || null, pid: p.pid, name: p.name, program: programOf(p.name, p.args), cpu, rssKb: p.rssKb });
@@ -189,9 +197,9 @@ export function ingest(machine, text) {
     const a = addr(machine, p.tid);
     const u = (terms[a] ??= { address: a, os: s.os, cpu: 0, rssKb: 0, totalMs: 0, ownMs: 0, own: { cpu: 0, rssKb: 0 }, programs: [], pids: [] });
     u.cpu += cpu; u.rssKb += p.rssKb; u.totalMs += total;
+    const name = p.root ? "agent" : programOf(p.name, p.args);
+    u.pids.push({ key, parent: keyOf.get(p.ppid) ?? null, root: p.root, program: name, ownMs: p.ownMs, kidMs: p.kidMs });
     if (p.root) { u.ownMs = p.ownMs; u.own = { cpu, rssKb: p.rssKb, name: p.name }; continue; }
-    const name = programOf(p.name, p.args);
-    u.pids.push({ key, program: name, ms: p.ownMs });
     const g = u.programs.find((x) => x.name === name) ?? (u.programs.push({ name, cpu: 0, rssKb: 0, count: 0 }), u.programs.at(-1));
     g.cpu += cpu; g.rssKb += p.rssKb; g.count++;
   }
@@ -245,12 +253,11 @@ export function hotText(u) {
 }
 export const memText = (kb) => (kb >= 1024 * 1024 ? `${(kb / 1024 / 1024).toFixed(1)}G` : `${Math.round(kb / 1024)}M`);
 
-// What the badges show right now (each live terminal's, and each orchestrator's with its
-// agents), so a view redraws when that changes and not on every sample.
+// What the badges show right now (each live terminal's), so a view redraws when that changes
+// and not on every sample.
 export function hotSignature(ctx) {
   const each = ctx.terminals.filter((t) => t.state === "live").map((t) => hotText(liveUsage(t.address)) ?? "");
-  const trees = orchestratorsOf(ctx).map((o) => hotText(treeUsage([o.address, ...workersOf(o.address, ctx).map((w) => w.address)])) ?? "");
-  return [...each, ...trees].join("|");
+  return each.join("|");
 }
 export const sampleVersion = () => version;
 
@@ -269,61 +276,86 @@ const mb = (kb) => kb / 1024;
 
 // The run's terminals as [{address, name, parent}] → its totals with this sample added.
 // `prev` is the file as read; `now` the wall clock in ms. Pure, so tests can drive it.
-// CPU totals keep the largest value seen per terminal and per process (the counters only grow),
-// so a sample counted twice changes nothing; memory peaks are maxima and averages weigh
-// each sample by the time since the one before (at most MAX_GAP_S), so more polls do not
-// tilt them either.
+//
+// CPU is credited per process, from its cumulative counters, keeping the largest value seen, so
+// a sample counted twice changes nothing and a total never goes down: its own time, plus the
+// time of its exited children (cutime, cstime) that no poll saw alive. A child a poll did see is
+// credited to its own program; once it is gone, its parent's children counter holds that time
+// too, so the parent's credit leaves out what was already counted (`r`, reaped). The agent's own
+// process's exited children are its "short-lived" commands. A process that leaves the tree
+// without being reaped there (reparented to init, a detached server) keeps what it had used then.
+//
+// Memory peaks are maxima, and averages weigh each sample by the time since the one before (at
+// most MAX_GAP_S), so more polls do not tilt them either.
 export function mergeRun(prev, terms, usage, now, os) {
-  const st = prev && prev.version === 1 ? JSON.parse(JSON.stringify(prev)) : { sampled_ms: 0, version: 1, os, estimated: os !== "linux", samples: 0, seconds: 0, cpu_s: 0, peak_rss_mb: 0, avg_rss_mb: 0, rss_mbs: 0, programs: {}, agents: {} };
+  const st = prev && prev.version === 2 ? JSON.parse(JSON.stringify(prev)) : { sampled_ms: 0, version: 2, os, estimated: os !== "linux", samples: 0, seconds: 0, cpu_s: 0, peak_rss_mb: 0, avg_rss_mb: 0, rss_mbs: 0, programs: {}, agents: {} };
   const dt = st.sampled_ms ? Math.min(Math.max(0, (now - st.sampled_ms) / 1000), MAX_GAP_S) : 5;
   st.sampled_ms = now; st.os = os; st.estimated = os !== "linux"; st.samples++; st.seconds = r1(st.seconds + dt);
+  // A process's credit goes to the agent's own time, its short-lived commands, or its program.
+  const fold = (raw, e) => {
+    if (e.root) {
+      raw.own_ms += e.o;
+      raw.done_ms["short-lived"] = (raw.done_ms["short-lived"] ?? 0) + e.k;
+    } else raw.done_ms[e.p] = (raw.done_ms[e.p] ?? 0) + e.o + e.k;
+  };
+  // Processes gone since the last sample: credited, and their parent told it reaped them.
+  const sweep = (raw, rt, nowLive) => {
+    for (const [k, e] of Object.entries(rt.live)) {
+      if (nowLive.has(k)) continue;
+      fold(raw, e);
+      if (e.pp && rt.live[e.pp] && nowLive.has(e.pp)) rt.live[e.pp].r += e.i;
+      delete rt.live[k];
+    }
+  };
+  const seen = new Set(terms.map((t) => t.address));
+  // Terminals that ended: all theirs is credited, and they are dropped, so the file stays small.
+  for (const ag of Object.values(st.agents)) {
+    for (const [a, rt] of Object.entries(ag.raw.terms)) {
+      if (seen.has(a)) continue;
+      sweep(ag.raw, rt, new Map());
+      delete ag.raw.terms[a];
+    }
+  }
   let runKb = 0;
   for (const t of terms) {
     const u = usage[t.address];
     const key = t.name || t.address;
-    const ag = (st.agents[key] ??= { terminals: [], parent: null, first_ms: now, last_ms: now, seconds: 0, cpu_s: 0, own_cpu_s: 0, peak_rss_mb: 0, avg_rss_mb: 0, programs: {}, raw: { terms: {}, done_ms: {}, rss_mbs: 0, prog_mbs: {}, prog_peak: {} } });
+    const ag = (st.agents[key] ??= { terminals: [], parent: null, first_ms: now, last_ms: now, seconds: 0, cpu_s: 0, own_cpu_s: 0, peak_rss_mb: 0, avg_rss_mb: 0, programs: {}, raw: { terms: {}, own_ms: 0, done_ms: {}, rss_mbs: 0, prog_mbs: {}, prog_peak: {} } });
     if (!ag.terminals.includes(t.address)) ag.terminals.push(t.address);
     if (t.parent) ag.parent = t.parent;
     const raw = ag.raw;
-    const rt = (raw.terms[t.address] ??= { cpu_ms: 0, own_ms: 0, live: {} });
-    // Processes gone since the last sample: their last CPU time stays with their program.
     const nowLive = new Map((u?.pids ?? []).map((p) => [p.key, p]));
-    for (const [k, [prog, ms]] of Object.entries(rt.live)) {
-      if (nowLive.has(k)) continue;
-      raw.done_ms[prog] = (raw.done_ms[prog] ?? 0) + ms;
-      delete rt.live[k];
+    const rt = (raw.terms[t.address] ??= { live: {} });
+    sweep(raw, rt, nowLive);
+    if (!u) { if (!Object.keys(rt.live).length) delete raw.terms[t.address]; continue; }
+    // p: program, o: own ms, k: exited children's ms not counted elsewhere, i: own + children
+    // (what its parent's counter gets when it is reaped), r: children it reaped that were counted.
+    for (const p of nowLive.values()) {
+      const e = (rt.live[p.key] ??= { p: p.program, root: p.root, pp: p.parent, o: 0, k: 0, i: 0, r: 0 });
+      e.p = p.program;
+      e.o = Math.max(e.o, p.ownMs);
+      e.k = Math.max(e.k, p.kidMs - e.r, 0);
+      e.i = Math.max(e.i, p.ownMs + p.kidMs);
     }
-    if (!u) continue;
-    for (const p of nowLive.values()) rt.live[p.key] = [p.program, Math.max(p.ms, rt.live[p.key]?.[1] ?? 0)];
-    rt.cpu_ms = Math.max(rt.cpu_ms, u.totalMs);
-    rt.own_ms = Math.max(rt.own_ms, u.ownMs);
     ag.last_ms = now; ag.seconds = r1(ag.seconds + dt);
     runKb += u.rssKb;
     raw.rss_mbs += mb(u.rssKb) * dt;
     ag.peak_rss_mb = r1(Math.max(ag.peak_rss_mb, mb(u.rssKb)));
-    const progKb = {};
-    for (const g of u.programs) progKb[g.name] = g.rssKb;
-    for (const [name, kb] of Object.entries(progKb)) {
-      raw.prog_mbs[name] = (raw.prog_mbs[name] ?? 0) + mb(kb) * dt;
-      raw.prog_peak[name] = Math.max(raw.prog_peak[name] ?? 0, mb(kb));
+    for (const g of u.programs) {
+      raw.prog_mbs[g.name] = (raw.prog_mbs[g.name] ?? 0) + mb(g.rssKb) * dt;
+      raw.prog_peak[g.name] = Math.max(raw.prog_peak[g.name] ?? 0, mb(g.rssKb));
     }
   }
-  // Derived numbers, from the raw counters.
+  // Derived numbers, from the credits: what is done plus what is live.
   const runProgs = {};
   st.cpu_s = 0;
   for (const ag of Object.values(st.agents)) {
     const raw = ag.raw;
-    const terms = Object.values(raw.terms);
-    const own = terms.reduce((n, x) => n + x.own_ms, 0);
-    let total = terms.reduce((n, x) => n + x.cpu_ms, 0);
-    const progMs = { ...raw.done_ms };
-    for (const x of terms) for (const [prog, ms] of Object.values(x.live)) progMs[prog] = (progMs[prog] ?? 0) + ms;
-    const counted = own + Object.values(progMs).reduce((n, ms) => n + ms, 0);
-    // macOS knows no exited children: its total is what was seen.
-    if (st.estimated) total = Math.max(total, counted);
-    // What the agent's commands used that no poll saw alive: commands under 5 s.
-    if (total - counted > 0) progMs["short-lived"] = total - counted;
-    ag.cpu_s = r1(total / 1000); ag.own_cpu_s = r1(own / 1000);
+    const sums = { own_ms: raw.own_ms, done_ms: { ...raw.done_ms } };
+    for (const rt of Object.values(raw.terms)) for (const e of Object.values(rt.live)) fold(sums, e);
+    const progMs = Object.fromEntries(Object.entries(sums.done_ms).filter(([, ms]) => ms > 0));
+    const total = sums.own_ms + Object.values(progMs).reduce((n, ms) => n + ms, 0);
+    ag.cpu_s = r1(total / 1000); ag.own_cpu_s = r1(sums.own_ms / 1000);
     ag.avg_rss_mb = ag.seconds ? r1(raw.rss_mbs / ag.seconds) : 0;
     ag.programs = {};
     for (const name of new Set([...Object.keys(progMs), ...Object.keys(raw.prog_peak)])) {
@@ -343,18 +375,25 @@ export function mergeRun(prev, terms, usage, now, os) {
 // Writes the file only when it still holds what this poll read (sampled_ms, its first key, is
 // the version; else exits 3), under a mkdir lock, through a temporary file and mv: two windows polling at
 // once cannot interleave, and the slower one's sample is dropped, not merged twice. A lock
-// left by a killed writer is broken after a minute.
+// left by a killed writer is broken after a minute: moved aside (atomic, so one writer takes it),
+// and put back if it turns out to be a fresh one taken meanwhile. The JSON comes in arguments of
+// at most WRITE_CHUNK characters each, joined: one argument may not exceed 128 kB on Linux.
 export const WRITE = [
-  'f="$1/.resources.json" want=$2 l="$1/.resources.json.lock"',
+  'f="$1/.resources.json" want=$2 l="$1/.resources.json.lock"; shift 2',
   'if ! mkdir "$l" 2>/dev/null; then',
-  '  [ -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rmdir "$l" 2>/dev/null',
+  '  if [ -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ] && mv "$l" "$l.$$" 2>/dev/null; then',
+  '    if [ -n "$(find "$l.$$" -maxdepth 0 -mmin +1 2>/dev/null)" ] || [ -e "$l" ]; then rmdir "$l.$$"; else mv "$l.$$" "$l"; fi',
+  '  fi',
   '  exit 3',
   'fi',
   "trap 'rmdir \"$l\" 2>/dev/null' EXIT",
   'have=$(head -c 40 "$f" 2>/dev/null | sed -n \'s/^{"sampled_ms":\\([0-9]*\\).*/\\1/p\')',
   '[ "${have:-0}" = "$want" ] || exit 3',
-  'printf "%s" "$3" >"$f.tmp.$$" && mv "$f.tmp.$$" "$f"',
+  'printf "%s" "$@" >"$f.tmp.$$" && mv "$f.tmp.$$" "$f"',
 ].join("\n");
+
+const WRITE_CHUNK = 100000;
+export const chunks = (text) => Array.from({ length: Math.ceil(text.length / WRITE_CHUNK) || 1 }, (_, i) => text.slice(i * WRITE_CHUNK, (i + 1) * WRITE_CHUNK));
 
 // Polls closer together than this (another window's) are skipped rather than written.
 const MIN_WRITE_GAP = 4000;
@@ -372,7 +411,7 @@ export async function recordRuns(runs, termsOf, sampled) {
     const prev = stored.get(r.key) ?? null;
     if (prev && now - (prev.sampled_ms ?? 0) < MIN_WRITE_GAP) return;
     const next = mergeRun(prev, terms, live.terminals, now, info.os);
-    const out = await exec("sh", ["-c", WRITE, "sh", r.dir, String(prev?.sampled_ms ?? 0), JSON.stringify(next)], { on: r.machine }).catch(() => null);
+    const out = await exec("sh", ["-c", WRITE, "sh", r.dir, String(prev?.sampled_ms ?? 0), ...chunks(JSON.stringify(next))], { on: r.machine }).catch(() => null);
     if (out?.code === 0) stored.set(r.key, next);
   }));
 }

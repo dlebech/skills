@@ -5,15 +5,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LINUX_AWK, MAC_AWK, WRITE, parseSample, ingest, liveUsage, treeUsage, otherProcesses, hotText, programOf, mergeRun } from "../../herdr-app/mods/harbormaster/resources.js";
+import { LINUX_AWK, MAC_AWK, WRITE, chunks, parseSample, ingest, liveUsage, treeUsage, otherProcesses, hotText, programOf, mergeRun } from "../../herdr-app/mods/harbormaster/resources.js";
 
 // A fake /proc: herdr-core (100) holds terminal t1 (200, claude), which runs bash (201) and
 // vitest under node (202); 203 has a ") " in its name; outside every terminal a browser (300)
 // and a small idle process (301) that is left out. CPU in ticks of 1/100 s, RSS in 4 kB pages.
-function fakeProc(dir, { uptime, ticks }) {
+function fakeProc(dir, { uptime, ticks, fresh = false }) {
   const stat = (pid, comm, ppid, ut, st, cut, cst, start, pages) =>
     `${pid} (${comm}) S ${ppid} 1 1 0 -1 0 0 0 0 0 ${ut} ${st} ${cut} ${cst} 20 0 1 0 ${start} 1000 ${pages} 0`;
   const procs = [
@@ -25,6 +25,8 @@ function fakeProc(dir, { uptime, ticks }) {
     [203, "odd) R name", 200, 1, 0, 0, 0, 50, 10, ["odd"], ""],
     [300, "MainThread", 1, 90000, 1000, 0, 0, 60, 300000, ["/usr/lib/firefox/firefox"], ""],
     [301, "sleep", 1, 0, 0, 0, 0, 70, 10, ["sleep", "100"], ""],
+    // Started at 1002 s after boot, with 3 s of CPU since.
+    ...(fresh ? [[204, "node", 200, 300, 0, 0, 0, 100200, 1000, ["node", "x.js"], ""]] : []),
   ];
   mkdirSync(join(dir, "self"), { recursive: true });
   writeFileSync(join(dir, "self", "stat"), "1 (x) S 0");
@@ -40,7 +42,7 @@ function fakeProc(dir, { uptime, ticks }) {
 const awks = ["awk", "mawk", "busybox awk"].filter((a) => spawnSync("sh", ["-c", `echo | ${a} '{}'`]).status === 0);
 
 function sampleWith(awk, dir) {
-  const files = ["100", "200", "201", "202", "203", "300", "301", "999"].map((p) => join(dir, p, "stat")); // 999 exited
+  const files = ["100", "200", "201", "202", "203", "204", "300", "301", "999"].map((p) => join(dir, p, "stat")); // 999 exited
   const sh = `d=$1 prog=$2; shift 2; LC_ALL=C ${awk} -v hz=100 -v pg=4096 -v proc="$d" "$prog" "$@"`;
   return execFileSync("sh", ["-c", sh, "sh", dir, LINUX_AWK, ...files], { encoding: "utf8" });
 }
@@ -89,18 +91,34 @@ test("the live snapshot: per-terminal programs, CPU % from two polls, others", (
     assert.equal(hotText(u), "150% · 1.1G");
     assert.equal(otherProcesses("box")[0].program, "browser");
     assert.equal(otherProcesses("box").some((p) => p.pid === "301"), false);
+    // A reload a second later (after an action) is not a measurement: skipped.
+    fakeProc(dir, { uptime: 1006, ticks: 1300 });
+    assert.equal(ingest("box", sampleWith("awk", dir)), null);
+    assert.equal(Math.round(liveUsage("box/t1").own.cpu), 50);
     const tree = treeUsage(["box/t1"]);
     assert.equal(Math.round(tree.cpu), 150);
     assert.equal(tree.own.rssKb, 400000);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("a process started since the poll before gets all its CPU as its share", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hm-proc-"));
+  try {
+    fakeProc(dir, { uptime: 1000, ticks: 1000 });
+    ingest("box2", sampleWith("awk", dir));
+    fakeProc(dir, { uptime: 1005, ticks: 1000, fresh: true });
+    ingest("box2", sampleWith("awk", dir));
+    const node = liveUsage("box2/t1").programs.find((g) => g.name === "node");
+    assert.equal(Math.round(node.cpu), 60);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("macOS sampler reads ps output", () => {
   const ps = [
-    "  100     1   9000   0:01.50   0.1 /Users/x/.local/bin/herdr-core",
-    "  200   100 400000  12:03.25  45.0 /usr/local/bin/claude",
-    "  202   200 800000 1:02:03.00  99.5 /usr/local/bin/node",
-    "  300     1 1200000 1-00:00:01.00  85.0 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "  100     1   9000   0:01.50   0.1 Mon Nov 16 08:00:00 2026 /Users/x/.local/bin/herdr-core",
+    "  200   100 400000  12:03.25  45.0 Mon Nov 16 09:43:12 2026 /usr/local/bin/claude",
+    "  202   200 800000 1:02:03.00  99.5 Mon Nov 16 09:50:01 2026 /usr/local/bin/node",
+    "  300     1 1200000 1-00:00:01.00  85.0 Sun Nov 15 09:00:00 2026 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "ENV",
     "  200 claude HOME=/Users/x HC_TERMINAL_ID=t9 TERM=xterm",
   ].join("\n");
@@ -114,6 +132,8 @@ test("macOS sampler reads ps output", () => {
   assert.equal(by[202].pcpu, 99.5);
   assert.equal(by[300].ownMs, 86401000);
   assert.equal(by[300].name, "Google_Chrome");
+  assert.equal(by[202].start, "Mon_Nov_16_09:50:01_2026");
+  assert.equal(by[202].ppid, "200");
   assert.equal(programOf(by[300].name), "browser");
 });
 
@@ -129,61 +149,92 @@ test("programOf names commands from the table, else by program", () => {
   assert.equal(programOf("firefox", "-marionette"), "browser");
 });
 
-const usage = (totalMs, ownMs, rssKb, pids, programs = []) => ({ totalMs, ownMs, rssKb, pids, programs });
+// A process in a usage's pids, as ingest() gives them.
+const proc = (key, program, ownMs, kidMs, parent = null, root = false) => ({ key, program, ownMs, kidMs, parent, root });
+const usage = (rssKb, pids, programs = []) => ({ rssKb, pids, programs, totalMs: 0, ownMs: 0 });
+const agentRoot = (ownMs, kidMs) => proc("10:1", "agent", ownMs, kidMs, null, true);
 
-test("run totals: idempotent CPU, exited processes, short-lived commands, peaks and averages", () => {
+test("run totals: a command's exited workers count for it, not as short-lived; samples count once", () => {
   const terms = [{ address: "t1", name: "orc", parent: null }, { address: "t2", name: "impl-x-t1", parent: "orc" }];
-  let st = mergeRun(null, terms, {
-    t1: usage(10000, 10000, 1024 * 100, []),
-    t2: usage(20000, 5000, 1024 * 300, [{ key: "50:1", program: "test runner", ms: 12000 }], [{ name: "test runner", rssKb: 1024 * 200 }]),
-  }, 1_000_000, "linux");
-  assert.equal(st.cpu_s, 30);
-  assert.equal(st.agents["impl-x-t1"].programs["test runner"].cpu_s, 12);
-  assert.equal(st.agents["impl-x-t1"].programs["short-lived"].cpu_s, 3);
-  assert.equal(st.agents["impl-x-t1"].parent, "orc");
+  // `npm test` (own 1 s) has run 59 s of CPU in workers it already reaped.
+  const one = {
+    t1: usage(1024 * 100, [proc("1:1", "agent", 10000, 0, null, true)]),
+    t2: usage(1024 * 300, [agentRoot(10000, 0), proc("20:5", "test runner", 1000, 59000, "10:1")], [{ name: "test runner", rssKb: 1024 * 200 }]),
+  };
+  let st = mergeRun(null, terms, one, 1_000_000, "linux");
+  let ag = st.agents["impl-x-t1"];
+  assert.equal(ag.programs["test runner"].cpu_s, 60);
+  assert.equal(ag.programs["short-lived"], undefined);
+  assert.equal(ag.own_cpu_s, 10);
+  assert.equal(ag.cpu_s, 70);
+  assert.equal(st.cpu_s, 80);
+  assert.equal(ag.parent, "orc");
   assert.equal(st.peak_rss_mb, 400);
-  // The same sample again (another window's poll at the same moment) adds no CPU.
-  const again = mergeRun(st, terms, {
-    t1: usage(10000, 10000, 1024 * 100, []),
-    t2: usage(20000, 5000, 1024 * 300, [{ key: "50:1", program: "test runner", ms: 12000 }]),
-  }, 1_000_000, "linux");
-  assert.equal(again.cpu_s, 30);
-  // The test runner exits and is reaped (its time moves to its parent's children counter);
-  // its CPU stays with "test runner", memory drops, the average is weighted by time.
-  st = mergeRun(st, terms, { t1: usage(11000, 11000, 1024 * 100, []), t2: usage(22000, 6000, 1024 * 100, []) }, 1_010_000, "linux");
-  const ag = st.agents["impl-x-t1"];
-  assert.equal(ag.programs["test runner"].cpu_s, 12);
-  assert.equal(ag.programs["short-lived"].cpu_s, 4);
-  assert.equal(ag.cpu_s, 22);
+  // The same sample again (another window's poll at the same moment) adds nothing.
+  assert.equal(mergeRun(st, terms, one, 1_000_000, "linux").cpu_s, 80);
+  // npm test ends (61 s in all) and the agent reaps it: its children counter grows by 61 s, of
+  // which 60 were counted for the test runner; the 1 s no poll saw is short-lived.
+  st = mergeRun(st, terms, { t1: one.t1, t2: usage(1024 * 100, [agentRoot(10000, 61000)]) }, 1_010_000, "linux");
+  ag = st.agents["impl-x-t1"];
+  assert.equal(ag.programs["test runner"].cpu_s, 60);
+  assert.equal(ag.programs["short-lived"].cpu_s, 1);
+  assert.equal(ag.cpu_s, 71);
   assert.equal(ag.peak_rss_mb, 300);
   assert.equal(ag.avg_rss_mb, Math.round(((300 * 5 + 100 * 10) / 15) * 10) / 10);
   assert.equal(st.peak_rss_mb, 400);
-  // A gap longer than 15 s (the app was closed) counts as 15 s.
-  st = mergeRun(st, terms, { t1: usage(11000, 11000, 1024 * 100, []) }, 2_000_000, "linux");
+  // A gap longer than 15 s (the app was closed) counts as 15 s. t2 has ended: its credits stay,
+  // its process bookkeeping is dropped.
+  st = mergeRun(st, [terms[0]], { t1: one.t1 }, 2_000_000, "linux");
   assert.equal(st.seconds, 30);
-  assert.equal(st.agents["impl-x-t1"].seconds, 15); // t2 had no sample this time
-  assert.ok(JSON.stringify(st).startsWith('{"sampled_ms":2000000,'));
+  assert.equal(st.agents["impl-x-t1"].seconds, 15);
+  assert.equal(st.agents["impl-x-t1"].cpu_s, 71);
+  assert.deepEqual(st.agents["impl-x-t1"].raw.terms, {});
+  assert.ok(JSON.stringify(st).startsWith('{"sampled_ms":2000000,"version":2,'));
+});
+
+test("run totals never go down when a process leaves the tree unreaped", () => {
+  const terms = [{ address: "t1", name: "a", parent: null }];
+  // agent → sh → node dev server; then sh exits and the server is reparented out of the tree.
+  let st = mergeRun(null, terms, { t1: usage(1, [agentRoot(10000, 0), proc("2:1", "shell", 1000, 0, "10:1"), proc("3:1", "node", 5000, 0, "2:1")]) }, 1, "linux");
+  assert.equal(st.agents.a.cpu_s, 16);
+  st = mergeRun(st, terms, { t1: usage(1, [agentRoot(10000, 1000)]) }, 5001, "linux");
+  assert.equal(st.agents.a.cpu_s, 16);
+  assert.equal(st.agents.a.programs.node.cpu_s, 5);
+  assert.equal(st.agents.a.programs.shell.cpu_s, 1);
+  st = mergeRun(st, terms, { t1: usage(1, [agentRoot(12000, 1000)]) }, 10001, "linux");
+  assert.equal(st.agents.a.cpu_s, 18);
 });
 
 test("macOS totals are what was seen", () => {
   const st = mergeRun(null, [{ address: "t1", name: "a", parent: null }],
-    { t1: usage(5000, 2000, 1024, [{ key: "9:0", program: "node", ms: 3000 }]) }, 1, "darwin");
+    { t1: usage(1024, [agentRoot(2000, 0), proc("9:Mon_Nov_16_09:43:12_2026", "node", 3000, 0, "10:1")]) }, 1, "darwin");
   assert.equal(st.estimated, true);
   assert.equal(st.agents.a.cpu_s, 5);
 });
 
 test("the write is atomic, guarded by what was read and by a lock", () => {
   const dir = mkdtempSync(join(tmpdir(), "hm-run-"));
-  const write = (want, text) => spawnSync("sh", ["-c", WRITE, "sh", dir, want, text]).status;
+  const lock = join(dir, ".resources.json.lock");
+  const write = (want, text) => spawnSync("sh", ["-c", WRITE, "sh", dir, want, ...chunks(text)]).status;
   try {
     assert.equal(write("0", '{"sampled_ms":5,"a":1}'), 0);
     assert.equal(readFileSync(join(dir, ".resources.json"), "utf8"), '{"sampled_ms":5,"a":1}');
     // Another poll wrote first: the stale one is dropped.
     assert.equal(write("0", '{"sampled_ms":6,"a":2}'), 3);
     assert.equal(write("5", '{"sampled_ms":7,"a":3}'), 0);
-    // A writer holds the lock: skipped, the file stays whole.
-    mkdirSync(join(dir, ".resources.json.lock"));
+    // A writer holds the lock: skipped, the file stays whole, the lock stays.
+    mkdirSync(lock);
     assert.equal(write("7", '{"sampled_ms":8,"a":4}'), 3);
     assert.equal(JSON.parse(readFileSync(join(dir, ".resources.json"), "utf8")).a, 3);
+    assert.equal(existsSync(lock), true);
+    // A lock older than a minute is a killed writer's: broken, and the next write goes through.
+    execFileSync("touch", ["-d", "2 minutes ago", lock]);
+    assert.equal(write("7", '{"sampled_ms":8,"a":4}'), 3);
+    assert.equal(existsSync(lock), false);
+    // JSON longer than one argument may be (128 kB on Linux) goes in several, joined.
+    const big = `{"sampled_ms":9,"pad":"${"x".repeat(300000)}"}`;
+    assert.ok(chunks(big).length > 2);
+    assert.equal(write("7", big), 0);
+    assert.equal(readFileSync(join(dir, ".resources.json"), "utf8"), big);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
