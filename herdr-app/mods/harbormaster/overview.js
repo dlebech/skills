@@ -2,12 +2,12 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking } from "./data.js";
+import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
-import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, proofCounts, proofRowParts, needsLook, resultLine, pendingLine } from "./proof.js";
+import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, proofCounts, proofRowParts, needsLook, resultLine, pendingLine, gatheringStage } from "./proof.js";
 import { oneLine, needHead, questionSections, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
@@ -660,11 +660,15 @@ const SAID_FOR = 15000;
 const isFinished = (r) => r.phase === "finished" || Boolean(r.away);
 
 // The run's proof rows (proof.js proofTasks), with the user's acceptances and asks, and the clicks
-// the files don't show yet. A row is pending while its task isn't done (taskDone, by `stages`
-// when given, else plan.md's states); a task proof.md has but plan.md doesn't counts as done.
+// the files don't show yet. A row is pending while its task is under way (planned, implementing,
+// in review, fixing: by `stages` when given, else plan.md's states), never while blocked or done;
+// a task proof.md has but plan.md doesn't counts as done.
 function proofRows(r, stages = null) {
-  const done = (id) => { const i = r.tasks.findIndex((x) => x.id === id); return i < 0 || taskDone(r, stages, i); };
-  const rows = proofTasks(r.tasks, r.proof.md, r.proof.files, { accepted: r.proof.accepted, asks: r.proof.asks, done, finished: isFinished(r) });
+  const gathering = (id) => {
+    const i = r.tasks.findIndex((x) => x.id === id);
+    return i >= 0 && gatheringStage(stages?.[i]?.stage ?? taskStage(r.tasks[i].state));
+  };
+  const rows = proofTasks(r.tasks, r.proof.md, r.proof.files, { accepted: r.proof.accepted, asks: r.proof.asks, gathering, finished: isFinished(r) });
   for (const k of rows) {
     const key = `${r.key}:${k.id}`, s = said.get(key);
     if (!s) continue;
@@ -937,6 +941,8 @@ function proofSection(view, t, r, stages) {
           .tooltip(`You accepted this proof as it is${k.accepted.at ? ` ${ago(Date.parse(k.accepted.at))}` : ""}`).child("accepted")))
         .when(k.asked && !more, (e) => e.child(div().flex_none().text_size(10.5).text_color(AMBER(t)).child("asked…")))
         .child(k.pending ? pill(t, "pending", "muted").tooltip(pendingLine(k))
+          // A "pending" left on a finished run reads as not checked, as the verdict counts it.
+          : k.result === "pending" ? pill(t, "not checked", s.finished ? AMBER(t) : "dim").tooltip(resultLine(k))
           : k.result ? pill(t, k.result, colorOf(k)).tooltip(k.why || k.result)
           : k.scoped ? pill(t, "not checked", s.finished ? AMBER(t) : "dim") : pill(t, "not scoped", AMBER(t)).tooltip("No Proof line in plan.md")))
       .when(more, (el) => el.children(proofRowParts(k, s.finished, doneOf(k)).map(part)));

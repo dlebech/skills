@@ -81,8 +81,9 @@ export function parseProofMd(text) {
 // `extra` adds the user's say on each row: `accepted` (proof-accepted.json, by task id) and `asks`
 // (pendingProofs(), by task id); each row then has `accepted` (the entry, while it still holds)
 // and `asked` (true while an Ask to prove waits for this result).
-// `extra.done` (task id → whether the task is done; default: every task is) and `extra.finished`
-// (the run is finished or put away) decide `pending`: see isPending().
+// `extra.gathering` (task id → whether its task is still under way: planned, implementing, in
+// review or fixing; default: none is) and `extra.finished` (the run is finished or put away)
+// decide `pending`: see isPending().
 export function proofTasks(tasks, md, shotFiles = null, extra = {}) {
   const seen = new Set();
   const row = (id, name, planned) => {
@@ -109,7 +110,7 @@ export function proofTasks(tasks, md, shotFiles = null, extra = {}) {
     k.accepted = !isPass(k) && a && a.result === line ? a : null;
     k.asked = !isPass(k) && !k.accepted && extra.asks?.get?.(proveId(k.id)) === line;
     // An accepted row is accepted, whatever its task's stage.
-    k.pending = !k.accepted && isPending(k, extra.done ? extra.done(k.id) : true, Boolean(extra.finished));
+    k.pending = !k.accepted && isPending(k, Boolean(extra.gathering?.(k.id)), Boolean(extra.finished));
   }
   return rows;
 }
@@ -123,11 +124,16 @@ export function proofTasks(tasks, md, shotFiles = null, extra = {}) {
 export const isPass = (k) => k.result === "pass" && !k.missing;
 
 // A row whose proof is still being gathered, so nothing in it is the user's yet: proof.md says
-// "Result: pending — <why>", or its task isn't done (planned, implementing, in review, fixing)
-// and nothing failed. A done task's partial or missing proof still needs a look, and so does
-// anything pending once the run is finished: nobody is gathering it any more.
-export const isPending = (k, done, finished) => !finished && !isPass(k)
-  && (k.result === "pending" || (!done && k.result !== "fail"));
+// "Result: pending — <why>", or its task is still under way (`gathering`: planned, implementing,
+// in review, fixing) and nothing failed. A done or blocked task's partial or missing proof still
+// needs a look (nobody is gathering a blocked task's), and so does anything pending once the
+// run is finished: nobody is gathering it any more.
+// Whether a task's stage (data.js taskStage / shownStage) is one whose proof is still being
+// gathered: planned, implementing, in review or fixing; not done, blocked or a stage named by none.
+const GATHERING = new Set(["planned", "implement", "review", "fix"]);
+export const gatheringStage = (stage) => GATHERING.has(stage);
+export const isPending = (k, gathering, finished) => !finished && !isPass(k)
+  && (k.result === "pending" || (gathering && k.result !== "fail"));
 
 // The result as one line, the way the row shows it and an acceptance or ask records it:
 // "partial — the hover card needs a real hover", "pass — … (no screenshot)", "not checked", "not scoped".
@@ -224,7 +230,8 @@ export function pendingProofs(lines) {
 
 // The verdict's counts over proofTasks() rows: accepted rows count only as accepted, pending
 // rows (isPending) only as pending, so a partial still being gathered is not a partial yet.
-// `unchecked` is the rest: scoped, no result (or a "pending" one on a finished run).
+// `unchecked` is the rest: scoped, no result (or a "pending" one on a finished run). `pending`
+// counts an unscoped pending row too, as its row says pending; `total` (the pass denominator) doesn't.
 export function proofCounts(rows) {
   const scoped = rows.filter((k) => k.scoped);
   const open = scoped.filter((k) => !k.accepted && !k.pending);
@@ -234,7 +241,7 @@ export function proofCounts(rows) {
     total: scoped.length, pass, fail, partial,
     // Over scoped rows only, like pass: an accepted unscoped task is in neither count.
     accepted: scoped.filter((k) => k.accepted).length,
-    pending: scoped.filter((k) => k.pending).length,
+    pending: rows.filter((k) => k.pending).length,
     unchecked: open.length - pass - fail - partial,
     missing: open.filter((k) => k.missing).length,
     unscoped: rows.filter((k) => !k.scoped && !k.accepted && !k.pending).length,
@@ -243,10 +250,10 @@ export function proofCounts(rows) {
 
 // The verdict line on top of the Proof section:
 // "Proof T2 · 6/8 pass · 2 pending · 1 partial (1 task without a screenshot) · checks green · two-way door".
-// {text, tone ("done" | "blocked" | "dim")}, or null when the run has no proof at all. `done` and
+// {text, tone ("done" | "blocked" | "dim")}, or null when the run has no proof at all. `gathering` and
 // `finished` are proofTasks()'s, for which rows are pending; pending rows never make it blocked.
-export function proofVerdict({ tier, md, tasks, danger, shotFiles = null, accepted = null, asks = null, done = null, finished = false }) {
-  const all = proofTasks(tasks, md, shotFiles, { accepted, asks, done, finished });
+export function proofVerdict({ tier, md, tasks, danger, shotFiles = null, accepted = null, asks = null, gathering = null, finished = false }) {
+  const all = proofTasks(tasks, md, shotFiles, { accepted, asks, gathering, finished });
   const rows = all.filter((x) => x.scoped);
   if (!tier && !md && rows.length === 0) return null;
   const { pass, fail, partial, pending, unchecked, missing, accepted: acc } = proofCounts(all);
