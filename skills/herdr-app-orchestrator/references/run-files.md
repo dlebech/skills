@@ -86,6 +86,7 @@ describes them in text. Harbormaster lists the file names (up to 40) and reads `
 ```markdown
 # Proof: <branch>
 Tier: T2
+Checks: green — <what ran, e.g. the repo's checks on the integration branch>
 
 ## <task id> <task name>
 Tier: T1
@@ -95,7 +96,10 @@ Files: shared/proof/<file>, shared/proof/<file>
 ```
 
 A task's `## ` section is matched to the task by its id; its `Result` shows beside the task's
-evidence in the Proof section. A run with no `proof.md` shows its plan's evidence only.
+row in the Proof section. The optional header line `Checks: green — …` or `Checks: red — …` (CI or
+the local suite on the integration branch) shows as "checks green" in the verdict line. A T2 or T3
+task with a `Result:` whose `Files:` has no image (png, jpg, jpeg, gif, webp) counts as "missing: n screenshots".
+A run with no `proof.md` shows its plan's evidence only.
 
 ## The PR body: Evidence and Merge danger
 
@@ -147,7 +151,8 @@ terminal label `run.autonomy`; the run card shows it as a tag. L3 (auto-merge) i
 ```
 
 `[decided]` is a decision the orchestrator made itself, `[user]` one you made (the orchestrator logs one when it acts on your answer, section 6 of its skill). Harbormaster reads the
-last 20 `[decided]` lines and shows them, newest first, as "Decided for you" on the run card and pane.
+last 60 lines of either kind and shows them as "Decided for you": one summary line (`Decided for you · 20 by the
+orchestrator, 1 from you · latest: <the newest line>`), which on the pane expands to the list, newest first.
 A line that does not read as `<UTC time> <topic>: <decision> — <why>` is shown as its raw text.
 
 ## Tokens: status.json `tokens`, sessions and .tokens/
@@ -159,11 +164,13 @@ last one; run `tokens.sh <run-directory>` by hand to see why, which also writes 
 
 ```json
 {"total": 26222515, "input": 588, "output": 212199, "cache_read": 25133155, "cache_write": 876573,
- "by_agent": [{"name": "orchestrator", "total": 8844538}, {"name": "pda-t1", "total": 4690650}],
+ "by_agent": [{"name": "orchestrator", "total": 8844538, "input": 120, "output": 61000, "cache_read": 8500000, "cache_write": 283418},
+              {"name": "pda-t1", "total": 4690650, "input": 40, "output": 30000, "cache_read": 4600000, "cache_write": 60610}],
  "updated": "2026-11-16T09:02:56Z"}
 ```
 
-`total` is the sum of the four kinds, as Harbormaster's context size is; `by_agent` lists the
+`total` is the sum of the four kinds, as Harbormaster's context size is; each agent has the four kinds too
+(a count from before that lacks them shows its bar in one colour); `by_agent` lists the
 orchestrator first, then agents by size. A count only grows: one lower than the count already in
 `status.json` is never written. What it counts, from the session files on this computer, and only
 messages from orchestrator.json's `started` on (what a session said before the run, or an older run

@@ -36,11 +36,12 @@ A missing tool is never a silent skip: note it in one line in `proof.md` (`T2 sc
 
 ## 4. Write proof.md
 
-One section per task (or one for a plain branch), in this shape. Update the section rather than adding a second one, and set the top `Tier:` to the highest tier of its tasks.
+One section per task (or one for a plain branch), in this shape. Update the section rather than adding a second one, and set the top `Tier:` to the highest tier of its tasks. Write the `Checks:` line too: `green` or `red`, then what ran (CI or the local suite); Harbormaster shows it in the verdict line.
 
 ```markdown
 # Proof: <branch>
 Tier: T2
+Checks: green — <what ran>
 
 ## <task id> <task name>
 Tier: T1

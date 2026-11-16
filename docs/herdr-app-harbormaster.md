@@ -75,7 +75,7 @@ Harbormaster is built for that:
 
 The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks mods to list those, so here they are:
 
-- **Every 5 seconds, per machine:** one `sh -c` script. It prints the captain's open decisions, `.captain-decisions.json` in the runs root, then for each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json` (with the token totals `tokens.sh` counted; Harbormaster never reads session files for them), `plan.md`, `question.md` and its modification time (`stat`), and the `parked` and `closed` markers, counts the unhandled `inbox/*.message` files, and prints `proof.md` and the names of the files in `shared/proof/` (at most 40), and the last 20 `- [decided]` lines of `decisions.md` (`grep`, `tail`, capped at 8 kB).
+- **Every 5 seconds, per machine:** one `sh -c` script. It prints the captain's open decisions, `.captain-decisions.json` in the runs root, then for each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json` (with the token totals `tokens.sh` counted; Harbormaster never reads session files for them), `plan.md`, `question.md` and its modification time (`stat`), and the `parked` and `closed` markers, counts the unhandled `inbox/*.message` files, and prints `proof.md` and the names of the files in `shared/proof/` (at most 40), and the last 60 `- [decided]` and `- [user]` lines of `decisions.md` (`grep`, `tail`, capped at 20 kB).
 - **Every minute per open run (running or finished), every 15 minutes per closed one:** `gh pr view <url>` for each PR and related PR in `status.json`, on the run's machine. A run shows only the PRs its orchestrator recorded there. A PR's `## Merge danger` first line (from its body) is kept with the result and shown on its row: red for a one-way door, dim for a two-way one (see `skills/herdr-app-orchestrator/references/run-files.md`). The results are kept in Herdr's shared state (`harbormaster.prs`), so every copy of the mod and every layout uses the same ones.
 - **When you press Park or Close:** `git worktree list` in the run's folder, to find the integration worktrees whose spaces to close.
 - **Every 30 seconds per open run on another machine, with its orchestrator there:** the same `git worktree list`, to find the integration worktrees to open spaces for. The worktrees it has opened or seen open are kept in Herdr's shared state (`harbormaster.worktrees`).
@@ -97,9 +97,10 @@ It changes the window on its own only for a closed run (a `closed` marker): it c
 small tag by the name (`L1`; hover for what it means); the narrow Crew block leaves it out so the
 type tag and agent count keep their room. Every decision an orchestrator makes itself is a
 `- [decided] <UTC time> <topic>: <decision> — <why>` line in `decisions.md`. The overview card shows
-the newest as one line, "Decided for you · 4: …", with all of them in the tooltip; the run pane lists
-the latest 3 with when they were made and why, and "+N more" shows up to 20. A line that does not
-parse is shown as its raw text. Formats: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
+one summary line, "Decided for you · 20 by the orchestrator, 1 from you · latest: …" (counts of `[decided]`
+and `[user]` lines, the newest of either), with all of them in the tooltip. The run pane has the same line; click it
+to list every decision (up to the last 60 lines) with when it was made and why, newest first, and again to collapse
+(not remembered). A line that does not parse is shown as its raw text. Formats: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
 ## Tokens
 
@@ -111,8 +112,9 @@ files on the orchestrator's computer, from the run's start on, including those o
 killed and worktrees already removed, those of an orchestrator resumed in a new terminal (best effort
 for a pi orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
 down. A run's card shows the total in its
-meta line (`26M tok`); the run pane has a **Tokens** section with the split by kind (output, cache
-read, cache write, input; exact counts on hover) and each agent's share as a bar, the orchestrator
+meta line (`26M tok`); the run pane has a **Tokens** section with the split (fresh tokens, meaning input, output and cache writes, in
+blue; cache reads in green) and each agent's share as a stacked bar in the same colours, with the exact numbers on
+hover (`fresh 1,234,567 (in 12, out 3,456, cache write 1,230,000) · cache read 28,000,000`), the orchestrator
 first, then the agents by size, named by their worktree (`pda-t3`). The narrow Crew block leaves it
 out; hovering an orchestrator's context size there shows the run total too. A token is any of input,
 output, cache read and cache write, so the total is dominated by cache reads: it measures how much the
@@ -135,11 +137,17 @@ inbox. Nothing stops by itself. Details: [run-files.md](../skills/herdr-app-orch
 
 ## Proof
 
-A run's pane has a Proof section. Its title is the run's tier, `Proof · T2` (`(set by user)` when
-the plan says so), from plan.md's `Proof tier:` line, else the highest tier among the tasks. Each
-task is a row: its tier, its evidence from the task's `Proof:` line, and, when `proof.md` has a
-section for it, what was checked and a pass, fail or partial pill. A task with no `Proof:` line is
-flagged "Not scoped", and the section's title counts them. Two links open `proof.md` and the
+A run's pane has a Proof section. Its top line is the verdict, for example `Proof T2 · 6/8 pass · 2
+partial (missing: 3 screenshots) · checks green · two-way door`: the run's tier (plan.md's `Proof tier:`
+line, else the highest among the tasks), passes over the tasks that have a `Proof:` line or a proof.md
+entry, fails and partials, tasks of tier T2 or higher with a result whose `Files:` list has no image ("missing: n
+screenshots"), the `Checks: green|red` line of proof.md, and the merge danger of the run's PR (`two-way
+door` or `one-way door`). It is in the blocked colour for a fail, red checks or a one-way door, green
+when everything passes, dim otherwise. Below it is one compact row per task: tier, name and a pass,
+partial, fail, not checked or not scoped pill (a spot for screenshot thumbnails is reserved in the row).
+Click a row to see its evidence, "Checked:", "Result:" and files. A running run shows the rows; once it
+is finished, parked or closed the section starts collapsed to the verdict line (click it to expand;
+not remembered). Two links open `proof.md` and the
 `shared/proof/` folder; for a run on another machine they are shown as paths, since nothing here
 can open a file there. In the runs overview, a run's card carries a small tier tag by its name
 (hover for how many tasks are not scoped) and "n unscoped" in its meta line. The formats are in

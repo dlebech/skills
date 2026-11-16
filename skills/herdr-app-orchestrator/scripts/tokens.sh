@@ -41,7 +41,7 @@
 # where a file could not be read into the cache, is never written.
 #
 # Writes (or prints) status.json's `tokens`: {total, input, output, cache_read,
-# cache_write, by_agent: [{name, total}], updated}, the orchestrator first, then agents
+# cache_write, by_agent: [{name, total, input, output, cache_read, cache_write}], updated}, the orchestrator first, then agents
 # by size. Exits 1, writing nothing, when the count failed.
 #
 # CLAUDE_CONFIG_DIR, PI_CODING_AGENT_DIR and HERDR_WORKTREES_ROOT move where it looks,
@@ -147,6 +147,7 @@ publish() {
 stamp=$cache/.stamp
 trap 'rm -f "$stamp.$$" "$cache/.chunk.$$" "$cache/tokens.json.$$"' EXIT
 if [ -s "$cache/tokens.json" ] && [ -e "$stamp" ] && [ "$(<"$stamp")" = "${#files[@]}" ] &&
+  jq -e '(.by_agent // []) | all(has("cache_read"))' "$cache/tokens.json" >/dev/null 2>&1 &&
   [ -n "$(find "$stamp" -mmin -1 2>/dev/null)" ] &&
   { [ ${#files[@]} -eq 0 ] || [ -z "$(find "${files[@]}" -newer "$stamp" -print -quit 2>/dev/null)" ]; }; then
   publish "$(<"$cache/tokens.json")"
@@ -234,15 +235,19 @@ done
 # Each response once; then the totals and each agent's share.
 tokens=$(awk -F'\t' '
   FILENAME ~ /\.at$/ { name = $6; next }
-  NF == 5 && !seen[$1]++ { i += $2; o += $3; r += $4; w += $5; by[name] += $2 + $3 + $4 + $5 }
+  NF == 5 && !seen[$1]++ {
+    i += $2; o += $3; r += $4; w += $5
+    bi[name] += $2; bo[name] += $3; br[name] += $4; bw[name] += $5
+  }
   END {
     printf "%d\t%d\t%d\t%d\n", i, o, r, w
-    for (n in by) printf "%s\t%d\n", n, by[n]
+    for (n in bi) printf "%s\t%d\t%d\t%d\t%d\n", n, bi[n], bo[n], br[n], bw[n]
   }' /dev/null ${first[@]+"${first[@]}"} ${rest[@]+"${rest[@]}"} | jq -Rnc --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
   [inputs | split("\t")] as $l
   | ($l[0] | map(tonumber)) as [$i, $o, $r, $w]
   | {total: ($i + $o + $r + $w), input: $i, output: $o, cache_read: $r, cache_write: $w,
-     by_agent: ($l[1:] | map({name: .[0], total: (.[1] | tonumber)})
+     by_agent: ($l[1:] | map((.[1:] | map(tonumber)) as [$ai, $ao, $ar, $aw]
+         | {name: .[0], total: ($ai + $ao + $ar + $aw), input: $ai, output: $ao, cache_read: $ar, cache_write: $aw})
        | sort_by(if .name == "orchestrator" then 0 else 1 end, -.total)),
      updated: $updated}') && [ -n "$tokens" ] || exit 1
 
