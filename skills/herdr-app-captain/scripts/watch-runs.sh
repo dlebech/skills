@@ -136,7 +136,7 @@ while :; do
       # An open question is a reason of its own unless the plan status already carries
       # it; its title is the one-line summary, so a new or reworded question is news. Not while
       # an inbox message waits: that is the answer, and the orchestrator is still clearing the question.
-      # Level requests, asks to prove and asks what is blocking are no answers, so they do not hide the question.
+      # Level requests, asks to prove, asks what is blocking and asks to address comments are no answers, so they do not hide the question.
       if [ "$status" != finished ] && [ -z "$(answer_messages "$dir")" ]; then
         case $status in "waiting for user"*) ;; *)
           title=$(question_title "$dir")

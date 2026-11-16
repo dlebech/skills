@@ -9,6 +9,7 @@
 // files still counts: that file was read, whatever happened to the PR read.
 
 import { needsYou, needReason } from "./live.js";
+import { stepComments, commentsText } from "./comments.js";
 
 // No new progress line, no change in the run's agents and no new terminal output for this
 // long, and the run has stalled.
@@ -95,24 +96,37 @@ export function prStep(pr, flow) {
   return step("request review");
 }
 
-// The run's next step from its PRs: the most urgent PR's {label, rank, who, count, same, pr, prs},
-// where `count` is how many PRs the run has, `same` how many share that label and `prs` those
-// PRs; or null
-// without a PR (the run's own step applies) or when no PR's state is known.
+// The labels whose PRs' review comments are read (data.js) and counted: an approval or a change
+// request often comes with comments that still want a fix, a reply or a reason to leave them.
+export const COMMENT_LABELS = new Set(["approved — merge", "changes requested"]);
+
+// The run's next step from its PRs: the most urgent PR's {label, rank, who, count, same, pr, prs,
+// comments}, where `count` is how many PRs the run has, `same` how many share that label, `prs`
+// those PRs and `comments` their review comments summed (comments.js stepComments; null for a
+// label that does not count them); or null without a PR (the run's own step applies) or when no
+// PR's state is known.
 export function nextStep(prs, flow) {
   const steps = (prs ?? []).map((pr) => ({ pr, s: prStep(pr, flow) })).filter((x) => x.s);
   if (!steps.length) return null;
   const top = steps.reduce((a, b) => (b.s.rank < a.s.rank ? b : a));
   const same = steps.filter((x) => x.s.label === top.s.label);
   const who = [...new Set(same.flatMap((x) => x.s.who))];
-  return { label: top.s.label, rank: top.s.rank, who, count: (prs ?? []).length, same: same.length, pr: top.pr, prs: same.map((x) => x.pr) };
+  const list = same.map((x) => x.pr);
+  const comments = COMMENT_LABELS.has(top.s.label) ? stepComments(list) : null;
+  return { label: top.s.label, rank: top.s.rank, who, count: (prs ?? []).length, same: same.length, pr: top.pr, prs: list, comments };
 }
 
 // A next step as the Crew shows it: "review from anna, bo", then "· 3 PRs" with several PRs.
-// Short, for the narrow sidebar; reviewWaitText says it in full.
+// Short, for the narrow sidebar; reviewWaitText says it in full. With review comments,
+// "approved · 3 comments" in place of "approved — merge" (merging comes after them), and
+// "changes requested · 3 comments"; "· comments ?" when they could not be read.
 export function nextStepText(step) {
   if (!step) return "";
-  const label = step.label === "review from" ? `review from ${step.who.join(", ") || "a reviewer"}` : step.label;
+  const said = commentsText(step.comments);
+  const label = step.label === "review from" ? `review from ${step.who.join(", ") || "a reviewer"}`
+    : said && step.label === "approved — merge" ? `approved · ${said}`
+    : said ? `${step.label} · ${said}`
+    : step.label;
   return step.count > 1 ? `${label} · ${step.count} PRs` : label;
 }
 
