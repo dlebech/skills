@@ -2,7 +2,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, decisionQueue, answerRun, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
+import { stats, decisionQueue, answerRun, compactRun, isCompact, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag } from "./ui.js";
 import { tokenText } from "./context.js";
@@ -261,7 +261,7 @@ function cardHeader(view, t, r, f, meta) {
         .when(Boolean(r.proof.tier), (el) => el.child(tierTag(t, `tier-${r.key}`, r.proof.tier.tier, `Proof tier${r.proof.tier.byUser ? " (set by user)" : ""}${r.tasks.some((k) => !k.proof) ? `; ${plural(r.tasks.filter((k) => !k.proof).length, "task")} not scoped` : ""}`)))
         .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(13.5).text_color(t.foreground), runName(r.branch, r.topic)))
         .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
-      .child(div().truncate().text_size(11.5).text_color(t.dim).child(meta)))
+      .child(metaLine(t, r, meta)))
     .map(withContext(view, t, `run-${r.key}`, r.terminal))
     .child(runPin(t, `pin-${r.key}`, r, f.orch))
     .child(statusDot(t, f.orch))
@@ -289,7 +289,18 @@ function cardNotes(t, r, f) {
 }
 
 const unscopedOf = (r) => (r.proof.tier ? r.tasks.filter((k) => !k.proof).length : 0);
-const runMeta = (r, f) => [r.repo, f.workers.length ? plural(f.workers.length, "agent") : null, r.tokens ? `${tokenText(r.tokens.total)} tok` : null, unscopedOf(r) ? `${unscopedOf(r)} unscoped` : null, r.updated ? ago(r.updated) : null].filter(Boolean).join(" · ");
+// The tokens segment: "26M tok", or "31M / 30M tok" in the blocked colour once over the soft budget.
+const tokenMeta = (r) => (!r.tokens ? null : r.budget ? `${tokenText(r.tokens.total)} / ${tokenText(r.budget)} tok` : `${tokenText(r.tokens.total)} tok`);
+const runMeta = (r, f) => [r.repo, f.workers.length ? plural(f.workers.length, "agent") : null, tokenMeta(r), unscopedOf(r) ? `${unscopedOf(r)} unscoped` : null, r.updated ? ago(r.updated) : null].filter(Boolean).join(" · ");
+// The meta line as one text, or three when the tokens segment is over budget, to colour it.
+const metaLine = (t, r, meta) => {
+  const tok = tokenMeta(r), at = tok ? meta.indexOf(tok) : -1;
+  const line = h_flex().min_w(0).text_size(11.5).text_color(t.dim);
+  if (!overBudget(r) || at < 0) return div().truncate().text_size(11.5).text_color(t.dim).child(meta);
+  return line.child(div().flex_none().child(meta.slice(0, at)))
+    .child(div().id(`over-${r.key}`).flex_none().text_color(t.blocked).font_semibold().tooltip(`Over its soft budget of ${r.budget.toLocaleString("en")} tokens`).child(tok))
+    .child(div().truncate().child(meta.slice(at + tok.length)));
+};
 const runEdge = (t, f) => (f.need ? t.blocked : t[f.badge.tone] ?? t.border);
 const relatedTip = (p) => [p.number ? p.title : null, prStateText(p), p.url].filter(Boolean).join(" · ");
 
@@ -408,6 +419,9 @@ function tokensSection(t, r) {
     .child(div().id(`tok-${r.key}`).px(2).text_size(11).text_color(t.dim)
       .tooltip(`${exact(total)}: input ${input.toLocaleString("en")}, output ${output.toLocaleString("en")}, cache read ${cacheRead.toLocaleString("en")}, cache write ${cacheWrite.toLocaleString("en")}`)
       .child(`output ${tokenText(output)} · cache read ${tokenText(cacheRead)} · cache write ${tokenText(cacheWrite)} · input ${tokenText(input)}`))
+    .when(Boolean(r.budget), (el) => el.child(div().id(`budget-${r.key}`).px(2).text_size(11).text_color(overBudget(r) ? t.blocked : t.dim)
+      .tooltip("A soft budget: crossing it asks you whether to continue, compact or stop; nothing stops by itself")
+      .child(`${overBudget(r) ? "Over" : "Under"} its soft budget of ${tokenText(r.budget)} tokens`)))
     .children(byAgent.map(row));
 }
 
@@ -548,7 +562,7 @@ function captainStrip(view, t, ctx, s) {
 // into its input, when it is there; otherwise, and for a run's question, to the run's inbox
 // (answerRun), which wakes its orchestrator. Marks the item answered once it is written.
 // Returns false when there is nowhere to send it.
-function sendAnswer(view, it, text, cx) {
+function sendAnswer(view, it, text, cx, option = false) {
   const cap = captainOf(facts()).terminal;
   if (it.kind === "decision" && cap) {
     replyToCaptain(cap.address, it.decision, text);
@@ -561,7 +575,9 @@ function sendAnswer(view, it, text, cx) {
   view.answered[it.id] = it.since ?? 0;
   cx.spawn(async (cx) => {
     try {
-      await answerRun(run, it.title, text);
+      // The budget question's Compact button compacts the orchestrator first (never a typed reply).
+      if (option && isCompact(text) && (it.kind === "budget" || /budget/i.test(it.title))) await compactRun(run, it.title, text);
+      else await answerRun(run, it.title, text);
       // The captain isn't there to clear its decision, so it goes with the answer.
       if (it.kind === "decision") await dropDecision(it.decision).catch(() => {});
     } catch (e) {
@@ -641,10 +657,18 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
           cx.notify();
         }))
       .child(open ? "Cancel" : "Reply");
+    // /compact is typed into the orchestrator, so only while it sits idle or done.
+    const orchNow = it.run ? orchestratorState(it.run, ctx) : null;
+    const compactWhy = (o) => (isCompact(o.label) && (it.kind === "budget" || /budget/i.test(it.title)) && orchNow !== "idle" && orchNow !== "done"
+      ? `Compact needs the orchestrator idle or done (it is ${orchNow === "gone" ? "gone" : orchNow})` : null);
     const buttons = !answered && !why && it.options.length > 0 && h_flex().flex_wrap().gap(6).pl(22)
-      .children(it.options.map((o, i) => actionButton(t, `${it.id}-opt-${i}`, i === it.recommended ? `★ ${o.label}` : o.label,
-        `${o.text || o.label}${i === it.recommended ? " (recommended)" : ""}`,
-        (cx) => { sendAnswer(view, it, o.label, cx); }, i === it.recommended)));
+      .children(it.options.map((o, i) => {
+        const off = compactWhy(o);
+        const b = actionButton(t, `${it.id}-opt-${i}`, i === it.recommended ? `★ ${o.label}` : o.label,
+          `${o.text || o.label}${i === it.recommended ? " (recommended)" : ""}`,
+          off ? null : (cx) => { sendAnswer(view, it, o.label, cx, true); }, i === it.recommended);
+        return off ? b.tooltip(off) : b;
+      }));
     return v_flex().id(it.id).gap(6).p(8).rounded(7).bg(t.surface)
       .child(h_flex().gap(8).items_start().child(body).when(Boolean(replyBtn), (el) => el.child(replyBtn)))
       .when(Boolean(buttons), (el) => el.child(buttons))

@@ -13,7 +13,7 @@ and it keeps nothing the files do not.
 | `orchestrator.json` | `init-run.sh` | captain, Harbormaster | `{terminal, tab_id, folder, branch, kind, started}`: how to find and resume the run. |
 | `spec.md` | orchestrator | orchestrator, agents | The goal, scope and acceptance criteria. |
 | `plan.md` | orchestrator | everyone | First line `Status: <one line>` (`running`, `waiting for user: <summary>`, `blocked: <reason>`, `finished`), then `Prefix:` and the tasks with their states. |
-| `status.json` | `set-status.sh`, `tokens.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated, tokens}`. Outlives the orchestrator. `set-status.sh` keeps fields other scripts write. |
+| `status.json` | `set-status.sh`, `tokens.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated, tokens, budget, budget_asked}`. Outlives the orchestrator. `set-status.sh` keeps fields other scripts write. |
 | `sessions` | `tokens.sh` | `tokens.sh` | Every session the orchestrator's terminal has had, one `<kind> <session id or file>` a line (below). |
 | `.tokens/` | `tokens.sh` | `tokens.sh` | Its cache: each session file's parsed usage and how far it was read (below). |
 | `decisions.md` | orchestrator | anyone | The decisions log: what was decided, by whom, why (the line format is below). |
@@ -198,6 +198,57 @@ safe while the session files are there. Writes to `status.json` go through `lib.
 `status_update`, under a lock (`.status.lock`), so `set-status.sh` and `tokens.sh` publishing at once
 do not undo each other. Harbormaster reads only `status.json`, so the numbers show for runs on other
 machines and stay after the orchestrator is gone.
+
+## Soft budget
+
+`set-status.sh --budget <tokens>` (`500k`, `2M`, `1.5M` or a plain number; `""` clears it) stores
+`budget` in `status.json`, a number compared with `tokens.total` (cache reads included). It is soft:
+nothing stops by itself. The orchestrator sets it at the start when the user gave `budget=`.
+
+Every `set-status.sh` call checks it after the token count. When `tokens.total >= budget` and
+`budget_asked` is not this budget, it records `budget_asked: <budget>` and prints one line:
+`over budget: <total> of <budget> tokens; ask the budget question (run-files.md)`. It prints once per
+budget value, so raising the budget arms it again. It never writes `question.md` (one may be open).
+Harbormaster marks a run over budget from `status.json` alone (`31M / 30M tok`, in the blocked colour),
+even when the orchestrator is gone.
+
+On that line the orchestrator asks this question, at any autonomy level (it is always yours to decide,
+and the captain does not answer it):
+
+```markdown
+# Over the token budget: <total> of <budget>. Continue, compact or stop?
+
+## Question
+<where the run stands: tasks merged, what is left, the biggest token users>
+
+## Options
+1. **Continue**: raise the budget and carry on; reply with a new number, else it doubles
+2. **Compact**: compact the orchestrator's context, then carry on
+3. **Stop**: finish the current step, commit and push everything, then park the run
+
+## Recommended
+<Continue when most tasks are merged, else Compact>: <why, one line>
+
+## Evidence
+<tokens.by_agent, tasks done/planned>
+
+## Risk
+<what each choice costs; Stop is resumable>
+
+## Blocks
+Nothing: it is a soft budget
+```
+
+- **Continue**: `set-status.sh --budget <the number in the answer, else twice the old one>`, then carry on.
+- **Compact**: the answerer has already sent `/compact` to the orchestrator's terminal (Claude Code and pi
+  take it as input), and does so only while the orchestrator is idle or done, never working or blocked.
+  After the compaction, re-read the skill, `spec.md`, `plan.md` and `decisions.md` (as always), then carry on.
+- **Stop**: finish the current step, commit and push everything, set the status to `blocked: stopped at
+  budget` and end the turn. The user resumes it later (and may raise the budget first).
+
+When a run is over budget with no `question.md` (the orchestrator is gone or has not asked yet),
+Harbormaster shows the same three options in its queue and answers them through `inbox/`. Its Compact
+button sends `/compact` first, and is enabled only while the orchestrator is idle or done.
 
 ## .captain-decisions.json
 

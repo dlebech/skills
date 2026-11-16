@@ -117,6 +117,17 @@ run has processed, not what it cost. Harbormaster itself reads only `status.json
 for a run on another machine and stay once the orchestrator is gone. How runs, sessions and messages
 are matched: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
+### Soft budget
+
+`set-status.sh --budget 2M` (also `500k`, `1.5M` or a plain number) gives a run a soft token budget,
+which the orchestrator sets when started with `budget=2M`. A run that has used it shows `31M / 30M tok` in
+the blocked colour on its card and a note in its Tokens section, from `status.json` alone. The
+orchestrator asks a budget question when it notices (Continue, Compact or Stop; at any autonomy level),
+which shows in Waiting on you like any other. A run over budget with no question open gets the same
+three buttons from Harbormaster itself. **Compact** types `/compact` into the orchestrator's terminal,
+enabled only while it is idle or done, then answers through the inbox; the other two answer through the
+inbox. Nothing stops by itself. Details: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
+
 ## Proof
 
 A run's pane has a Proof section. Its title is the run's tier, `Proof · T2` (`(set by user)` when

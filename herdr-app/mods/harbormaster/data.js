@@ -13,6 +13,7 @@
 import { exec, machines, spaces, shared, setShared, run as command } from "herdr";
 import { parseQuestion, answerMessage } from "./question.js";
 import { parseDecidedLines } from "./decided.js";
+import { tokenText } from "./context.js";
 import { proofOf, runTier, parseProofMd } from "./proof.js";
 import { orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
@@ -204,6 +205,8 @@ function parse(machine, stdout) {
       related: (status.related ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
       waiting: status.waiting ?? [],
       tokens: tokensOf(status.tokens),
+      // The soft token budget (set-status.sh --budget), or null; `over` once tokens.total reaches it.
+      budget: Number(status.budget) > 0 ? Number(status.budget) : null,
       updated: status.updated ? Date.parse(status.updated) : null,
       // When the run was created (init-run.sh); null for runs from before it recorded that.
       started: Date.parse(orch.started ?? "") || null,
@@ -234,6 +237,35 @@ function tokensOf(x) {
     total: n(x.total), input: n(x.input), output: n(x.output), cacheRead: n(x.cache_read), cacheWrite: n(x.cache_write),
     byAgent: (Array.isArray(x.by_agent) ? x.by_agent : []).filter((a) => a?.name && n(a.total) > 0).map((a) => ({ name: String(a.name), total: n(a.total) })),
     updated: Date.parse(x.updated ?? "") || null,
+  };
+}
+
+// Whether a run has used its soft budget, from status.json alone (so also for a run whose
+// orchestrator is gone, or on another machine).
+export const overBudget = (r) => Boolean(r.budget && r.tokens && r.tokens.total >= r.budget);
+
+// The budget question's options, as run-files.md's template words them. Compact is the one
+// button that does more than write the answer: compactRun sends /compact first.
+export const BUDGET_OPTIONS = [
+  { label: "Continue", text: "raise the budget (the answer may carry a new number, else it doubles) and carry on" },
+  { label: "Compact", text: "compact the orchestrator's context, then carry on" },
+  { label: "Stop", text: "finish the current step, commit and push everything, then park the run" },
+];
+export const isCompact = (label) => /^compact$/i.test(label ?? "");
+
+// A budget item for the queue, for a run over budget with no question.md (the orchestrator
+// is gone, or has not asked yet): the same three options, recommended the way the
+// orchestrator's own question is: Continue when most tasks are merged, else Compact.
+function budgetItem(r, tokenText) {
+  const mostlyDone = r.planned > 0 && (r.merged ?? 0) / r.planned >= 0.5;
+  const top = r.tokens.byAgent.slice(0, 3).map((a) => `${a.name} ${tokenText(a.total)}`).join(", ");
+  return {
+    id: `need-${r.key}`, kind: "budget", title: `Over budget: ${tokenText(r.tokens.total)} of ${tokenText(r.budget)} tokens`,
+    options: BUDGET_OPTIONS, recommended: mostlyDone ? 0 : 1,
+    why: mostlyDone ? "most tasks are merged" : "much work is left; a smaller context is cheaper",
+    evidence: `${tokenText(r.tokens.total)} used${r.planned ? `, ${r.merged ?? 0}/${r.planned} tasks done` : ""}${top ? `; largest: ${top}` : ""}`,
+    risk: "Continue keeps spending; Stop parks the run until you resume it; Compact drops the orchestrator's context, which it re-reads from the run files.",
+    blocks: "nothing is blocked: it is a soft budget", since: r.updated ?? r.started, run: r, answered: r.unhandled > 0,
   };
 }
 
@@ -530,6 +562,9 @@ export function decisionQueue(runs, decisions, ctx) {
   const items = [];
   for (const r of runs) {
     const orch = orchestratorState(r, ctx);
+    // Over budget without an open question: its own item, answered through the inbox. With a
+    // question.md that question is the item (the orchestrator asked it), never both.
+    if (overBudget(r) && !r.question && !r.away && r.phase !== "finished") { items.push(budgetItem(r, tokenText)); continue; }
     if (!needsYou(r, orch)) continue;
     const q = r.ask;
     items.push(q ? {
@@ -587,6 +622,16 @@ export const dropDecision = (d) => exec("sh", ["-c", DROP, "sh", d.id], { on: d.
 // `answer` is an option's label or the person's own words.
 export function answerRun(run, title, answer, free = "") {
   return tellOrchestrator(run, "harbormaster", answerMessage(title, answer, free));
+}
+
+// Compacts the orchestrator's context: /compact typed into its terminal, which Claude Code
+// and pi both take as input, then the answer in its inbox as for any other (run-files.md).
+// The caller only offers it while the orchestrator is idle or done: /compact typed into a
+// working one would queue behind its turn, into a blocked one would answer its dialog.
+export async function compactRun(run, title, answer) {
+  const sent = await exec("hc", ["send", run.localTerminal, "/compact"], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  if (sent.code !== 0) throw new Error(`could not send /compact: ${(sent.stderr || sent.stdout || "hc send failed").trim()}`);
+  return answerRun(run, title, answer);
 }
 
 // Closing a run whose orchestrator is there asks it to clean up: it ends its agents,
