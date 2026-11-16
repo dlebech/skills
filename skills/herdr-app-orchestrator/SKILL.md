@@ -32,6 +32,7 @@ Parse `$ARGUMENTS` for the work source, constraints, options, and optional profi
 - `agent=<kind>` and `model=<model>` are shorthand defaults for all roles.
 - `implementer=<kind>` and `implementer-model=<model>` override implementation and fixes.
 - `reviewer=<kind>` and `reviewer-model=<model>` override review.
+- `autonomy=L0|L1|L2` sets how much you decide yourself (default `L0`; section 6).
 - `specialist=<kind>` and `specialist-model=<model>` define an optional stronger profile for a user-assigned or unusually complex task, and for the final review of a large branch.
 - Natural-language equivalents are valid, such as “use Sonnet for implementation, Haiku for review, Opus for complex tasks.”
 
@@ -218,6 +219,8 @@ Check the PR's size with `git diff --shortstat <default>...<integration>` from t
 ## 6. Handle agent questions and user decisions
 
 Questions arrive as `question:` messages, or as a `blocked` child when an agent shows an approval or question dialog. For the latter, `hc get <agent>` gives it in `status.msg`, and `hc read <agent>` shows the screen; `hc send` is refused while it is open, so answer with `hc keys <agent> <keys>`, and never use `--force` to bypass a permission decision. Answer when the spec, repository, or user direction determines the answer, and log the decision. Otherwise ask the user, then send the decision back. Ask only when the decision is genuinely the user's.
+
+Autonomy is the `autonomy` argument, default `L0`; publish it at the start with `set-status.sh --autonomy`. At `L0` the user approves decisions, as above. At `L1` decide small things yourself and stop only for a direction or design call. At `L2` run to a merge-ready PR with proof and stop only at merge. At every level, each decision you make yourself is one appended `decisions.md` line, `- [decided] <UTC time> <topic>: <decision> — <why>`, which Harbormaster shows as "Decided for you" ([references/run-files.md](references/run-files.md)). Merging is never automatic.
 
 To ask the user, with or without a captain, since `herdr-app-captain` reads the file and the user may be in your tab:
 

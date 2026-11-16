@@ -13,8 +13,8 @@ and it keeps nothing the files do not.
 | `orchestrator.json` | `init-run.sh` | captain, Harbormaster | `{terminal, tab_id, folder, branch, kind, started}`: how to find and resume the run. |
 | `spec.md` | orchestrator | orchestrator, agents | The goal, scope and acceptance criteria. |
 | `plan.md` | orchestrator | everyone | First line `Status: <one line>` (`running`, `waiting for user: <summary>`, `blocked: <reason>`, `finished`), then `Prefix:` and the tasks with their states. |
-| `status.json` | `set-status.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, issues, prs, related, waiting, updated}`. Outlives the orchestrator. |
-| `decisions.md` | orchestrator | anyone | The decisions log: what was decided, by whom, why. |
+| `status.json` | `set-status.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated}`. Outlives the orchestrator. |
+| `decisions.md` | orchestrator | anyone | The decisions log: what was decided, by whom, why (the line format is below). |
 | `question.md` | orchestrator | Harbormaster, captain, you | The open question to you, if any (below). Removed once answered. |
 | `inbox/*.message` | anyone who answers or instructs | orchestrator | Messages to the orchestrator (below). The orchestrator renames a message it has read to `.handled`. |
 | `shared/` | orchestrator, agents | orchestrator, agents | Briefs, findings, reports. Not committed. `shared/proof/` holds captured proof. |
@@ -126,6 +126,27 @@ message, renames it `.handled`, deletes `question.md` and carries on. While `que
 a message is unhandled, Harbormaster shows "answered, waiting for the orchestrator".
 
 An orchestrator that is gone reads waiting messages when it is resumed, so an answer is not lost.
+
+## Autonomy and decisions.md
+
+`set-status.sh --autonomy L0|L1|L2` stores `autonomy` in `status.json` (missing means `L0`) and the
+terminal label `run.autonomy`; the run card shows it as a tag. L3 (auto-merge) is not built.
+
+- `L0`: you approve decisions, as before.
+- `L1`: the orchestrator decides small things itself and stops only for a direction or design call.
+  `herdr-app-captain`, if it runs, may answer the routine questions of an L1 run.
+- `L2`: the orchestrator runs to a merge-ready PR with proof and stops only at merge.
+
+`decisions.md` may hold free text, but each decision is also one appended line:
+
+```
+- [decided] 2026-11-16T09:30:00Z Tag colour: grey, like the type tag — keeps the card calm
+- [user] 2026-11-16T09:41:00Z Merge order: t1 before t2 — t2 builds on it
+```
+
+`[decided]` is a decision the orchestrator made itself, `[user]` one you made. Harbormaster reads the
+last 20 `[decided]` lines and shows them, newest first, as "Decided for you" on the run card and pane.
+A line that does not read as `<UTC time> <topic>: <decision> — <why>` is shown as its raw text.
 
 ## .captain-decisions.json
 

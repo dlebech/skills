@@ -184,6 +184,12 @@ check "tab name, type and branch" "$(tab_name "$tab")" "🐙 ✋ rev · feature/
 "$orch/set-status.sh" "$dir" --type ""
 check "type cleared" "$(jq -r '.type // "none"' "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.type"] // ""'):$(tab_name "$tab")" \
   "none::🐙 ✋ feature/x"
+"$orch/set-status.sh" "$dir" --autonomy L1
+check "autonomy" "$(jq -r .autonomy "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.autonomy"]')" L1:L1
+"$orch/set-status.sh" "$dir" --autonomy L3 2>/dev/null
+check "autonomy L3 refused" "$?:$(jq -r .autonomy "$dir/status.json")" 2:L1
+"$orch/set-status.sh" "$dir" --progress "task 2/2 in review"
+check "autonomy kept" "$(jq -r .autonomy "$dir/status.json")" L1
 "$orch/set-status.sh" "$dir" --waiting $'impl-x\t rev-y\n'
 check "waiting split on any space" "$(jq -c .waiting "$dir/status.json")" '["impl-x","rev-y"]'
 "$orch/set-status.sh" "$dir" --waiting ""
