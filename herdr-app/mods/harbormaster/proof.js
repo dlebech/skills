@@ -58,7 +58,7 @@ export function parseProofMd(text) {
   const out = { tier: null, checks: null, tasks: {}, cut: false };
   if (!text) return out;
   let cur = null;
-  for (const line of text.split("\n")) {
+  for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
     const h = /^##\s+(\S+)/.exec(line);
     if (h) { cur = out.tasks[h[1]] = { tier: null, checked: "", result: null, why: "", files: [] }; continue; }
     const kv = /^(Tier|Checks|Checked|Result|Files):\s*(.*)$/i.exec(line);

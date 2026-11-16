@@ -51,7 +51,7 @@ function recommendedIndex(body, options) {
 // Returns null for no question.
 export function parseQuestion(text) {
   if (!text?.trim()) return null;
-  const lines = text.split("\n");
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const head = lines.find((l) => l.trim());
   const title = head.replace(/^#+\s*/, "").trim() || head.trim();
   const parts = {};

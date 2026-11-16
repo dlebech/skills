@@ -215,6 +215,16 @@ check "budget answered for this budget" "$(jq -r .budget_answered "$dir/status.j
 check "answered stays the old budget" "$(jq -r '[.budget, .budget_answered] | join(",")' "$dir/status.json")" 4000000,3000000
 "$orch/set-status.sh" "$dir" --budget ""
 check "budget cleared" "$(jq -r '[.budget, .budget_asked, .budget_answered] | map(. // "none") | join(",")' "$dir/status.json")" none,none,none
+# Continue gives a new budget and answers the old one: the next crossing stays unanswered.
+"$orch/set-status.sh" "$dir" --budget 30M
+jq '.tokens = {total: 31000000}' "$dir/status.json" >"$dir/s.tmp" && mv "$dir/s.tmp" "$dir/status.json"
+contains "30M crossing asked" "$("$orch/set-status.sh" "$dir" --progress x)" "over budget: 31000000 of 30000000"
+"$orch/set-status.sh" "$dir" --budget 60M --budget-answered
+check "continue answers the old budget" "$(jq -r '[.budget, .budget_asked, .budget_answered] | join(",")' "$dir/status.json")" 60000000,30000000,30000000
+jq '.tokens = {total: 61000000}' "$dir/status.json" >"$dir/s.tmp" && mv "$dir/s.tmp" "$dir/status.json"
+contains "60M crossing asked" "$("$orch/set-status.sh" "$dir" --progress y)" "over budget: 61000000 of 60000000"
+check "second crossing unanswered" "$(jq -r '[.budget_asked, .budget_answered] | join(",")' "$dir/status.json")" 60000000,30000000
+"$orch/set-status.sh" "$dir" --budget ""
 jq 'del(.tokens)' "$dir/status.json" >"$dir/s.tmp" && mv "$dir/s.tmp" "$dir/status.json"
 "$orch/set-status.sh" "$dir" --progress "task 2/2 in review"
 "$orch/set-status.sh" "$dir" --waiting $'impl-x\t rev-y\n'
