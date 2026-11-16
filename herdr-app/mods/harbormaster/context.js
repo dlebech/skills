@@ -141,6 +141,15 @@ export function tokenHeadline(tk) {
   return p.cached > 0 ? `${f} tok (+${tokenText(p.cached)} cached)` : `${f} tok`;
 }
 
+// tokenHeadline's short form, for a column: "2.9M +89.5M" (fresh, then cache reads).
+export function tokenShort(tk) {
+  const p = tkParts(tk);
+  if (tk.split === false || (tk.total > 0 && p.input + p.output + p.write + p.cached === 0)) return tokenText(tk.total);
+  const fresh = p.input + p.output + p.write;
+  const f = fresh > 0 && fresh < 1000 ? "<1k" : tokenText(fresh);
+  return p.cached > 0 ? `${f} +${tokenText(p.cached)}` : f;
+}
+
 // The full breakdown, for the hover over the headline. Budgets count the total.
 export function tokenDetail(tk) {
   const n = (v) => Number(v).toLocaleString("en");

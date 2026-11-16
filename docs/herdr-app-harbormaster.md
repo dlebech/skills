@@ -206,18 +206,33 @@ open runs from their logs (`timing.sh`), `.resources.json` and `status.json`, an
 one (or one resumed after it was recorded) shows its live figures. It adds nothing to run cards. Each
 section folds with a click on its title.
 
+Top to bottom it answers three questions: is anything hot right now, where does the time go, and what
+did each run cost. Numbers are right-aligned in fixed columns so they line up; dim text is for side notes.
+
+- **Now.** The CPU and memory of all agents together, large, and the hottest agent in plain words:
+  "Hottest: impl-xweek-ui 44%, mostly browser" (the program with half its CPU or more, else the two
+  biggest). Something outside the agents that is busier still is named after it. CPU % counts one core as
+  100% (on hover).
+- **CPU and memory now.** Every agent terminal from the last 5-second sample, under its run (and the
+  captain), hottest first, with CPU %, a small CPU bar, memory, and what it is busy with (its programs of
+  1% or more, repeated ones as "firefox ×3"). A run whose only agent is its orchestrator is one line.
+  Runs under 1% CPU fold into one "N quiet runs" line that names them; click it to list them. Then the
+  terminals in no run (idle shells under 1% and 100 MB counted, not listed), then **Other processes**: the
+  busiest processes outside every agent (a browser, Docker, Herdr itself), one line per program, folded
+  the same way, so fan noise can be explained. Hover a row for the agent's own share, each program, its
+  terminal's name and the pids.
 - **Where the time goes.** The runs' `critical_path` summed: where the orchestrators' wall time went, by
   category (model, test, lint/typecheck, build, install, CI wait, agent wait, review, git, user wait,
-  other) plus idle, as one stacked bar with each category's share and time. **By repo** and **By type**
-  give a bar per repository or run type instead, as long as its total. Hover a segment for its time.
-- **CPU and memory now.** Every agent terminal from the last 5-second sample, under its orchestrator (and
-  the captain), with CPU % (100% is one core), memory, and its busiest commands; then the terminals in no
-  run, then **Other processes**: the busiest processes outside every agent (a browser, Docker, Herdr
-  itself), so fan noise can be explained. Hover a row for the agent's own share and each program, and
-  its terminal's name. Terminals in no run under 1% CPU and 100 MB (idle shells) are one "+N more" line.
-- **Runs.** Per run: its wall time, a bar of where it went, its tokens (the column shows the full total, since it is too narrow for the card's fresh-first headline; a bar as wide as its share of
-  the largest run's, as on run cards: fresh tokens, that is input, output and cache writes, in blue, cache reads in green;
-  exact numbers on hover), and its CPU time and memory peak (all its agents together). Click a run for
+  other). The heading says the working and the idle time ("2h 57m working · 6h 26m idle"); the bar shows
+  the working time only, biggest first, and the legend its four biggest parts of 1% or more ("+N more"
+  lists the rest on hover). **By repo** and **By type** give a bar per repository or run type instead, as
+  long as its working time. Hover a segment for its time.
+- **Runs.** One row per run, in columns: its type, name (open, or how long ago it started; hover for the
+  branch, machine and tasks), wall time, a bar of where it went (working time only, as wide as its share
+  of the wall time; "no time data yet" when its session was not read), its tokens fresh-first like the
+  card, short ("3.1M +92M": fresh tokens, that is input, output and cache writes, then the cache reads;
+  the full breakdown on hover), its CPU time and memory peak (all its agents together). The newest 5 are
+  listed; **+ N older runs** lists the rest. Click a run for
   the categories with shares, the effort (all agents' time, more than the wall time as they work in
   parallel), CPU by program, and its tasks: each with its effort by category, CPU and memory peak; click
   a task for its agents, each with its role, time, CPU and peak. An agent's CPU includes the commands it
@@ -228,8 +243,7 @@ already read come first, so a first read of another run does not hold them up), 
 once, and a run the history already has not at all. A big run's first read can take a minute or more (its
 later reads are quick, from `timing.sh`'s cache); until then it shows "reading…". An open run's figures,
 its wall time included, are as of that last read, so they can be up to two minutes behind. The history
-is read again every minute, the live table with each 5-second poll. The newest 25 runs are listed;
-**Show N older** lists the rest. Only the last 4 MB of `.history.jsonl` is read (a line is about 3 kB or more), so after a few hundred runs the oldest drop out of the sums as well; the file is not rotated.
+is read again every minute, the live table with each 5-second poll. Only the last 4 MB of `.history.jsonl` is read (a line is about 3 kB or more), so after a few hundred runs the oldest drop out of the sums as well; the file is not rotated.
 
 Which agent and task a terminal's CPU and memory count for is one rule (`attribute.js`), the same for
 open runs and history lines: the agent whose brief named it; for the commands an agent started with
