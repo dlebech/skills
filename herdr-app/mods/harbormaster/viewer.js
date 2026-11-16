@@ -6,11 +6,12 @@
 import { div, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, writeTextFile, appHome, openOverlay, closeOverlay } from "herdr";
-import { makeCopier, isImage, isVideo, mediaPath, dropCacheArgs } from "./media.js";
+import { makeCopier, isImage, isVideo, mediaPath } from "./media.js";
 import { openUrl } from "./live.js";
 
 const copier = () => makeCopier({ exec, writeTextFile, home: appHome() });
 const RECHECK = 60000; // a shown file is looked at again after this long, in case it changed
+const RECHECK_BAD = 300000; // one that failed or was too large, less often: each look can be an ssh stat
 
 const keyOf = (run, rel) => `${run.machine ?? ""}|${run.dir}|${rel}`;
 
@@ -20,9 +21,10 @@ function want(view, run, rel) {
   view.wanted ??= [];
   const k = keyOf(run, rel);
   const have = view.media.get(k);
-  if (have && (have.state === "loading" || Date.now() - have.at < RECHECK)) return have;
-  // A copy that was ready keeps showing while it is looked at again.
-  const next = have?.state === "ready" ? { ...have, at: Date.now() } : { state: "loading", at: Date.now() };
+  const bad = have?.state === "error" || have?.state === "large";
+  if (have && (have.state === "loading" || Date.now() - have.at < (bad ? RECHECK_BAD : RECHECK))) return have;
+  // A copy that was ready, failed or was too large keeps showing while it is looked at again.
+  const next = have && have.state !== "loading" ? { ...have, at: Date.now() } : { state: "loading", at: Date.now() };
   view.media.set(k, next);
   view.wanted.push({ run: { dir: run.dir, machine: run.machine ?? null }, rel, k });
   return next;
@@ -45,8 +47,6 @@ export function startCopies(view, cx) {
 }
 
 // Deletes a run's copies; the run is going.
-export const dropCache = (run) => exec("sh", dropCacheArgs(appHome(), run.machine, run.dir));
-
 const mb = (n) => `${(n / 1e6).toFixed(1)} MB`;
 const NOTE = { loading: "Copying…", error: "Could not copy" };
 

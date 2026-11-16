@@ -139,10 +139,10 @@ inbox. Nothing stops by itself. Details: [run-files.md](../skills/herdr-app-orch
 ## Proof
 
 A run's pane has a Proof section. Its top line is the verdict, for example `Proof T2 · 6/8 pass · 2
-partial (missing: 3 screenshots) · checks green · two-way door`: the run's tier (plan.md's `Proof tier:`
+partial (2 tasks without a screenshot) · checks green · two-way door`: the run's tier (plan.md's `Proof tier:`
 line, else the highest among the tasks), passes over the tasks that have a `Proof:` line or a proof.md
-entry, fails and partials, tasks of tier T2 or higher with a result whose `Files:` list has no image ("missing: n
-screenshots"), the `Checks: green|red` line of proof.md, and the merge danger of the run's PR (`two-way
+entry, fails and partials, tasks of tier T2 or higher with a result whose `Files:` list has no existing image or video ("n tasks without a
+screenshot": it counts tasks, not images; proof.md is read up to 64 kB, and the verdict says "(proof.md cut)" past that), the `Checks: green|red` line of proof.md, and the merge danger of the run's PR (`two-way
 door` or `one-way door`). It is in the blocked colour for a fail, red checks or a one-way door, green
 when everything passes, dim otherwise. Below it is one compact row per task: tier, name and a pass,
 partial, fail, not checked or not scoped pill, and small thumbnails of the task's images from its proof.md

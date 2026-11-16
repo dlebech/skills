@@ -98,7 +98,7 @@ Files: shared/proof/<file>, shared/proof/<file>
 A task's `## ` section is matched to the task by its id; its `Result` shows beside the task's
 row in the Proof section. The optional header line `Checks: green — …` or `Checks: red — …` (CI or
 the local suite on the integration branch) shows as "checks green" in the verdict line. A T2 or T3
-task with a `Result:` whose `Files:` has no image or video (png, jpg, jpeg, gif, webp; mp4, webm, mov, m4v) counts as "missing: n screenshots".
+task with a `Result:` whose `Files:` has no image or video (png, jpg, jpeg, gif, webp; mp4, webm, mov, m4v) counts as "n tasks without a screenshot" (tasks, not images; an image missing from `shared/proof/` does not count). `Files:` is comma-separated paths only: a note in parentheses after a path is ignored, and notes belong in `Checked:`. Only a `## ` section with a `Result:` or `Tier:` is a task; Harbormaster reads the first 64 kB of proof.md and marks the verdict "(proof.md cut)" past that.
 A run with no `proof.md` shows its plan's evidence only.
 
 ## The PR body: Evidence and Merge danger

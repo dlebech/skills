@@ -62,10 +62,13 @@ function showPopup(view, arg) {
 async function listen(view, cx) {
   for (;;) {
     const c = String(await nextCommand());
-    const [, name, arg] = /^([\w-]+)[:\s]*(.*)$/s.exec(c.trim()) ?? [];
-    if (name === "show-run") showPopup(view, arg?.trim() ?? "");
-    else if (name === "close-popup") closePopup();
-    cx.notify();
+    // A throw here would end the loop and this copy would never hear a command again.
+    try {
+      const [, name, arg] = /^([\w-]+)[:\s]*(.*)$/s.exec(c.trim()) ?? [];
+      if (name === "show-run") showPopup(view, arg?.trim() ?? "");
+      else if (name === "close-popup") closePopup();
+      cx.notify();
+    } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }
   }
 }
 
