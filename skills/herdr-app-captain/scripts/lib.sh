@@ -16,7 +16,7 @@
 #       review-only run reviews), waiting: [name], updated}, kept by set-status.sh, which also sets the terminal's run.status,
 #       run.type, run.topic, progress, and run.prs labels
 #   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
-#   <root>/<folder>/<branch>/inbox/             <name>.message, from the captain
+#   <root>/<folder>/<branch>/inbox/             <UTC time>-<source>.message, from the captain, Harbormaster or the user
 #   <root>/<folder>/<branch>/shared/            the run's agents' files; not the captain's
 #   <root>/<folder>/<branch>/parked             the user set the run aside for now: its
 #       orchestrator's tab was closed on purpose, to resume later

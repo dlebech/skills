@@ -630,7 +630,7 @@ async function writeInbox(run, source, text) {
 async function wakeOrchestrator(run, file) {
   const sent = await exec("hc", ["send", run.localTerminal, `Read and act on ${run.dir}/inbox/${file}.`], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
   if (sent.code === 9) return { blocked: true };
-  if (sent.code !== 0) throw new Error(`the message is in its inbox, but its orchestrator could not be told: ${(sent.stderr || sent.stdout || "hc send failed").trim()}`);
+  if (sent.code !== 0) throw Object.assign(new Error(`the message is in its inbox, but its orchestrator could not be told: ${(sent.stderr || sent.stdout || "hc send failed").trim()}`), { inInbox: true });
   return { blocked: false };
 }
 
@@ -641,8 +641,16 @@ export const dropDecision = (d) => exec("sh", ["-c", DROP, "sh", d.id], { on: d.
 
 // Answers a run's question (or a captain decision that names the run) from the queue:
 // `answer` is an option's label or the person's own words.
-export function answerRun(run, title, answer, free = "") {
-  return tellOrchestrator(run, "harbormaster", answerMessage(title, answer, free));
+// A gone or lost orchestrator is never told: its terminal is gone, or only a shell, which
+// would run the wake-up line as a command. The message waits in the inbox until the run is
+// resumed, and this resolves to {blocked: false, waits: true}.
+export async function answerRun(run, title, answer, free = "") {
+  const text = answerMessage(title, answer, free);
+  if (orchestratorState(run, facts()) === "gone") {
+    await writeInbox(run, "harbormaster", text);
+    return { blocked: false, waits: true };
+  }
+  return tellOrchestrator(run, "harbormaster", text);
 }
 
 // Compacts the orchestrator's context: the answer goes into its inbox first, then /compact is

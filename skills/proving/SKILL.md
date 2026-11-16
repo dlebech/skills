@@ -1,14 +1,14 @@
 ---
 name: proving
 description: Capture proof that a task, branch or PR works, for a tier T0–T3 (tests, test output, screenshots, demo), and write the PR's Evidence section.
-argument-hint: "[tier T0-T3] [task, branch or PR to prove]"
+argument-hint: "[tier T0-T3] [run=<run-directory>] [task, branch or PR to prove]"
 ---
 
 Capture evidence that a change works, at the depth a tier asks for, so a reviewer can trust it without redoing it. Proof is a review aid: record what was checked and what happened, honestly, including what could not be checked.
 
 ## 1. Pick the target and tier
 
-`$ARGUMENTS` is free text: a tier (`T0`–`T3`) and what to prove (a task, a branch, a PR). Default tier `T0`; default target the current branch. In an orchestrator run, take the tier from the task's `Proof:` line in `plan.md`.
+`$ARGUMENTS` is free text: a tier (`T0`–`T3`), optionally `run=<run-directory>` (the orchestrator passes it), and what to prove (a task, a branch, a PR). Default tier `T0`; default target the current branch. In an orchestrator run, take the tier from the task's `Proof:` line in `plan.md`.
 
 | Tier | Evidence |
 | --- | --- |
@@ -19,7 +19,8 @@ Capture evidence that a change works, at the depth a tier asks for, so a reviewe
 
 ## 2. Find where proof goes
 
-- Root: `${HERDR_ORCHESTRATION_ROOT:-~/.herdr/hc-orchestration}`. The run directory is `<root>/<last part of the repository's path>/<branch, with / and the like as ->`. If it holds an `orchestrator.json`, you are in a run: files go in `<run>/shared/proof/`, the summary in `<run>/proof.md`.
+- `run=<run-directory>` in the arguments wins: use it when it holds an `orchestrator.json`. You often work in a task or integration worktree, whose folder and branch are not the run's, so the path cannot be derived there.
+- Otherwise derive it. Root: `${HERDR_ORCHESTRATION_ROOT:-~/.herdr/hc-orchestration}`. The run directory is `<root>/<repository name>/<integration branch, with / and the like as ->`, where the repository name is the main checkout's folder: `basename "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"`, the same from any worktree. If it holds an `orchestrator.json`, you are in a run: files go in `<run>/shared/proof/`, the summary in `<run>/proof.md`.
 - Otherwise: `${TMPDIR:-/tmp}/proof-<branch as ->/`, with the files and `proof.md` together in it.
 
 Never commit proof or put it in the repository. Name files `<task-id>-<what>.<ext>`.

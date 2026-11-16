@@ -112,7 +112,7 @@ red for a one-way door. `pr-humanize` keeps both sections verbatim, between `## 
 Anyone who answers a question, or tells the orchestrator something (Harbormaster, the
 captain, you by hand), writes one file:
 
-`inbox/<UTC yyyymmddThhmmssZ>-<source>.message` (Harbormaster adds milliseconds, `…Z-<ms>-<source>`, so two answers in a second don't collide), written to `inbox/.<name>.tmp` and then moved,
+`inbox/<UTC yyyymmddThhmmssZ>-<source>.message` (Harbormaster adds milliseconds, `…Z-<ms>-<source>`, so two answers in a second don't collide; the captain writes `…Z-captain`). Only the `.message` suffix and the atomic write are required; the names sort by time, so waiting messages are read in the order they were written. Written to `inbox/.<name>.tmp` and then moved,
 so it is never read half-written. For an answer, the text is
 
 ```
@@ -127,7 +127,7 @@ click an option or Reply; the captain relays the same way. The orchestrator read
 message, renames it `.handled`, deletes `question.md` and carries on. While `question.md` is still there and
 a message is unhandled, Harbormaster shows "answered, waiting for the orchestrator".
 
-An orchestrator that is gone reads waiting messages when it is resumed, so an answer is not lost.
+An orchestrator that is gone or lost is never woken (its terminal is gone, or only a shell, which would run the wake-up as a command): the message waits, and Harbormaster says so ("waits in its inbox until the run is resumed"). The resumed orchestrator reads waiting messages in name order, so an answer is not lost.
 
 ## Autonomy and decisions.md
 
@@ -146,7 +146,7 @@ terminal label `run.autonomy`; the run card shows it as a tag. L3 (auto-merge) i
 - [user] 2026-11-16T09:41:00Z Merge order: t1 before t2 — t2 builds on it
 ```
 
-`[decided]` is a decision the orchestrator made itself, `[user]` one you made. Harbormaster reads the
+`[decided]` is a decision the orchestrator made itself, `[user]` one you made (the orchestrator logs one when it acts on your answer, section 6 of its skill). Harbormaster reads the
 last 20 `[decided]` lines and shows them, newest first, as "Decided for you" on the run card and pane.
 A line that does not read as `<UTC time> <topic>: <decision> — <why>` is shown as its raw text.
 
@@ -201,8 +201,8 @@ machines and stay after the orchestrator is gone.
 
 ## Soft budget
 
-`set-status.sh --budget <tokens>` (`500k`, `2M`, `1.5M` or a plain number; `""` clears it) stores
-`budget` in `status.json`, a number compared with `tokens.total` (cache reads included). It is soft:
+`set-status.sh --budget <tokens>` (`30M`, `50M`, `500k`, `1.5M` or a plain number; `""` clears it) stores
+`budget` in `status.json`, a number compared with `tokens.total` (cache reads included, and they dominate: a run of a few tasks is tens of millions, so `30M` or `50M` are realistic, `2M` is crossed in the first turns). It is soft:
 nothing stops by itself. The orchestrator sets it at the start when the user gave `budget=`.
 
 Every `set-status.sh` call checks it after the token count. When `tokens.total >= budget` and
