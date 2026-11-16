@@ -42,6 +42,7 @@ max_hc_failures=5
 [ $# -eq 0 ] || { echo "usage: watch-runs.sh" >&2; exit 2; }
 seen_file=$root/.captain-seen
 idle_file=$root/.captain-idle
+prs_flag=$root/.captain-seen-prs
 mkdir -p "$root"
 chmod 700 "$root"
 touch "$seen_file" "$idle_file"
@@ -117,8 +118,9 @@ while :; do
       esac
     fi
     for r in ${reasons[@]+"${reasons[@]}"}; do current+=("attention $branch $r	$dir"); done
-    # PRs are news, not a call for the user: one line each, once.
-    while IFS= read -r url; do
+    # PRs are news, not a call for the user: one line each, once. A finished run's
+    # "finished" line already says its PRs are up.
+    [ "$status" = finished ] || while IFS= read -r url; do
       [ -z "$url" ] || current+=("update $branch pr $url	$dir")
     done < <(jq -r '(.prs // [])[]?.url // empty' "$dir/status.json" 2>/dev/null)
   done 3< <(run_infos)
@@ -127,7 +129,11 @@ while :; do
   printf '%s\n' ${idle[@]+"${idle[@]}"} | sed '/^$/d' >"$idle_file"
   new=()
   for line in ${current[@]+"${current[@]}"}; do
-    grep -qxF -- "$line" "$seen_file" || new+=("$line")
+    grep -qxF -- "$line" "$seen_file" && continue
+    # The first pass after PR updates existed (no flag yet) only records the PRs
+    # already open, so an upgrade does not dump them all at once.
+    case $line in "update "*) [ -e "$prs_flag" ] || continue ;; esac
+    new+=("$line")
   done
   # A question or dialog reported earlier that is gone now, typically answered in the
   # orchestrator's own tab, so the captain can say it no longer needs the user.
@@ -148,6 +154,7 @@ while :; do
     new+=("cleared ${line#attention }")
   done <"$seen_file"
   printf '%s\n' ${current[@]+"${current[@]}"} | sed '/^$/d' >"$seen_file"
+  touch "$prs_flag"
   if [ ${#new[@]} -gt 0 ]; then
     printf '%s\n' "${new[@]}"
     exit 0
