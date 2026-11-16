@@ -58,6 +58,8 @@ Record every test, lint or build run as a `Ran:` line with the sha it ran agains
 
 `Files:` is comma-separated paths only; put notes in `Checked:`. Use `##` only for task sections.
 
+A `proof-accepted.json` beside `proof.md` records the tasks whose proof the user accepted as it is (from Harbormaster); leave it alone. An acceptance lapses by itself once a task's `Result:` line changes.
+
 ## 5. The PR's Evidence section
 
 Write `## Evidence` text from `proof.md`: per task, what was checked, the result and the local file names (proof is not hosted, so say they are local). Hand it to the caller (the orchestrator puts it in the PR body), or when asked, update the PR body yourself with `gh pr edit`, replacing only that section: read the body with `gh pr view <pr> --json body -q .body`, swap the text from `## Evidence` to the next `## ` heading, and write it back with `gh pr edit <pr> --body-file -`. Do not paste screenshots or logs into the PR; describe them.

@@ -17,12 +17,17 @@ import { parseDecidedLines } from "./decided.js";
 import { levelRequest, pendingLevels } from "./levels.js";
 import { tokenText } from "./context.js";
 import { dropCacheArgs } from "./media.js";
-import { proofOf, runTier, parseProofMd } from "./proof.js";
+import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, proveRequest, withAcceptance, resultLine } from "./proof.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
 import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f", GS = "\u001d";
+
+// The first lines of inbox messages that answer no question: level requests ("set autonomy to
+// L2") and asks to prove ("prove t23 to T2: …"). Kept equal to answer_messages in
+// skills/herdr-app-captain/scripts/lib.sh.
+const NOT_ANSWERS = "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: )";
 
 // One sh script per machine: the captain's decisions, then every run, its files
 // separated by \x1f, runs by \x1e; then, after a \x1d, the process snapshot.
@@ -41,17 +46,20 @@ const SCRIPT = [
   '  [ -e "$d/question.md" ] && { stat -c %Y "$d/question.md" 2>/dev/null || stat -f %m "$d/question.md" 2>/dev/null; }; printf \'\\037\'',
   '  [ -e "$d/parked" ] && { printf +; head -c 400 "$d/parked"; }; printf \'\\037\'',
   '  [ -e "$d/closed" ] && { printf +; head -c 400 "$d/closed"; }; printf \'\\037\'',
-  // Unhandled messages, but for level requests (below), which the tags show instead: one must not
-  // make a queued question read as answered.
-  '  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && ! head -n 1 "$m" | grep -qE "^set (autonomy|proof tier) to " && n=$((n+1)); done; printf "%s\\037" "$n"',
+  // Unhandled messages, but for level requests and asks to prove (below), which the tags and the
+  // Proof rows show instead: one must not make a queued question read as answered.
+  `  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && ! head -n 1 "$m" | grep -qE '${NOT_ANSWERS}' && n=$((n+1)); done; printf "%s\\037" "$n"`,
   // proof.md (a "+" before it when there is one, "!" when it was cut at 64 kB), then the names of the files in shared/proof/, capped.
   '  [ -e "$d/proof.md" ] && { [ "$(wc -c < "$d/proof.md")" -gt 64000 ] && printf \'!\' || printf +; head -c 64000 "$d/proof.md"; }; printf \'\\037\'',
   '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
   // decisions.md: the last 60 lines of its own decisions and the user's, capped.
   '  grep -a -E "^- \\[(decided|user)\\] " "$d/decisions.md" 2>/dev/null | tail -n 60 | tail -c 20000; printf \'\\037\'',
-  // Level requests (levels.js) in the inbox's unhandled messages, oldest first: what is pending.
-  // Only a message's first line, so an answer's free text that reads like one is not one.
-  '  for m in "$d"/inbox/*.message; do [ -e "$m" ] && head -n 1 "$m"; done | grep -a -E "^set (autonomy|proof tier) to " | head -c 2000; printf \'\\037\'',
+  // Level requests (levels.js) and asks to prove (proof.js) in the inbox's unhandled messages,
+  // oldest first: what is pending. Only a message's first line, so an answer's free text that
+  // reads like one is not one.
+  `  for m in "$d"/inbox/*.message; do [ -e "$m" ] && head -n 1 "$m"; done | grep -a -E '${NOT_ANSWERS}' | tail -c 8000; printf '\\037'`,
+  // The user's acceptances of proof as it is (Accept on a Proof row), capped.
+  '  head -c 20000 "$d/proof-accepted.json" 2>/dev/null; printf \'\\037\'',
   // The run's CPU and memory totals so far (resources.js adds each sample to them).
   '  head -c 1000000 "$d/.resources.json" 2>/dev/null',
   "done",
@@ -199,7 +207,7 @@ function parse(machine, stdout) {
 }
 
 function parseRun(machine, chunk) {
-  const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile, requests] = chunk.split(US);
+  const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile, requests, acceptedFile] = chunk.split(US);
   const orch = json(orchFile) ?? {};
   const status = json(statusFile) ?? {};
   const tasks = tasksOf(plan);
@@ -261,6 +269,9 @@ function parseRun(machine, chunk) {
       tier,
       md: /^[+!]/.test(proofFile ?? "") ? { ...parseProofMd(proofFile.slice(1)), cut: proofFile[0] === "!" } : null,
       files: (proofNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
+      // Tasks the user accepted as they are (proof-accepted.json), and asks to prove still unread.
+      accepted: parseAccepted(acceptedFile),
+      asks: pendingProofs(requests),
     },
     // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
     prefix: /^Prefix:\s*`?([\w-]+)/m.exec(plan ?? "")?.[1]?.toLowerCase() ?? null,
@@ -716,6 +727,55 @@ export function requestLevel(run, kind, level) {
   const from = kind === "autonomy" ? run.autonomy : run.proof?.tier?.tier ?? null;
   return messageRun(run, "harbormaster-level", levelRequest(kind, level, { from, finished: run.phase === "finished" }));
 }
+
+// Asks the orchestrator to finish one task's proof (a Proof row's Ask to prove): an inbox message,
+// "prove t23 to T2: <the result line>", the way a level request is sent. The row reads "asked…"
+// while it is unhandled and the result line is the same.
+export function askProof(run, row) {
+  return messageRun(run, "harbormaster-proof", proveRequest(row, run.proof?.tier?.tier ?? null));
+}
+
+// proof-accepted.json in the run directory, which Harbormaster owns: read on the run's machine,
+// changed here, and written back only if it still holds what was read (else exit 3, and it is
+// read again), under a mkdir lock, through a temporary file of its own and mv, so two windows
+// accepting at once lose neither. A lock left by a killed writer is broken after a minute, as
+// resources.js does for .resources.json. Every value is an argument, never part of the script.
+// A failed read, or a file that is not a JSON object, is never overwritten: that throws.
+const READ_ACCEPTED = '[ -e "$1/proof-accepted.json" ] || exit 0; cat "$1/proof-accepted.json"';
+export const WRITE_ACCEPTED = [
+  'f="$1/proof-accepted.json" l="$1/proof-accepted.json.lock"',
+  'if ! mkdir "$l" 2>/dev/null; then',
+  '  if [ -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ] && mv "$l" "$l.$$" 2>/dev/null; then',
+  '    if [ -n "$(find "$l.$$" -maxdepth 0 -mmin +1 2>/dev/null)" ] || [ -e "$l" ]; then rmdir "$l.$$"; else mv "$l.$$" "$l"; fi',
+  '  fi',
+  '  exit 3',
+  'fi',
+  "trap 'rmdir \"$l\" 2>/dev/null' EXIT",
+  // $(…) drops trailing newlines; the caller passes what it read without them too.
+  'have=$(cat "$f" 2>/dev/null)',
+  '[ "$have" = "$2" ] || exit 3',
+  'printf "%s" "$3" >"$f.tmp.$$" && mv "$f.tmp.$$" "$f"',
+].join("\n");
+async function changeAccepted(run, id, entry) {
+  for (let i = 0; i < 5; i++) {
+    if (i > 0) await exec("sleep", ["0.3"]).catch(() => {});
+    const got = await exec("sh", ["-c", READ_ACCEPTED, "sh", run.dir], { on: run.machine });
+    if (got.code !== 0) throw new Error(`could not read proof-accepted.json: ${(got.stderr || "").trim() || `exit ${got.code}`}`);
+    let file;
+    try { file = acceptedFile(got.stdout); } catch { throw new Error("proof-accepted.json is not a JSON object; fix or delete it, then try again"); }
+    const was = got.stdout.replace(/\n+$/, "");
+    const out = await exec("sh", ["-c", WRITE_ACCEPTED, "sh", run.dir, was, withAcceptance(file, id, entry)], { on: run.machine });
+    if (out.code === 0) return;
+    if (out.code !== 3) throw new Error(out.stderr || "could not write proof-accepted.json");
+  }
+  throw new Error("proof-accepted.json is being changed elsewhere; try again");
+}
+
+// Accepts a task's proof as it is (a Proof row's Accept), for its current result line only;
+// works with the orchestrator gone, since nothing but this file changes.
+export const acceptProof = (run, row) => changeAccepted(run, row.id, { at: new Date().toISOString(), result: resultLine(row) });
+// Takes an acceptance back (Unaccept): the row needs a look again.
+export const unacceptProof = (run, row) => changeAccepted(run, row.id, null);
 
 // Compacts the orchestrator's context: the answer goes into its inbox first, then /compact is
 // typed into its terminal (Claude Code and pi both take it as input), and only once the

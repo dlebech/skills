@@ -24,6 +24,7 @@ and it keeps nothing the files do not.
 | `inbox/*.message` | anyone who answers or instructs | orchestrator | Messages to the orchestrator (below). The orchestrator renames a message it has read to `.handled`. |
 | `shared/` | orchestrator, agents | orchestrator, agents | Briefs, findings, reports. Not committed. `shared/proof/` holds captured proof. |
 | `proof.md` | orchestrator, `proving` skill | Harbormaster, you | Per-task proof results (below). Not committed. |
+| `proof-accepted.json` | Harbormaster | Harbormaster, orchestrator | Tasks whose proof you accepted as it is (below). Nobody else writes it. |
 | `parked`, `closed` | captain, Harbormaster, orchestrator | everyone | You put the run away. One line, `<UTC time>\t<plan status then>`; `init-run.sh` deletes them when an orchestrator resumes the run. |
 
 The root also holds `.captain-decisions.json`, the captain's own open decisions (below).
@@ -109,6 +110,42 @@ the local suite on the integration branch) shows as "checks green" in the verdic
 task with a `Result:` whose `Files:` has no image or video (png, jpg, jpeg, gif, webp; mp4, webm, mov, m4v) counts as "n tasks without a screenshot" (tasks, not images; an image missing from `shared/proof/` does not count). `Files:` is comma-separated paths only: a note in parentheses after a path is ignored, and notes belong in `Checked:`. Only a `## ` section with a `Result:` or `Tier:` is a task; Harbormaster reads the first 64 kB of proof.md and marks the verdict "(proof.md cut)" past that.
 A run with no `proof.md` shows its plan's evidence only.
 
+### Accepting proof, or asking for it
+
+A task whose proof is not a pass (partial, fail, a T2+ pass without a screenshot, not checked, not
+scoped) has two buttons on its Proof row in Harbormaster. **Accept** records that you take its
+proof as it is (for a not-checked or not-scoped task, only once the task is done or the run is
+finished), in `proof-accepted.json`, which only Harbormaster writes, so it works with the
+orchestrator gone. It writes it on the run's machine under a `proof-accepted.json.lock` directory
+(broken after a minute if left behind), through a temporary file and `mv`, and only if the file still
+holds what it read, so two windows lose neither change; a file that is not a JSON object is never
+overwritten (fix or delete it), and other entries and fields are kept:
+
+```json
+{ "t23": { "at": "2026-11-16T10:00:00.000Z", "result": "partial — the hover card needs a real hover, not screenshotted" } }
+```
+
+`result` is the result line accepted: `<pass|fail|partial> — <why>` from proof.md (with
+` (no screenshot)` for a T2+ pass without one), or `not checked` / `not scoped`. An acceptance holds
+only while the task's result line is still that one; once proof.md says something else, the task
+needs a look again. Unaccept removes its entry. An accepted task does not need a look: the
+verdict counts it apart (`23/24 pass · 1 accepted · checks green`). The orchestrator and the
+`proving` skill leave the file alone.
+
+**Ask to prove** writes an inbox message (source `harbormaster-proof`, woken like an answer) whose
+first line names the task, its tier and the result line it is about:
+
+```
+prove t23 to T2: partial — the hover card needs a real hover, not screenshotted
+Asked from Harbormaster: finish this task's proof to T2 and update its proof.md section.
+```
+
+(`prove <task id>: …` when no tier is named; whitespace in a task id is written as `_`, so the id
+stays one word). The orchestrator finishes that task's proof (with the
+`proving` skill if available), updates its proof.md section, and renames the message `.handled`.
+Until then, while the result line is unchanged, the row reads `asked…`. Like a level request, it
+does not count as an answer to an open `question.md`.
+
 ## The PR body: Evidence and Merge danger
 
 The orchestrator's PR body has `## Evidence` (per task: what was checked, the result, and the
@@ -155,7 +192,8 @@ applies it, `set-status.sh --autonomy <level>` or the plan's `Proof tier: T<n> (
 a `- [user]` line in `decisions.md`, renames the message `.handled` and acts on it: a higher tier on
 a finished run means proving its done tasks to the new tier, which sets the run back to running.
 Until `status.json` or `plan.md` shows the level, while the message is unhandled, the tag reads
-`T3 requested…`. A level request does not count as an answer to an open `question.md`.
+`T3 requested…`. A level request does not count as an answer to an open `question.md`. Neither
+does an ask to prove (`prove <task> to T<n>: …`, see [Accepting proof](#accepting-proof-or-asking-for-it)).
 
 An orchestrator that is gone or lost is never woken (its terminal is gone, or only a shell, which would run the wake-up as a command): the message waits, and Harbormaster says so ("waits in its inbox until the run is resumed"). The resumed orchestrator reads waiting messages in name order, so an answer is not lost.
 
