@@ -43,8 +43,9 @@ export function agentSig(run, ctx) {
   return all.map((a) => `${a}:${exactStatus(a, ctx) ?? "-"}:${ctx.terminals.find((t) => t.address === a)?.turn ?? "-"}`).sort().join("\n");
 }
 
-// A screen's words only: a spinner, a counter or a clock ticking is not new output.
-export const screenSig = (text) => String(text ?? "").replace(/[^\p{L}]+/gu, " ").trim();
+// A screen's words only: a spinner, a counter or a clock ticking ("34s", "1m 2s", "12:04") is
+// not new output. Numbers go with a unit of up to two letters glued to them.
+export const screenSig = (text) => String(text ?? "").replace(/\d[\d.,:]*[a-z]{0,2}\b/gi, " ").replace(/[^\p{L}]+/gu, " ").trim();
 
 // The store with a PR's finished CI run added: {[repo]: [{sha, ms}]}, once per head commit,
 // the last CI_KEEP kept. The same store when there is nothing to add.

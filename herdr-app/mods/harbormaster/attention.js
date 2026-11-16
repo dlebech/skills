@@ -174,9 +174,9 @@ const VERB = { implement: "implementing", review: "in review", fix: "fixing" };
 
 // The run's current step, {text, since}: tasks at work ("t3 implementing", "+N" for more),
 // else CI running on a PR ("CI on #42", since its first check started), else its progress
-// line, else its phase. `stages` are the tasks' shown stages (data.js shownStage), in
+// line, else its phase; since is null when not known yet. `stages` are the tasks' shown stages (data.js shownStage), in
 // run.tasks order; `since` is when the progress line or task states last changed.
-export function stepOf(run, { prs = [], stages = [], since = null, now = Date.now() } = {}) {
+export function stepOf(run, { prs = [], stages = [], since = null } = {}) {
   const active = (run?.tasks ?? []).map((k, i) => ({ k, stage: stages[i] })).filter((x) => VERB[x.stage]);
   if (active.length) {
     const [first] = active;
@@ -185,7 +185,7 @@ export function stepOf(run, { prs = [], stages = [], since = null, now = Date.no
   const ci = ciState(prs);
   if (ci.state === "running") return { text: `CI on ${ci.pr.number ? `#${ci.pr.number}` : "the PR"}`, since: ci.startedAt ?? since };
   const text = run?.progress || run?.statusLine || run?.phase || "";
-  return { text, since: since ?? now };
+  return { text, since };
 }
 
 // "CI on #42 · 34m".
@@ -231,12 +231,15 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, filesOk = true, now = Date.now() } = {}) {
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
-  const step = stepOf(run, { prs, stages, since, now });
+  const step = stepOf(run, { prs, stages, since });
   const base = { cantTell: false, why: null, next: null, step, stall: false, reasons: [] };
   const out = (group, extra) => {
     const r = { ...base, ...extra, group };
     const anchors = r.reasons.map((x) => x.since).filter(Boolean);
-    r.waitSince = anchors.length ? Math.min(...anchors) : step.since ?? run?.updated ?? run?.started ?? null;
+    // Done waits since the run last changed (its closing, or its last status update).
+    r.waitSince = anchors.length ? Math.min(...anchors)
+      : group === "done" ? run?.away?.at ?? run?.updated ?? null
+      : step.since ?? run?.updated ?? run?.started ?? null;
     return r;
   };
   // A blocked orchestrator is a live fact, read from the window, so it counts without its files.
