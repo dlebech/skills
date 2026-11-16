@@ -12,6 +12,8 @@
 #   attention <branch> <reason>    <run-directory>
 #   cleared <branch> <reason>      <run-directory>
 #   update <branch> pr <url>       <run-directory>
+#   attention machine <name> cannot be read    <name>:
+# and "cleared" for the last once that machine can be read again (runs.sh says why).
 # Every line is the whole update: the captain reads the run's files for detail.
 # Reasons: the plan's "waiting for user" or "blocked" status, a question.md (its
 # title, for a new or reworded one), finished, the
@@ -93,9 +95,18 @@ while :; do
   # read keeps what was reported for it (carried below), so it neither repeats nor clears.
   rm -rf "$copies" && mkdir -p "$copies"
   unread=
-  sources=$(run_sources "$copies") || unread=" *"
+  # An unreadable machine is an event of its own, so the captain knows its runs are not
+  # watched; it clears once the machine can be read again.
+  if ! sources=$(run_sources "$copies"); then
+    unread=" *"
+    current+=("attention machines cannot be read (hc machine ls failed)	*:")
+  fi
   while IFS=$'\x1f' read -r machine from there <&5; do
-    case $from in !*) unread+=" $machine"; continue ;; esac
+    case $from in !*)
+      unread+=" $machine"
+      current+=("attention machine $machine cannot be read	$machine:")
+      continue ;;
+    esac
     while IFS= read -r run_info <&3; do
       dir=$(dirname "$run_info")
       IFS=$'\x1f' read -r branch _ terminal _ < <(run_facts "$run_info")
@@ -147,6 +158,7 @@ while :; do
     return 1
   }
   while IFS= read -r line; do
+    case $line in "attention machine"*) continue ;; esac # added above while still true
     [ -n "$line" ] && carried "${line##*	}" && current+=("$line")
   done <"$seen_file"
   while IFS= read -r line; do
@@ -172,6 +184,9 @@ while :; do
   for line in ${new[@]+"${new[@]}"}; do reported+=${line#*$'\t'}$'\n'; done
   while IFS= read -r line; do
     case $line in
+      "attention machine"*)
+        printf '%s\n' ${current[@]+"${current[@]}"} | grep -qxF -- "$line" || new+=("cleared ${line#attention }")
+        continue ;;
       "attention "*" waiting for user"* | "attention "*" blocked"* | "attention "*" question: "* | "attention "*" orchestrator blocked on a dialog"*) ;;
       *) continue ;;
     esac

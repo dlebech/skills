@@ -12,10 +12,13 @@
 #   1. runs.sh lists the machine's runs as "<machine>:<directory>", matches its
 #      orchestrator terminal ("<machine>/<address>"), shows the question and unhandled
 #      message there, the parked run, and the closed one only with --all;
-#   2. a machine that cannot be read is said so, not left out silently;
-#   3. mark_run and post-message.sh write on the run's machine;
+#   2. a machine that cannot be read is said so, not left out silently, and with hc
+#      machine ls failing, its orchestrators are not called unclaimed;
+#   3. mark_run and post-message.sh write on the run's machine, also to a run whose
+#      path holds spaces, quotes, $(...) and backticks;
 #   4. watch-runs.sh reports a remote run's question, and its clearing, with the same
-#      address; the events of a machine it cannot read are kept, neither repeated nor cleared.
+#      address; the events of a machine it cannot read are kept, neither repeated nor
+#      cleared, and the machine is reported, and cleared once it can be read.
 #
 # Usage: tests/herdr-app-captain/runs-remote.sh [--local]   (--local: part 1 only)
 set -uo pipefail
@@ -61,7 +64,13 @@ make_runs() {
   printf '{"terminal":"","tab_id":"","folder":"/src/proj","branch":"closed-c"}\n' >"$r/closed-c/orchestrator.json"
   printf 'Status: running\n' >"$r/closed-c/plan.md"
   : >"$r/closed-c/closed"
+  # A closed run with a name the shell would act on, for the writes on another machine.
+  mkdir -p "$r/$odd"
+  printf '{"terminal":"","tab_id":"","folder":"/src/proj","branch":"odd"}\n' >"$r/$odd/orchestrator.json"
+  printf 'Status: running\n' >"$r/$odd/plan.md"
+  : >"$r/$odd/closed"
 }
+odd='a b$(touch pwned)`touch pwned2`'"'q\"q"
 
 echo "== run addresses"
 (
@@ -81,12 +90,13 @@ printf 'second line, not copied\n' >>"$work/src/proj/feature-a/inbox/20260101T00
   HERDR_ORCHESTRATION_ROOT=$work/src sh -c "$REMOTE_RUNS_SCRIPT" | unpack_runs "$work/copy" >"$work/copy-root"
 )
 check "its root" "$(cat "$work/copy-root")" "$work/src"
-check "files copied" "$(cd "$work/copy" && find . -type f | sort | tr '\n' ' ')" \
+check "files copied" "$(cd "$work/copy" && find . -type f ! -path "./proj/a b*" | sort | tr '\n' ' ')" \
   "./proj/closed-c/closed ./proj/closed-c/orchestrator.json ./proj/closed-c/plan.md ./proj/feature-a/inbox/20260101T000000Z-harbormaster.message ./proj/feature-a/orchestrator.json ./proj/feature-a/plan.md ./proj/feature-a/question.md ./proj/feature-a/status.json ./proj/parked-b/orchestrator.json ./proj/parked-b/parked ./proj/parked-b/plan.md "
 check "plan's Status line only" "$(cat "$work/copy/proj/feature-a/plan.md")" "Status: waiting for user: which db?"
 check "a message's first line only" "$(cat "$work/copy/proj/feature-a/inbox/20260101T000000Z-harbormaster.message")" "set autonomy to L2"
 check "question kept" "$(cmp -s "$work/src/proj/feature-a/question.md" "$work/copy/proj/feature-a/question.md" && echo same)" same
 check "marker kept" "$(cat "$work/copy/proj/parked-b/parked")" "$(cat "$work/src/proj/parked-b/parked")"
+check "odd name kept" "$(cat "$work/copy/proj/$odd/plan.md")" "Status: running"
 
 echo "== this machine only, as before"
 make_runs "$work/local"
@@ -128,6 +138,14 @@ echo "== a machine that cannot be read"
 out=$(CAPTAIN_MACHINES="$machine ghost-$$" "$capt/runs.sh")
 contains "said so" "$out" "machine ghost-$$: cannot be read (unknown machine"
 contains "the other still read" "$out" "run: $run"
+# hc machine ls failing, hc ls answering: the machine's orchestrator is not unclaimed.
+mkdir -p "$work/bin"
+printf '#!/bin/sh\n[ "$1" = machine ] && exit 1\nexec %s "$@"\n' "$(command -v hc)" >"$work/bin/hc"
+chmod +x "$work/bin/hc"
+out=$(env -u CAPTAIN_MACHINES PATH="$work/bin:$PATH" "$capt/runs.sh")
+contains "warned" "$out" "warning: hc machine ls failed"
+contains "orchestrator unknown, not unclaimed" "$out" "orchestrator on unreadable machine $machine: $terminal"
+lacks "nothing unclaimed there" "$out" "unclaimed orchestrator: $machine/"
 
 echo "== writes go to the run's machine"
 (. "$capt/lib.sh" && mark_run "$machine:$remote/proj/closed-c" parked)
@@ -140,6 +158,11 @@ check "no temporary left" "$(hc exec --on "$machine" sh -c "ls -A '$remote/proj/
 printf 'x\n' | "$capt/post-message.sh" "$machine:$remote/proj/nothing" 2>"$work/err"
 check "no run, no message" "$?:$(cat "$work/err")" "1:no run at $remote/proj/nothing"
 hc exec --on "$machine" rm "$msg"
+(. "$capt/lib.sh" && mark_run "$machine:$remote/proj/$odd" parked)
+check "odd name, marker there" "$(hc exec --on "$machine" cut -f2 "$remote/proj/$odd/parked")" "running"
+msg=$(printf 'odd\n' | "$capt/post-message.sh" "$machine:$remote/proj/$odd")
+check "odd name, message there" "$(hc exec --on "$machine" cat "$msg")" "odd"
+check "nothing ran" "$(hc exec --on "$machine" sh -c 'for d in "$1" "$1/$2" "$HOME"; do ls -A "$d"; done | grep -cxE "pwned2?"' sh "$remote/proj" "$odd")" 0
 
 echo "== the watcher"
 watch_once() { timeout 60 "$capt/watch-runs.sh"; }
@@ -156,8 +179,13 @@ printf 'attention gone-b waiting for user: x\tghost-%s:/r/gone-b\n' $$ >>"$HERDR
 printf 'Status: waiting for user: again?\n' | hc exec --on "$machine" -i sh -c "cat >'$remote/proj/feature-a/plan.md'"
 out=$(CAPTAIN_MACHINES="$machine ghost-$$" watch_once)
 contains "new event still seen" "$out" "attention feature/a waiting for user: again?	$run"
-lacks "unread machine not cleared" "$out" "ghost-$$"
+contains "unreadable machine reported" "$out" "attention machine ghost-$$ cannot be read	ghost-$$:"
+lacks "its run not cleared" "$out" "cleared feature/a"
+lacks "its event not repeated" "$out" "gone-b"
 contains "its event kept" "$(cat "$HERDR_ORCHESTRATION_ROOT/.captain-seen")" "attention gone-b waiting for user: x	ghost-$$:/r/gone-b"
+# Readable again (here: no longer configured), the machine's event clears.
+out=$(watch_once)
+check "machine cleared" "$out" "cleared machine ghost-$$ cannot be read	ghost-$$:"
 
 [ "$failed" = 0 ] && echo "all passed"
 exit "$failed"

@@ -34,7 +34,11 @@ found=0
 # Each other machine's runs, read at once into a copy (lib.sh's run_sources).
 copies=$(mktemp -d)
 trap 'rm -rf "$copies"' EXIT
-sources=$(run_sources "$copies") || echo "warning: hc machine ls failed; runs on other machines are not listed"
+machines_listed=1
+sources=$(run_sources "$copies") || {
+  machines_listed=
+  echo "warning: hc machine ls failed; runs on other machines are not listed"
+}
 
 # list_runs <machine> <folder to read> <root there>: prints the runs in one source.
 list_runs() {
@@ -123,7 +127,8 @@ done <<<"$unread"
   jq -r '.terminals[] | [.address, (.name // "-"), (.status // "starting"), (.where // "-")] | join("\t")' |
   while IFS=$'\t' read -r address name state where; do
     case $claimed_terminals in *" $address "*) continue ;; esac
-    case $address in */*) case $'\n'$unread in *$'\n'"${address%%/*}"$'\t'*)
+    # Without hc machine ls, no other machine's runs were read: none of theirs is unclaimed.
+    case $address in */*) case ${machines_listed:-*}$'\n'$unread in "*"* | *$'\n'"${address%%/*}"$'\t'*)
       echo "orchestrator on unreadable machine ${address%%/*}: $address $name $state ($where), its run unknown"
       continue ;; esac ;; esac
     echo "unclaimed orchestrator: $address $name $state ($where), no run directory"
