@@ -2,7 +2,7 @@
 
 Harbormaster is a Herdr app mod with two layouts. It shows what `herdr-app-captain` and its `herdr-app-orchestrator` runs are doing, so you don't have to read the Agents list row by row. Everything in it is written from scratch: it uses Herdr's mod API and leaves Herdr's own mods and layouts unchanged.
 
-- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list. The captain's and each orchestrator's card shows how full that agent's context is (`144k`), as of its last turn, read from its own session file: Claude Code, pi and opencode (needs `python3`), nothing for other programs.
+- **Crew block.** The 🧑‍✈️ captain and every 🐙 orchestrator, as cards with a colored edge, then **Adrift**: every other agent, on any machine, that isn't one of their workers. It sits above Herdr's own Agents list. The captain's and each orchestrator's card shows how full that agent's context is (`144k`), as of its last turn, read from its own session file: Claude Code, pi and opencode (needs `python3`), nothing for other programs. A card whose agent (with the commands it runs) uses more than 50% CPU or 2 GB of memory gets a small `85% · 2.1G` badge, with what uses it on hover, and for an orchestrator the whole run's use too; see [CPU and memory](#cpu-and-memory).
   - The captain's card says whether its watcher is running and how many runs it watches, running and finished, and turns red with how many decisions it is waiting on you for. Clicking it focuses the captain and opens the runs overview beside it, if it isn't open already.
   - Each orchestrator's card is named for what the run is about, with a tag for its type (`feat`, `fix`, `rev` or `expl`): the issue or PR number from its branch and the short topic its orchestrator published (`feat` `#985 · Road routes`, `rev` `PR 368 · Triage decision`), with the full branch in the tooltip. Run cards and the harbor's signs show the type the same way. A run with no topic yet, such as one started before orchestrators published one, shows its branch. The name gets the card's whole first line. The line below starts with the type tag and the number of 🦀 workers, then its progress, its status when it isn't running, and its PRs, so a narrow sidebar cuts the progress short before the tag and workers. A run that needs you turns red and says what for. Finished ones come last, with a green edge and their PR numbers. Clicking it focuses the orchestrator and opens that run's card beside it (see below), if it isn't open already. Clicking a card never closes its pane; close it like any pane.
   - Each Adrift line shows the agent's space and its name as Herdr's own Agents list gives it: the tab's name when someone named it, otherwise the agent's own title (Claude Code sets one from its session), never a bare tab number like "1". Clicking it focuses the agent.
@@ -75,7 +75,7 @@ Harbormaster is built for that:
 
 The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks mods to list those, so here they are:
 
-- **Every 5 seconds, per machine:** one `sh -c` script. It prints the captain's open decisions, `.captain-decisions.json` in the runs root, then for each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json` (with the token totals `tokens.sh` counted; Harbormaster never reads session files for them), `plan.md`, `question.md` and its modification time (`stat`), and the `parked` and `closed` markers, counts the unhandled `inbox/*.message` files, and prints `proof.md` and the names of the files in `shared/proof/` (at most 40), and the last 20 `- [decided]` lines of `decisions.md` (`grep`, `tail`, capped at 8 kB).
+- **Every 5 seconds, per machine:** one `sh -c` script. It prints the captain's open decisions, `.captain-decisions.json` in the runs root, then for each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json` (with the token totals `tokens.sh` counted; Harbormaster never reads session files for them), `plan.md`, `question.md` and its modification time (`stat`), and the `parked` and `closed` markers, counts the unhandled `inbox/*.message` files, and prints `proof.md` and the names of the files in `shared/proof/` (at most 40), and the last 20 `- [decided]` lines of `decisions.md` (`grep`, `tail`, capped at 8 kB), and `.resources.json`. The same script then takes one process snapshot for [CPU and memory](#cpu-and-memory): on Linux one `awk` over `/proc/*/stat`, the environment of herdr-core's children and the command lines of the processes it prints; on macOS `ps` twice.
 - **Every minute per open run (running or finished), every 15 minutes per closed one:** `gh pr view <url>` for each PR and related PR in `status.json`, on the run's machine. A run shows only the PRs its orchestrator recorded there. A PR's `## Merge danger` first line (from its body) is kept with the result and shown on its row: red for a one-way door, dim for a two-way one (see `skills/herdr-app-orchestrator/references/run-files.md`). The results are kept in Herdr's shared state (`harbormaster.prs`), so every copy of the mod and every layout uses the same ones.
 - **When you press Park or Close:** `git worktree list` in the run's folder, to find the integration worktrees whose spaces to close.
 - **Every 30 seconds per open run on another machine, with its orchestrator there:** the same `git worktree list`, to find the integration worktrees to open spaces for. The worktrees it has opened or seen open are kept in Herdr's shared state (`harbormaster.worktrees`).
@@ -85,7 +85,7 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 - **When you answer from the queue:** a run's answer is a file in its `inbox/`, then `hc send` to wake its orchestrator (not when the orchestrator is gone or lost: the message only waits). A captain decision answered into a run's inbox is then removed from `.captain-decisions.json` in the runs root with `jq`, a temporary file and `mv`.
 - **When you press Compact on the budget question:** `hc send <orchestrator> /compact`, then a `sleep 2` loop (for at most 10 minutes) until the compaction is over, then the wake-up for the answer.
 
-It writes to a run directory only when you press Park, Close or Delete, or answer a question (and, for a captain decision answered into a run's inbox, to `.captain-decisions.json` in the runs root): one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. An answer from the queue is a message there too (`<time>-<ms>-harbormaster.message`). Delete removes the run directory.
+It writes to a run directory on its own only `.resources.json`, every 5 seconds per open run whose orchestrator is there (a temporary file and `mv`, under a `.resources.json.lock` directory). Otherwise it writes to one only when you press Park, Close or Delete, or answer a question (and, for a captain decision answered into a run's inbox, to `.captain-decisions.json` in the runs root): one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. An answer from the queue is a message there too (`<time>-<ms>-harbormaster.message`). Delete removes the run directory.
 
 It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended; and for an open run on another machine: it renames the orchestrator's tab after the run's status, when the tab is unnamed or has one of the orchestrator's own `🐙` names, at most once a minute, opens a space for each integration worktree that has never had one, and finishes parking a run the captain parked there; and names a captain's tab on another machine `⚓ captain`.
 
@@ -133,6 +133,35 @@ three buttons from Harbormaster itself. **Compact** types `/compact` into the or
 enabled only while it is idle or done, waits for the compaction to end, and wakes it to read the answer in its inbox; the other two answer through the
 inbox. Nothing stops by itself. Details: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
+## CPU and memory
+
+Who is busy right now, and what each agent, task and run used, from the same 5-second poll: nothing new
+keeps running. Each herdr-core terminal's processes are found from its own process (a child of
+`herdr-core hold`, by the `HC_TERMINAL_ID` in its environment) down through everything it started, and split
+into the agent's own process and its commands, named by program from a small table in `resources.js`
+(`PROGRAMS`: test runner, browser, lint, install, build, mcp server, docker, git, shell; else the program's
+own name, such as `node` or `php`).
+
+- **Badges.** A Crew card or an agent row in the run pane, and an agent adrift, gets a small `85% · 2.1G`
+  badge only above 50% CPU (100% is one core) or 2 GB of memory (`HOT` in `resources.js`); hover it for the
+  agent's own share and its busiest programs. An orchestrator's Crew card is badged on its own process
+  and commands, like any agent; its tooltip adds the whole run's use (the orchestrator and its agents).
+- **Run totals.** For each open run whose orchestrator is there, each sample is added to
+  `.resources.json` in the run directory: per agent (named as its terminal, so per task through
+  `impl-<prefix>-<task>`) its CPU seconds and peak and average memory, split by program, and the run's
+  own. They outlive the agents, the run and the app; the stats view and the run history read them.
+  Formats: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
+- **Others.** The busiest processes outside every agent (a browser left open, Docker, the Herdr app
+  itself) are kept in the live snapshot too, so fan noise can always be explained.
+
+On **Linux** CPU time comes from `/proc/<pid>/stat`, including the time of commands that already exited
+(`cutime`, `cstime`), and the CPU % from the difference between two polls, so the first poll shows memory only.
+On **macOS** it is one `ps` sample: CPU % is `ps`'s own, and CPU totals are each live process's time,
+so commands that ended between two polls are missed (`estimated` in the file). Other systems show nothing.
+While the app is closed nothing is sampled, so peaks then are missed. The cost, measured on this
+machine with about 290 processes: the snapshot adds about 10 ms of CPU to each 5-second poll (the whole
+script about 90 ms), reading it about 0.3 ms in the app, and each run's write a few ms.
+
 ## Proof
 
 A run's pane has a Proof section. Its title is the run's tier, `Proof · T2` (`(set by user)` when
@@ -170,6 +199,7 @@ Parking leaves the run directory, worktrees, branches and PRs in place, and the 
 | `herdr-app/mods/harbormaster/live.js` | Live facts from herdr-core (status, workers, captain, panes) and the focus, pin and open-link actions |
 | `herdr-app/mods/harbormaster/ui.js` | Emoji, program icons, zoom, and text formatting |
 | `herdr-app/mods/harbormaster/overview.js` | The runs overview (totals, captain, run cards) and the Crew block |
+| `herdr-app/mods/harbormaster/resources.js` | CPU and memory: the process snapshot, the live usage and badges, and each run's `.resources.json` |
 | `herdr-app/mods/harbormaster/context.js` | Each crew agent's context size, from its session file, and `tokenText` (`1.2M`) |
 | `herdr-app/mods/harbormaster/harbor.js` | The sea, the reefs, the captain's boat, the rail and the pane headers |
 | `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, spinner, chevrons. All original, CC0 like the rest of this repository |

@@ -8,19 +8,21 @@
 // <root>/<folder>/<branch>/: orchestrator.json, plan.md, status.json (with the token
 // totals tokens.sh counts into it; this mod never reads session files for them), question.md,
 // inbox/*.message (written here on an answer or Close), parked and closed markers;
-// and <root>/.captain-decisions.json for the captain's open decisions.
+// and <root>/.captain-decisions.json for the captain's open decisions. The same poll takes a
+// process snapshot for CPU and memory (resources.js), kept per run in .resources.json.
 
 import { exec, machines, spaces, shared, setShared, run as command } from "herdr";
 import { parseQuestion, answerMessage } from "./question.js";
 import { parseDecidedLines } from "./decided.js";
 import { tokenText } from "./context.js";
 import { proofOf, runTier, parseProofMd } from "./proof.js";
+import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
-const RS = "\u001e", US = "\u001f";
+const RS = "\u001e", US = "\u001f", GS = "\u001d";
 
 // One sh script per machine: the captain's decisions, then every run, its files
-// separated by \x1f, runs by \x1e.
+// separated by \x1f, runs by \x1e; then, after a \x1d, the process snapshot.
 const SCRIPT = [
   'root="${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}"',
   'head -c 60000 "$root/.captain-decisions.json" 2>/dev/null',
@@ -41,8 +43,11 @@ const SCRIPT = [
   '  [ -e "$d/proof.md" ] && { printf +; head -c 12000 "$d/proof.md"; }; printf \'\\037\'',
   '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
   // decisions.md: the last 20 lines the orchestrator logged as its own decisions, capped.
-  '  grep -a "^- \\[decided\\] " "$d/decisions.md" 2>/dev/null | tail -n 20 | tail -c 8000',
+  '  grep -a "^- \\[decided\\] " "$d/decisions.md" 2>/dev/null | tail -n 20 | tail -c 8000; printf \'\\037\'',
+  // The run's CPU and memory totals so far (resources.js adds each sample to them).
+  '  head -c 1000000 "$d/.resources.json" 2>/dev/null',
   "done",
+  SAMPLER,
 ].join("\n");
 
 const json = (s) => {
@@ -165,13 +170,14 @@ function parseDecisions(machine, text) {
 
 function parse(machine, stdout) {
   return stdout.split(RS).slice(1).filter((s) => s.trim()).map((chunk) => {
-    const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile] = chunk.split(US);
+    const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile, resourcesFile] = chunk.split(US);
     const orch = json(orchFile) ?? {};
     const status = json(statusFile) ?? {};
     const tasks = tasksOf(plan);
     const statusLine = /^Status:\s*(.*)$/m.exec(plan ?? "")?.[1]?.trim() ?? null;
     const folder = orch.folder ?? status.folder ?? "";
     const parts = dir.split("/");
+    setStored(`${machine ?? ""}:${dir}`, resourcesFile);
     const onMachine = (id) => (id ? (machine ? `${machine}/${id}` : id) : null);
     return {
       key: `${machine ?? ""}:${dir}`,
@@ -301,12 +307,14 @@ export function loadRuns() {
   cache.pending = (async () => {
     const names = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
     if (!names.includes(null)) names.unshift(null);
-    const runs = [], decisions = [], errors = [], answered = new Set();
+    const runs = [], decisions = [], errors = [], answered = new Set(), samples = [];
     await Promise.all(names.map(async (on) => {
       try {
         const out = await exec("sh", ["-c", SCRIPT], { on });
-        decisions.push(...parseDecisions(on, out.stdout.split(RS)[0]));
-        runs.push(...parse(on, out.stdout));
+        const [files, sample] = out.stdout.split(GS);
+        decisions.push(...parseDecisions(on, files.split(RS)[0]));
+        runs.push(...parse(on, files));
+        samples.push([on, sample]);
         answered.add(on ?? "");
       } catch (e) {
         errors.push(`${on ?? "this machine"}: ${e?.message ?? e}`);
@@ -317,6 +325,8 @@ export function loadRuns() {
     if (read !== reads) return cache;
     cache = { at: Date.now(), runs, decisions, errors, pending: null, pendingAt: 0 };
     const ctx = facts();
+    for (const [on, sample] of samples) ingest(on, sample);
+    recordRuns(runs.filter((r) => !r.away && orchestratorState(r, ctx) !== "gone"), (r) => runTerminals(r, ctx), answered).catch(() => {});
     for (const r of runs) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
     for (const r of runs) if (r.machine && !r.away) nameTab(r);
     nameCaptainTab(ctx);
@@ -328,6 +338,15 @@ export function loadRuns() {
     return cache;
   });
   return cache.pending;
+}
+
+// The run's terminals for its CPU and memory totals: its orchestrator and every live terminal
+// under it (agents, and the commands they started with hc run), each with its name and its
+// parent's (its name, else address), so the totals group by agent and task.
+function runTerminals(r, ctx) {
+  const nameOf = (address) => ctx.terminals.find((t) => t.address === address)?.name || address;
+  return [{ address: r.terminal, name: nameOf(r.terminal), parent: null },
+    ...workersOf(r.terminal, ctx).map((w) => ({ address: w.address, name: w.name || w.address, parent: nameOf(w.parent) }))];
 }
 
 // ---- tasks ----
