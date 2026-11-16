@@ -17,17 +17,22 @@
 #                 other sessions, so its folder alone cannot tell which are its. pi has
 #                 no pid to session map: best effort, the earliest session in its folder
 #                 whose header names that folder and that started after its terminal did.
+#                 opencode likewise: the earliest session in its folder created after its
+#                 terminal, with that session's sub-sessions.
 #   agents        every session in the run's worktrees, <worktrees>/<repo>/<prefix>-*
 #                 for each repository in plan.md's Repos line (or the run's folder) and
 #                 the integration worktree, with Claude Code's sub-agent transcripts. An
 #                 agent is named by its worktree, e.g. pda-t3; the integration
-#                 worktree's as "integration".
+#                 worktree's as "integration". opencode keeps all sessions in one SQLite
+#                 database, found by each session's folder; opencode-usage.py (python3,
+#                 read-only) reads it, and without either opencode adds nothing.
 # Only messages from the run's start (orchestrator.json `started`) on count, for both:
 # what a session said before the run, or an older run that used the same prefix, is not
 # this run's. Claude Code logs one API response once per content block, each line
 # carrying the same usage, so responses are counted once by message id, across files
 # too, as a resumed session repeats earlier messages; pi by session and entry id, since
-# its 8-character entry ids repeat across sessions. A token is any of input, output,
+# its 8-character entry ids repeat across sessions; opencode by message id. Its
+# reasoning tokens count as output and a v2 compaction is a call like any other. A token is any of input, output,
 # cache read and cache write: `total` is their sum, as the context size Harbormaster
 # shows is.
 #
@@ -36,6 +41,9 @@
 # before that point, so a rerun reads only the bytes appended since, and rereads a file
 # that was replaced, shrank or was rewritten. When no session file is newer than the
 # last count and none came or went, the last count is used as is, for up to a minute.
+# opencode's database is not append-only, so a session's cache is keyed by a stamp (its
+# newest message's update time and message count) and re-read whole when that changes;
+# rows once seen are kept, so a message opencode deletes later still counts.
 # The cache is what is summed, so a session file Claude Code deletes later (after 30
 # days by default) still counts; and a count lower than the one in status.json, or one
 # where a file could not be read into the cache, is never written.
@@ -44,8 +52,9 @@
 # cache_write, by_agent: [{name, total}], updated}, the orchestrator first, then agents
 # by size. Exits 1, writing nothing, when the count failed.
 #
-# CLAUDE_CONFIG_DIR, PI_CODING_AGENT_DIR and HERDR_WORKTREES_ROOT move where it looks,
-# for tests; they default to ~/.claude, ~/.pi/agent and ~/.herdr/worktrees.
+# CLAUDE_CONFIG_DIR, PI_CODING_AGENT_DIR, OPENCODE_DATA_DIR and HERDR_WORKTREES_ROOT move
+# where it looks, for tests; they default to ~/.claude, ~/.pi/agent,
+# ~/.local/share/opencode and ~/.herdr/worktrees.
 set -u
 . "$(dirname "$0")/lib.sh"
 
