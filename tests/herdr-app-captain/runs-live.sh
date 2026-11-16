@@ -184,6 +184,49 @@ check "tab name, type and branch" "$(tab_name "$tab")" "🐙 ✋ rev · feature/
 "$orch/set-status.sh" "$dir" --type ""
 check "type cleared" "$(jq -r '.type // "none"' "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.type"] // ""'):$(tab_name "$tab")" \
   "none::🐙 ✋ feature/x"
+"$orch/set-status.sh" "$dir" --autonomy L1
+check "autonomy" "$(jq -r .autonomy "$dir/status.json"):$(hc get "$fake" --json | jq -r '.labels["run.autonomy"]')" L1:L1
+"$orch/set-status.sh" "$dir" --autonomy L3 2>/dev/null
+check "autonomy L3 refused" "$?:$(jq -r .autonomy "$dir/status.json")" 2:L1
+"$orch/set-status.sh" "$dir" --progress "task 2/2 in review"
+check "autonomy kept" "$(jq -r .autonomy "$dir/status.json")" L1
+for v in 2M:2000000 500k:500000 1.5M:1500000 750000:750000; do
+  "$orch/set-status.sh" "$dir" --budget "${v%%:*}"
+  check "budget ${v%%:*}" "$(jq -r .budget "$dir/status.json")" "${v##*:}"
+done
+"$orch/set-status.sh" "$dir" --budget lots 2>/dev/null
+check "budget junk refused" "$?:$(jq -r .budget "$dir/status.json")" 2:750000
+"$orch/set-status.sh" "$dir" --budget 0 2>/dev/null
+check "budget 0 refused" "$?:$(jq -r .budget "$dir/status.json")" 2:750000
+out=$("$orch/set-status.sh" "$dir" --budget 1M)
+check "under budget prints nothing" "$out:$(jq -r '.budget_asked // "none"' "$dir/status.json")" ":none"
+# The token count comes from session files a toy run does not have: write one in.
+jq '.tokens = {total: 1200000}' "$dir/status.json" >"$dir/s.tmp" && mv "$dir/s.tmp" "$dir/status.json"
+out=$("$orch/set-status.sh" "$dir" --progress "over")
+check "crossing prints the line" "$out" "over budget: 1200000 of 1000000 tokens; ask the budget question (run-files.md)"
+check "budget_asked recorded" "$(jq -r .budget_asked "$dir/status.json")" 1000000
+check "crossing prints once" "$("$orch/set-status.sh" "$dir" --progress "again")" ""
+out=$("$orch/set-status.sh" "$dir" --budget 1.1M)
+contains "a new budget arms it again" "$out" "over budget: 1200000 of 1100000"
+check "raised above the total: quiet" "$("$orch/set-status.sh" "$dir" --budget 3M):$(jq -r .budget "$dir/status.json")" ":3000000"
+"$orch/set-status.sh" "$dir" --budget-answered
+check "budget answered for this budget" "$(jq -r .budget_answered "$dir/status.json")" 3000000
+"$orch/set-status.sh" "$dir" --budget 4M
+check "answered stays the old budget" "$(jq -r '[.budget, .budget_answered] | join(",")' "$dir/status.json")" 4000000,3000000
+"$orch/set-status.sh" "$dir" --budget ""
+check "budget cleared" "$(jq -r '[.budget, .budget_asked, .budget_answered] | map(. // "none") | join(",")' "$dir/status.json")" none,none,none
+# Continue gives a new budget and answers the old one: the next crossing stays unanswered.
+"$orch/set-status.sh" "$dir" --budget 30M
+jq '.tokens = {total: 31000000}' "$dir/status.json" >"$dir/s.tmp" && mv "$dir/s.tmp" "$dir/status.json"
+contains "30M crossing asked" "$("$orch/set-status.sh" "$dir" --progress x)" "over budget: 31000000 of 30000000"
+"$orch/set-status.sh" "$dir" --budget 60M --budget-answered
+check "continue answers the old budget" "$(jq -r '[.budget, .budget_asked, .budget_answered] | join(",")' "$dir/status.json")" 60000000,30000000,30000000
+jq '.tokens = {total: 61000000}' "$dir/status.json" >"$dir/s.tmp" && mv "$dir/s.tmp" "$dir/status.json"
+contains "60M crossing asked" "$("$orch/set-status.sh" "$dir" --progress y)" "over budget: 61000000 of 60000000"
+check "second crossing unanswered" "$(jq -r '[.budget_asked, .budget_answered] | join(",")' "$dir/status.json")" 60000000,30000000
+"$orch/set-status.sh" "$dir" --budget ""
+jq 'del(.tokens)' "$dir/status.json" >"$dir/s.tmp" && mv "$dir/s.tmp" "$dir/status.json"
+"$orch/set-status.sh" "$dir" --progress "task 2/2 in review"
 "$orch/set-status.sh" "$dir" --waiting $'impl-x\t rev-y\n'
 check "waiting split on any space" "$(jq -c .waiting "$dir/status.json")" '["impl-x","rev-y"]'
 "$orch/set-status.sh" "$dir" --waiting ""
@@ -258,10 +301,17 @@ contains "primary" "$out" primary
 echo "== watcher"
 out=$(watch_once)
 contains "waiting for user" "$out" "attention feature/x waiting for user: which db?"
-# Answered in the orchestrator's own tab: the question clears, and the watcher says so.
+# Answered through the inbox: the status goes back to running while question.md is still
+# there (the orchestrator is mid-way through clearing it). That is not a new question.
 "$orch/set-status.sh" "$dir" running
 out=$(watch_once)
+case $out in *"attention feature/x question:"*) echo "FAIL no question: attention while an answer waits: $out"; failed=1 ;; *) echo "ok   no question: attention while an answer waits" ;; esac
 contains "answered elsewhere" "$out" "cleared feature/x waiting for user: which db?"
+# The orchestrator deletes question.md once it has the answer: nothing more to report.
+rm "$dir/question.md"
+out=$(watch_once)
+case $out in *"question:"*) echo "FAIL a cleared question: $out"; failed=1 ;; *) echo "ok   a cleared question is not reported again" ;; esac
+echo "Which db?" >"$dir/question.md"
 "$orch/set-status.sh" "$dir" "waiting for user: which db?"
 out=$(watch_once)
 contains "asked again" "$out" "attention feature/x waiting for user: which db?"

@@ -12,6 +12,14 @@ export function agentStatus(term, ctx) {
   return s === "error" ? "blocked" : s ?? "idle";
 }
 
+// An agent's status exactly as reported, or null when it reports none: unlike agentStatus
+// it does not call an unknown status idle, for what must only happen to an idle agent.
+export function exactStatus(address, ctx) {
+  if (!address) return null;
+  const s = ctx.agents.find((a) => a.address === address)?.status ?? ctx.terminals.find((t) => t.address === address)?.status ?? null;
+  return s === "error" ? "blocked" : s;
+}
+
 // Whether the orchestrator is lost: its terminal is live but only a shell runs in it
 // (its program now, not the command it started with), with no agent status.
 // herdr-core keeps terminals across a restart but replaces their lost programs with a
@@ -98,8 +106,7 @@ export function needsYou(run, orchState) {
 // The question comes first, so it matches a view's "Waiting for your answer".
 export function needReason(run, orchState) {
   if (!needsYou(run, orchState)) return null;
-  const question = run.question?.split("\n").map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean);
-  if (question) return question;
+  if (run.ask) return run.ask.title;
   if (orchState === "blocked") return "blocked on a dialog";
   const why = (run.statusLine ?? "").replace(/^(waiting for user|blocked)\s*:?\s*/i, "").trim();
   return why || (run.phase === "blocked" ? "blocked" : "waiting for you");
@@ -253,4 +260,17 @@ export function openUrl(url) {
 export function closeOwnPane() {
   const f = focused();
   if (f?.pane && panes().find((x) => x.pane === f.pane)?.mod === "harbormaster") run("pane.close", { pane: f.pane });
+}
+
+// Opens the stats view (props.role "stats") in a tab of its own, or shows the one already open:
+// a tab named "Stats" whose only pane is Harbormaster.
+export function openStats() {
+  for (const s of spaces()) {
+    const tab = (s.tabs ?? []).find((t) => t.name === "Stats" && t.panes === 1 && panes().some((p) => p.tab === t.id && p.mod === "harbormaster"));
+    if (!tab) continue;
+    run("space.select", { id: s.id });
+    run("tab.select", { id: tab.id });
+    return;
+  }
+  run("tab.new", { name: "Stats", mod: "harbormaster", props: { role: "stats" } });
 }

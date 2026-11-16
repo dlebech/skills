@@ -2,6 +2,12 @@
 
 import { div, svg, image } from "gpui-kit";
 import { settings } from "herdr";
+import { typeTip } from "./levels.js";
+
+// Token bars, here and in the stats view: fresh tokens (input, output, cache writes) in the accent,
+// cache reads green in every theme: the theme's own "done" colour is blue in some, which made both
+// segments look the same. ansi2 is the theme's green; the fixed one reads on dark and light.
+export const tokenColors = (t) => ({ fresh: t.accent ?? t.muted, cached: t.ansi2 ?? "#3fa055", out: t.ansi5 ?? "#b07cd8" });
 
 export const CAPTAIN = "\u{1F9D1}‍✈️", OCTOPUS = "\u{1F419}", CRAB = "\u{1F980}";
 
@@ -42,8 +48,8 @@ export function runName(branch, topic) {
 }
 
 // A run's type (set-status.sh --type) as a small tag before its name: what kind of
-// run it is, so a review reads apart from a feature at a glance.
-export const typeTag = (t, type) => div().flex_none().text_size(10).font_semibold().px(5).rounded(4)
+// run it is, so a review reads apart from a feature at a glance. With an `id`, it says so on hover.
+export const typeTag = (t, type, id = null) => (id ? div().id(id).tooltip(typeTip(type)) : div()).flex_none().text_size(10).font_semibold().px(5).rounded(4)
   .bg(t.raised).text_color(t.muted).child(String(type));
 
 // Puts a runName() on an element: the title as its text, the tip, if any, as its tooltip.

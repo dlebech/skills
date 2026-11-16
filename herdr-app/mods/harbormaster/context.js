@@ -4,6 +4,10 @@
 //                ~/.claude/projects/*/<session>.jsonl has each call's usage
 //   pi           the newest ~/.pi/agent/sessions/--<cwd>--/*.jsonl (by folder, so a second
 //                pi in the same folder can be mistaken for it)
+//   opencode     the newest assistant message of any session in the terminal's folder in
+//                ~/.local/share/opencode/opencode.db (read-only, with python3; a second
+//                opencode in the same folder can be mistaken for it). The terminal's app is
+//                taken to be named opencode*: check `hc get` on one if it does not show.
 // Other programs show nothing until a case is added below.
 
 import { exec } from "herdr";
@@ -37,6 +41,39 @@ for a; do
       tail -c 4000000 "$f" | grep -F '"usage"' | jq -rR --arg a "$a" 'fromjson? | .message
         | select(.role == "assistant" and (.usage.totalTokens // 0) > 0)
         | [$a, .usage.totalTokens, (.model // "")] | @tsv' 2>/dev/null | tail -1 ;;
+    opencode*)
+      python3 - "$a" "$cwd" 2>/dev/null <<'PY'
+import json, os, sqlite3, sys
+a, cwd = sys.argv[1:3]
+path = os.path.join(os.environ.get("OPENCODE_DATA_DIR") or os.path.expanduser("~/.local/share/opencode"), "opencode.db")
+if not os.path.exists(path):
+    sys.exit()
+db = sqlite3.connect("file:" + path + "?mode=ro", uri=True, timeout=5)
+tables = {r[0] for r in db.execute("select name from sqlite_master where type = 'table'")}
+best = None
+# Both table generations: session + message, session_v2 + session_message. Two other readers
+# know them: scripts/opencode-usage.py (tokens) and timing.sh (time); change all three together.
+for s, m, where in (("session", "message", "data like '%\"assistant\"%'"), ("session_v2", "session_message", "type = 'assistant'")):
+    if s not in tables or m not in tables:
+        continue
+    q = "select time_created, data from %s where %s and session_id in (select id from %s where directory = ?)" % (m, where, s)
+    for created, data in db.execute(q, (cwd,)):
+        try:
+            d = json.loads(data)
+        except ValueError:
+            continue
+        t = d.get("tokens")
+        if d.get("role", "assistant") != "assistant" or not isinstance(t, dict):
+            continue
+        c = t.get("cache") or {}
+        n = sum(int(x or 0) for x in (t.get("input"), t.get("output"), t.get("reasoning"), c.get("read"), c.get("write")))
+        mod = d.get("modelID") or (d.get("model") or {}).get("id") or ""
+        if n > 0 and (best is None or created > best[0]):
+            best = (created, n, mod)
+if best:
+    print("%s\t%d\t%s" % (a, best[1], best[2]))
+PY
+      ;;
   esac
 done
 `;
@@ -85,3 +122,76 @@ export function loadContexts(addresses) {
 
 // 143217 → "143k", 1200000 → "1.2M".
 export const tokenText = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1).replace(/\.0$/, "")}M` : `${Math.round(n / 1000)}k`;
+
+// The headline for a run's tokens: what was fresh (input, output, cache writes) first, then
+// the cache reads, which are billed at about a tenth and dominate the total:
+// "2.9M tok (+89.5M cached)". `tk` has total, input, output, cacheRead, cacheWrite (or
+// snake_case); a count from before the split has only a total and reads "<total> tok":
+// a per-agent count says so with `split: false`, the run's total by having all its parts zero. Without cache reads it is just "2.9M tok".
+const tkParts = (tk) => {
+  const cached = Number(tk.cacheRead ?? tk.cache_read) || 0;
+  const write = Number(tk.cacheWrite ?? tk.cache_write) || 0;
+  return { cached, write, input: Number(tk.input) || 0, output: Number(tk.output) || 0 };
+};
+export function tokenHeadline(tk) {
+  const p = tkParts(tk);
+  if (tk.split === false || (tk.total > 0 && p.input + p.output + p.write + p.cached === 0)) return `${tokenText(tk.total)} tok`;
+  const fresh = p.input + p.output + p.write;
+  const f = fresh > 0 && fresh < 1000 ? "<1k" : tokenText(fresh);
+  return p.cached > 0 ? `${f} tok (+${tokenText(p.cached)} cached)` : `${f} tok`;
+}
+
+// tokenHeadline's short form, for a column: "2.9M +89.5M" (fresh, then cache reads).
+export function tokenShort(tk) {
+  const p = tkParts(tk);
+  if (tk.split === false || (tk.total > 0 && p.input + p.output + p.write + p.cached === 0)) return tokenText(tk.total);
+  const fresh = p.input + p.output + p.write;
+  const f = fresh > 0 && fresh < 1000 ? "<1k" : tokenText(fresh);
+  return p.cached > 0 ? `${f} +${tokenText(p.cached)}` : f;
+}
+
+// The full breakdown, for the hover over the headline. Budgets count the total.
+export function tokenDetail(tk) {
+  const n = (v) => Number(v).toLocaleString("en");
+  const p = tkParts(tk);
+  if (tk.split === false || p.input + p.output + p.write + p.cached === 0) return `${n(tk.total)} tokens in total (no split into input, output and cache)`;
+  return [`${n(tk.total)} tokens in total`, `Input ${n(p.input)}`, `Output ${n(p.output)}`, `Cache writes ${n(p.write)}`, `Cache reads ${n(p.cached)}`,
+    "Cache reads are billed at about a tenth of input; the budget counts the total."].join("\n");
+}
+
+// When a run started, for telling runs apart in a narrow Crew card: "09:14" today, "14 Nov" this
+// year, "14 Nov 2025" before; startedTip gives the full "Started 14 Nov 2026, 09:14". Local time;
+// "" without a start (runs from before init-run.sh recorded it).
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const clock = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+const day = (d) => `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+export function startedText(ms, now = Date.now()) {
+  if (!ms) return "";
+  const d = new Date(ms), n = new Date(now);
+  if (d.toDateString() === n.toDateString()) return clock(d);
+  return d.getFullYear() === n.getFullYear() ? day(d) : `${day(d)} ${d.getFullYear()}`;
+}
+export const startedTip = (ms) => (ms ? `Started ${day(new Date(ms))} ${new Date(ms).getFullYear()}, ${clock(new Date(ms))}` : "");
+
+// How long, for a run's age: "45m", "8h 12m", "2d 3h".
+export function spanText(ms) {
+  const m = Math.max(0, Math.floor(ms / 60000));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+// The run pane's line on when a run started and how long it has gone, or "" without a start:
+// "Started today 09:28 · running for 8h 12m", "Started 14 Nov 18:20 · finished after 7h 40m"
+// (until its last status update, which set it finished), "… · stopped after 3h 5m" (parked or
+// closed before it finished; until it was put away).
+export function runAgeText(r, now = Date.now()) {
+  if (!r?.started) return "";
+  const d = new Date(r.started), n = new Date(now);
+  const when = d.toDateString() === n.toDateString() ? `today ${clock(d)}`
+    : `${day(d)}${d.getFullYear() === n.getFullYear() ? "" : ` ${d.getFullYear()}`} ${clock(d)}`;
+  const age = r.phase === "finished" ? `finished after ${spanText((r.updated ?? now) - r.started)}`
+    : r.away ? `stopped after ${spanText((r.away.at ?? now) - r.started)}`
+    : `running for ${spanText(now - r.started)}`;
+  return `Started ${when} · ${age}`;
+}

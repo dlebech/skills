@@ -1,6 +1,7 @@
 # Shared by runs.sh, watch-runs.sh and the captain (mark_run); source it, do not run it.
 #
-# The run-directory protocol, as written by herdr-app-orchestrator's init-run.sh
+# The run-directory protocol (documented in herdr-app-orchestrator's
+# references/run-files.md), as written by herdr-app-orchestrator's init-run.sh
 # and set-status.sh. <folder> is the last part of the repository's path, or of the
 # folder holding a run's several repositories; <branch> has "/" and the like as "-".
 #   <root>/<folder>/<branch>/orchestrator.json  {"terminal", "tab_id", "folder", "branch"}
@@ -15,7 +16,7 @@
 #       review-only run reviews), waiting: [name], updated}, kept by set-status.sh, which also sets the terminal's run.status,
 #       run.type, run.topic, progress, and run.prs labels
 #   <root>/<folder>/<branch>/question.md        the orchestrator's open question to the user
-#   <root>/<folder>/<branch>/inbox/             <name>.message, from the captain
+#   <root>/<folder>/<branch>/inbox/             <UTC time>-<source>.message, from the captain, Harbormaster or the user
 #   <root>/<folder>/<branch>/shared/            the run's agents' files; not the captain's
 #   <root>/<folder>/<branch>/parked             the user set the run aside for now: its
 #       orchestrator's tab was closed on purpose, to resume later
@@ -27,7 +28,8 @@
 #       orchestrator resumes the run. A finished run whose orchestrator's terminal
 #       is gone is closed without a marker.
 #   <root>/.captain-decisions.json              the captain's open decisions for the user,
-#       [{id, question, run, asked}], kept by decisions.sh; Harbormaster shows them
+#       [{id, question, run, asked, options, recommended, evidence, risk, blocks}] (the
+#       last five optional), kept by decisions.sh; Harbormaster shows them
 
 # The same default as herdr-app-orchestrator's scripts/init-run.sh.
 root=${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}
@@ -74,11 +76,30 @@ is_shell() {
   esac
 }
 
+# question_title <run-dir>: question.md's one-line summary: its "# " title, else its
+# first non-empty line, on one line and cut to 100 characters. Empty without a question.
+question_title() {
+  [ -s "$1/question.md" ] || return 0
+  awk 'NF { sub(/^# +/, ""); gsub(/[\t\r]+/, " "); print substr($0, 1, 100); exit }' "$1/question.md"
+}
+
 # unhandled_messages <run-dir>: one inbox message path per line.
 unhandled_messages() {
   local f
   for f in "$1"/inbox/*.message; do
     [ -e "$f" ] && echo "$f"
+  done
+}
+
+# answer_messages <run-dir>: the unhandled inbox messages that may answer a question, one
+# path per line: all but level requests ("set autonomy to L2", "set proof tier to T3" as
+# their first line, from Harbormaster's level tags) and asks to prove ("prove t23 to T2: …",
+# from its Proof rows; run-files.md), which answer nothing. Harbormaster's data.js
+# (NOT_ANSWERS) uses the same pattern.
+answer_messages() {
+  local f
+  unhandled_messages "$1" | while IFS= read -r f; do
+    head -n 1 "$f" | grep -qE '^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: )' || echo "$f"
   done
 }
 

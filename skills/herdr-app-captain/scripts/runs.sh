@@ -78,6 +78,7 @@ while IFS= read -r run_info <&3; do
   [ ! -e "$dir/status.json" ] || jq -r '
     (.type // empty | "  type: \(.)"),
     (.topic // empty | "  topic: \(.)"),
+    (.autonomy // empty | "  autonomy: \(.)"),
     (if .progress or .tasks then "  progress: \([.progress // empty,
       (.tasks // empty | "\(.merged)/\(.planned) tasks merged")] | join("; "))" else empty end),
     (if (.waiting // [] | length) > 0 then "  waiting agents: \(.waiting | join(" "))" else empty end),
