@@ -8,7 +8,7 @@ import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, state
 import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
 import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, proofCounts, proofRowParts, needsLook, resultLine } from "./proof.js";
-import { oneLine } from "./question.js";
+import { oneLine, needHead, questionSections, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf } from "./attend.js";
@@ -446,12 +446,60 @@ function cardHeader(view, t, r, f, meta) {
     .child(pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need));
 }
 
-function needBox(t, r, f) {
-  return h_flex().gap(8).p(8).rounded(7).bg(t.blocked + "1c").items_start()
-    .child(div().flex_none().text_color(t.blocked).font_bold().child(r.question ? "?" : "!"))
-    .child(v_flex().flex_1().min_w(0).gap(2)
+// What a run needs you for, on its card and in its pane. Without a question: why, and a click
+// opens the orchestrator. With one: what it asks and the recommendation in short, then a
+// Details fold with the question's sections, a button per option and Reply, answered the way
+// Waiting on you answers (answerParts, sendAnswer: the run's inbox, then a wake). `where`
+// tells the card's and the pane's ids apart.
+function needBox(view, t, r, f, ctx, where) {
+  const focus = (_e, cx) => { cx.stop_propagation(); if (f.orch !== "gone") focusAgent(r.terminal); };
+  const it = r.ask ? decisionQueue([r], [], ctx).find((x) => x.kind === "run") : null;
+  const box = h_flex().id(`need-${where}-${r.key}`).gap(8).p(8).rounded(7).bg(t.blocked + "1c").items_start()
+    .child(div().flex_none().text_color(t.blocked).font_bold().child(r.question ? "?" : "!"));
+  if (!it) {
+    return box.cursor_pointer().on_click(focus).child(v_flex().flex_1().min_w(0).gap(2)
       .child(div().text_size(11).font_semibold().text_color(t.blocked).child(r.question ? "Waiting for your answer — click to open the orchestrator" : "Needs you — click to open the orchestrator"))
       .child(div().text_size(12).text_color(t.foreground).child((f.reason ?? "").slice(0, 220))));
+  }
+  const head = needHead(r.ask);
+  const key = `q-${r.key}`;
+  const open = isOpen(view, key);
+  const a = answerParts(view, t, it, ctx, "box");
+  const sections = questionSections(r.ask, r.question);
+  const count = it.options.length ? plural(it.options.length, "option") : "reply in your own words";
+  const fold = h_flex().id(`qfold-${where}-${r.key}`).gap(6).items_center().min_w(0).rounded(4).cursor_pointer()
+    .text_size(11.5).text_color(t.muted).hover((st) => st.bg(t.hover).text_color(t.foreground))
+    .tooltip(open ? "Hide the question's details" : "The whole question, its options and Reply")
+    .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); cx.notify(); })
+    .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
+    .child(div().flex_none().font_semibold().child("Details"))
+    .child(div().truncate().text_color(t.dim).child([count, it.since ? `asked ${ago(it.since)}` : null].filter(Boolean).join(" · ")));
+  // A section's text whole, as paragraphs (question.js), under its small label.
+  const part = (label, text, color) => v_flex().gap(2)
+    .when(Boolean(label), (el) => el.child(div().text_size(10.5).font_semibold().text_color(color ?? t.dim).child(label)))
+    .children(paragraphs(text).map((l) => div().text_size(11.5).text_color(t.foreground).child(l)));
+  const options = it.options.length > 0 && v_flex().gap(4)
+    .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("Options"))
+    .children(it.options.map((o, i) => h_flex().gap(8).items_start()
+      .child(a.optionButton(i))
+      .child(div().flex_1().min_w(0).pt(3).text_size(11.5).text_color(t.muted).child(plain(o.text)))));
+  const tone = { Recommended: t.accent, Risk: t.blocked };
+  const details = open && v_flex().id(`qdetail-${where}-${r.key}`).gap(8).pt(4)
+    // Clicks in here answer or type; they never fall through to the card's open-the-orchestrator.
+    .on_click((_e, cx) => cx.stop_propagation())
+    .children(sections.filter((x) => !x.label || x.label === "Question").map((x) => part(x.label, x.text)))
+    .when(Boolean(options), (el) => el.child(options))
+    .children(sections.filter((x) => x.label && x.label !== "Question").map((x) => part(x.label, x.text, tone[x.label])))
+    .when(Boolean(a.replyBtn), (el) => el.child(h_flex().child(a.replyBtn)))
+    .when(Boolean(a.input), (el) => el.child(a.input));
+  return box.child(v_flex().flex_1().min_w(0).gap(4)
+    .child(div().id(`qtitle-${where}-${r.key}`).cursor_pointer().text_size(12.5).font_medium().text_color(t.foreground)
+      .tooltip(f.orch !== "gone" ? "Open the orchestrator" : "The orchestrator is gone: answer here, it waits in the run's inbox")
+      .on_click(focus).child(oneLine(head.title, 300)))
+    .when(Boolean(head.rec), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(oneLine(head.rec, 200))))
+    .when(Boolean(a.note), (el) => el.child(a.note))
+    .child(fold)
+    .when(Boolean(details), (el) => el.child(details)));
 }
 
 // The one-line notes under the progress: parked or closed, gone, waiting agents, unread messages.
@@ -504,7 +552,7 @@ function card(view, t, r, ctx, compact = false) {
     .hover((s) => s.bg(t.raised)).on_click(focus)
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
     .child(cardHeader(view, t, r, f, runMeta(r, f)))
-    .when(need, (el) => el.child(needBox(t, r, f)))
+    .when(need, (el) => el.child(needBox(view, t, r, f, ctx, "card")))
     .when(Boolean(facts), (el) => el.child(facts))
     .when(Boolean(r.progress), (el) => el.child(progressLine(t, r, f.att)))
     .children(cardNotes(t, r, f))
@@ -972,7 +1020,7 @@ function runDetail(view, t, r, ctx) {
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
     .child(div().id(`head-${r.key}`).cursor_pointer().on_click(() => orch !== "gone" && focusAgent(r.terminal))
       .child(cardHeader(view, t, r, f, runMeta(r, f))))
-    .when(need, (el) => el.child(div().id(`need-${r.key}`).cursor_pointer().on_click(() => focusAgent(r.terminal)).child(needBox(t, r, f))))
+    .when(need, (el) => el.child(needBox(view, t, r, f, ctx, "pane")))
     .when(Boolean(facts) || Boolean(r.progress) || notes.length > 0 || Boolean(blocking), (el) => el.child(v_flex().gap(4)
       .when(Boolean(facts), (e) => e.child(facts))
       .when(Boolean(r.progress), (e) => e.child(progressLine(t, r, f.att)))
@@ -1079,7 +1127,9 @@ function sendAnswer(view, it, text, cx, option = false) {
 // Sends the inline reply as the answer to the item being replied to.
 export function submitReply(view, cx) {
   const text = view.reply.value().trim();
-  const it = decisionQueue(view.runs, view.decisions, facts()).find((x) => x.id === view.replying);
+  // A need box's Reply answers the same item (question.js replyId).
+  const id = replyItem(view.replying);
+  const it = decisionQueue(view.runs, view.decisions, facts()).find((x) => x.id === id);
   if (!text || !it || !sendAnswer(view, it, text, cx)) return;
   view.reply.set_value("");
   view.replying = null;
@@ -1101,6 +1151,56 @@ function noAnswer(it) {
   return null;
 }
 
+// The answering half of a queue item, shared by Waiting on you and a run's need box: a button
+// per option (the recommended one starred), Reply with its input, and once answered what
+// happens next. `slot` keeps the two apart: the queue's ids as they were, the box's prefixed
+// ("box:"), so a card and the queue in one overview never open the same Reply twice.
+// {replyBtn, optionButton(i), canPick, note, input}; replyBtn, note and input may be false.
+function answerParts(view, t, it, ctx, slot = "") {
+  const cap = captainOf(ctx);
+  // An answer written for an earlier question of this run (another `since`) no longer counts.
+  if (view.answered[it.id] !== undefined && view.answered[it.id] !== (it.since ?? 0)) delete view.answered[it.id];
+  const rid = replyId(slot, it.id);
+  const open = view.replying === rid;
+  // A message waiting in the run's inbox counts too: someone else (the captain, by hand) answered.
+  const sent = view.answered[it.id] !== undefined;
+  const answered = sent || Boolean(it.answered);
+  const why = noAnswer(it);
+  const replyBtn = it.kind !== "attention" && h_flex().id(rid + "-reply").flex_none().items_center().px(8).h(22).rounded(5)
+    .text_size(11).text_color(open ? t.accent : t.dim)
+    .when(Boolean(why), (el) => el.opacity(0.45).tooltip(why))
+    .when(!why, (el) => el.cursor_pointer().tooltip(slot ? "Answer in your own words" : "Answer in your own words, without leaving the overview")
+      .hover((st) => st.bg(t.hover).text_color(t.foreground))
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        view.replying = open ? null : rid;
+        view.reply.set_value("");
+        if (!open) view.reply.focus();
+        cx.notify();
+      }))
+    .child(open ? "Cancel" : "Reply");
+  // /compact is typed into the orchestrator, so only while it sits idle or done.
+  const orchNow = it.run ? (orchestratorState(it.run, ctx) === "gone" ? "gone" : exactStatus(it.run.terminal, ctx) ?? "unknown") : null;
+  const compactWhy = (o) => (isCompact(o.label) && isBudgetQuestion(it) && !["idle", "done"].includes(orchNow)
+    ? `Compact needs the orchestrator idle or done (it is ${orchNow})` : null);
+  const canPick = !answered && !why;
+  // Greyed out once answered or when it can't be answered from here; a click picks that option.
+  const optionButton = (i) => {
+    const o = it.options[i];
+    // Disabled always says why: from here it can't be answered, it was, or Compact must wait.
+    const off = why || (answered && "Already answered") || compactWhy(o);
+    const b = actionButton(t, `${rid}-opt-${i}`, i === it.recommended ? `★ ${o.label}` : o.label,
+      `${o.text || o.label}${i === it.recommended ? " (recommended)" : ""}`,
+      off ? null : (cx) => { sendAnswer(view, it, o.label, cx, true); }, i === it.recommended);
+    return off ? b.tooltip(off) : b;
+  };
+  const note = answered && div().text_size(11).text_color(t.muted).child(it.run && runGone(it.run) ? "Waits in its inbox until the run is resumed" : sent ? "Answered, waiting for the orchestrator" : "Message waiting for the orchestrator");
+  const input = open && v_flex().gap(4)
+    .child(Input.new(view.reply))
+    .child(div().text_size(10.5).text_color(t.dim).child(it.kind === "decision" && cap.terminal ? "Enter sends it to the captain, with this decision attached" : it.run && runGone(it.run) ? "Enter writes it to the run's inbox, where it waits until the run is resumed" : "Enter writes it to the run's inbox and tells its orchestrator"));
+  return { replyBtn, optionButton, canPick, note, input };
+}
+
 // Everything waiting on the person, in one queue at the top of the overview, oldest first
 // (the work blocked longest): each run's question.md, the captain's open decisions
 // (decisions.sh) and the runs that need them without a question. Each item can be answered
@@ -1115,10 +1215,6 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
     if (!it || (it.since ?? 0) !== view.answered[id]) delete view.answered[id];
   }
   const row = (it) => {
-    const open = view.replying === it.id;
-    // A message waiting in the run's inbox counts too: someone else (the captain, by hand) answered.
-    const sent = view.answered[it.id] !== undefined;
-    const answered = sent || Boolean(it.answered);
     const why = noAnswer(it);
     const address = it.kind === "decision" ? cap.terminal?.address : it.run?.terminal;
     const meta = [it.kind === "decision" ? "captain asks" : null, it.run?.branch ?? (it.decision?.run ?? "").split("/").pop(),
@@ -1137,37 +1233,14 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
         .when(Boolean(it.evidence), (el) => el.child(line("Evidence", it.evidence)))
         .when(Boolean(it.risk), (el) => el.child(line("Risk", it.risk, t.blocked)))
         .when(Boolean(it.blocks), (el) => el.child(line("Blocks", it.blocks))));
-    const replyBtn = it.kind !== "attention" && h_flex().id(it.id + "-reply").flex_none().items_center().px(8).h(22).rounded(5)
-      .text_size(11).text_color(open ? t.accent : t.dim)
-      .when(Boolean(why), (el) => el.opacity(0.45).tooltip(why))
-      .when(!why, (el) => el.cursor_pointer().tooltip("Answer in your own words, without leaving the overview")
-        .hover((st) => st.bg(t.hover).text_color(t.foreground))
-        .on_click((_e, cx) => {
-          view.replying = open ? null : it.id;
-          view.reply.set_value("");
-          if (!open) view.reply.focus();
-          cx.notify();
-        }))
-      .child(open ? "Cancel" : "Reply");
-    // /compact is typed into the orchestrator, so only while it sits idle or done.
-    const orchNow = it.run ? (orchestratorState(it.run, ctx) === "gone" ? "gone" : exactStatus(it.run.terminal, ctx) ?? "unknown") : null;
-    const compactWhy = (o) => (isCompact(o.label) && isBudgetQuestion(it) && !["idle", "done"].includes(orchNow)
-      ? `Compact needs the orchestrator idle or done (it is ${orchNow})` : null);
-    const buttons = !answered && !why && it.options.length > 0 && h_flex().flex_wrap().gap(6).pl(22)
-      .children(it.options.map((o, i) => {
-        const off = compactWhy(o);
-        const b = actionButton(t, `${it.id}-opt-${i}`, i === it.recommended ? `★ ${o.label}` : o.label,
-          `${o.text || o.label}${i === it.recommended ? " (recommended)" : ""}`,
-          off ? null : (cx) => { sendAnswer(view, it, o.label, cx, true); }, i === it.recommended);
-        return off ? b.tooltip(off) : b;
-      }));
+    const a = answerParts(view, t, it, ctx);
+    const buttons = a.canPick && !why && it.options.length > 0 && h_flex().flex_wrap().gap(6).pl(22)
+      .children(it.options.map((_o, i) => a.optionButton(i)));
     return v_flex().id(it.id).gap(6).p(8).rounded(7).bg(t.surface)
-      .child(h_flex().gap(8).items_start().child(body).when(Boolean(replyBtn), (el) => el.child(replyBtn)))
+      .child(h_flex().gap(8).items_start().child(body).when(Boolean(a.replyBtn), (el) => el.child(a.replyBtn)))
       .when(Boolean(buttons), (el) => el.child(buttons))
-      .when(answered, (el) => el.child(div().pl(22).text_size(11).text_color(t.muted).child(it.run && runGone(it.run) ? "Waits in its inbox until the run is resumed" : sent ? "Answered, waiting for the orchestrator" : "Message waiting for the orchestrator")))
-      .when(open, (el) => el.child(v_flex().gap(4)
-        .child(Input.new(view.reply))
-        .child(div().text_size(10.5).text_color(t.dim).child(it.kind === "decision" && cap.terminal ? "Enter sends it to the captain, with this decision attached" : it.run && runGone(it.run) ? "Enter writes it to the run's inbox, where it waits until the run is resumed" : "Enter writes it to the run's inbox and tells its orchestrator"))));
+      .when(Boolean(a.note), (el) => el.child(a.note.pl(22)))
+      .when(Boolean(a.input), (el) => el.child(a.input));
   };
   return v_flex().id("waiting").flex_none().gap(6).p(10).rounded(10).bg(t.blocked + "14").border(1).border_color(t.blocked + "66")
     .child(div().text_size(11.5).font_semibold().text_color(t.blocked).child(`Waiting on you · ${items.length}`))
@@ -1340,6 +1413,8 @@ export function runOfProps(runs, p) {
 export function runPane(view, t, p) {
   const ctx = facts();
   const r = runOfProps(view.runs, p);
+  // A popup opened with "details" (show-run) starts with the question's Details unfolded, once.
+  if (p.details && r && !view.detailsShown) { view.folds ??= new Map(); view.folds.set(`q-${r.key}`, true); view.detailsShown = true; }
   return v_flex().id("run-pane").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .child(v_flex().id("run-pane-list").flex_1().min_h(0).p(10).gap(8).overflow_y_scrollbar()
       .child(r ? runDetail(view, t, r, ctx) : view.runs.length

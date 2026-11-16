@@ -54,11 +54,13 @@ function showPopup(view, arg) {
   const cur = shared(POPUP);
   if (cur && cur.arg === arg && Date.now() - cur.at < 2000) return; // another copy just did
   const pick = view.runs.filter((r) => !r.away);
-  const r = arg ? view.runs.find((x) => [x.branch, x.dir, x.key, x.localTerminal].includes(arg))
+  // "<run> details" opens it with its question's Details unfolded, for a shot without a click.
+  const [, name, details] = /^(.*?)(?:(?:^|\s+)(details))?$/.exec(arg) ?? [null, arg, null];
+  const r = name ? view.runs.find((x) => [x.branch, x.dir, x.key, x.localTerminal].includes(name))
     : [...pick].sort(newestFirst)[0];
   if (!r) { console.log(`harbormaster.show-run: no run matches "${arg}"`); return; }
   closePopup();
-  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) });
+  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: details ? { ...runProps(r), details: true } : runProps(r) });
   // Another copy opened one for this same command first: keep theirs, so none is left untracked.
   const won = shared(POPUP);
   if (won && won.arg === arg && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }

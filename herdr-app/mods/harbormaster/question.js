@@ -55,17 +55,30 @@ export function parseQuestion(text) {
   const head = lines.find((l) => l.trim());
   const title = head.replace(/^#+\s*/, "").trim() || head.trim();
   const parts = {};
-  let key = null;
-  for (const line of lines) {
+  // What the known sections don't hold, kept for Details: the text between the title and the
+  // first "## ", and any other section (## Context), by its heading as written.
+  const before = [];
+  const extra = [];
+  let key = null, other = null, seen = false;
+  for (const line of lines.slice(lines.indexOf(head) + 1)) {
     const h = /^##\s+(.*?)\s*$/.exec(line);
-    if (h) { key = SECTIONS.find((s) => s === h[1].toLowerCase()) ?? null; if (key) parts[key] = []; continue; }
+    if (h) {
+      seen = true;
+      key = SECTIONS.find((s) => s === h[1].toLowerCase()) ?? null;
+      if (key) { parts[key] = []; other = null; } else extra.push((other = { label: h[1], lines: [] }));
+      continue;
+    }
     if (key) parts[key].push(line);
+    else if (other) other.lines.push(line);
+    else if (!seen) before.push(line);
   }
   const body = (k) => (parts[k] ?? []).join("\n").trim();
   const structured = SECTIONS.some((k) => parts[k]);
   const options = structured ? optionsOf(body("options")) : [];
   const rec = recommendedIndex(body("recommended"), options);
-  const why = body("recommended").split("\n").find((l) => l.trim())?.replace(/^[^:—–]*[:—–]\s*/, "").trim() ?? "";
+  // Only what follows a separator is why: a bare "2" or label has none.
+  const first = body("recommended").split("\n").find((l) => l.trim()) ?? "";
+  const why = /[:—–]/.test(first) ? first.replace(/^[^:—–]*[:—–]\s*/, "").trim() : "";
   return {
     title,
     structured,
@@ -76,8 +89,72 @@ export function parseQuestion(text) {
     evidence: body("evidence"),
     risk: body("risk"),
     blocks: body("blocks"),
+    // ## Recommended below its first line: the longer why some orchestrators add.
+    recMore: body("recommended").split("\n").slice(body("recommended").split("\n").findIndex((l) => l.trim()) + 1).join("\n").trim(),
+    before: before.join("\n").trim(),
+    extra: extra.map((x) => ({ label: x.label, text: x.lines.join("\n").trim() })).filter((x) => x.text),
   };
 }
+
+// The need box's lines for a question, read from its summary alone: what is asked, and the
+// recommendation in short ("Recommends Merge now — t5's change is small"), or null without one.
+export function needHead(q) {
+  if (!q) return null;
+  const rec = q.recommended !== null ? q.options[q.recommended] : null;
+  const text = rec ? `${rec.label}${q.why ? ` — ${q.why}` : ""}` : q.why;
+  return { title: `Asks you: ${q.title}`, rec: text ? `Recommends ${text}` : null };
+}
+
+// The question's sections as the need box's Details list them, [{label, text}], each whole
+// (line breaks kept), unknown sections last under their own heading and only when it has text; the options are buttons, so not here. A
+// free-form question (`raw` is question.md's text) is its text below the title line.
+export function questionSections(q, raw) {
+  if (!q) return [];
+  if (!q.structured) {
+    const lines = (raw ?? "").replace(/\r\n?/g, "\n").split("\n");
+    const rest = lines.slice(lines.findIndex((l) => l.trim()) + 1).join("\n").trim();
+    return rest ? [{ label: "Question", text: rest }] : [];
+  }
+  const rec = q.recommended !== null ? q.options[q.recommended] : null;
+  const recLine = rec ? `${rec.label}${q.why ? ` — ${q.why}` : ""}` : q.why;
+  return [
+    // Text between the title and the first section has no label of its own.
+    { label: "", text: q.before },
+    { label: "Question", text: q.question },
+    { label: "Recommended", text: [recLine, q.recMore].filter(Boolean).join("\n\n") },
+    { label: "Evidence", text: q.evidence },
+    { label: "Risk", text: q.risk },
+    { label: "Blocks", text: q.blocks },
+    ...q.extra,
+  ].filter((s) => s.text);
+}
+
+// The id view.replying holds for a queue item's Reply: the queue's as is, a need box's under
+// "box:" so a card and the queue in one overview never open the same Reply; and back to the
+// queue item's id, which is what submitReply answers.
+export const replyId = (slot, id) => `${slot ? `${slot}:` : ""}${id}`;
+export const replyItem = (rid) => rid?.replace(/^box:/, "") ?? null;
+
+// A section's text as the lines to show: the file's hard-wrapped lines joined into
+// paragraphs (a blank line ends one), a list item on a line of its own, and Markdown's bold
+// markers dropped, since the box shows plain text.
+export function paragraphs(text) {
+  const out = [];
+  let joining = false;
+  for (const raw of (text ?? "").replace(/\r\n?/g, "\n").split("\n")) {
+    const line = plain(raw.trim());
+    if (!line) { joining = false; continue; }
+    const item = /^(?:\d+[.)]|[-*])\s/.test(raw.trim());
+    if (joining && !item) out[out.length - 1] += ` ${line}`;
+    else out.push(line);
+    joining = true;
+  }
+  return out;
+}
+
+// Markdown's bold pairs (**x**) dropped from text shown as is. Not __x__: underscores are
+// part of file names and identifiers (__init__.py, foo__bar__baz).
+export const plain = (s) => (s ?? "").replace(/\*\*(.+?)\*\*/g, "$1");
 
 // The message an answer writes to a run's inbox (run-files.md): the answer to the question
 // by its title, then any free text. `answer` is an option's label or the person's own words.
