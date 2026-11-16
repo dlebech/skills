@@ -220,10 +220,10 @@ Questions arrive as `question:` messages, or as a `blocked` child when an agent 
 
 To ask the user, with or without a captain, since `herdr-app-captain` reads the file and the user may be in your tab:
 
-1. Write one concise question, or several that belong together, with context, options, and a recommendation, to `<run-directory>/.question.tmp`, then `mv` it to `question.md`, so it is never read half-written.
+1. Write one question, or several that belong together, to `<run-directory>/.question.tmp`, then `mv` it to `question.md`, so it is never read half-written. Use its fixed sections: a `# ` title that can be answered from alone, then `## Question`, `## Options` (numbered, `**label**: what happens`), `## Recommended`, `## Evidence`, `## Risk` and `## Blocks`. Harbormaster turns them into one-click answers, and each can be answered from its summary. The format is in [references/run-files.md](references/run-files.md), with the other run files.
 2. Set `plan.md`'s status to `waiting for user: <short summary>`, different for each question, since the captain is alerted when it changes, with `set-status.sh`, as in section 2. When the question is an agent's, pass `--waiting` in the same call, with that agent added to those already waiting.
 3. Repeat the question in your reply as plain text, and end your turn.
-4. The answer arrives as your next prompt, typed in your tab or an `inbox/` `.message` that `herdr-app-captain` relayed. First set the status back to `running` with `--waiting` updated (`""` when no agent waits any more), then rename a message to `.handled`, delete `question.md`, and continue.
+4. The answer arrives as your next prompt, typed in your tab or an `inbox/` `.message`, from Harbormaster's queue, `herdr-app-captain` or the user (it starts `Answer to "<title>": <option>`). First set the status back to `running` with `--waiting` updated (`""` when no agent waits any more), then rename a message to `.handled`, delete `question.md`, and continue.
 
 Pass the user's mid-run decisions to every affected running agent without waiting for them to ask, and update `spec.md` when they change the goal or scope. Do not expose routine coordination or ask the user to interact with a task agent.
 

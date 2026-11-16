@@ -1,6 +1,7 @@
 # Shared by runs.sh, watch-runs.sh and the captain (mark_run); source it, do not run it.
 #
-# The run-directory protocol, as written by herdr-app-orchestrator's init-run.sh
+# The run-directory protocol (documented in herdr-app-orchestrator's
+# references/run-files.md), as written by herdr-app-orchestrator's init-run.sh
 # and set-status.sh. <folder> is the last part of the repository's path, or of the
 # folder holding a run's several repositories; <branch> has "/" and the like as "-".
 #   <root>/<folder>/<branch>/orchestrator.json  {"terminal", "tab_id", "folder", "branch"}
@@ -27,7 +28,8 @@
 #       orchestrator resumes the run. A finished run whose orchestrator's terminal
 #       is gone is closed without a marker.
 #   <root>/.captain-decisions.json              the captain's open decisions for the user,
-#       [{id, question, run, asked}], kept by decisions.sh; Harbormaster shows them
+#       [{id, question, run, asked, options, recommended, evidence, risk, blocks}] (the
+#       last five optional), kept by decisions.sh; Harbormaster shows them
 
 # The same default as herdr-app-orchestrator's scripts/init-run.sh.
 root=${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}

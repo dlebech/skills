@@ -98,8 +98,7 @@ export function needsYou(run, orchState) {
 // The question comes first, so it matches a view's "Waiting for your answer".
 export function needReason(run, orchState) {
   if (!needsYou(run, orchState)) return null;
-  const question = run.question?.split("\n").map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean);
-  if (question) return question;
+  if (run.ask) return run.ask.title;
   if (orchState === "blocked") return "blocked on a dialog";
   const why = (run.statusLine ?? "").replace(/^(waiting for user|blocked)\s*:?\s*/i, "").trim();
   return why || (run.phase === "blocked" ? "blocked" : "waiting for you");

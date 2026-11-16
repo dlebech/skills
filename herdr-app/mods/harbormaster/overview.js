@@ -2,10 +2,11 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
+import { stats, decisionQueue, answerRun, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText } from "./context.js";
+import { oneLine } from "./question.js";
 
 // How each runPhase() reads on a card.
 const PHASE = {
@@ -428,69 +429,114 @@ function captainStrip(view, t, ctx, s) {
     .child(statusDot(t, agentStatus(cap.terminal, ctx)));
 }
 
-// Sends the inline reply to the captain as an answer to the decision being replied to.
+// Sends an answer to an item of the queue. A captain decision goes to the captain, typed
+// into its input, when it is there; otherwise, and for a run's question, to the run's inbox
+// (answerRun), which wakes its orchestrator. Marks the item answered once it is written.
+// Returns false when there is nowhere to send it.
+function sendAnswer(view, it, text, cx) {
+  const cap = captainOf(facts()).terminal;
+  if (it.kind === "decision" && cap) {
+    replyToCaptain(cap.address, it.decision, text);
+    return true;
+  }
+  const run = it.run;
+  if (!run?.localTerminal) return false;
+  view.actionError = null;
+  // Marked before the write, so a second click meanwhile is ignored; undone if it fails.
+  view.answered[it.id] = it.since ?? 0;
+  cx.spawn(async (cx) => {
+    try {
+      await answerRun(run, it.title, text);
+      // The captain isn't there to clear its decision, so it goes with the answer.
+      if (it.kind === "decision") await dropDecision(it.decision).catch(() => {});
+    } catch (e) {
+      delete view.answered[it.id];
+      view.actionError = `${run.branch}: ${e?.message ?? e}`;
+    }
+    view.redraw = true;
+    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+    try { await view.load(cx); } catch { /* the next refresh shows it */ }
+  }, { owner: null });
+  return true;
+}
+
+// Sends the inline reply as the answer to the item being replied to.
 export function submitReply(view, cx) {
   const text = view.reply.value().trim();
-  const d = view.decisions.find((x) => x.key === view.replying);
-  const cap = captainOf(facts()).terminal;
-  if (!text || !d || !cap) return;
-  replyToCaptain(cap.address, d, text);
+  const it = decisionQueue(view.runs, view.decisions, facts()).find((x) => x.id === view.replying);
+  if (!text || !it || !sendAnswer(view, it, text, cx)) return;
   view.reply.set_value("");
   view.replying = null;
   cx.notify();
 }
 
-// Everything waiting on the person, in one list at the top of the overview: the captain's
-// open decisions (decisions.sh), oldest first, then each run that needs them, with what
-// for. A decision clicks through to the captain, a run to its orchestrator.
+// Why an item can't be answered from here, or null when it can.
+function noAnswer(it) {
+  if (it.kind === "attention") return "This run needs you without a question: click to open its orchestrator";
+  if (it.kind === "decision" && !captainOf(facts()).terminal && !it.run?.localTerminal) return "The captain isn't running and this decision names no run: start /herdr-app-captain to answer it";
+  if (it.kind !== "decision" && !it.run?.localTerminal) return "This run's orchestrator isn't known: open the run to answer";
+  return null;
+}
+
+// Everything waiting on the person, in one queue at the top of the overview, oldest first
+// (the work blocked longest): each run's question.md, the captain's open decisions
+// (decisions.sh) and the runs that need them without a question. Each item can be answered
+// from what it shows: its recommended option, evidence and risk, a button per option and a
+// free-text Reply. An answer goes to the run's inbox, or to the captain for its decisions.
 function waitingOnYou(view, t, s, decisions, runs, ctx) {
   const cap = captainOf(ctx);
-  const runName = (d) => {
-    if (!d.run) return null;
-    const r = runs.find((x) => x.dir === d.run && x.machine === d.machine);
-    return r?.branch ?? d.run.split("/").pop();
-  };
-  const items = [
-    ...decisions.map((d) => ({
-      id: `dec-${d.key}`, emoji: CAPTAIN, decision: d, text: d.question, address: cap.terminal?.address,
-      meta: ["captain asks", runName(d), d.machine, d.asked ? ago(d.asked) : null],
-      tip: cap.terminal ? "Click to open the captain, or Reply to answer this decision from here" : "The captain isn't running; start /herdr-app-captain to answer",
-    })),
-    ...s.need.map((r) => {
-      const orch = orchestratorState(r, ctx);
-      return {
-        id: `need-${r.key}`, emoji: OCTOPUS, text: needReason(r, orch) ?? "needs you", address: r.terminal,
-        meta: [r.branch, r.machine, r.question ? "question" : orch === "blocked" ? "dialog" : r.phase, r.updated ? ago(r.updated) : null],
-        tip: "Click to open the orchestrator",
-      };
-    }),
-  ];
+  const items = decisionQueue(runs, decisions, ctx);
   if (!items.length) return null;
+  for (const id of Object.keys(view.answered)) {
+    const it = items.find((x) => x.id === id);
+    if (!it || (it.since ?? 0) !== view.answered[id]) delete view.answered[id];
+  }
   const row = (it) => {
-    const d = it.decision;
-    const open = d && view.replying === d.key;
+    const open = view.replying === it.id;
+    // A message waiting in the run's inbox counts too: someone else (the captain, by hand) answered.
+    const sent = view.answered[it.id] !== undefined;
+    const answered = sent || Boolean(it.answered);
+    const why = noAnswer(it);
+    const address = it.kind === "decision" ? cap.terminal?.address : it.run?.terminal;
+    const meta = [it.kind === "decision" ? "captain asks" : null, it.run?.branch ?? (it.decision?.run ?? "").split("/").pop(),
+      it.run?.machine ?? it.decision?.machine, it.since ? `asked ${ago(it.since)}` : null];
+    const line = (label, text, color) => text && div().text_size(11).text_color(t.muted)
+      .child(div().flex().gap(4).child(div().flex_none().font_semibold().text_color(color ?? t.dim).child(label)).child(div().flex_1().min_w(0).child(oneLine(text))));
+    const rec = it.recommended !== null ? it.options[it.recommended] : null;
     const body = h_flex().id(it.id + "-body").flex_1().min_w(0).gap(8).items_start()
-      .when(Boolean(it.address), (el) => el.cursor_pointer().on_click(() => focusAgent(it.address)))
-      .child(div().flex_none().text_size(14).child(it.emoji))
+      .when(Boolean(address), (el) => el.cursor_pointer().on_click(() => focusAgent(address)))
+      .child(div().flex_none().text_size(14).child(it.kind === "decision" ? CAPTAIN : OCTOPUS))
       .child(v_flex().flex_1().min_w(0).gap(2)
-        .child(div().text_size(12.5).text_color(t.foreground).child(it.text.slice(0, 300)))
-        .child(div().truncate().text_size(11).text_color(t.dim).child(it.meta.filter(Boolean).join(" · "))));
-    const replyBtn = d && cap.terminal && h_flex().id(it.id + "-reply").flex_none().items_center().px(8).h(22).rounded(5)
-      .text_size(11).text_color(open ? t.accent : t.dim).cursor_pointer().tooltip("Answer this decision without leaving the overview")
-      .hover((st) => st.bg(t.hover).text_color(t.foreground))
-      .on_click((_e, cx) => {
-        view.replying = open ? null : d.key;
-        view.reply.set_value("");
-        if (!open) view.reply.focus();
-        cx.notify();
-      })
+        .child(div().text_size(12.5).text_color(t.foreground).child(it.title.slice(0, 300)))
+        .child(div().truncate().text_size(11).text_color(t.dim).child(meta.filter(Boolean).join(" · ")))
+        .when(Boolean(rec), (el) => el.child(line("Recommended", `${rec.label}${it.why ? ` — ${it.why}` : ""}`, t.accent)))
+        .when(!rec && Boolean(it.why), (el) => el.child(line("Recommended", it.why, t.accent)))
+        .when(Boolean(it.evidence), (el) => el.child(line("Evidence", it.evidence)))
+        .when(Boolean(it.risk), (el) => el.child(line("Risk", it.risk, t.blocked)))
+        .when(Boolean(it.blocks), (el) => el.child(line("Blocks", it.blocks))));
+    const replyBtn = it.kind !== "attention" && h_flex().id(it.id + "-reply").flex_none().items_center().px(8).h(22).rounded(5)
+      .text_size(11).text_color(open ? t.accent : t.dim)
+      .when(Boolean(why), (el) => el.opacity(0.45).tooltip(why))
+      .when(!why, (el) => el.cursor_pointer().tooltip("Answer in your own words, without leaving the overview")
+        .hover((st) => st.bg(t.hover).text_color(t.foreground))
+        .on_click((_e, cx) => {
+          view.replying = open ? null : it.id;
+          view.reply.set_value("");
+          if (!open) view.reply.focus();
+          cx.notify();
+        }))
       .child(open ? "Cancel" : "Reply");
-    return v_flex().id(it.id).gap(6).p(8).rounded(7).bg(t.surface).tooltip(it.tip)
-      .hover((st) => st.bg(t.raised))
+    const buttons = !answered && !why && it.options.length > 0 && h_flex().flex_wrap().gap(6).pl(22)
+      .children(it.options.map((o, i) => actionButton(t, `${it.id}-opt-${i}`, i === it.recommended ? `★ ${o.label}` : o.label,
+        `${o.text || o.label}${i === it.recommended ? " (recommended)" : ""}`,
+        (cx) => { sendAnswer(view, it, o.label, cx); }, i === it.recommended)));
+    return v_flex().id(it.id).gap(6).p(8).rounded(7).bg(t.surface)
       .child(h_flex().gap(8).items_start().child(body).when(Boolean(replyBtn), (el) => el.child(replyBtn)))
+      .when(Boolean(buttons), (el) => el.child(buttons))
+      .when(answered, (el) => el.child(div().pl(22).text_size(11).text_color(t.muted).child(sent ? "Answered, waiting for the orchestrator" : "Message waiting for the orchestrator")))
       .when(open, (el) => el.child(v_flex().gap(4)
         .child(Input.new(view.reply))
-        .child(div().text_size(10.5).text_color(t.dim).child("Enter sends it to the captain, with this decision attached"))));
+        .child(div().text_size(10.5).text_color(t.dim).child(it.kind === "decision" && cap.terminal ? "Enter sends it to the captain, with this decision attached" : "Enter writes it to the run's inbox and tells its orchestrator"))));
   };
   return v_flex().id("waiting").flex_none().gap(6).p(10).rounded(10).bg(t.blocked + "14").border(1).border_color(t.blocked + "66")
     .child(div().text_size(11.5).font_semibold().text_color(t.blocked).child(`Waiting on you · ${items.length}`))
