@@ -4,6 +4,7 @@
 //   "run"             one run's card (props().dir and .terminal name it), pinned beside its orchestrator
 //   "crew"            the captain, orchestrators and agents adrift, above Herdr's own Agents list
 //   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
+//   "stats"           where the time goes, tokens, CPU and memory: per run, task and agent, live, and past runs
 // Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute;
 // the crew and the overview also read each crew agent's context size (context.js).
 
@@ -13,12 +14,14 @@ import { props, theme } from "herdr";
 import { loadRuns, cachedRuns, refreshPrs, isClosed } from "./data.js";
 import { facts, crewAddresses } from "./live.js";
 import { loadContexts } from "./context.js";
-import { hotSignature } from "./resources.js";
+import { hotSignature, sampleVersion } from "./resources.js";
 import { cards, crew, runPane, submitReply } from "./overview.js";
 import { harbor, rail, paneHeader } from "./harbor.js";
+import { statsView } from "./stats.js";
+import { loadHistory, refreshTimings } from "./statsdata.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
-const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor"]);
+const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"]);
 
 export default class Harbormaster extends View {
   init(_props, cx) {
@@ -40,13 +43,24 @@ export default class Harbormaster extends View {
     cx.timer.every(5000, (cx) => this.refresh(cx));
     // The harbor's scuttle target: data, not frames; .transition does the moving.
     if (role === "harbor") cx.timer.every(2000, (cx) => { this.step++; cx.notify(); });
+    // Run timing is read in the background, one run at a time, each at most every 90 s while
+    // open (statsdata.js); the history when a run may have closed. Never blocks drawing.
+    if (role === "stats") {
+      const slow = (cx) => cx.spawn(async (cx) => {
+        await Promise.all([loadHistory(), this.load(cx)]);
+        cx.notify();
+        await refreshTimings(this.runs, () => { try { cx.notify(); } catch { /* closed */ } });
+      });
+      slow(cx);
+      cx.timer.every(30000, slow);
+    }
   }
 
   // Reads the runs and the captain's decisions again; redraws when they changed.
   async load(cx) {
     const { runs, decisions, errors } = await loadRuns();
     // The CPU and memory badges change with every sample, so only what they show counts.
-    const hot = hotSignature(facts());
+    const hot = props()?.role === "stats" ? sampleVersion() : hotSignature(facts());
     const changed = JSON.stringify(runs) !== JSON.stringify(this.runs) || JSON.stringify(decisions) !== JSON.stringify(this.decisions)
       || errors.join() !== this.errors.join() || hot !== this.hot;
     this.hot = hot;
@@ -75,8 +89,8 @@ export default class Harbormaster extends View {
     if (this.expireBusy()) cx.notify();
     cx.spawn(async (cx) => {
       const runs = await this.load(cx);
-      // The crew and the overview show each crew agent's context size; the harbor does not.
-      if (props()?.role !== "harbor") {
+      // The crew and the overview show each crew agent's context size; the harbor and stats do not.
+      if (props()?.role !== "harbor" && props()?.role !== "stats") {
         const contexts = await loadContexts(crewAddresses(facts()));
         if (JSON.stringify(contexts) !== JSON.stringify(this.contexts)) { this.contexts = contexts; cx.notify(); }
       }
@@ -95,6 +109,7 @@ export default class Harbormaster extends View {
       case "harbor": return harbor(this);
       case "harbor-rail": return rail(this);
       case "harbor-pane": return paneHeader(p);
+      case "stats": return statsView(this, t);
       default: return cards(this, t, this.runs, this.errors, this.decisions);
     }
   }

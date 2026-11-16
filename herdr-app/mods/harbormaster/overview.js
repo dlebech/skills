@@ -3,7 +3,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, decisionQueue, answerRun, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
-import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane } from "./live.js";
+import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag } from "./ui.js";
 import { tokenText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
@@ -827,7 +827,12 @@ export function cards(view, t, runs, errors, decisions = []) {
   return v_flex().id("root").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .on_size_change((size, cx) => { view.size = size; cx.notify(); })
     .child(v_flex().flex_none().px(10).pt(10).pb(6).gap(2)
-      .child(div().px(4).text_size(11.5).font_medium().text_color(t.dim).child("Runs"))
+      .child(h_flex().px(4).items_center()
+        .child(div().flex_1().text_size(11.5).font_medium().text_color(t.dim).child("Runs"))
+        .child(div().id("open-stats").flex_none().px(6).h(18).rounded(4).flex().items_center().text_size(11).text_color(t.dim)
+          .cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))
+          .tooltip("Where the time goes, tokens, CPU and memory: per run, task and agent, and past runs")
+          .on_click(() => openStats()).child("Stats")))
       .child(totals(t, s, decisions, ctx)))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
       .when(Boolean(waiting), (el) => el.child(waiting))
