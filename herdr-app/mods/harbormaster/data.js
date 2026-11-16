@@ -601,7 +601,8 @@ export function relatedOf(run) {
   return shared("harbormaster.prs")?.[run.key]?.related ?? run.related.map((p) => unknownPr(p.url, p.repo));
 }
 
-// Refreshes a run's PRs when stale: every 60 s while the run is open, every 15 min once closed.
+// Refreshes a run's PRs when stale: every 60 s while the run is open, every 15 min once closed
+// or parked (`closed`).
 // A PR gh could not read keeps its last summary, marked `stale`, or is unknownPr; the
 // entry's `error` says why (null when every PR was read) and `okAt` is the last read
 // that got them all, so a failing gh shows as "can't tell" instead of old data passing as new.
@@ -705,6 +706,8 @@ export function stats(runs, ctx) {
   const parked = runs.filter(isParked);
   const shown = [...live, ...docked];
   const open = shown.flatMap((r) => prsOf(r) ?? []).filter(isOpen);
+  // Parked runs' open PRs, apart: the header says them beside the open ones ("+4 parked").
+  const parkedOpen = parked.map((r) => (prsOf(r) ?? []).filter(isOpen).length);
   const tasks = live.map(taskCounts);
   return {
     live,
@@ -713,6 +716,8 @@ export function stats(runs, ctx) {
     shown,
     closed: runs.filter((r) => isClosed(r, ctx)),
     open,
+    parkedOpen: parkedOpen.reduce((n, x) => n + x, 0),
+    parkedWithOpen: parkedOpen.filter(Boolean).length,
     failing: open.filter((p) => p.checks?.fail).length,
     merged: tasks.reduce((n, c) => n + c.merged, 0),
     planned: tasks.reduce((n, c) => n + c.planned, 0),

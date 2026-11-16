@@ -13,6 +13,8 @@ import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf, needsYouNow as needsYouOf } from "./attend.js";
 import { stepText, quietText, flowState, flowSetting, runDot } from "./attention.js";
+import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } from "./tell.js";
+import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
 import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
 import { commentsAsked, commentsSig, defaultMode, commentLines, hasComments, botCount } from "./comments.js";
@@ -487,6 +489,8 @@ function runFacts(r, ctx) {
   const workers = workersOf(r.terminal, ctx);
   return {
     orch, parked, need, badge, att,
+    // A parked run keeps its pill, with what its PRs wait on muted beside it.
+    parkedNext: parked ? parkedLabel(att, r.away) : null,
     dot: runStatus(orch, workers, att, ctx),
     closed: isClosed(r, ctx),
     reason: needReason(r, orch) ?? needLine(att),
@@ -511,6 +515,8 @@ function cardHeader(view, t, r, f, meta) {
     .map(withContext(view, t, `run-${r.key}`, r.terminal))
     .child(runPin(t, `pin-${r.key}`, r, f.orch))
     .child(statusDot(t, f.dot))
+    .when(Boolean(f.parkedNext), (el) => el.child(div().id(`parked-next-${r.key}`).flex_shrink().min_w(0).truncate().text_size(11).text_color(t.dim)
+      .tooltip("What its pull requests wait on, and how long it has been parked. Parked runs stay out of Needs you.").child(f.parkedNext)))
     .child(f.badge.tip ? div().id(`badge-${r.key}`).flex_none().tooltip(f.badge.tip).child(pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need))
       : pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need));
 }
@@ -578,7 +584,8 @@ function needBox(view, t, r, f, ctx, where) {
 }
 
 // The one-line notes under the progress: parked or closed, gone, waiting agents, unread messages.
-function cardNotes(t, r, f) {
+// `decisions`: false in the pane, whose Decisions heading says what is new itself.
+function cardNotes(t, r, f, decisions = true) {
   const note = (text, tone = "muted") => div().text_size(11.5).text_color(t[tone]).child(text);
   return [
     r.away && note(`${f.parked ? "Parked" : "Closed"} ${ago(r.away.at)}${r.away.was ? ` · was: ${r.away.was}` : ""}`),
@@ -587,7 +594,15 @@ function cardNotes(t, r, f) {
     !r.away && f.orch === "gone" && r.phase === "finished" && note("Orchestrator is gone, only a shell is left in its tab: resume it if the PR needs more work, or park or close the run."),
     r.waiting.length > 0 && note(`Waiting on an answer: ${r.waiting.join(", ")}`),
     r.unhandled > 0 && note(`${plural(r.unhandled, "relayed message")} not read yet`),
+    decisions && newDecisionsNote(r) && note(newDecisionsNote(r), "accent"),
   ].filter(Boolean);
+}
+
+// "7 decisions new since you looked", or null: the run's decision lines newer than when its
+// Decisions were last unfolded (telling.js).
+function newDecisionsNote(r) {
+  const n = newDecisions(r.decided, decisionsSeen(r)).length;
+  return n ? `${plural(n, "decision")} new since you looked` : null;
 }
 
 const unscopedOf = (r) => (r.proof.tier ? r.tasks.filter((k) => !k.proof).length : 0);
@@ -899,6 +914,11 @@ function pathLink(t, r, id, rel, label) {
 // did not parse shows its raw text.
 function decisionsSection(view, t, r) {
   const key = `dec-${r.key}`, open = isOpen(view, key);
+  // Unfolding marks every line seen (telling.js); the lines new then stay marked while it is
+  // open, by the seen time from before (view.decWas).
+  const seen = decisionsSeen(r);
+  const fresh = new Set(newDecisions(r.decided, open ? view.decWas?.get(key) ?? seen : seen));
+  const since = !open ? newSinceText(fresh.size) : null;
   const you = r.decided.filter((d) => d.by === "user").length, orch = r.decided.length - you;
   const counts = [orch > 0 && `${orch} by the orchestrator`, you > 0 && `${you} from you`].filter(Boolean).join(", ");
   const title = (d) => `${d.by === "user" ? "You · " : ""}${d.topic ? `${d.topic}: ${d.decision}` : d.decision}`;
@@ -916,18 +936,29 @@ function decisionsSection(view, t, r) {
         if (more) view.decRows.delete(id); else view.decRows.add(id);
         cx.notify();
       })
+      .child(fresh.has(d) ? div().flex_none().w(6).h(6).mt(5).rounded(3).bg(t.accent).tooltip("New since you last looked") : div().flex_none().w(6))
       .child(when(d))
       .child(v_flex().flex_1().min_w(0)
-        .child(div().when(!more, (el) => el.truncate()).text_color(t.foreground).child(title(d)))
+        .child(div().when(!more, (el) => el.truncate()).text_color(t.foreground).when(fresh.has(d), (el) => el.font_semibold()).child(title(d)))
         .when(Boolean(more && d.why), (el) => el.child(div().text_size(11).text_color(t.dim).child(d.why))));
   };
   return v_flex().gap(4)
     .child(h_flex().id(`fold-${key}`).gap(6).px(2).items_center().min_w(0).rounded(4).cursor_pointer().text_size(11)
       .hover((st) => st.bg(t.hover)).tooltip(open ? "Fold the decisions" : "Show every decision")
-      .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); cx.notify(); })
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        view.folds ??= new Map();
+        view.folds.set(key, !open);
+        view.decWas ??= new Map();
+        if (open) view.decWas.delete(key);
+        else { view.decWas.set(key, seen); markDecisionsSeen(r); }
+        cx.notify();
+      })
       .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
       .child(div().flex_none().font_semibold().text_color(t.foreground).child("Decisions"))
-      .child(div().min_w(0).truncate().text_color(t.muted).child(`· ${r.decided.length}${counts ? ` · ${counts}` : ""}`)))
+      .child(div().flex_none().text_color(t.muted).child(`· ${r.decided.length}`))
+      .when(Boolean(since), (el) => el.child(div().flex_none().text_color(t.accent).font_semibold().child(`· ${since}`)))
+      .child(div().min_w(0).truncate().text_color(t.muted).child(counts ? `· ${counts}` : "")))
     .when(open, (el) => el.children(r.decided.map(line)));
 }
 
@@ -1103,7 +1134,7 @@ function runDetail(view, t, r, ctx) {
   // Each agent's task and that task's stage, by address.
   const workOf = new Map(stages.flatMap(({ agents, stage }, i) => agents.map((a) => [a.agent.address, { task: r.tasks[i], stage }])));
   const facts = factsLine(t, r, prs, 13, f.att);
-  const notes = cardNotes(t, r, f);
+  const notes = cardNotes(t, r, f, false);
   const blocking = blockingAction(view, t, r, f.att, `pane-${r.key}`);
   const comments = commentsAction(view, t, r, f.att, `pane-${r.key}`);
   // Most important first: who and what, whether it needs you, when and its PR, then the PR
@@ -1356,7 +1387,7 @@ function totals(t, s, need, decisions, ctx) {
     .when(s.docked.length > 0, (el) => el.child(stat("t-done", s.docked.length, "finished", "done")))
     .child(stat("t-agents", s.workers, s.workers === 1 ? "agent" : "agents", s.workers ? "working" : null))
     .when(s.planned > 0, (el) => el.child(stat("t-tasks", `${s.merged}/${s.planned}`, "tasks done", null)))
-    .child(stat("t-prs", s.open.length, s.failing ? `open PRs · ${s.failing} failing` : s.open.length === 1 ? "open PR" : "open PRs", s.failing ? "blocked" : s.open.length ? "done" : null));
+    .child(stat("t-prs", s.open.length, openPrsLabel(s.open.length, s.failing, s.parkedOpen), s.failing ? "blocked" : s.open.length ? "done" : null));
 }
 
 // Deleting closed runs by age, from the closed runs' header: each preset's cutoff in days
@@ -1467,7 +1498,8 @@ export function cards(view, t, runs, errors, decisions = []) {
         .child(div().id("open-stats").flex_none().px(6).h(18).rounded(4).flex().items_center().text_size(11).text_color(t.dim)
           .cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))
           .tooltip("Where the time goes, tokens, CPU and memory: per run, task and agent, and past runs")
-          .on_click(() => openStats()).child("Stats")))
+          .on_click(() => openStats()).child("Stats"))
+        .child(toastsToggle(t)))
       .child(totals(t, s, need, decisions, ctx)))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
       .when(Boolean(waiting), (el) => el.child(waiting))
@@ -1475,13 +1507,24 @@ export function cards(view, t, runs, errors, decisions = []) {
       .when(s.shown.length === 0, (el) => el.child(div().p(12).text_size(12).text_color(t.dim).child("No runs in progress. Ask the captain to start one, e.g. “start issue 185 in my-app”.")))
       .children(live.map((r) => card(view, t, r, ctx, narrow)))
       .children(sorted(docked).map((r) => card(view, t, r, ctx, true)))
-      .when(s.parked.length > 0, (el) => el.child(div().pt(6).px(4).text_size(11).font_semibold().text_color(t.dim).child(`Parked · ${s.parked.length}`)))
+      .when(s.parked.length > 0, (el) => el.child(div().pt(6).px(4).text_size(11).font_semibold().text_color(t.dim).child(parkedHeading(s.parked.length, s.parkedWithOpen))))
       .children(sorted(s.parked).map((r) => card(view, t, r, ctx, true)))
       .when(closed.length > 0, (el) => el.child(closedHeader(view, t, closed)))
       .when(Boolean(view.showDone), (el) => el.children(closed.map((r) => card(view, t, r, ctx, true))))
       .when(Boolean(view.actionNote), (el) => el.child(div().px(4).text_size(11).text_color(t.muted).child(view.actionNote)))
       .when(Boolean(view.actionError), (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(view.actionError)))
       .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n")))));
+}
+
+// Toasts on or off (telling.js): a toast when a run starts needing you. On by default.
+function toastsToggle(t) {
+  const on = toastsOn();
+  return div().id("toasts-toggle").flex_none().px(6).h(18).rounded(4).flex().items_center().text_size(11).text_color(on ? t.dim : t.muted)
+    .cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))
+    .tooltip(on ? "A toast when a run starts needing you (a question, a PR to merge, red CI…). Click to turn them off."
+      : "Toasts are off. Click to get one when a run starts needing you.")
+    .on_click((_e, cx) => { cx.stop_propagation(); setToastsOn(!on); cx.notify(); })
+    .child(on ? "Toasts on" : "Toasts off");
 }
 
 // The props of a run's own pane. Herdr stores pane props as given and shows them on every
@@ -1606,7 +1649,7 @@ export function crew(view, t) {
         const run = r ?? { key: term.address, type: labels["run.type"] || null, autonomy: /^L[0-2]$/.test(labels["run.autonomy"]) ? labels["run.autonomy"] : "L0" };
         return { type: runTypeTag(t, run, `crew-${term.address}`), tags: levelTags(view, t, run, `crew-${term.address}`, true) };
       })(),
-      title: name.title, tip: [name.tip, startedTip(r?.started)].filter(Boolean).join("\n") || null,
+      title: name.title, tip: [name.tip, startedTip(r?.started), r ? newDecisionsNote(r) : null].filter(Boolean).join("\n") || null,
       tone, status, address: term.address, crabs: state === "finished" ? 0 : workers, run: r,
       // Badged on its own, like any agent: a run's agents together pass 2 GB while nothing is busy.
       usage: liveUsage(term.address), whose: "The orchestrator and its commands",
