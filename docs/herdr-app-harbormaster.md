@@ -77,17 +77,18 @@ Harbormaster is built for that:
 
 The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks mods to list those, so here they are:
 
-- **Every 5 seconds, per machine:** one `sh -c` script. It prints the captain's open decisions, `.captain-decisions.json` in the runs root, then for each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json` (with the token totals `tokens.sh` counted; Harbormaster never reads session files for them), `plan.md`, `question.md` and its modification time (`stat`), and the `parked` and `closed` markers, counts the unhandled `inbox/*.message` files, and prints `proof.md` and the names of the files in `shared/proof/` (at most 40), and the last 20 `- [decided]` lines of `decisions.md` (`grep`, `tail`, capped at 8 kB), and `.resources.json`. The same script then takes one process snapshot for [CPU and memory](#cpu-and-memory): on Linux one `awk` over `/proc/*/stat`, the environment of herdr-core's children and the command lines of the processes it prints; on macOS `ps` twice.
+- **Every 5 seconds, per machine:** one `sh -c` script. It prints the captain's open decisions, `.captain-decisions.json` in the runs root, then for each run under `~/.herdr/hc-orchestration/*/*/` (or `$HERDR_ORCHESTRATION_ROOT`), it prints `orchestrator.json`, `status.json` (with the token totals `tokens.sh` counted; Harbormaster never reads session files for them), `plan.md`, `question.md` and its modification time (`stat`), and the `parked` and `closed` markers, counts the unhandled `inbox/*.message` files, and prints `proof.md` and the names of the files in `shared/proof/` (at most 40), and the last 60 `- [decided]` and `- [user]` lines of `decisions.md` (`grep`, `tail`, capped at 20 kB), and `.resources.json`. The same script then takes one process snapshot for [CPU and memory](#cpu-and-memory): on Linux one `awk` over `/proc/*/stat`, the environment of herdr-core's children and the command lines of the processes it prints; on macOS `ps` twice.
 - **Every minute per open run (running or finished), every 15 minutes per closed one:** `gh pr view <url>` for each PR and related PR in `status.json`, on the run's machine. A run shows only the PRs its orchestrator recorded there. A PR's `## Merge danger` first line (from its body) is kept with the result and shown on its row: red for a one-way door, dim for a two-way one (see `skills/herdr-app-orchestrator/references/run-files.md`). The results are kept in Herdr's shared state (`harbormaster.prs`), so every copy of the mod and every layout uses the same ones.
 - **When you press Park or Close:** `git worktree list` in the run's folder, to find the integration worktrees whose spaces to close.
 - **Every 30 seconds per open run on another machine, with its orchestrator there:** the same `git worktree list`, to find the integration worktrees to open spaces for. The worktrees it has opened or seen open are kept in Herdr's shared state (`harbormaster.worktrees`).
 - **Every 5 seconds per closed run with a space still on one of its worktree folders:** one `sh -c` that checks whether those folders still exist, so it closes only the spaces whose folder is gone.
 - **Live from herdr-core:** the terminal labels `role`, `run.status`, `run.type`, `run.topic`, `progress` and `run.prs`, and the `captain-watch` terminal.
 
+- **When a proof thumbnail is shown or opened:** `stat` and `cp` on this computer, or on the run's machine `stat` and `base64`, of that one file (see Proof); the copies are written under `mods/harbormaster/.cache/` in the app's home. A video opens with `xdg-open` (`open` on macOS).
 - **When you answer from the queue:** a run's answer is a file in its `inbox/`, then `hc send` to wake its orchestrator (not when the orchestrator is gone or lost: the message only waits). A captain decision answered into a run's inbox is then removed from `.captain-decisions.json` in the runs root with `jq`, a temporary file and `mv`.
 - **When you press Compact on the budget question:** `hc send <orchestrator> /compact`, then a `sleep 2` loop (for at most 10 minutes) until the compaction is over, then the wake-up for the answer.
 
-When a run closes, or just before you delete it, it also appends a summary of the run (time by category, tokens, CPU and memory, per agent and task) as one line to `.history.jsonl` in the runs root (`~/.herdr/hc-orchestration`) of the run's machine, so its numbers outlive it; the format is in `skills/herdr-app-orchestrator/references/run-files.md`. It writes to a run directory on its own only `.resources.json`, every 5 seconds per open run whose orchestrator is there (a temporary file and `mv`, under a `.resources.json.lock` directory). Otherwise it writes to one only when you press Park, Close or Delete, or answer a question (and, for a captain decision answered into a run's inbox, to `.captain-decisions.json` in the runs root): one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. An answer from the queue is a message there too (`<time>-<ms>-harbormaster.message`). Delete removes the run directory.
+When a run closes, or just before you delete it, it also appends a summary of the run (time by category, tokens, CPU and memory, per agent and task) as one line to `.history.jsonl` in the runs root (`~/.herdr/hc-orchestration`) of the run's machine, so its numbers outlive it; the format is in `skills/herdr-app-orchestrator/references/run-files.md`. It writes to a run directory on its own only `.resources.json`, every 5 seconds per open run whose orchestrator is there (a temporary file and `mv`, under a `.resources.json.lock` directory). Otherwise it writes to one only when you press Park, Close or Delete, or answer a question (and, for a captain decision answered into a run's inbox, to `.captain-decisions.json` in the runs root): one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. An answer from the queue is a message there too (`<time>-<ms>-harbormaster.message`). Delete removes the run directory, and this computer's copies of its proof images.
 
 It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended; and for an open run on another machine: it renames the orchestrator's tab after the run's status, when the tab is unnamed or has one of the orchestrator's own `🐙` names, at most once a minute, opens a space for each integration worktree that has never had one, and finishes parking a run the captain parked there; and names a captain's tab on another machine `⚓ captain`.
 
@@ -99,9 +100,10 @@ It changes the window on its own only for a closed run (a `closed` marker): it c
 small tag by the name (`L1`; hover for what it means); the narrow Crew block leaves it out so the
 type tag and agent count keep their room. Every decision an orchestrator makes itself is a
 `- [decided] <UTC time> <topic>: <decision> — <why>` line in `decisions.md`. The overview card shows
-the newest as one line, "Decided for you · 4: …", with all of them in the tooltip; the run pane lists
-the latest 3 with when they were made and why, and "+N more" shows up to 20. A line that does not
-parse is shown as its raw text. Formats: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
+one summary line, "Decided for you · 20 by the orchestrator, 1 from you · latest: …" (counts of `[decided]`
+and `[user]` lines, the newest of either), with all of them in the tooltip. The run pane has the same line; click it
+to list every decision (up to the last 60 lines) with when it was made and why, newest first, and again to collapse
+(not remembered). A line that does not parse is shown as its raw text. Formats: [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
 ## Tokens
 
@@ -113,8 +115,9 @@ files on the orchestrator's computer, from the run's start on, including those o
 killed and worktrees already removed, those of an orchestrator resumed in a new terminal (best effort
 for a pi or opencode orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
 down. A run's card shows the total in its
-meta line (`26M tok`); the run pane has a **Tokens** section with the split by kind (output, cache
-read, cache write, input; exact counts on hover) and each agent's share as a bar, the orchestrator
+meta line (`26M tok`); the run pane has a **Tokens** section with the split (fresh tokens, meaning input, output and cache writes, in
+blue; cache reads in green) and each agent's share as a stacked bar in the same colours, with the exact numbers on
+hover (`fresh 1,234,567 (in 12, out 3,456, cache write 1,230,000) · cache read 28,000,000`), the orchestrator
 first, then the agents by size, named by their worktree (`pda-t3`). The narrow Crew block leaves it
 out; hovering an orchestrator's context size there shows the run total too. A token is any of input,
 output, cache read and cache write, so the total is dominated by cache reads: it measures how much the
@@ -204,7 +207,7 @@ section folds with a click on its title.
   itself), so fan noise can be explained. Hover a row for the agent's own share and each program, and
   its terminal's name. Terminals in no run under 1% CPU and 100 MB (idle shells) are one "+N more" line.
 - **Runs.** Per run: its wall time, a bar of where it went, its tokens (a bar as wide as its share of
-  the largest run's: fresh tokens, that is input, output and cache writes, in blue, cache reads in green;
+  the largest run's, as on run cards: fresh tokens, that is input, output and cache writes, in blue, cache reads in green;
   exact numbers on hover), and its CPU time and memory peak (all its agents together). Click a run for
   the categories with shares, the effort (all agents' time, more than the wall time as they work in
   parallel), CPU by program, and its tasks: each with its effort by category, CPU and memory peak; click
@@ -218,15 +221,54 @@ The history is read again every minute, the live table with each 5-second poll.
 
 ## Proof
 
-A run's pane has a Proof section. Its title is the run's tier, `Proof · T2` (`(set by user)` when
-the plan says so), from plan.md's `Proof tier:` line, else the highest tier among the tasks. Each
-task is a row: its tier, its evidence from the task's `Proof:` line, and, when `proof.md` has a
-section for it, what was checked and a pass, fail or partial pill. A task with no `Proof:` line is
-flagged "Not scoped", and the section's title counts them. Two links open `proof.md` and the
+A run's pane has a Proof section. Its top line is the verdict, for example `Proof T2 · 6/8 pass · 2
+partial (2 tasks without a screenshot) · checks green · two-way door`: the run's tier (plan.md's `Proof tier:`
+line, else the highest among the tasks), passes over the tasks that have a `Proof:` line or a proof.md
+entry, fails and partials, tasks of tier T2 or higher with a result whose `Files:` list has no existing image or video ("n tasks without a
+screenshot": it counts tasks, not images; proof.md is read up to 64 kB, and the verdict says "(proof.md cut)" past that), the `Checks: green|red` line of proof.md, and the merge danger of the run's PR (`two-way
+door` or `one-way door`). It is in the blocked colour for a fail, red checks or a one-way door, green
+when everything passes, dim otherwise. Below it is one compact row per task: tier, name and a pass,
+partial, fail, not checked or not scoped pill, and small thumbnails of the task's images from its proof.md
+`Files:` (the first three, then `+n`; a `▶` box for a video: mp4, webm, mov, m4v). A thumbnail click opens the
+screenshot in a Harbormaster overlay, scaled to fit, with its file name, `‹` `›` for the task's other images and
+Esc or ✕ to close. A video opens in the system player. A file over 6 MB is not copied (see below) and says "too
+large to preview".
+Click a row to see its evidence, "Checked:", "Result:" and files. A running run shows the rows; once it
+is finished, parked or closed the section starts collapsed to the verdict line (click it to expand;
+not remembered). Two links open `proof.md` and the
 `shared/proof/` folder; for a run on another machine they are shown as paths, since nothing here
 can open a file there. In the runs overview, a run's card carries a small tier tag by its name
 (hover for how many tasks are not scoped) and "n unscoped" in its meta line. The formats are in
 [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
+
+### Where the screenshots come from
+
+The app can only draw images from its own folder, and a run on another machine keeps its files there, so
+Harbormaster copies a file the first time its thumbnail is shown: on this computer with `cp`, for a run on
+another machine with `base64` through the connection (`exec` with `on:`), decoded here. Files over 6 MB (base64
+of that nears the connection's 8 MiB output limit) are not copied. The copy is made in the background and the
+thumbnail shows `…` meanwhile, or `big` for a refused file; a file that changed (size or time) is copied again, a
+shown one is looked at again once a minute. Copies live in `mods/harbormaster/.cache/<machine or local>/<run>/`
+in the app's home (a hidden folder, so saving into it doesn't reload the mod), and a run's folder is removed when
+you Delete the run, alone or with Delete older than. A run an agent or a script deleted by hand leaves its copies
+until you delete the folder. `install.sh` copies only the mod's `*.js`, `*.svg` and `mod.json`, so it neither
+ships nor wipes the cache. A video on this computer opens from the run folder without a copy; one from another
+machine is copied first (same limit) and the copy opens.
+
+### Popup of a run's pane, for screenshots
+
+An agent that has to show a run's pane in a screenshot (the proving skill's T2 for a Herdr mod) opens it as a brief centered dialog,
+without switching your space or tab, takes the shot and closes it:
+
+```sh
+herdr-app do 'harbormaster.show-run:<branch>'   # or the run's directory, or its orchestrator's terminal
+sleep 1; herdr-app shot proof.png
+herdr-app do 'harbormaster.close-popup'
+```
+
+`show-run` with no name shows the newest run that isn't parked or closed. A popup is one at a time (a second
+`show-run` replaces it) and closes itself after a minute if nobody closes it. The commands reach a shown
+Harbormaster that isn't the dialog itself (the Crew block of `harbormaster-main`, or the open overview); with none on screen they do nothing. The dialog is a centered one, not a pointer popup, which has nowhere to appear without a pointer.
 
 ## Parked, resumed, and closed runs
 

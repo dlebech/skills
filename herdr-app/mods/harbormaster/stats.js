@@ -10,7 +10,7 @@ import { summaryOf, mergeRuns, acrossRuns, liveGroups, cachedHistory, tokenParts
 import { facts, orchestratorsOf, workersOf, captainOf } from "./live.js";
 import { props } from "herdr";
 import { tokenText } from "./context.js";
-import { runName, withTip, typeTag, ago, plural } from "./ui.js";
+import { runName, withTip, typeTag, ago, plural, tokenColors } from "./ui.js";
 
 // Each category's colour, from the theme, so light and dark both work; idle is the track's.
 const COLOR = {
@@ -22,8 +22,6 @@ const COLOR = {
 const LABEL = { ...Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label])), idle: "idle" };
 const ORDER = [...CATEGORIES.map((c) => c.key), "idle"];
 const colorOf = (t, k) => (COLOR[k]?.(t) ?? t.dim);
-// Token bars: fresh tokens (input, output, cache writes) blue, cache reads green.
-const FRESH = (t) => t.ansi4, CACHED = (t) => t.ansi2;
 
 const pct = (part, whole) => (whole > 0 ? (100 * part) / whole : 0);
 const pctText = (part, whole) => `${Math.round(pct(part, whole))}%`;
@@ -50,18 +48,19 @@ function legend(t, id, m) {
       .child(div().text_color(t.dim).child(durationText(v)))));
 }
 
-// A token bar as wide as this run's share of the largest run's tokens: fresh then cache reads.
+// A token bar like the run card's (overview.js tokensSection): on a track scaled to the largest
+// run's tokens, fresh tokens (input, output, cache writes) then cache reads, in tokenColors; the
+// same tooltip. Fresh tokens are a few % of a run's, so they keep a few pixels when not zero.
 function tokenBar(t, id, tokens, max) {
   const p = tokenParts(tokens);
   if (!p) return div().flex_1().min_w(0);
-  const all = p.fresh + p.cached;
-  const exact = (n) => n.toLocaleString("en");
-  const tip = `${exact(tokens.total)} tokens (${pctText(p.fresh, all)} fresh)\nfresh ${exact(p.fresh)}: input ${exact(tokens.input)}, output ${exact(tokens.output)}, cache write ${exact(tokens.cache_write)}\ncache read ${exact(p.cached)}`;
-  return div().id(id).flex_1().min_w(0).h(6).tooltip(tip)
-    .child(h_flex().h_full().rounded(3).overflow_hidden().w(`${Math.max(1, pct(all, max)).toFixed(2)}%`)
-      // Fresh tokens are a few % of a run's: kept visible at a few pixels.
-      .child(div().h_full().flex_none().w(`${pct(p.fresh, all).toFixed(2)}%`).when(p.fresh > 0, (el) => el.min_w(3)).bg(FRESH(t)))
-      .child(div().h_full().flex_1().bg(CACHED(t))));
+  const c = tokenColors(t);
+  const n = (v) => v.toLocaleString("en");
+  const tip = `${n(tokens.total)} tokens: fresh ${n(p.fresh)} (in ${n(tokens.input)}, out ${n(tokens.output)}, cache write ${n(tokens.cache_write)}) · cache read ${n(p.cached)}`;
+  const w = (v) => `${pct(v, max).toFixed(2)}%`;
+  return div().id(id).flex_1().min_w(0).h(5).rounded(3).bg(t.raised).overflow_hidden().flex().tooltip(tip)
+    .child(div().h_full().flex_none().bg(c.fresh).w(w(p.fresh)).when(p.fresh > 0, (el) => el.min_w(3)))
+    .child(div().h_full().flex_none().bg(c.cached).w(w(p.cached)));
 }
 
 // A collapsible section: its title, what it sums up on the right, and its body unless folded.
