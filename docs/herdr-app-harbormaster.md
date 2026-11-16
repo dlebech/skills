@@ -109,7 +109,7 @@ orchestrator does not run it itself: `set-status.sh` runs it on every publish, a
 what the session files gained since, so it stays cheap. It reads Claude Code's, pi's and opencode's own session
 files on the orchestrator's computer, from the run's start on, including those of agents already
 killed and worktrees already removed, those of an orchestrator resumed in a new terminal (best effort
-for a pi orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
+for a pi or opencode orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
 down. A run's card shows the total in its
 meta line (`26M tok`); the run pane has a **Tokens** section with the split by kind (output, cache
 read, cache write, input; exact counts on hover) and each agent's share as a bar, the orchestrator
