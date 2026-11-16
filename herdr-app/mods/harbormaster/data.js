@@ -17,6 +17,7 @@ import { parseDecidedLines } from "./decided.js";
 import { tokenText } from "./context.js";
 import { proofOf, runTier, parseProofMd } from "./proof.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
+import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
 import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f", GS = "\u001d";
@@ -758,6 +759,8 @@ const MISSING = 'for p; do [ -e "$p" ] || printf "%s\\n" "$p"; done';
 // report or ask; and only the tab its terminal is in now, so a resumed run, whose
 // orchestrator.json still names the old terminal until init-run.sh runs, is safe.
 async function tidyClosed(run, ctx) {
+  // Whoever wrote the marker, the run's time summary goes to the history once (a failure just waits for a later poll).
+  writeHistory(run, "closed");
   const spaces = leftoverSpaces(run);
   if (spaces.length) {
     const out = await exec("sh", ["-c", MISSING, "sh", ...new Set(spaces.map((s) => s.path))], { on: run.machine }).catch(() => null);
@@ -944,6 +947,8 @@ const DELETE = [
 ].join("\n");
 
 export async function deleteRun(run) {
+  // Its summary goes to the history first, if not there; the delete goes ahead if that fails or takes too long.
+  await writeHistoryBeforeDelete(run);
   const out = await exec("sh", ["-c", DELETE, "sh", run.dir, run.folder ?? "", run.branch,
     run.localTerminal ?? "", run.away?.how === "closed" ? "1" : ""], { on: run.machine });
   if (out.code !== 0) throw new Error((out.stderr || "could not delete the run directory").trim());
@@ -958,6 +963,8 @@ export async function deleteRun(run) {
 // Deletes several closed runs, one at a time per machine and the machines at once, each as
 // deleteRun does, guards and all. Returns the runs it could not delete, each with why.
 export async function deleteRuns(runs) {
+  // Start every history write first, so the waits overlap instead of adding up per run.
+  await Promise.all(runs.map((r) => writeHistoryBeforeDelete(r)));
   const byMachine = new Map();
   for (const r of runs) byMachine.set(r.machine ?? "", [...(byMachine.get(r.machine ?? "") ?? []), r]);
   const failed = [];

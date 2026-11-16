@@ -17,6 +17,7 @@ and it keeps nothing the files do not.
 | `sessions` | `tokens.sh` | `tokens.sh` | Every session the orchestrator's terminal has had, one `<kind> <session id or file>` a line (below). |
 | `.tokens/` | `tokens.sh` | `tokens.sh` | Its cache: each session file's parsed usage and how far it was read (below). |
 | `.resources.json` | Harbormaster | Harbormaster, run history | CPU and memory per agent and program, added to on each 5 s poll while the run is open (below). |
+| `.history.jsonl` | Harbormaster | stats view | In the runs root, not a run directory: one summary line per closed run (below). Outlives the run. |
 | `.timing/` | Harbormaster's `timing.sh` | `timing.sh` | Its cache: each session's events read so far and its time by category, keyed by the file's size, inode and mtime and the script's logic. Safe to delete. |
 | `decisions.md` | orchestrator | anyone | The decisions log: what was decided, by whom, why (the line format is below). |
 | `question.md` | orchestrator | Harbormaster, captain, you | The open question to you, if any (below). Removed once answered. |
@@ -253,6 +254,42 @@ JSON object, `sampled_ms` always its first key:
 - Writes go to a temporary file and `mv`, under a `.resources.json.lock` directory, and only when the file
   still has the `sampled_ms` the poll read, so two windows polling at once cannot interleave or count twice.
   `raw` keeps per-process bookkeeping only for terminals still alive, so the file grows with agents, not time.
+
+## Run history: .history.jsonl
+
+When Harbormaster sees a run's `closed` marker (whoever wrote it) and, if no line is there yet, just before
+it deletes the run, it appends one line to `.history.jsonl` in the runs root of the run's machine, so
+the stats view can show runs whose directory is gone. A parked run is not written, as it may resume.
+One JSON object per line, built from `timing.sh`, `status.json` and `.resources.json`; a piece that is not
+known is `null`:
+
+```json
+{"v": 1, "run": "<run directory>", "folder": "...", "branch": "...", "type": "feat", "topic": "...", "machine": null,
+ "started": "<ISO>", "ended": "<ISO, timing end>", "closed": "<ISO, the closed marker's time, or the delete time>",
+ "status": "<plan status at close>", "tasks_merged": 5, "tasks_planned": 5,
+ "wall": 7200, "critical_path": {"agent_wait": 5000, "idle": 300}, "categories": {"test": 900, "model": 4000},
+ "tasks": [{"id": "t1", "total": 900, "categories": {}, "cpu_s": 120.5, "peak_rss_mb": 800.0}],
+ "agents": [{"name": "impl-x-t1", "role": "impl", "task": "t1", "kind": "claude", "total": 900, "categories": {},
+             "cpu_s": 120.5, "peak_rss_mb": 800.0, "avg_rss_mb": 500.0}],
+ "tokens": {"total": 0, "input": 0, "output": 0, "cache_read": 0, "cache_write": 0},
+ "resources": {"cpu_s": 0, "peak_rss_mb": 0, "avg_rss_mb": 0, "estimated": false, "programs": {"test runner": {"cpu_s": 0, "peak_rss_mb": 0}}},
+ "recorded": "<ISO>"}
+```
+
+- A run's key is `run` + `started`. A line is added once per closing (`closed` differs): a run resumed and
+  closed again gets a second line, and readers keep the last line per key.
+- A run closed, resumed and deleted while open (never closed again) has no line for its second stretch: the
+  delete finds the first closing's line and writes nothing.
+- A closed run already closed when Harbormaster started is written at most one a minute per machine, one
+  timing read at a time; one whose logs cannot be read is written without timing on its second failure.
+- Agents are matched between timing (worktree names, labels like `impl-x-t1`) and resources (terminal names)
+  by label or name; the orchestrator is the terminal with no parent. A task's `cpu_s` is its agents' sum and
+  its `peak_rss_mb` the largest of theirs.
+- Written under a `.history.jsonl.lock` directory (a lock older than a minute is broken), one write of one
+  line, after checking the file for the closing. Readers skip lines that do not parse. Nothing else rewrites
+  the file.
+- A failure never blocks closing or deleting: a closed run whose timing cannot be read is tried again later,
+  and a delete waits at most 90 s for the write.
 
 ## Soft budget
 
