@@ -267,8 +267,8 @@ Esc or ✕ to close. A video opens in the system player. A file over 6 MB is not
 large to preview".
 With every task listed, two links open `proof.md` and the
 `shared/proof/` folder; for a run on another machine they are shown as paths, since nothing here
-can open a file there. In the runs overview, a run's card shows the same verdict as a line (not once the run is finished, parked or closed;
-smaller card) and a small tier tag by its name
+can open a file there. In the runs overview, a run's card shows the same verdict as a line (not once the run is finished, parked
+or closed) and a small tier tag by its name
 (hover for what the tier means, from the table in `skills/proving/SKILL.md`, and how many tasks are not scoped; the verdict line, on the card and in the pane, and each task row have the same hover) and "n unscoped" in its meta line. The formats are in
 [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
