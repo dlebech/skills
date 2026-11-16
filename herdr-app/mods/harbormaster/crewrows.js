@@ -5,8 +5,10 @@
 import { byWait, nextStepText, stepText, ageText, reviewWaitText } from "./attention.js";
 
 // The groups, in the order the Crew shows them. Done is folded until clicked open.
+// An empty group is not shown, except Needs you while there are orchestrators: it then says
+// so (`empty`), so a glance tells "nothing for you" from "not looked yet".
 export const GROUPS = [
-  { key: "needs", title: "Needs you" },
+  { key: "needs", title: "Needs you", empty: "nothing for you right now 🎉" },
   { key: "else", title: "Everything else" },
   { key: "done", title: "Done", folded: true },
 ];
@@ -94,3 +96,7 @@ export const needLine = (a) => (a?.group === "needs" ? a.reasons.map((r) => r.te
 export function closableDone(rows, busy = {}) {
   return rows.filter((x) => x.a?.group === "done" && x.a.next && x.r?.dir && !x.r.away && !x.r.question && !busy[x.r.key]).map((x) => x.r);
 }
+
+// The line an empty group shows in its place, or null: only a group with an `empty` text, and
+// only while there are orchestrators (`total` rows in all; none keeps the Crew's own empty text).
+export const emptyNote = (g, list, total) => (g.empty && !list.length && total > 0 ? g.empty : null);

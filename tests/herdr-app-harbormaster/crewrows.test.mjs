@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assess, STALL_MS } from "../../herdr-app/mods/harbormaster/attention.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone } from "../../herdr-app/mods/harbormaster/crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote } from "../../herdr-app/mods/harbormaster/crewrows.js";
 
 const MIN = 60000;
 const now = Date.parse("2026-11-16T12:00:00Z");
@@ -180,4 +180,13 @@ test("Close all merged takes only Done runs whose PRs are all merged or closed, 
   assert.deepEqual(closableDone(rows, { b: { label: "Closing…" } }).map((r) => r.key), ["a"]);
   // Not Done, or Done only because it is closed: never.
   assert.deepEqual(closableDone([{ r: run(), a: at(run(), { pr: read([pr()]) }) }]), []);
+});
+
+test("an empty Needs you says nothing is for you, only while there are orchestrators", () => {
+  const needs = GROUPS[0];
+  assert.equal(emptyNote(needs, [], 2), "nothing for you right now 🎉");
+  assert.equal(emptyNote(needs, [{}], 2), null);
+  assert.equal(emptyNote(needs, [], 0), null);
+  assert.equal(emptyNote(GROUPS[1], [], 2), null);
+  assert.equal(emptyNote(GROUPS[2], [], 2), null);
 });

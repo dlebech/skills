@@ -13,7 +13,7 @@ import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf } from "./attend.js";
 import { stepText, quietText, flowState, flowSetting } from "./attention.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone } from "./crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
 
@@ -1456,6 +1456,11 @@ export function crew(view, t) {
   };
   for (const g of GROUPS) {
     const list = groups[g.key];
+    const none = emptyNote(g, list, orchestrators.length);
+    // Needs you with nothing in it: one calm line in its place, styled as a heading.
+    if (none) rows.push(h_flex().id(`crew-group-${g.key}`).flex_none().gap(5).px(4).pt(6).items_center().min_w(0).text_size(10.5)
+      .child(div().flex_none().font_semibold().text_color(t.dim).child(g.title))
+      .child(div().min_w(0).truncate().text_color(PASS(t)).child(none)));
     if (!list.length) continue;
     rows.push(groupHead(g, list.length));
     if (g.key === "done" && closing.confirm) rows.push(closing.confirm);
