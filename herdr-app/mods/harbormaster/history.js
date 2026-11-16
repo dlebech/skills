@@ -51,7 +51,7 @@ export function buildLine(run, timing, resources, closedMs, now = Date.now()) {
     ended: timing?.end ?? null,
     closed: iso(closedMs),
     status: run.statusLine ?? null,
-    tasks_merged: recordedCounts(run).merged, tasks_planned: recordedCounts(run).planned,
+    tasks_merged: recordedCounts(run).done, tasks_planned: recordedCounts(run).planned,
     wall: timing?.wall ?? null,
     critical_path: timing?.critical_path ?? null,
     categories: timing?.categories ?? null,

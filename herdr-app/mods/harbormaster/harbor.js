@@ -7,7 +7,8 @@ import { v_flex, h_flex } from "gpui-base";
 import { spaces, panes, run, setAgentOrder } from "herdr";
 import { stats, taskTone, taskCounts, prsOf, PR_TONE, isParked, resumeRun } from "./data.js";
 import { facts, orchestratorState, agentStatus, workersOf, captainOf, adrift, agentNames, focusAgent, openUrl } from "./live.js";
-import { needsYouNow, needWhy, attentionOf } from "./attend.js";
+import { needsYouNow, needWhy, attentionOf, runlessOrchs } from "./attend.js";
+import { needCount } from "./crewrows.js";
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, stateText, runName, withTip } from "./ui.js";
 
 const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
@@ -57,10 +58,10 @@ function resumeAsk(view, r) {
       .child(button(`resume-no-${r.key}`, "Cancel", "#e9e2d0", ink, () => {})));
 }
 
-function reef(view, r, ctx, x, y, w, h, n) {
+// `att`: the run's attentionOf, read once per draw by harbor().
+function reef(view, r, ctx, x, y, w, h, n, att) {
   const orch = orchestratorState(r, ctx);
   // Needs you by the overview's and the Crew's rule (attend.js), so the harbor agrees with them.
-  const att = attentionOf(r, ctx);
   const need = needsYouNow(r, ctx, att);
   const reason = needWhy(r, ctx, att);
   // Reefs are drawn for open runs and parked ones. A finished one here is docked: its
@@ -73,7 +74,7 @@ function reef(view, r, ctx, x, y, w, h, n) {
   const asking = view.confirm?.key === r.key && view.confirm.action === "resume";
   const workers = workersOf(r.terminal, ctx);
   const prs = prsOf(r) ?? [];
-  const { merged, planned } = taskCounts(r);
+  const { done, planned } = taskCounts(r);
   const big = Math.min(104, Math.max(70, w * 0.26));
   const small = Math.min(74, Math.max(50, w * 0.17));
   const cols = Math.max(1, Math.floor((w - big - 40) / (small + 24)));
@@ -91,11 +92,11 @@ function reef(view, r, ctx, x, y, w, h, n) {
     .bg(need ? "#f6c28b" : rope).border(3).border_color(need ? "#c1562c" : "#a07a3f").text_color("#4a3418").opacity(docked ? 0.8 : 1)
     .child(withTip(div().id(`sign-${r.key}`).truncate().text_size(13).font_weight(800), runName(r.branch, r.topic), `${OCTOPUS} ${r.type ? `${r.type} · ` : ""}`))
     .child(div().truncate().text_size(10.5).font_weight(600).child(`${r.repo}${r.machine ? ` · ${r.machine}` : ""} · ${parked ? "PARKED · CLICK TO RESUME" : need ? "NEEDS YOU" : docked ? "FINISHED · PR UP" : orch === "gone" ? "GONE · CLICK TO RESUME" : r.phase.toUpperCase()}`));
-  // Buoys on a line along the bottom of the reef: one per task, lit as it is done (merged into the run's branch).
+  // Buoys on a line along the bottom of the reef: one per task, lit as it is done.
   const buoys = h_flex().absolute().left(14).bottom(8).gap(8).items_end()
     .children(Array.from({ length: planned }, (_, i) => {
       const task = r.tasks[i];
-      const st = task?.state ?? (i < merged ? "merged" : "planned");
+      const st = task?.state ?? (i < done ? "merged" : "planned");
       const tone = taskTone(st);
       const c = tone === "done" ? "#3fa66b" : tone === "blocked" ? "#e2553f" : tone ? brass : "#c9cfd4";
       return v_flex().id(`buoy-${r.key}-${i}`).items_center().tooltip(task ? `${task.id} ${task.name}: ${stateText(task.state)}` : `task ${i + 1}: ${stateText(st)}`)
@@ -104,7 +105,7 @@ function reef(view, r, ctx, x, y, w, h, n) {
           .when(tone === "working" || tone === "blocked", (el) => el.loop("opacity", { from: 0.45, to: 1, period: 1300 })))
         .child(div().w(2).h(14).bg(deepNavy));
     }))
-    .when(planned > 0, (el) => el.child(div().pl(4).pb(1).px(5).rounded(4).bg("#173450aa").text_size(10.5).font_weight(700).text_color(sail).child(`${merged}/${planned} done`)));
+    .when(planned > 0, (el) => el.child(div().pl(4).pb(1).px(5).rounded(4).bg("#173450aa").text_size(10.5).font_weight(700).text_color(sail).child(`${done}/${planned} done`)));
   const flags = h_flex().absolute().right(12).top(8).gap(6)
     .children(prs.map((p, i) => {
       const c = FLAG[PR_TONE[p.state] ?? "dim"];
@@ -144,7 +145,13 @@ export function harbor(view) {
   const s = stats(view.runs, ctx);
   // Every open run: those still working, then finished ones until their tab is closed,
   // then parked ones, set aside for later.
-  const runs = [...s.shown, ...s.parked], need = runs.filter((r) => needsYouNow(r, ctx));
+  const runs = [...s.shown, ...s.parked];
+  // One attention per run per draw: the harbor redraws on its animation timer.
+  const atts = new Map(runs.map((r) => [r, attentionOf(r, ctx)]));
+  const need = runs.filter((r) => needsYouNow(r, ctx, atts.get(r)));
+  // The header counts as the overview's and the Crew's Needs you do (crewrows.js needCount): the
+  // runs, orchestrators without a run blocked on a dialog, and the captain's open decisions.
+  const needs = needCount(need, runlessOrchs(view.runs, ctx), view.decisions?.length ?? 0);
   const cap = captainOf(ctx);
   // What the captain calls out: its own open decisions, then each run that needs you.
   const calls = [...(view.decisions?.length ? [plural(view.decisions.length, "decision")] : []), ...need.map((r) => r.branch)];
@@ -190,14 +197,14 @@ export function harbor(view) {
     .child(h_flex().absolute().right(130).top(20).gap(16).text_size(12).font_weight(600).text_color(ink)
       .child(div().child(plural(s.live.length, "run")))
       .when(s.docked.length > 0, (el) => el.child(div().child(`${s.docked.length} finished`)))
-      .child(div().text_color(need.length ? "#a3301f" : ink).child(`${need.length} need you`))
+      .child(div().text_color(needs ? "#a3301f" : ink).child(`${needs} need you`))
       .child(div().child(`${plural(s.open.length, "flag")} up`)))
     .child(anchor)
     .child(capSign)
     .child(boat)
     .when(runs.length === 0, (el) => el.child(div().absolute().left(x0 + 40).top(top + 60).px(14).py(8).rounded(8).bg("#fbf7eecc").text_size(13).text_color(ink)
       .child("Calm waters. Ask the captain to start a run and a reef shows up here.")))
-    .children(runs.map((r, i) => reef(view, r, ctx, start + i * (rw + gap), top, rw, bottom - top, i)))
+    .children(runs.map((r, i) => reef(view, r, ctx, start + i * (rw + gap), top, rw, bottom - top, i, atts.get(r))))
     .children(drifters.slice(0, 6).map((a, i) => critter(view, {
       kind: "crab", id: a.address, i: 50 + i, status: a.status, w: 54, label: crabNames[i], program: a.program,
       x: W - 150 + (i % 2) * 70, y: top + 10 + Math.floor(i / 2) * 82, onClick: () => focusAgent(a.address),

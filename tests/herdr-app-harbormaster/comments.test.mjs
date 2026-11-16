@@ -225,7 +225,7 @@ test("the message: the PR and mode first, every comment with its thread, then wh
   assert.equal(defaultMode(undefined), "ask");
 });
 
-test("asked… holds while the message is unread, or until the PR's comments or the run's status change", () => {
+test("asked… holds while the message is unread, or until the PR's open comments change", () => {
   assert.deepEqual(pendingComments("set autonomy to L2\naddress comments on https://x/pull/1: ask\nwhat is blocking? y"), ["https://x/pull/1"]);
   assert.deepEqual(pendingComments(null), []);
   const p = pr(1, "APPROVED", some(2));
@@ -233,7 +233,8 @@ test("asked… holds while the message is unread, or until the PR's comments or 
   const asked = { sig: commentsSig(r, p) };
   assert.equal(commentsAsked(r, p, asked), true);
   assert.equal(commentsAsked(r, { ...p, comments: some(1) }, asked), false);
-  assert.equal(commentsAsked({ ...r, statusLine: "running" }, p, asked), false);
+  // The orchestrator read the ask and is working on it: its status changed, the comments did not.
+  assert.equal(commentsAsked({ ...r, statusLine: "t3 addressing comments" }, p, asked), true);
   assert.equal(commentsAsked({ ...r, commentsAsked: [p.url] }, p, null), true);
   assert.equal(commentsAsked(r, p, null), false);
 });

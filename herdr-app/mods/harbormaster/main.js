@@ -22,6 +22,7 @@ import { harbor, rail, paneHeader } from "./harbor.js";
 import { statsView } from "./stats.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
 import { observeTelling } from "./telling.js";
+import { parseCommand, runNamed } from "./commands.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
 const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"]);
@@ -33,7 +34,7 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"
 //   show-stats[:<branch | run dir>]                         open the Stats view (a run: focused on it)
 //   show-overview, show-crew                               open the runs overview, or the Crew block
 //   close-popup                                            close it
-//   open-run:<run key>                                     a toast's click (telling.js) for a run whose
+//   open-run:key=<run key>                                 a toast's click (telling.js) for a run whose
 //                                                         orchestrator is gone: its card, kept open until closed
 // Every shown Harbormaster copy hears a command, so the popup's id and time are in shared state and
 // a copy that sees the same command opened a moment ago leaves it alone (and one that lost a race closes its own).
@@ -61,7 +62,7 @@ function showPopup(view, arg, keep = false) {
   // "<run> details" opens it with its question's Details unfolded, "<run> proof" with its Proof
   // list open and its first pending row unfolded, for a shot without a click.
   const [, name, details] = /^(.*?)(?:(?:^|\s+)(details|proof))?$/.exec(arg) ?? [null, arg, null];
-  const r = name ? view.runs.find((x) => [x.branch, x.dir, x.key, x.localTerminal].includes(name))
+  const r = name ? runNamed(view.runs, name)
     : [...pick].sort(newestFirst)[0];
   if (!r) { console.log(`harbormaster.show-run: no run matches "${arg}"`); return; }
   closePopup();
@@ -103,13 +104,13 @@ async function listen(view, cx) {
     const c = String(await nextCommand());
     // A throw here would end the loop and this copy would never hear a command again.
     try {
-      const [, name, arg] = /^([\w-]+)[:\s]*(.*)$/s.exec(c.trim()) ?? [];
-      if (name === "show-run") showPopup(view, arg?.trim() ?? "");
-      else if (name === "show-stats") showStats(view, arg?.trim() ?? "");
+      const { name, arg } = parseCommand(c);
+      if (name === "show-run") showPopup(view, arg);
+      else if (name === "show-stats") showStats(view, arg);
       else if (name === "show-overview") showView("overview", "cards", 560, 900);
       else if (name === "show-crew") showView("crew", "crew", 360, 640);
       else if (name === "close-popup") closePopup();
-      else if (name === "open-run") showPopup(view, arg?.trim() ?? "", true);
+      else if (name === "open-run") showPopup(view, arg, true);
       cx.notify();
     } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }
   }
@@ -191,14 +192,15 @@ export default class Harbormaster extends View {
         const contexts = await loadContexts(crewAddresses(facts()));
         if (JSON.stringify(contexts) !== JSON.stringify(this.contexts)) { this.contexts = contexts; cx.notify(); }
       }
-      // PRs land in shared state, which re-renders every copy by itself. A parked run's PRs are
-      // read as rarely as a closed run's: nobody works on them, they only show what they wait on.
       const ctx = facts();
-      // Toasts and the decisions seen: from the copies that poll for the whole window only.
+      // Toasts and the decisions seen: from the copies that poll for the whole window only (the
+      // Crew block, the overview, the sea layout's harbor; the store's claim keeps it to one toast).
       const role = props()?.role;
-      if ((role === "crew" || role === undefined || role === "cards") && !props()?.overlay && !checking()) {
+      if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) {
         try { observeTelling(runs, ctx); } catch (e) { console.log(`harbormaster: telling failed: ${e?.message ?? e}`); }
       }
+      // PRs land in shared state, which re-renders every copy by itself. A parked run's PRs are
+      // read as rarely as a closed run's: nobody works on them, they only show what they wait on.
       for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});
     });
   }

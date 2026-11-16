@@ -20,7 +20,7 @@ import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, proveRequest, withAcceptance, resultLine } from "./proof.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
-import { checkKind, ciTimes, prTtl } from "./attention.js";
+import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
 import { blockingRequest, blockingPending, ciRequest } from "./blocking.js";
 import { commentsArgs, commentSummary, commentsRequest, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
@@ -66,9 +66,9 @@ const SCRIPT = [
   `  for m in "$d"/inbox/*.message; do [ -e "$m" ] && head -n 1 "$m"; done | grep -a -E '${NOT_ANSWERS}' | tail -c 8000; printf '\\037'`,
   // The user's acceptances of proof as it is (Accept on a Proof row), capped.
   '  head -c 20000 "$d/proof-accepted.json" 2>/dev/null; printf \'\\037\'',
-  // The run's reports (shared/*report*.md or review*.md, as a review or exploration leaves),
-  // for a finished run's Needs-you box; never a task's (t3-report.md), which a run has many of.
-  '  ls "$d/shared" 2>/dev/null | grep -iE "(report.*|^review.*)\\.md$" | grep -viE "^t[0-9]+[-_.]" | head -5; printf \'\\037\'',
+  // shared/'s Markdown file names, capped, for a finished run's Needs-you box: needaction.js
+  // runReports picks the run's reports among them (one rule, so the two never drift apart).
+  '  ls "$d/shared" 2>/dev/null | grep -iE "\\.md$" | head -200; printf \'\\037\'',
   // The run's CPU and memory totals so far (resources.js adds each sample to them).
   '  head -c 1000000 "$d/.resources.json" 2>/dev/null',
   "done",
@@ -286,7 +286,7 @@ function parseRun(machine, chunk) {
       accepted: parseAccepted(acceptedFile),
       asks: pendingProofs(requests),
     },
-    // Its reports in shared/ (file names, as ls sorts them).
+    // shared/'s Markdown files (names, as ls sorts them); needaction.js runReports picks its reports.
     reports: (reportNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
     // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
     prefix: /^Prefix:\s*`?([\w-]+)/m.exec(plan ?? "")?.[1]?.toLowerCase() ?? null,
@@ -327,16 +327,16 @@ export const isBudgetQuestion = (it) => it.kind === "budget" || /^Over the token
 
 // A budget item for the queue, for a run over budget with no question.md (the orchestrator
 // is gone, or has not asked yet): the same three options, recommended the way the
-// orchestrator's own question is: Continue when most tasks are merged, else Compact.
+// orchestrator's own question is: Continue when most tasks are done, else Compact.
 function budgetItem(r, tokenText) {
-  const { merged, planned } = taskCounts(r);
-  const mostlyDone = planned > 0 && merged / planned >= 0.5;
+  const { done, planned } = taskCounts(r);
+  const mostlyDone = planned > 0 && done / planned >= 0.5;
   const top = r.tokens.byAgent.slice(0, 3).map((a) => `${a.name} ${tokenText(a.total)}`).join(", ");
   return {
     id: `need-${r.key}`, kind: "budget", title: `Over budget: ${tokenText(r.tokens.total)} of ${tokenText(r.budget)} tokens`,
     options: BUDGET_OPTIONS, recommended: mostlyDone ? 0 : 1,
-    why: mostlyDone ? "most tasks are merged" : "much work is left; a smaller context is cheaper",
-    evidence: `${tokenText(r.tokens.total)} used${planned ? `, ${merged}/${planned} tasks done` : ""}${top ? `; largest: ${top}` : ""}`,
+    why: mostlyDone ? "most tasks are done" : "much work is left; a smaller context is cheaper",
+    evidence: `${tokenText(r.tokens.total)} used${planned ? `, ${done}/${planned} tasks done` : ""}${top ? `; largest: ${top}` : ""}`,
     risk: "Continue keeps spending; Stop parks the run until you resume it; Compact drops the orchestrator's context, which it re-reads from the run files.",
     blocks: "nothing is blocked: it is a soft budget", since: r.updated ?? r.started, run: r, answered: r.unhandled > 0,
   };
@@ -496,7 +496,7 @@ export function shownStage(task, agents) {
   return agents[0]?.stage ?? stage;
 }
 
-// How many tasks a run has done (`merged`) and planned: one count for the overview's header, the
+// How many tasks a run has done (`done`) and planned: one count for the overview's header, the
 // cards, the pane and a confirm's "N of M tasks done" alike. Done is plan.md's tasks whose state
 // reads done (taskTone), as the task strip shows them; status.json's `merged` only when plan.md
 // lists no tasks, since an orchestrator updates it less often (one said 7 merged of 14 done).
@@ -504,15 +504,16 @@ export function shownStage(task, agents) {
 export function taskCounts(run) {
   const tasks = run.tasks ?? [];
   return {
-    merged: tasks.length ? tasks.filter((task) => taskTone(task.state) === "done").length : run.merged ?? 0,
+    done: tasks.length ? tasks.filter((task) => taskTone(task.state) === "done").length : run.merged ?? 0,
     planned: Math.max(run.planned ?? 0, tasks.length),
   };
 }
 
 // taskCounts for a record (the stats view, the history line), so a run's row says what its card
-// said; nulls when neither plan.md nor status.json says anything.
+// said; nulls when neither plan.md nor status.json says anything. The record keeps the field's
+// old name, tasks_merged (run-files.md says what it counts since when).
 export function recordedCounts(run) {
-  if (!run.tasks?.length && run.merged == null && run.planned == null) return { merged: null, planned: null };
+  if (!run.tasks?.length && run.merged == null && run.planned == null) return { done: null, planned: null };
   return taskCounts(run);
 }
 
@@ -528,7 +529,6 @@ const PR_STALE = 5 * 60000;
 // A PR's state → a theme tone; the harbor maps the same tones to its own colors. An open PR is
 // muted: no colour means fine (see overview.js AMBER); what it waits on has a colour of its own.
 export const PR_TONE = { OPEN: "muted", DRAFT: "dim", MERGED: "done", CLOSED: "blocked" };
-const isOpen = (pr) => pr.state === "OPEN" || pr.state === "DRAFT";
 
 function checks(rollup) {
   const c = { pass: 0, fail: 0, pending: 0 };
@@ -744,9 +744,9 @@ export function stats(runs, ctx) {
   const docked = runs.filter((r) => r.phase === "finished" && !r.away && !isClosed(r, ctx));
   const parked = runs.filter(isParked);
   const shown = [...live, ...docked];
-  const open = shown.flatMap((r) => prsOf(r) ?? []).filter(isOpen);
+  const open = shown.flatMap((r) => prsOf(r) ?? []).filter(isOpenPr);
   // Parked runs' open PRs, apart: the header says them beside the open ones ("+4 parked").
-  const parkedOpen = parked.map((r) => (prsOf(r) ?? []).filter(isOpen).length);
+  const parkedOpen = parked.map((r) => (prsOf(r) ?? []).filter(isOpenPr).length);
   const tasks = live.map(taskCounts);
   return {
     live,
@@ -758,7 +758,7 @@ export function stats(runs, ctx) {
     parkedOpen: parkedOpen.reduce((n, x) => n + x, 0),
     parkedWithOpen: parkedOpen.filter(Boolean).length,
     failing: open.filter((p) => p.checks?.fail).length,
-    merged: tasks.reduce((n, c) => n + c.merged, 0),
+    done: tasks.reduce((n, c) => n + c.done, 0),
     planned: tasks.reduce((n, c) => n + c.planned, 0),
     workers: shown.reduce((n, r) => n + workersOf(r.terminal, ctx).length, 0),
   };

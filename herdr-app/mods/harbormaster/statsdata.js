@@ -94,7 +94,7 @@ export function summaryOf(run, timing, res) {
     run: run.dir, folder: run.folder || null, branch: run.branch, type: run.type ?? null, topic: run.topic ?? null,
     started: timing?.start ?? (run.started ? new Date(run.started).toISOString() : null), ended: timing?.end ?? null,
     closed: run.away?.how === "closed" && run.away.at ? new Date(run.away.at).toISOString() : null,
-    status: run.statusLine ?? null, tasks_merged: recordedCounts(run).merged, tasks_planned: recordedCounts(run).planned,
+    status: run.statusLine ?? null, tasks_merged: recordedCounts(run).done, tasks_planned: recordedCounts(run).planned,
     wall: num(timing?.wall), critical_path: cats(timing?.critical_path), categories: cats(timing?.categories),
     tasks, agents: all, tokens: tokensOf(run.tokens) ?? tokensOf(timing?.tokens), resources: resourcesOfLine(res), timed: Boolean(timing),
   };

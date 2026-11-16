@@ -15,6 +15,7 @@ import { cachedRuns } from "./data.js";
 import { attentionOf } from "./attend.js";
 import { orchestratorState } from "./live.js";
 import { runName } from "./ui.js";
+import { openRunAction } from "./commands.js";
 import { toastParts, nextToasts, toastText, nextSeen, latestDecision } from "./tell.js";
 
 const NOTIFIED_KEY = "harbormaster.notified";
@@ -32,7 +33,7 @@ export const setToastsOn = (on) => setShared(TOASTS_KEY, on ? null : false);
 function post(run, parts, ctx) {
   const name = runName(run.branch, run.topic).title + (run.machine ? ` (${run.machine})` : "");
   const live = run.terminal && orchestratorState(run, ctx) !== "gone";
-  const action = live ? { name: "agent.focus", args: { terminal: run.terminal } } : { name: `harbormaster.open-run:${run.key}`, args: {} };
+  const action = live ? { name: "agent.focus", args: { terminal: run.terminal } } : { name: openRunAction(run), args: {} };
   try { notify({ ...toastText(name, parts), level: "error", action }); } catch (e) { console.log(`harbormaster: toast failed: ${e?.message ?? e}`); }
 }
 

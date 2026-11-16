@@ -16,7 +16,8 @@ export const TOAST_HOLD = 60000;
 // is a new part, and the same reason read again is not. PR parts start with "pr/".
 //   known: false when nothing can be said (its files could not be read): the run is skipped.
 //   prKnown: false when its PRs could not be read (can't tell): its PR parts are carried over.
-// Stalled is left out: it is a nudge (amber), not a decision, a long build or test run trips it,
+// A dialog is left out: Herdr itself toasts when an agent is blocked on one, so a second toast a
+// minute later would tell the same thing twice. Stalled is left out: it is a nudge (amber), not a decision, a long build or test run trips it,
 // and the Crew shows it; a toast every time an agent works quietly for 30 min would be noise.
 export function toastParts(run, att) {
   if (!run || !att || (att.group === "cant" && !att.reasons.some((r) => r.key !== "cant-tell"))) return { known: false, prKnown: false, parts: [] };
@@ -25,7 +26,8 @@ export function toastParts(run, att) {
   const nums = (prs) => (prs ?? []).map((p) => (p.number ? `#${p.number}` : null)).filter(Boolean);
   const parts = [];
   for (const r of att.reasons) {
-    if (r.key === "question") parts.push({ id: `question:${run.askedAt ?? r.text}`, text: r.text === "blocked on a dialog" ? "Blocked on a dialog" : `Asks you: ${r.text}` });
+    // A dialog is not told: Herdr posts its own toast when an agent needs you.
+    if (r.key === "question") { if (r.text !== "blocked on a dialog") parts.push({ id: `question:${run.askedAt ?? r.text}`, text: `Asks you: ${r.text}` }); }
     else if (r.key === "gone") parts.push({ id: "gone", text: "Its orchestrator is gone: resume it" });
     else if (r.key === "finished") parts.push({ id: "finished", text: "Finished — read its report and close it" });
     else if (r.key === "red-ci") parts.push({ id: `pr/red-ci:${r.text}`, text: r.text.replace(/^red CI/, "Red CI") });
@@ -123,54 +125,6 @@ export function nextSeen(store, runs, { failed = [] } = {}) {
     if (!listed.has(key) && !down.has(key.slice(0, key.indexOf(":")))) { delete next[key]; changed = true; }
   }
   return changed ? next : store;
-}
-
-// ---- a card's PR facts ----
-
-// A PR's state as a word ("Open", "Draft", "Merged"), or null when it could not be read.
-export const prStateText = (pr) => (pr.state === "UNKNOWN" ? null : pr.state === "DRAFT" ? "Draft" : pr.state[0] + pr.state.slice(1).toLowerCase());
-
-// A PR's review as [text, tone]: who approved or asked for changes, when we know.
-export function reviewText(pr) {
-  const who = (list) => (list?.length ? ` by ${list.join(", ")}` : "");
-  if (pr.review === "CHANGES_REQUESTED") return [`Changes requested${who(pr.changesBy)}`, "blocked"];
-  if (pr.review === "APPROVED") return [`Approved${who(pr.approvedBy)}`, "done"];
-  if (pr.review === "REVIEW_REQUIRED") return ["Review needed", "dim"];
-  return null;
-}
-
-// A PR's checks as {text, tone}, or null without any. Failing checks are red ("act") on a live
-// run, dim on a parked or closed one (`away`): it never needs you, so red would ask for nothing.
-function checksFact(pr, away) {
-  const c = pr.checks ?? {};
-  if (c.fail) return { text: `checks ✗ ${c.fail} failing`, tone: away ? "dim" : "blocked" };
-  if (c.pending) return { text: `checks … ${c.pending} running`, tone: "dim" };
-  if (c.pass) return { text: "checks ✓", tone: "pass" };
-  return null;
-}
-
-// The facts line's PR part: [{kind: "pr", pr, i, text} | {kind: "prs", prs, text} | {kind: "text",
-// text, tone, bold?}], tone a theme colour name or "pass" (green). Each PR is "PR #42 open", then
-// its checks, "one-way door" (`oneWay(danger)` says which dangers are) and its review. Several
-// PRs that all say the same (state, checks and review, and no one-way door) are said once:
-// "2 PRs open · checks ✓ · Approved by anna", rather than the same three facts per PR.
-export function prFacts(prs, { away = false, oneWay = () => false } = {}) {
-  const per = (prs ?? []).map((pr, i) => {
-    const state = prStateText(pr);
-    const review = reviewText(pr);
-    return {
-      pr, i, state,
-      head: `${pr.number ? `PR #${pr.number}` : "PR"}${state ? ` ${state.toLowerCase()}` : ""}`,
-      rest: [checksFact(pr, away), pr.danger && oneWay(pr.danger) ? { text: "one-way door", tone: "blocked", bold: true } : null,
-        review ? { text: review[0], tone: review[1] === "done" ? "pass" : review[1] } : null].filter(Boolean),
-    };
-  });
-  const sig = (x) => [x.state, ...x.rest.map((f) => f.text)].join("\n");
-  const alike = per.length > 1 && per.every((x) => x.state && sig(x) === sig(per[0])) && !per[0].rest.some((f) => f.text === "one-way door");
-  if (alike) {
-    return [{ kind: "prs", prs: per.map((x) => x.pr), text: `${per.length} PRs ${per[0].state.toLowerCase()}` }, ...per[0].rest.map((f) => ({ kind: "text", ...f }))];
-  }
-  return per.flatMap((x) => [{ kind: "pr", pr: x.pr, i: x.i, text: x.head }, ...x.rest.map((f) => ({ kind: "text", ...f }))]);
 }
 
 // ---- parked runs ----

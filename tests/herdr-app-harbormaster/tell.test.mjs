@@ -24,6 +24,14 @@ const seenOf = (r, a) => ({ key: r.key, ...toastParts(r, a) });
 
 // ---- toastParts ----
 
+test("toastParts: a dialog is not told, since Herdr posts its own toast for it", () => {
+  const r = run();
+  const a = att(r, { orch: "blocked" });
+  assert.equal(a.group, "needs");
+  assert.ok(a.reasons.some((x) => x.text === "blocked on a dialog"));
+  assert.deepEqual(toastParts(r, a).parts.filter((x) => x.id.startsWith("question")), []);
+});
+
 test("toastParts: a question, an approval to merge and red CI each become a part with its own id", () => {
   const q = run({ question: "q", ask: { title: "Which groups?" }, askedAt: ago(5), phase: "waiting", statusLine: "waiting for user: Which groups?" });
   const p = toastParts(q, att(q, { orch: "idle" }));

@@ -2,7 +2,7 @@
 // (data.js), its PR read, its live agents, and the times and settings tracking.js keeps.
 
 import { prEntryOf, taskAgents, shownStage, isClosed, isParked, filesFresh } from "./data.js";
-import { orchestratorState, agentStatus, workersOf, needReason } from "./live.js";
+import { orchestratorState, orchestratorsOf, agentStatus, workersOf, needReason } from "./live.js";
 import { assess, prRead, reviewFlow, stalled, ciState } from "./attention.js";
 import { proofTasks, proofCounts, gatheringStage } from "./proof.js";
 import { stepSince, stepAges, lastActivity, ciUsualOf, reviewFlows } from "./tracking.js";
@@ -37,15 +37,29 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
 
 // Whether a proof task failed, counted as the box counts it (overview.js needItemsOf: proof.js's
 // rows, a task still under way pending), so the pill and the Crew never say merge over it.
+// Kept per run read (a new read is a new object) and which tasks are still under way, since
+// every poll and the harbor's animation ask again and proof.md can be long.
+const proofFailedSeen = new WeakMap();
 export function proofFailed(run, stages = []) {
   if (!run.proof?.md) return false;
+  const under = run.tasks.map((_, i) => (gatheringStage(stages[i]) ? 1 : 0)).join("");
+  const seen = proofFailedSeen.get(run);
+  if (seen?.under === under) return seen.failed;
   const gathering = (id) => {
     const i = run.tasks.findIndex((x) => x.id === id);
-    return i >= 0 && gatheringStage(stages[i]);
+    return i >= 0 && under[i] === "1";
   };
   const finished = run.phase === "finished" || Boolean(run.away);
-  return proofCounts(proofTasks(run.tasks, run.proof.md, run.proof.files, { accepted: run.proof.accepted, gathering, finished })).fail > 0;
+  const failed = proofCounts(proofTasks(run.tasks, run.proof.md, run.proof.files, { accepted: run.proof.accepted, gathering, finished })).fail > 0;
+  proofFailedSeen.set(run, { under, failed });
+  return failed;
 }
+
+// The orchestrators without a run directory among `runs`, as the Crew judges them ({term, r:
+// null, a}): one blocked on a dialog needs you, though no view has a run for it
+// (crewrows.js needCount counts it).
+export const runlessOrchs = (runs, ctx) => orchestratorsOf(ctx).filter((term) => !runs.some((r) => r.terminal === term.address))
+  .map((term) => ({ term, r: null, a: attentionOf(null, ctx, Date.now(), term) }));
 
 // Whether a run needs you now, one rule for every view that counts it (the overview's header
 // and order, its cards and panes, the harbor, the Crew): exactly the Crew's Needs you group (a

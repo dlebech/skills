@@ -6,7 +6,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assess, nextStepText, ageText } from "../../herdr-app/mods/harbormaster/attention.js";
 import { rowLead, badgeOf, pillReason } from "../../herdr-app/mods/harbormaster/crewrows.js";
-import { parkedLabel, prFacts, toastParts } from "../../herdr-app/mods/harbormaster/tell.js";
+import { parkedLabel, toastParts } from "../../herdr-app/mods/harbormaster/tell.js";
+import { prFacts } from "../../herdr-app/mods/harbormaster/prfacts.js";
 import { proofFailed } from "../../herdr-app/mods/harbormaster/attend.js";
 import { summaryOf } from "../../herdr-app/mods/harbormaster/statsdata.js";
 import { buildLine } from "../../herdr-app/mods/harbormaster/history.js";
@@ -130,12 +131,12 @@ test("tasks done count plan.md's done tasks, status.json's merged only without a
   const tasks = [...Array(13)].map((_, i) => ({ id: `t${i + 1}`, state: i % 2 ? "done" : "merged" })).concat([{ id: "t14", state: "implementing" }]);
   // status.json says 7 merged of 9 planned; plan.md lists 14, 13 of them done.
   const r = run({ phase: "running", tasks, merged: 7, planned: 9 });
-  assert.deepEqual(taskCounts(r), { merged: 13, planned: 14 });
-  assert.deepEqual(taskCounts(run({ tasks: [], merged: 3, planned: 5 })), { merged: 3, planned: 5 });
-  assert.deepEqual(taskCounts(run({ tasks: [], merged: null, planned: null })), { merged: 0, planned: 0 });
+  assert.deepEqual(taskCounts(r), { done: 13, planned: 14 });
+  assert.deepEqual(taskCounts(run({ tasks: [], merged: 3, planned: 5 })), { done: 3, planned: 5 });
+  assert.deepEqual(taskCounts(run({ tasks: [], merged: null, planned: null })), { done: 0, planned: 0 });
   // The overview header sums the same counts.
   const s = stats([r], { agents: [], terminals: [], spaces: [], panes: [] });
-  assert.equal(`${s.merged}/${s.planned}`, "13/14");
+  assert.equal(`${s.done}/${s.planned}`, "13/14");
 });
 
 test("PRs that all say the same are said once; any difference keeps them apart", () => {

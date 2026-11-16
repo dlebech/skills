@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assess } from "../../herdr-app/mods/harbormaster/attention.js";
-import { needActions, doLine, proofText, runReports, MAX_OPEN } from "../../herdr-app/mods/harbormaster/needaction.js";
+import { needActions, doLine, proofText, runReports, MAX_OPEN, ownAddressRows } from "../../herdr-app/mods/harbormaster/needaction.js";
 import { firstFailing, prSummary } from "../../herdr-app/mods/harbormaster/data.js";
 import { ciRequest, BLOCKING } from "../../herdr-app/mods/harbormaster/blocking.js";
 
@@ -253,4 +253,21 @@ test("a failed proof task is named and read before any merge", () => {
   assert.equal(two.line, "Proof: t2 polish and 1 more failed — read it before merging #1");
   const [draft] = items(run(), [pr({ number: 1, state: "DRAFT" })], { flow: "self" }, { proof });
   assert.equal(draft.line, "Proof: t2 polish failed — read it before marking #1 ready");
+});
+
+test("after an ask, a working run offers no Address buttons anywhere: not in a box, not on its card", () => {
+  const p = pr({ approvedBy: ["anna"], review: "APPROVED", comments: said(15) });
+  // In Needs you: the box carries them, so the card and pane do not repeat them.
+  const a = att(here(), [p], { flow: "peer" });
+  assert.equal(a.group, "needs");
+  const box = needActions(a, { run: here(), prs: [p], now });
+  assert.equal(ownAddressRows(true, box), false);
+  // Its orchestrator read the ask and started a fix agent: the run is working, out of Needs you.
+  const busy = here({ statusLine: "t3 addressing comments" });
+  const w = att(busy, [p], { flow: "peer", working: true });
+  assert.notEqual(w.group, "needs");
+  assert.deepEqual(needActions(w, { run: busy, prs: [p], now }), []);
+  assert.equal(ownAddressRows(false, []), false);
+  // In Needs you for another reason, with no Address in its box: the card's own rows.
+  assert.equal(ownAddressRows(true, [{ actions: [{ kind: "open" }] }]), true);
 });

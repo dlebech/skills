@@ -10,6 +10,7 @@
 
 import { needsYou, needReason } from "./live.js";
 import { stepComments, commentsText } from "./comments.js";
+import { plural, andList } from "./words.js";
 
 // No new progress line, no change in the run's agents and no new terminal output for this
 // long, and the run has stalled.
@@ -142,8 +143,6 @@ export const stepTextOf = (att, opts = {}) => nextStepText(att?.next, {
   red: Boolean(att?.reasons?.some((r) => r.key === "red-ci")), failed: Boolean(att?.proofFailed), ...opts,
 });
 
-// "#1, #2 and #3"
-const andList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] ?? "");
 
 // A review wait in full, for a hover: "Waiting for anna to review PR #1799 and #1372", or null
 // when the step is not a review wait.
@@ -278,8 +277,6 @@ export function stepOf(run, { prs = [], stages = [], since = null, ages = null }
   if (run?.progress) return { text: run.progress, since: ages?.[progressKey(run.progress)] ?? since, more: 0 };
   return { text: run?.statusLine || run?.phase || "", since, more: 0 };
 }
-
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 // "t4 implementing 1h05m · +2 tasks" (a task's verb reads its age as how long), "CI on #42 · 34m",
 // "writing docs · 3m".

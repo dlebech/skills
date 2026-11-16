@@ -12,15 +12,16 @@ import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, segmentLoo
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
-import { attentionOf, needsYouNow as needsYouOf } from "./attend.js";
+import { attentionOf, needsYouNow as needsYouOf, runlessOrchs } from "./attend.js";
 import { stepText, quietText, flowState, flowSetting, runDot } from "./attention.js";
-import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText, reviewText, prStateText, prFacts } from "./tell.js";
+import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } from "./tell.js";
+import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
 import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, crewEntries, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
 import { commentsAsked, commentsSig, defaultMode, commentLines, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
-import { needActions, doLine } from "./needaction.js";
+import { needActions, doLine, ownAddressRows } from "./needaction.js";
 
 // How each runPhase() reads on a card. Running is muted, not the working colour: colour means
 // something to look at (see AMBER), and the run's spinning dot already says it works.
@@ -162,7 +163,7 @@ function taskStrip(t, r, counts, stages, names = true) {
       const p = proof[i] ?? null;
       const look = segmentLook(p?.tone);
       const color = look.color === "blocked" ? t.blocked : look.color === "amber" ? AMBER(t)
-        : task ? taskColor(t, task, stages[i].stage) : i < counts.merged ? t.done : t.border;
+        : task ? taskColor(t, task, stages[i].stage) : i < counts.done ? t.done : t.border;
       return div().id(`seg-${r.key}-${i}`).flex_1().h_full().rounded(3).bg(color)
         .when(look.mark === "pass", (el) => el.border_b(2).border_color(PASS(t)))
         .when(Boolean(task), (el) => el.tooltip([[task.id, task.name].filter(Boolean).join(" "), stageText(task, stages[i].stage), p?.text].filter(Boolean).join(" · ")))
@@ -175,7 +176,7 @@ function taskStrip(t, r, counts, stages, names = true) {
 // "21/22 done · 1 in review": the tasks done (data.js taskCounts, as the header counts them),
 // then those under way by stage.
 function tasksText(r, counts, stages) {
-  return [`${counts.merged}/${counts.planned} done`, stageSummary(stages)].filter(Boolean).join(" · ");
+  return [`${counts.done}/${counts.planned} done`, stageSummary(stages)].filter(Boolean).join(" · ");
 }
 
 // What a card offers: Park and Close while its orchestrator runs, finished or not (a
@@ -197,7 +198,7 @@ const ACTION = {
 
 // The question a card asks before acting, naming what is left.
 function confirmText(r, action, counts) {
-  const left = [counts.planned ? `${counts.merged} of ${counts.planned} tasks done` : null,
+  const left = [counts.planned ? `${counts.done} of ${counts.planned} tasks done` : null,
     r.prs.length ? plural(r.prs.length, "PR") + " stay open" : null].filter(Boolean).join(", ");
   if (action === "park") return `Park ${r.branch}? Its orchestrator and agents end and its integration worktree's space closes (the worktree stays); the run waits here until you resume it.${left ? ` ${left}.` : ""}`;
   const clean = "Its orchestrator pushes what isn't pushed, deletes the worktrees and closes its tab; branches and PRs stay.";
@@ -383,8 +384,8 @@ const MODE_TIP = {
 // Address comments, on a run's card and pane: for each of its approved or changes-requested PRs
 // with open review comments, "Address N comments on #42" and two buttons, Ask me and Handle them,
 // the run's autonomy's default (comments.js defaultMode) highlighted; a click writes an inbox
-// message for that PR (data.js askComments) and the row reads "asked…" until the PR's comments
-// or the run's status change, or while the message is unread. Null when there are none, the run
+// message for that PR (data.js askComments) and the row reads "asked…" until the PR's open
+// comments change, or while the message is unread. Null when there are none, the run
 // is put away, or its orchestrator is not known here; and while the run has an open question
 // (an Ask me's question is answered in its box, and a second ask would only queue a duplicate).
 function commentsAction(view, t, r, att, id) {
@@ -406,18 +407,18 @@ function commentsAction(view, t, r, att, id) {
 }
 
 // Whether a PR's Address comments was asked and nothing has moved since (comments.js commentsAsked),
-// dropping a click from here whose PR or run has moved on.
+// dropping a click from here whose PR's comments have moved on.
 function addressAsked(r, p) {
   const mine = commentsAskedHere.get(p.url);
   if (mine && mine.sig !== commentsSig(r, p)) commentsAskedHere.delete(p.url);
   return commentsAsked(r, p, commentsAskedHere.get(p.url));
 }
 const askedNote = (t, id) => div().id(id).flex_none().text_size(11).text_color(t.muted)
-  .tooltip("Asked its orchestrator to address these comments; waiting for the comments or the run's status to change").child("asked…");
+  .tooltip("Asked its orchestrator to address these comments; waiting for its open comments to change").child("asked…");
 const modeTip = (r, mode) => `${MODE_TIP[mode]}.${mode === defaultMode(r.autonomy) ? ` The default at ${r.autonomy ?? "L0"}.` : ""}`;
 
 // The click of an Ask me or Handle them: writes the run's inbox message for the PR (data.js
-// askComments); the button reads "asked…" until the PR's comments or the run's status change.
+// askComments); the button reads "asked…" until the PR's open comments change.
 const addressSend = (view, r, p, mode) => (cx) => {
   commentsAskedHere.set(p.url, { sig: commentsSig(r, p) });
   view.actionError = null;
@@ -438,9 +439,10 @@ const addressSend = (view, r, p, mode) => (cx) => {
   }, { owner: null });
 };
 
-// Whether the need box carries Address comments (needaction.js), so the card and pane leave out
-// their own Address rows.
-const boxAddresses = (r, ctx, f) => f.need && needItemsOf(r, ctx, f.att).some((it) => it.actions.some((x) => x.kind === "address"));
+// The card's and pane's own Address rows, only while the run is in Needs you and its box does
+// not carry them (needaction.js ownAddressRows).
+const addressRows = (view, t, r, ctx, f, id) => (ownAddressRows(f.need, f.need ? needItemsOf(r, ctx, f.att) : [])
+  ? commentsAction(view, t, r, f.att, id) : null);
 
 // Who reviews the run's pull requests, peer (a colleague on GitHub) or self (you, from the
 // proof), as a two-way toggle with the folder's default marked. A click sets it for the whole
@@ -786,8 +788,7 @@ function card(view, t, r, ctx, compact = false) {
   const proof = r.phase !== "finished" && !r.away ? proofSummary(t, r) : null;
   // A stalled run's Ask what's blocking is in its need box.
   const blocking = need ? null : blockingAction(view, t, r, f.att, `card-${r.key}`);
-  // The need box carries Address comments when it shows; else its own rows.
-  const comments = boxAddresses(r, ctx, f) ? null : commentsAction(view, t, r, f.att, `card-${r.key}`);
+  const comments = addressRows(view, t, r, ctx, f, `card-${r.key}`);
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(8).p(12).pl(16).rounded(10).bg(t.surface)
     .border(1).border_color(need ? t.blocked + "88" : t.border).cursor_pointer()
     .hover((s) => s.bg(t.raised)).on_click(focus)
@@ -948,7 +949,7 @@ function foldLine(view, t, key, tip, items) {
 }
 
 // A PR as a row with room to spare: its whole title, then repo, checks and review.
-// `away`: the run is parked or closed, so failing checks are dim, not red (tell.js prFacts).
+// `away`: the run is parked or closed, so failing checks are dim, not red (prfacts.js prFacts).
 function prDetail(t, pr, i, related = false, away = false) {
   const tone = PR_TONE[pr.state] ?? "dim";
   const c = pr.checks ?? {};
@@ -1291,7 +1292,7 @@ function runDetail(view, t, r, ctx) {
   const facts = factsLine(t, r, prs, 13, f.att);
   const notes = cardNotes(t, r, f, false);
   const blocking = need ? null : blockingAction(view, t, r, f.att, `pane-${r.key}`);
-  const comments = boxAddresses(r, ctx, f) ? null : commentsAction(view, t, r, f.att, `pane-${r.key}`);
+  const comments = addressRows(view, t, r, ctx, f, `pane-${r.key}`);
   // Most important first: who and what, whether it needs you, when and its PR, then the PR
   // itself, proof, tasks, decisions and agents; tokens last, since they are about cost.
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(14).p(14).pl(18).rounded(10).bg(t.surface)
@@ -1531,11 +1532,6 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
     .children(items.map(row));
 }
 
-// The orchestrators without a run directory, as the Crew judges them ({r: null, a}): one
-// blocked on a dialog needs you, though the overview has no run for it.
-const runlessOrchs = (view, ctx) => orchestratorsOf(ctx).filter((term) => !view.runs.some((r) => r.terminal === term.address))
-  .map((term) => ({ term, r: null, a: attentionOf(null, ctx, Date.now(), term) }));
-
 // The totals across runs, as small stats under the overview's title. "need you" counts as the
 // Crew's Needs you heading does (crewrows.js needCount): the runs that need you, orchestrators
 // without a run blocked on a dialog and the captain's open decisions; it focuses the first.
@@ -1552,7 +1548,7 @@ function totals(t, s, need, decisions, ctx, runless = []) {
     .child(stat("t-need", needs, "need you", needs ? "blocked" : null, firstNeed ? () => focusAgent(firstNeed) : null))
     .when(s.docked.length > 0, (el) => el.child(stat("t-done", s.docked.length, "finished", "done")))
     .child(stat("t-agents", s.workers, s.workers === 1 ? "agent" : "agents", null))
-    .when(s.planned > 0, (el) => el.child(stat("t-tasks", `${s.merged}/${s.planned}`, "tasks done", null)))
+    .when(s.planned > 0, (el) => el.child(stat("t-tasks", `${s.done}/${s.planned}`, "tasks done", null)))
     .child(stat("t-prs", s.open.length, openPrsLabel(s.open.length, s.failing, s.parkedOpen), s.failing ? "blocked" : s.open.length ? "done" : null));
 }
 
@@ -1666,7 +1662,7 @@ export function cards(view, t, runs, errors, decisions = []) {
           .tooltip("Where the time goes, tokens, CPU and memory: per run, task and agent, and past runs")
           .on_click(() => openStats()).child("Stats"))
         .child(toastsToggle(t)))
-      .child(totals(t, s, need, decisions, ctx, runlessOrchs(view, ctx))))
+      .child(totals(t, s, need, decisions, ctx, runlessOrchs(view.runs, ctx))))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
       .when(Boolean(waiting), (el) => el.child(waiting))
       .child(captainStrip(view, t, ctx, s))

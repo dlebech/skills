@@ -159,18 +159,11 @@ export function tokenDetail(tk) {
     "Cache reads are billed at about a tenth of input; the budget counts the total."].join("\n");
 }
 
-// When a run started, for telling runs apart in a narrow Crew card: "09:14" today, "14 Nov" this
-// year, "14 Nov 2025" before; startedTip gives the full "Started 14 Nov 2026, 09:14". Local time;
-// "" without a start (runs from before init-run.sh recorded it).
+// When a run started, for a Crew card's tooltip: "Started 14 Nov 2026, 09:14". Local time; ""
+// without a start (runs from before init-run.sh recorded it).
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const clock = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 const day = (d) => `${d.getDate()} ${MONTHS[d.getMonth()]}`;
-export function startedText(ms, now = Date.now()) {
-  if (!ms) return "";
-  const d = new Date(ms), n = new Date(now);
-  if (d.toDateString() === n.toDateString()) return clock(d);
-  return d.getFullYear() === n.getFullYear() ? day(d) : `${day(d)} ${d.getFullYear()}`;
-}
 export const startedTip = (ms) => (ms ? `Started ${day(new Date(ms))} ${new Date(ms).getFullYear()}, ${clock(new Date(ms))}` : "");
 
 // How long, for a run's age: "45m", "8h 12m", "2d 3h".

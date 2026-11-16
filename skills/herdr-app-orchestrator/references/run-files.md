@@ -417,6 +417,10 @@ known is `null`:
  "recorded": "<ISO>"}
 ```
 
+- `tasks_merged` keeps its name, but from 2026-11-17 it counts the tasks done: `plan.md`'s tasks whose
+  state reads done, as the run's card counts them (status.json's `tasks.merged` only when `plan.md` lists
+  no tasks). Older lines hold status.json's merged count, which an orchestrator updated less often, so
+  an older run may read fewer tasks than it finished.
 - A run's key is `run` + `started`. A line is added once per closing (`closed` differs): a run resumed and
   closed again gets a second line, and readers keep the last line per key.
 - A run closed, resumed and deleted while open (never closed again) has no line for its second stretch: the

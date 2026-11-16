@@ -197,9 +197,11 @@ export function commentsRequest(pr, mode) {
 // run's unhandled inbox messages (data.js reads them with the level requests).
 export const pendingComments = (lines) => (lines ?? "").split("\n").map((l) => COMMENTS.exec(l.trim())?.[1]).filter(Boolean);
 
-// What the PR's comments and the run looked like when it was asked: which comments are open
-// and the run's status. The ask reads "asked…" until this changes (or while its message is unread).
-export const commentsSig = (run, pr) => `${(pr?.comments?.items ?? []).map((x) => x.thread ?? x.url ?? x.text).join("\n")}\n${pr?.comments?.count ?? ""}\n${run?.statusLine ?? ""}`;
+// Which comments on the PR were open when it was asked. The ask reads "asked…" until this
+// changes (or while its message is unread). Not the run's status line: the orchestrator updates it
+// as soon as it reads the ask, long before the threads are answered, and dropping "asked…" then
+// would invite a second, duplicate ask while it works on the first.
+export const commentsSig = (run, pr) => `${(pr?.comments?.items ?? []).map((x) => x.thread ?? x.url ?? x.text).join("\n")}\n${pr?.comments?.count ?? ""}`;
 
 // Whether a PR's Address comments shows "asked…": its message is unread (run.commentsAsked has
 // its URL), or it was asked from here (`asked`: {sig} at the click) and nothing has moved since.

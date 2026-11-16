@@ -7,10 +7,9 @@
 // since most reasons are done elsewhere (on GitHub, in the proof, with Close).
 
 import { ageText, ciState } from "./attention.js";
+import { andList } from "./words.js";
 import { hasComments, commentsText, defaultMode } from "./comments.js";
 
-// "#1, #2 and #3"
-const andList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] ?? "");
 const numOf = (p) => (p?.number ? `#${p.number}` : null);
 // "#1799 and #1372", or "the PR" / "its 2 PRs" when GitHub gave no numbers.
 function prsText(prs) {
@@ -189,6 +188,12 @@ export function needActions(a, ctx = {}) {
   return [...a.reasons].sort((x, y) => rank(x.key) - rank(y.key))
     .map((r) => ({ key: r.key, tip: null, ...reasonItem(r, a, { ...ctx, now }) }));
 }
+
+// Whether a run's card and pane draw their own Address comments rows (overview.js
+// commentsAction): only while the run is in Needs you (`need`) and its box's items do not carry
+// them. Outside Needs you its orchestrator is working, often on the comments it was just asked
+// about, and Ask me / Handle them again would invite a second, duplicate ask.
+export const ownAddressRows = (need, items) => !!need && !(items ?? []).some((it) => it.actions.some((x) => x.kind === "address"));
 
 // The line a Crew row's hover ends with: "Do: Merge #42 · approved by anna 1h ago", or null.
 export const doLine = (items) => (items?.length ? `Do: ${items[0].line}` : null);
