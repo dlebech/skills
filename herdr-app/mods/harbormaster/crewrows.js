@@ -1,23 +1,27 @@
 // How the Crew block shows each orchestrator's attention (attention.js assess): its group
-// (Needs you, Everything else, Done), its place in it, the words that lead its detail line,
+// (Needs you, Working, Waiting on others, Can't tell, Done), its place in it, the words that lead its detail line,
 // their colour, and its hover. Pure, so the tests drive it; overview.js crew() draws it.
 
 import { byWait, nextStepText, stepText, ageText, reviewWaitText } from "./attention.js";
 
-// The groups, in the order the Crew shows them. Done is folded until clicked open.
-// An empty group is not shown, except Needs you while there are orchestrators: it then says
-// so (`empty`), so a glance tells "nothing for you" from "not looked yet".
+// The groups, in the order the Crew shows them: what you must act on, what is at work, what
+// waits on someone else (a reviewer), what can't be read (grey, so it is never mixed into
+// another group) and Done, folded until clicked open. An empty group is not shown, except
+// Needs you while there are orchestrators: it then says so (`empty`), so a glance tells
+// "nothing for you" from "not looked yet".
 export const GROUPS = [
   { key: "needs", title: "Needs you", empty: "nothing for you right now 🎉" },
-  { key: "else", title: "Everything else" },
+  { key: "working", title: "Working" },
+  { key: "waiting", title: "Waiting on others" },
+  { key: "cant", title: "Can't tell" },
   { key: "done", title: "Done", folded: true },
 ];
 
 // Rows ({a: assess result, ...}) by group, each longest wait first. A row without a result
-// goes under Everything else.
+// can't be told.
 export function groupRows(rows) {
-  const out = { needs: [], else: [], done: [] };
-  for (const x of rows) (out[x.a?.group] ?? out.else).push(x);
+  const out = Object.fromEntries(GROUPS.map((g) => [g.key, []]));
+  for (const x of rows) (out[x.a?.group] ?? out.cant).push(x);
   for (const list of Object.values(out)) list.sort((x, y) => byWait(x.a ?? {}, y.a ?? {}));
   return out;
 }
@@ -30,9 +34,10 @@ const onlyStalled = (a) => Boolean(a.stall) && a.reasons.length > 0 && a.reasons
 // colour name: "blocked" (red), "amber", "dim" (grey, can't tell) or "muted".
 //   Needs you: its reasons ("red CI on #42 · review proof → merge"); a stalled run says
 //     what it was doing ("quiet 34m", then "t3 implementing").
-//   Everything else: can't tell; while agents work or CI runs, the step and its age
-//     ("CI on #42 · 34m"); waiting on a reviewer, the label ("review from anna"), then the
-//     step; otherwise the next-step label, else the step.
+//   Working: the step and its age ("CI on #42 · 34m", "t3 implementing · 1h12m"); for a
+//     briefly idle run too, so the age shows how quiet it is.
+//   Waiting on others: the label ("review from anna"), then the step.
+//   Can't tell: "can't tell", grey.
 //   Done: the label ("merged — close run · 2 PRs"), or "closed".
 export function rowLead(a, now = Date.now()) {
   const step = stepText(a.step, now) || null;
@@ -41,24 +46,22 @@ export function rowLead(a, now = Date.now()) {
     return { lead, rest: a.stall ? a.step?.text || null : null, tone: onlyStalled(a) ? "amber" : "blocked" };
   }
   if (a.group === "done") return { lead: a.next ? nextStepText(a.next) : "closed", rest: null, tone: "muted" };
-  if (a.cantTell) return { lead: "can't tell", rest: null, tone: "dim" };
-  const key = a.reasons[0]?.key;
-  if (key === "working" || key === "ci-running") return { lead: step ?? a.reasons[0].text, rest: null, tone: "muted" };
-  if (key === "waiting-for") return { lead: a.reasons[0].text, rest: step, tone: "muted" };
-  return { lead: (a.next ? nextStepText(a.next) : null) ?? step ?? "idle", rest: null, tone: "muted" };
+  if (a.group === "cant" || a.cantTell) return { lead: "can't tell", rest: null, tone: "dim" };
+  if (a.group === "waiting") return { lead: a.reasons[0]?.text ?? (a.next ? nextStepText(a.next) : "waiting"), rest: step, tone: "muted" };
+  return { lead: step ?? a.reasons[0]?.text ?? (a.next ? nextStepText(a.next) : null) ?? "idle", rest: null, tone: "muted" };
 }
 
 // A row's edge colour name: red for Needs you (amber when it has only stalled), done's colour
-// for Done. Everything else: grey when the state can't be read, working's only while agents
-// work or CI runs, "review" (a calm colour of its own) while a reviewer has the PR, and
-// "neutral" for a run with nothing going on, so colour always means something.
+// for Done, grey for Can't tell, "review" (a calm colour of its own) for Waiting on others.
+// Working: working's colour only while agents work or CI runs, "neutral" for a run briefly
+// idle, so colour always means something.
 export function rowEdge(a) {
   if (a.group === "needs") return onlyStalled(a) ? "amber" : "blocked";
   if (a.group === "done") return "done";
-  if (a.cantTell) return "dim";
+  if (a.group === "cant" || a.cantTell) return "dim";
+  if (a.group === "waiting") return "review";
   const key = a.reasons?.[0]?.key;
-  if (key === "working" || key === "ci-running") return "working";
-  return key === "waiting-for" ? "review" : "neutral";
+  return key === "working" || key === "ci-running" ? "working" : "neutral";
 }
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
