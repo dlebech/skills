@@ -279,6 +279,7 @@ without switching your space or tab, takes the shot and closes it:
 
 ```sh
 herdr-app do 'harbormaster.show-run:<branch>'   # or the run's directory, or its orchestrator's terminal
+herdr-app do 'harbormaster.show-stats'          # the Stats view; show-stats:<branch> focuses one run
 sleep 1; herdr-app shot proof.png
 herdr-app do 'harbormaster.close-popup'
 ```

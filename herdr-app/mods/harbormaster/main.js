@@ -28,6 +28,7 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"
 // A brief popup of one run's pane, for taking a screenshot of it with `herdr-app shot` without
 // switching the user's space or tab. Commands sent with `herdr-app do 'harbormaster.<command>'`:
 //   show-run:<branch | run dir | orchestrator terminal>   open it (no name: the newest unclosed run); one at a time
+//   show-stats[:<branch | run dir>]                         open the Stats view (a run: focused on it)
 //   close-popup                                            close it
 // Every shown Harbormaster copy hears a command, so the popup's id and time are in shared state and
 // a copy that sees the same command opened a moment ago leaves it alone (and one that lost a race closes its own).
@@ -63,6 +64,18 @@ function showPopup(view, arg) {
   setShared(POPUP, { id, at: Date.now(), arg });
 }
 
+// The Stats view as the same brief popup, wide enough for its columns.
+function showStats(view, arg) {
+  const cur = shared(POPUP), key = `stats:${arg}`;
+  if (cur && cur.arg === key && Date.now() - cur.at < 2000) return;
+  const r = arg ? view.runs.find((x) => [x.branch, x.dir, x.key].includes(arg)) : null;
+  closePopup();
+  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 1100, height: 820, props: r ? { role: "stats", run: r.dir } : { role: "stats" } });
+  const won = shared(POPUP);
+  if (won && won.arg === key && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }
+  setShared(POPUP, { id, at: Date.now(), arg: key });
+}
+
 async function listen(view, cx) {
   for (;;) {
     const c = String(await nextCommand());
@@ -70,6 +83,7 @@ async function listen(view, cx) {
     try {
       const [, name, arg] = /^([\w-]+)[:\s]*(.*)$/s.exec(c.trim()) ?? [];
       if (name === "show-run") showPopup(view, arg?.trim() ?? "");
+      else if (name === "show-stats") showStats(view, arg?.trim() ?? "");
       else if (name === "close-popup") closePopup();
       cx.notify();
     } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }
@@ -93,7 +107,7 @@ export default class Harbormaster extends View {
     this.reply.on("submit", (_e, cx) => submitReply(this, cx));
     if (!DATA_ROLES.has(role)) return;
     // The popup's own copy doesn't listen: a command that closed or replaced the popup would end it.
-    if (!checking() && role !== "harbor" && !(role === "run" && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
+    if (!checking() && role !== "harbor" && !((role === "run" || role === "stats") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
     this.refresh(cx);
     cx.timer.every(5000, (cx) => this.refresh(cx));
     // The harbor's scuttle target: data, not frames; .transition does the moving.
