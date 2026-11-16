@@ -11,6 +11,9 @@ import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, proofCount
 import { oneLine } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
+import { attentionOf } from "./attend.js";
+import { nextStepText, stepText, quietText } from "./attention.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip } from "./crewrows.js";
 
 // How each runPhase() reads on a card.
 const PHASE = {
@@ -266,9 +269,12 @@ function runFacts(r, ctx) {
   const orch = orchestratorState(r, ctx);
   const parked = isParked(r);
   const need = needsYou(r, orch);
-  const badge = (parked ? PHASE.parked : r.away?.how === "closed" ? PHASE.closed : PHASE[r.phase]) ?? PHASE.unknown;
+  const att = attentionOf(r, ctx);
+  let badge = (parked ? PHASE.parked : r.away?.how === "closed" ? PHASE.closed : PHASE[r.phase]) ?? PHASE.unknown;
+  // A finished run says what comes next instead, as its Crew card does ("approved — merge").
+  if (badge === PHASE.finished && att.next) badge = { label: nextStepText(att.next), tone: att.group === "needs" ? "blocked" : "done" };
   return {
-    orch, parked, need, badge,
+    orch, parked, need, badge, att,
     closed: isClosed(r, ctx),
     reason: needReason(r, orch),
     counts: taskCounts(r),
@@ -344,7 +350,7 @@ function card(view, t, r, ctx, compact = false) {
       svg("mods/harbormaster/pr.svg").size(11).flex_none().text_color(t[PR_TONE[p.state]] ?? t.dim), relatedTip(p))),
   ];
   const focus = () => orch !== "gone" && focusAgent(r.terminal);
-  const facts = factsLine(t, r, prs, 12.5);
+  const facts = factsLine(t, r, prs, 12.5, f.att);
   // Not on a finished or put-away run's smaller card; a live card shows it even when narrow.
   const proof = r.phase !== "finished" && !r.away ? proofSummary(t, r) : null;
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(8).p(12).pl(16).rounded(10).bg(t.surface)
@@ -354,7 +360,7 @@ function card(view, t, r, ctx, compact = false) {
     .child(cardHeader(view, t, r, f, runMeta(r, f)))
     .when(need, (el) => el.child(needBox(t, r, f)))
     .when(Boolean(facts), (el) => el.child(facts))
-    .when(Boolean(r.progress), (el) => el.child(progressLine(t, r)))
+    .when(Boolean(r.progress), (el) => el.child(progressLine(t, r, f.att)))
     .children(cardNotes(t, r, f))
     .when(Boolean(proof), (el) => el.child(h_flex().id(`proof-${r.key}`).flex_wrap().items_center().gap(6).px(2).text_size(11.5).when(Boolean(proof.tip), (e) => e.tooltip(proof.tip))
       .child(div().flex_none().text_size(11).font_semibold().text_color(t.dim).child("Proof"))
@@ -384,9 +390,14 @@ function joined(t, items) {
 // The facts line, the one prominent line under the header: when the run started and how
 // long it has gone, then each of its PRs (a link) with its checks, a one-way door, and its review.
 // "Started today 09:28 · finished after 8h 7m · PR #42 open · checks ✓". Null when it has none of them.
-function factsLine(t, r, prs, size = 13) {
+function factsLine(t, r, prs, size = 13, att = null) {
   const items = [];
   if (r.started) items.push({ el: div().id(`age-${r.key}`).flex_none().tooltip(startedTip(r.started)).child(runAgeText(r)) });
+  // The current step and its age, as the Crew shows it, while the run is not finished; the
+  // progress line carries its own age (progressLine). A stalled run says so, in amber.
+  const live = att && r.phase !== "finished" && !r.away;
+  if (live && att.stall) items.push({ text: quietText(att.stall), color: AMBER(t), bold: true });
+  if (live && att.step?.text && att.step.text !== r.progress) items.push({ text: stepText(att.step), color: t.muted });
   prs.forEach((p, i) => {
     const state = prStateText(p);
     items.push({ el: div().id(`fact-pr-${r.key}-${i}`).flex_none().cursor_pointer().hover((s) => s.text_color(t.accent)).tooltip(`${p.title ?? ""}\n${p.url}`.trim())
@@ -406,8 +417,9 @@ function factsLine(t, r, prs, size = 13) {
 }
 
 // The orchestrator's own progress note: under the facts, smaller and muted, since it is in
-// its words and can lag behind.
-const progressLine = (t, r) => div().text_size(11.5).text_color(t.muted).child(r.progress);
+// its words and can lag behind. While it is the run's current step, with that step's age.
+const progressLine = (t, r, att = null) => div().text_size(11.5).text_color(t.muted)
+  .child(att?.step?.text === r.progress && r.phase !== "finished" && !r.away ? stepText(att.step) : r.progress);
 
 // The proof verdict as coloured parts, from plan.md's Proof lines and proof.md:
 // "T2 · 20/20 pass · checks green", with failures red and what is missing amber. Null for a run
@@ -802,7 +814,7 @@ function runDetail(view, t, r, ctx) {
   const { orch, closed, need, counts, prs, related, workers, stages } = f;
   // Each agent's task and that task's stage, by address.
   const workOf = new Map(stages.flatMap(({ agents, stage }, i) => agents.map((a) => [a.agent.address, { task: r.tasks[i], stage }])));
-  const facts = factsLine(t, r, prs);
+  const facts = factsLine(t, r, prs, 13, f.att);
   const notes = cardNotes(t, r, f);
   // Most important first: who and what, whether it needs you, when and its PR, then the PR
   // itself, proof, tasks, decisions and agents; tokens last, since they are about cost.
@@ -814,7 +826,7 @@ function runDetail(view, t, r, ctx) {
     .when(need, (el) => el.child(div().id(`need-${r.key}`).cursor_pointer().on_click(() => focusAgent(r.terminal)).child(needBox(t, r, f))))
     .when(Boolean(facts) || Boolean(r.progress) || notes.length > 0, (el) => el.child(v_flex().gap(4)
       .when(Boolean(facts), (e) => e.child(facts))
-      .when(Boolean(r.progress), (e) => e.child(progressLine(t, r)))
+      .when(Boolean(r.progress), (e) => e.child(progressLine(t, r, f.att)))
       .children(notes)))
     .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests")
       .children(prs.map((p, i) => prDetail(t, p, i)))
@@ -1193,18 +1205,20 @@ export function crew(view, t) {
   const ctx = facts();
   const cap = captainOf(ctx);
   const runOf = (term) => view.runs.find((r) => r.terminal === term.address);
-  // Unfinished orchestrators first, then finished ones still open.
+  const now = Date.now();
+  // Each orchestrator's attention, once per render: which group it is in and why. An
+  // orchestrator without a run directory is judged by its terminal alone (can't tell).
   const orchestrators = orchestratorsOf(ctx)
     .map((term) => ({ term, r: runOf(term) }))
-    .map((o) => ({ ...o, state: o.r?.phase ?? runPhase(o.term.labels?.["run.status"]) }))
-    .sort((a, b) => (a.state === "finished") - (b.state === "finished"));
+    .map((o) => ({ ...o, state: o.r?.phase ?? runPhase(o.term.labels?.["run.status"]), a: attentionOf(o.r ?? null, ctx, now, o.r ? null : o.term) }));
   // The focused agent, or the crew agent beside a focused Harbormaster pane.
   const current = currentAgent(ctx, [cap.terminal?.address, ...orchestrators.map((o) => o.term.address)].filter(Boolean));
   // Only the captain has a mark (a small one): the rest are all orchestrators. The context size
   // and the run's token total are in the row's hover, which leaves the width to the tags. The
   // hover is on its two lines of text, not the whole row, so it never covers a tag's own card.
-  const row = ({ id, mark = null, type = null, tags = [], title, tip = null, detail, tone, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null, usage = null, whose = "", more = null }) => {
+  const row = ({ id, mark = null, type = null, tags = [], title, tip = null, detail, tone, detailTip = null, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null, usage = null, whose = "", more = null }) => {
     const hover = [title, tip, contextTip(view, address, run)].filter(Boolean).join("\n");
+    const color = tone === "amber" ? AMBER(t) : t[tone] ?? t.dim;
     return h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
     .rounded(7).bg(address === current ? edge + "33" : edge + "14").cursor_pointer().hover((st) => st.bg(address === current ? edge + "40" : edge + "26"))
     .when(address === current, (el) => el.border(1).border_color(edge + "aa"))
@@ -1221,7 +1235,7 @@ export function crew(view, t) {
         .children(tags)
         .when(crabs > 0, (el) => el.child(h_flex().flex_none().gap(3).items_center().text_size(11).text_color(t.muted)
           .child(div().text_size(11).child(CRAB)).child(String(crabs))))
-        .child(div().id(`${id}-detail`).flex_1().min_w(0).truncate().text_size(11).text_color(t[tone] ?? t.dim).tooltip(hover).child(detail))))
+        .child(div().id(`${id}-detail`).flex_1().min_w(0).truncate().text_size(11).text_color(color).tooltip(detailTip ? `${detailTip}\n\n${hover}` : hover).child(detail))))
     .map(withUsage(t, id, usage, whose, more))
     .child(statusDot(t, status));
   };
@@ -1239,28 +1253,21 @@ export function crew(view, t) {
       usage: liveUsage(cap.terminal.address), whose: "The captain and its commands",
     }));
   }
-  for (const { term, r, state } of orchestrators) {
+  const orchRow = ({ term, r, state, a }) => {
     const labels = term.labels ?? {};
     const status = agentStatus(term, ctx);
-    // Without a run directory, the run.status label stands in for the run.
-    const run = r ?? { phase: state };
-    const need = needsYou(run, status);
-    const reason = needReason(run, status);
-    const prs = r ? prsOf(r) : null;
-    const prText = prs?.length ? prs.map((p) => (p.number ? `PR #${p.number}` : "PR")).join(", ")
-      : labels["run.prs"] ? plural(String(labels["run.prs"]).split(/[\s,]+/).filter(Boolean).length, "PR") : null;
     const crewOf = workersOf(term.address, ctx);
     const workers = crewOf.length;
-    // When it started tells apart runs with the same name. It is short and comes before the
-    // longer progress and PR text, so a narrow sidebar truncates those first.
+    // Why it is in its group (its reasons, the next-step label or the step and its age) leads,
+    // then when it started, which tells apart runs with the same name; it is short, so a narrow
+    // sidebar truncates the longer rest first. Without a run directory, its progress label.
+    const { lead, rest, tone } = rowLead(a, now);
     const started = startedText(r?.started);
-    const detail = (need ? [`needs you: ${reason}`, started]
-      : state === "finished" ? ["finished", started, prText]
-      : [state !== "running" ? (PHASE[state] ?? PHASE.unknown).label.toLowerCase() : null, started, labels.progress ?? r?.progress, prText]
-    ).filter(Boolean).join(" · ");
+    const detail = [lead, started, rest ?? (r ? null : labels.progress)].filter(Boolean).join(" · ");
     const name = runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic);
-    rows.push(row({
-      id: `crew-${term.address}`, detail: detail || "orchestrator",
+    const edge = rowEdge(a);
+    return row({
+      id: `crew-${term.address}`, detail: detail || "orchestrator", detailTip: rowTip(a, now).join("\n"),
       // The run's tags as its pane's header shows them, then its number and topic; without a
       // topic, its branch. Without a run directory, its terminal's labels stand in.
       ...(() => {
@@ -1268,14 +1275,34 @@ export function crew(view, t) {
         return { type: runTypeTag(t, run, `crew-${term.address}`), tags: levelTags(view, t, run, `crew-${term.address}`, true) };
       })(),
       title: name.title, tip: [name.tip, startedTip(r?.started)].filter(Boolean).join("\n") || null,
-      tone: need ? "blocked" : "muted", status, address: term.address, crabs: state === "finished" ? 0 : workers, run: r,
+      tone, status, address: term.address, crabs: state === "finished" ? 0 : workers, run: r,
       // Badged on its own, like any agent: a run's agents together pass 2 GB while nothing is busy.
       usage: liveUsage(term.address), whose: "The orchestrator and its commands",
       more: usageLine("The whole run, with its agents", treeUsage([term.address, ...crewOf.map((w) => w.address)])),
       // Clicking a run's orchestrator also opens that run's card beside it, while it's there.
       open: () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(term.address, runProps(r)) : focusAgent(term.address)),
-      edge: (need ? t.blocked : state === "finished" ? t.done : t.working) ?? t.border,
-    }));
+      edge: (edge === "amber" ? AMBER(t) : t[edge]) ?? t.border,
+    });
+  };
+  // Needs you, Everything else and Done, each longest wait first; Done folded until opened
+  // (view.folds, as the pane's folds). Its heading leaves room on the right for an action.
+  const groups = groupRows(orchestrators);
+  const groupHead = (g, n) => {
+    const head = h_flex().id(`crew-group-${g.key}`).flex_none().gap(5).px(4).pt(6).items_center()
+      .text_size(10.5).font_semibold().text_color(g.key === "needs" ? t.blocked : t.dim);
+    if (!g.folded) return head.child(`${g.title} · ${n}`);
+    const open = isOpen(view, `crew-${g.key}`);
+    return head.child(h_flex().id(`crew-fold-${g.key}`).gap(5).items_center().cursor_pointer().hover((st) => st.text_color(t.foreground))
+      .on_click((_e, cx) => { view.folds ??= new Map(); view.folds.set(`crew-${g.key}`, !open); cx.notify(); })
+      .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(10).flex_none())
+      .child(`${g.title} · ${n}`))
+      .child(div().flex_1());
+  };
+  for (const g of GROUPS) {
+    const list = groups[g.key];
+    if (!list.length) continue;
+    rows.push(groupHead(g, list.length));
+    if (!g.folded || isOpen(view, `crew-${g.key}`)) rows.push(...list.map(orchRow));
   }
   // Adrift: agents outside the crew, on any machine.
   const drifters = adrift([cap.terminal?.address, ...orchestrators.map((o) => o.term.address)], ctx);

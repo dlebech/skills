@@ -29,6 +29,7 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"
 // switching the user's space or tab. Commands sent with `herdr-app do 'harbormaster.<command>'`:
 //   show-run:<branch | run dir | orchestrator terminal>   open it (no name: the newest unclosed run); one at a time
 //   show-stats[:<branch | run dir>]                         open the Stats view (a run: focused on it)
+//   show-overview, show-crew                               open the runs overview, or the Crew block
 //   close-popup                                            close it
 // Every shown Harbormaster copy hears a command, so the popup's id and time are in shared state and
 // a copy that sees the same command opened a moment ago leaves it alone (and one that lost a race closes its own).
@@ -76,15 +77,16 @@ function showStats(view, arg) {
   setShared(POPUP, { id, at: Date.now(), arg: key });
 }
 
-// The runs overview as the same brief popup, for screenshots of its cards.
-function showOverview() {
+// The runs overview (role "cards") or the Crew block (role "crew", sidebar-narrow) as the
+// same brief popup, for screenshots of their cards.
+function showView(key, role, width, height) {
   const cur = shared(POPUP);
-  if (cur && cur.arg === "overview" && Date.now() - cur.at < 2000) return;
+  if (cur && cur.arg === key && Date.now() - cur.at < 2000) return;
   closePopup();
-  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 900, props: { role: "cards" } });
+  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width, height, props: { role } });
   const won = shared(POPUP);
-  if (won && won.arg === "overview" && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }
-  setShared(POPUP, { id, at: Date.now(), arg: "overview" });
+  if (won && won.arg === key && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }
+  setShared(POPUP, { id, at: Date.now(), arg: key });
 }
 
 const sameItems = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
@@ -97,7 +99,8 @@ async function listen(view, cx) {
       const [, name, arg] = /^([\w-]+)[:\s]*(.*)$/s.exec(c.trim()) ?? [];
       if (name === "show-run") showPopup(view, arg?.trim() ?? "");
       else if (name === "show-stats") showStats(view, arg?.trim() ?? "");
-      else if (name === "show-overview") showOverview();
+      else if (name === "show-overview") showView("overview", "cards", 560, 900);
+      else if (name === "show-crew") showView("crew", "crew", 360, 900);
       else if (name === "close-popup") closePopup();
       cx.notify();
     } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }
@@ -121,7 +124,7 @@ export default class Harbormaster extends View {
     this.reply.on("submit", (_e, cx) => submitReply(this, cx));
     if (!DATA_ROLES.has(role)) return;
     // The popup's own copy doesn't listen: a command that closed or replaced the popup would end it.
-    if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
+    if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards" || role === "crew") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
     this.refresh(cx);
     cx.timer.every(5000, (cx) => this.refresh(cx));
     // The harbor's scuttle target: data, not frames; .transition does the moving.
