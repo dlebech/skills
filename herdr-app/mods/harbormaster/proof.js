@@ -4,18 +4,8 @@
 
 import { isImage, isVideo } from "./media.js";
 
-// What each tier means, shown on hover over a tier tag. The source is the tier table in
-// skills/proving/SKILL.md (each row stands alone); tests/herdr-app-harbormaster/tiers.sh
-// fails when these differ from it, so change both together.
-export const TIER_TEXT = [
-  "Tests green (CI, or the repo's local suite).",
-  "Tests green, plus output for the changed behaviour.",
-  "Tests green, output for the changed behaviour, and screenshots or a recording.",
-  "Tests green, output for the changed behaviour, screenshots or a recording, and a guided demo.",
-];
-
-// "T2: Tests green, output for …"
-export const tierTip = (tier) => `T${tier}: ${TIER_TEXT[tier] ?? ""}`.trim();
+// The tier texts live in levels.js, with the other header tags' texts; re-exported here.
+export { TIER_TEXT, tierTip } from "./levels.js";
 
 // "T1 — the evidence", "T1: the evidence", "T2" → {tier: 1, text}; null when no T0..T3 leads it.
 export function proofOf(s) {
@@ -134,4 +124,25 @@ export function proofVerdict({ tier, md, tasks, danger, shotFiles = null }) {
   const bad = fail > 0 || md?.checks?.state === "red" || door?.[1].toLowerCase() === "one";
   const good = rows.length > 0 && pass === rows.length && !shots && md?.checks?.state !== "red";
   return { text: parts.join(" · "), tone: bad ? "blocked" : good ? "done" : "dim" };
+}
+
+// A task's segment on the tasks bar, from its proofTasks() row, once proof has something to say:
+// "pass" (green), "fail" (red), "partial" (amber: a partial result, or a pass at T2+ without a
+// screenshot), "unchecked" (amber: a done task without a result once the run is finished). Null
+// leaves the segment its stage's colour, so a blocked or never-started task on a finished, parked or
+// closed run still reads as blocked or planned. `row` is null for a run without proof.
+export function proofTone(row, finished, done = true) {
+  if (!row) return null;
+  if (row.result === "fail") return "fail";
+  if (row.result === "partial" || row.missing) return "partial";
+  if (row.result === "pass") return "pass";
+  return finished && done ? "unchecked" : null;
+}
+
+// How a proofTone() reads in the segment's hover: "proof pass", "proof partial — no screenshot".
+export function proofToneText(tone, row) {
+  if (!tone) return null;
+  if (tone === "partial" && row?.result === "pass") return "proof pass, but no screenshot";
+  if (tone === "unchecked") return row?.scoped ? "proof not checked" : "proof not scoped";
+  return `proof ${tone}`;
 }

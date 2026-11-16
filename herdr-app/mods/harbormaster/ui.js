@@ -2,6 +2,7 @@
 
 import { div, svg, image } from "gpui-kit";
 import { settings } from "herdr";
+import { autonomyTip, typeTip } from "./levels.js";
 
 // Token bars, here and in the stats view: fresh tokens (input, output, cache writes) in the accent,
 // cache reads green in every theme: the theme's own "done" colour is blue in some, which made both
@@ -46,14 +47,13 @@ export function runName(branch, topic) {
   return { title: ref ? `${ref} · ${topic}` : topic, tip: branch ?? null };
 }
 
-// A run's autonomy (set-status.sh --autonomy), "L1", as a small tag; `tip` says what it means.
-export const AUTONOMY = { L0: "L0: you approve decisions", L1: "L1: decides small things itself", L2: "L2: runs to a merge-ready PR, stops at merge" };
+// A run's autonomy (set-status.sh --autonomy), "L1", as a small tag; its hover defines the level.
 export const autonomyTag = (t, id, level) => div().id(id).flex_none().text_size(10).font_semibold().px(5).rounded(4)
-  .bg(t.raised).text_color(level === "L0" ? t.dim : t.muted).tooltip(`Autonomy ${AUTONOMY[level]}`).child(level);
+  .bg(t.raised).text_color(level === "L0" ? t.dim : t.muted).tooltip(autonomyTip(level)).child(level);
 
 // A run's type (set-status.sh --type) as a small tag before its name: what kind of
-// run it is, so a review reads apart from a feature at a glance.
-export const typeTag = (t, type) => div().flex_none().text_size(10).font_semibold().px(5).rounded(4)
+// run it is, so a review reads apart from a feature at a glance. With an `id`, it says so on hover.
+export const typeTag = (t, type, id = null) => (id ? div().id(id).tooltip(typeTip(type)) : div()).flex_none().text_size(10).font_semibold().px(5).rounded(4)
   .bg(t.raised).text_color(t.muted).child(String(type));
 
 // Puts a runName() on an element: the title as its text, the tip, if any, as its tooltip.

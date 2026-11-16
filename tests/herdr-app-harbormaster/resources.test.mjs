@@ -122,7 +122,8 @@ test("macOS sampler reads ps output", () => {
     "ENV",
     "  200 claude HOME=/Users/x HC_TERMINAL_ID=t9 TERM=xterm",
   ].join("\n");
-  const out = execFileSync("awk", ["-v", "now=1700000000", MAC_AWK], { input: ps, encoding: "utf8" });
+  // As in production: under a comma-decimal locale mawk reads "03.25" as 3.
+  const out = execFileSync("awk", ["-v", "now=1700000000", MAC_AWK], { input: ps, encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
   const s = parseSample(out);
   assert.equal(s.os, "darwin");
   const by = Object.fromEntries(s.procs.map((p) => [p.pid, p]));

@@ -7,7 +7,7 @@ import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, wo
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
-import { proofVerdict, proofTasks, tierTip } from "./proof.js";
+import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText } from "./proof.js";
 import { oneLine } from "./question.js";
 import { thumbs } from "./viewer.js";
 
@@ -115,15 +115,38 @@ function stageSummary(stages) {
     .filter(([, n]) => n > 0).map(([s, n]) => `${n} ${STAGE[s].label.toLowerCase()}`).join(" · ");
 }
 
-// One segment per planned task, hover for its name and stage, and how many are done
-// and under way below it; only for runs that plan at least one.
+// Each of r.tasks' proof on the tasks bar, in plan.md's order: {tone, text} (proof.js
+// proofTone), or null while proof has nothing to say. All null for a run without proof.
+// `stages` is stagesOf()'s, for whether a task is done: only a done task can be "not checked".
+function taskProof(r, stages) {
+  const { tier, md, files } = r.proof;
+  const none = r.tasks.map(() => null);
+  if (!proofVerdict({ tier, md, tasks: r.tasks, danger: null, shotFiles: files })) return none;
+  const rows = proofTasks(r.tasks, md, files);
+  const finished = r.phase === "finished" || Boolean(r.away);
+  return none.map((_, i) => {
+    const stage = stages[i]?.stage;
+    const done = stage ? stage === "done" : taskTone(r.tasks[i].state) === "done";
+    const tone = proofTone(rows[i], finished, done);
+    return tone ? { tone, text: proofToneText(tone, rows[i]) } : null;
+  });
+}
+const PROOF_COLOR = { pass: (t) => PASS(t), fail: (t) => t.blocked, partial: (t) => AMBER(t), unchecked: (t) => AMBER(t) };
+
+// One segment per planned task, hover for its name, stage and proof, and how many are done
+// and under way below it; only for runs that plan at least one. A task's proof result, once it
+// has one, colours its segment (green pass, red fail, amber partial, no screenshot or, once the
+// run is finished, not checked); its stage colours it otherwise. The one task bar: the Proof
+// section has none of its own.
 function taskStrip(t, r, counts, stages, names = true) {
+  const proof = taskProof(r, stages);
   return v_flex().gap(5)
     .child(h_flex().gap(3).h(6).children(Array.from({ length: counts.planned }, (_, i) => {
       const task = r.tasks[i];
-      const color = task ? taskColor(t, task, stages[i].stage) : i < counts.merged ? t.done : t.border;
+      const p = proof[i] ?? null;
+      const color = p ? PROOF_COLOR[p.tone](t) : task ? taskColor(t, task, stages[i].stage) : i < counts.merged ? t.done : t.border;
       return div().id(`seg-${r.key}-${i}`).flex_1().h_full().rounded(3).bg(color)
-        .when(Boolean(task), (el) => el.tooltip([[task.id, task.name].filter(Boolean).join(" "), stageText(task, stages[i].stage)].filter(Boolean).join(" · ")))
+        .when(Boolean(task), (el) => el.tooltip([[task.id, task.name].filter(Boolean).join(" "), stageText(task, stages[i].stage), p?.text].filter(Boolean).join(" · ")))
         // An agent is at it: a light edge, still (see statusDot for why not a pulse).
         .when(Boolean(task) && pulse(stages[i].stage, task), (el) => el.border(1).border_color(t.foreground + "88"));
     })))
@@ -253,7 +276,7 @@ function cardHeader(view, t, r, f, meta) {
     .child(div().flex_none().text_size(15).child(OCTOPUS))
     .child(v_flex().flex_1().min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)
-        .when(Boolean(r.type), (el) => el.child(typeTag(t, r.type)))
+        .when(Boolean(r.type), (el) => el.child(typeTag(t, r.type, `type-${r.key}`)))
         .child(autonomyTag(t, `auto-${r.key}`, r.autonomy))
         .when(Boolean(r.proof.tier), (el) => el.child(tierTag(t, `tier-${r.key}`, r.proof.tier.tier, `${tierTip(r.proof.tier.tier)}${r.proof.tier.byUser ? "\nSet by user" : ""}${r.tasks.some((k) => !k.proof) ? `\n${plural(r.tasks.filter((k) => !k.proof).length, "task")} not scoped` : ""}`)))
         .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(13.5).text_color(t.foreground), runName(r.branch, r.topic)))
@@ -470,21 +493,48 @@ function pathLink(t, r, id, rel, label) {
     .child(div().child("▤")).child(label);
 }
 
-// "Decisions": the latest three as readable lines (yours marked "You"), then a fold for the rest
-// with the counts. A line that did not parse shows as its raw text.
+// "Decisions": the heading row is the fold, at the top, with its chevron and the counts
+// ("Decisions · 57 · 45 by the orchestrator, 12 from you"). Folded, the latest three as
+// readable lines (yours marked "You"), each with its reason; unfolded, every decision as its
+// one-line title, and clicking one shows its reason. A line that did not parse shows its raw text.
 function decisionsSection(view, t, r) {
   const key = `dec-${r.key}`, open = isOpen(view, key);
   const you = r.decided.filter((d) => d.by === "user").length, orch = r.decided.length - you;
   const counts = [orch > 0 && `${orch} by the orchestrator`, you > 0 && `${you} from you`].filter(Boolean).join(", ");
-  const row = (d, i) => h_flex().id(`dec-${r.key}-${i}`).gap(8).items_start().px(2).text_size(11.5)
-    .child(div().flex_none().w(34).text_color(t.dim).child(d.at ? ago(d.at).replace(" ago", "") : "—"))
+  const title = (d) => `${d.by === "user" ? "You · " : ""}${d.topic ? `${d.topic}: ${d.decision}` : d.decision}`;
+  const when = (d) => div().flex_none().w(34).text_color(t.dim).child(d.at ? ago(d.at).replace(" ago", "") : "—");
+  const latest = (d, i) => h_flex().id(`dec-${r.key}-${i}`).gap(8).items_start().px(2).text_size(11.5)
+    .child(when(d))
     .child(v_flex().flex_1().min_w(0)
-      .child(div().text_color(t.foreground).child(`${d.by === "user" ? "You · " : ""}${d.topic ? `${d.topic}: ${d.decision}` : d.decision}`))
+      .child(div().text_color(t.foreground).child(title(d)))
       .when(Boolean(d.why), (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(d.why))));
-  return section(t, "Decisions")
-    .children((open ? r.decided : r.decided.slice(0, 3)).map(row))
-    .when(r.decided.length > 3, (el) => el.child(foldLine(view, t, key, open ? "Show only the latest three" : "Show every decision",
-      [{ text: open ? "Fewer" : `All ${r.decided.length}`, color: t.muted }, !open && { text: counts, color: t.dim }])));
+  // Unfolded: one line each, cut to fit; a click shows its whole title and its reason under it.
+  // Every row clicks, since any title can be cut, reason or not. Keyed on the line itself, not
+  // its place: a new decision moves every row down one.
+  const line = (d, i) => {
+    const id = `${r.key}-${d.raw}`, more = view.decRows?.has(id);
+    return h_flex().id(`decl-${r.key}-${i}`).gap(8).items_start().px(2).rounded(4).text_size(11.5)
+      .cursor_pointer().hover((st) => st.bg(t.hover)).tooltip(more ? "Show one line" : d.why ? "Show all of it and the reason" : "Show all of it")
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        view.decRows ??= new Set();
+        if (more) view.decRows.delete(id); else view.decRows.add(id);
+        cx.notify();
+      })
+      .child(when(d))
+      .child(v_flex().flex_1().min_w(0)
+        .child(div().when(!more, (el) => el.truncate()).text_color(t.foreground).child(title(d)))
+        .when(Boolean(more && d.why), (el) => el.child(div().text_size(11).text_color(t.dim).child(d.why))));
+  };
+  if (r.decided.length <= 3) return section(t, "Decisions", counts).children(r.decided.map(latest));
+  return v_flex().gap(4)
+    .child(h_flex().id(`fold-${key}`).gap(6).px(2).items_center().min_w(0).rounded(4).cursor_pointer().text_size(11)
+      .hover((st) => st.bg(t.hover)).tooltip(open ? "Show only the latest three" : "Show every decision")
+      .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); cx.notify(); })
+      .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
+      .child(div().flex_none().font_semibold().text_color(t.dim).child("Decisions"))
+      .child(div().min_w(0).truncate().text_color(t.dim).child(`· ${r.decided.length}${counts ? ` · ${counts}` : ""}`)))
+    .children(open ? r.decided.map(line) : r.decided.slice(0, 3).map(latest));
 }
 
 // "Tokens": what the run has used, across its orchestrator and every agent it ran. One line:
@@ -525,8 +575,8 @@ function tokensSection(view, t, r) {
     .when(open, (el) => el.children(byAgent.map(row)));
 }
 
-// The Proof section: the verdict as one fold line, a bar with a segment per scoped task
-// (green pass, red fail, amber partial, grey not checked), then the rows that need a look
+// The Proof section: the verdict as one fold line (the Tasks bar has each task's result in
+// colour, so there is no second bar here), then the rows that need a look
 // (failed, partial, missing a screenshot, not scoped, or not checked once the run is done)
 // without unfolding. Unfolding lists every task. A row shows its files as a count; clicking
 // it opens its evidence, checks, result and thumbnails. Not persisted.
@@ -568,7 +618,6 @@ function proofSection(view, t, r) {
   const shown = open ? s.rows : s.rows.filter(problem);
   return section(t, "Proof")
     .child(foldLine(view, t, key, `${s.tip ? `${s.tip}\n` : ""}${open ? "Show only the tasks that need a look" : `Show every task's proof (${s.rows.length})`}`, s.parts))
-    .when(s.scoped.length > 0, (el) => el.child(h_flex().gap(2).h(5).px(2).children(s.scoped.map((k) => div().flex_1().h_full().rounded(2).bg(colorOf(k))))))
     .children(shown.map(row))
     .when(open, (el) => el.child(h_flex().flex_wrap().gap(6).px(2).pt(2).items_center()
       .when(Boolean(md), (e) => e.child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md")))

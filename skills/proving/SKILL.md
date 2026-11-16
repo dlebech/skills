@@ -10,14 +10,14 @@ Capture evidence that a change works, at the depth a tier asks for, so a reviewe
 
 `$ARGUMENTS` is free text: a tier (`T0`–`T3`), optionally `run=<run-directory>` (the orchestrator passes it), and what to prove (a task, a branch, a PR). Default tier `T0`; default target the current branch. In an orchestrator run, take the tier from the task's `Proof:` line in `plan.md`.
 
-| Tier | Evidence |
+| Tier | Proved with |
 | --- | --- |
-| T0 | Tests green (CI, or the repo's local suite). |
-| T1 | Tests green, plus output for the changed behaviour. |
-| T2 | Tests green, output for the changed behaviour, and screenshots or a recording. |
-| T3 | Tests green, output for the changed behaviour, screenshots or a recording, and a guided demo. |
+| T0 | passing tests (CI, or the repo's local suite) |
+| T1 | passing tests and their output for the changed behaviour |
+| T2 | passing tests, their output for the changed behaviour, and screenshots or a recording |
+| T3 | passing tests, their output for the changed behaviour, screenshots or a recording, and a guided demo |
 
-Each row stands alone and is cumulative. Harbormaster shows these texts on hover over a tier tag: they are copied into `herdr-app/mods/harbormaster/proof.js` (`TIER_TEXT`) and `tests/herdr-app-harbormaster/tiers.sh` fails when the two differ, so change both together.
+Each row stands alone and is cumulative. Harbormaster shows these texts on hover over a tier tag, as a definition ("Proof tier T2 — proved with …"): they are copied into `herdr-app/mods/harbormaster/levels.js` (`TIER_TEXT`), and `tests/herdr-app-harbormaster/tiers.sh` and `levels.test.mjs` fail when the two differ, so change both together.
 
 ## 2. Find where proof goes
 
