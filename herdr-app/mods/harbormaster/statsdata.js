@@ -95,7 +95,7 @@ export function summaryOf(run, timing, res) {
     closed: run.away?.how === "closed" && run.away.at ? new Date(run.away.at).toISOString() : null,
     status: run.statusLine ?? null, tasks_merged: run.merged ?? null, tasks_planned: run.planned ?? null,
     wall: num(timing?.wall), critical_path: cats(timing?.critical_path), categories: cats(timing?.categories),
-    tasks, agents: all, tokens: tokensOf(timing?.tokens) ?? tokensOf(run.tokens), resources: resourcesOfLine(res), timed: Boolean(timing),
+    tasks, agents: all, tokens: tokensOf(run.tokens) ?? tokensOf(timing?.tokens), resources: resourcesOfLine(res), timed: Boolean(timing),
   };
 }
 

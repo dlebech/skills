@@ -279,7 +279,8 @@ done
 # shape as the files', with the session's stamp where the offset is: it is read again
 # only when the stamp changed or the run's start did.
 since_ms=0
-[ "$started" = - ] || since_ms=$(date -u -d "$started" +%s%3N 2>/dev/null) || since_ms=0
+# jq, not GNU date -d, so this works on macOS too.
+[ "$started" = - ] || since_ms=$(jq -rn --arg s "$started" '$s | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 * 1000' 2>/dev/null) || since_ms=0
 for i in "${!oc_ids[@]}"; do
   key=opencode_${oc_ids[$i]//[^A-Za-z0-9]/_}
   at=$cache/$key.at

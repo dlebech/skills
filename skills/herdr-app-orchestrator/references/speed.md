@@ -15,10 +15,9 @@ Example: `Ran: 45084ea bash tests/herdr-app-captain/runs-live.sh — pass (12 ch
 commit the command ran against, from a clean tree (`git rev-parse --short HEAD`). A failing run
 is recorded too (`— fail: <one line>`), and the output goes in the file beside it.
 
-Reviewers and the orchestrator reuse a `Ran:` line instead of rerunning it when its sha is the
-branch's current HEAD (or the integration commit that squashed the same tree) and the command is
-the one they need. They rerun only when the sha changed, the line is missing, or the result is not
-`pass`. Say in the review brief which `Ran:` lines exist.
+Reviewers and the orchestrator reuse a `Ran:` line instead of rerunning it when its sha is HEAD, or `git diff --quiet <sha> HEAD` (same tree), the tree is clean, and the result starts with `pass`, and the command is
+the one they need. They rerun otherwise (the tree changed, the line is missing, or the result is not
+`pass`). Say in the review brief which `Ran:` lines exist.
 
 ## 2. Targeted tests, full suite once
 

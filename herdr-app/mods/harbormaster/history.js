@@ -34,11 +34,12 @@ export function buildLine(run, timing, resources, closedMs, now = Date.now()) {
     }
   }
   for (const [p, v] of Object.entries(resources?.programs ?? {})) programs[p] ??= { cpu_s: v.cpu_s ?? null, peak_rss_mb: null };
+  // run.tokens is re-read every 5 s; timing's copy of status.json may be minutes old.
   const t = timing?.tokens ?? null;
-  const tokens = t && Number(t.total) > 0
-    ? { total: Number(t.total), input: Number(t.input) || 0, output: Number(t.output) || 0, cache_read: Number(t.cache_read) || 0, cache_write: Number(t.cache_write) || 0 }
-    : run.tokens
-      ? { total: run.tokens.total, input: run.tokens.input, output: run.tokens.output, cache_read: run.tokens.cacheRead, cache_write: run.tokens.cacheWrite }
+  const tokens = run.tokens && Number(run.tokens.total) > 0
+    ? { total: run.tokens.total, input: run.tokens.input, output: run.tokens.output, cache_read: run.tokens.cacheRead, cache_write: run.tokens.cacheWrite }
+    : t && Number(t.total) > 0
+      ? { total: Number(t.total), input: Number(t.input) || 0, output: Number(t.output) || 0, cache_read: Number(t.cache_read) || 0, cache_write: Number(t.cache_write) || 0 }
       : null;
   return {
     v: 1,

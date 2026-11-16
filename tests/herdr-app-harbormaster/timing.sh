@@ -258,4 +258,13 @@ rm -f "$run/plan.md" "$run/sessions" "$run/status.json" "$run/closed"
 check "bare run" '[1,null]' "$(sh "$script" "$run" "$(cat "$table")" | jq -c '[(.agents | length), .tokens]')"
 check "usage" 2 "$(sh "$script" "$run" >/dev/null 2>&1; echo $?)"
 
+# The table's test rule against this repo's own JavaScript test commands, and the other runners.
+trule=$(awk -F'\t' '$1 == "test" && $2 ~ /bash/ {print $3}' "$table")
+for c in 'node --import ./tests/herdr-app-harbormaster/loader.mjs --test tests/herdr-app-harbormaster/*.test.mjs' 'node --import ./loader.mjs --test stats.test.mjs' \
+  'node --test' 'bash tests/herdr-app-captain/runs-live.sh' 'vendor/bin/phpunit' 'composer test'; do
+  check "test rule: $c" true "$(jq -rn --arg c "$c" --arg r "$trule" '$c | test($r)')"
+done
+check "test rule: node a.js is not a test" false "$(jq -rn --arg r "$trule" '"node a.js; echo --test" | test($r)')"
+[ "$(awk -F'\t' '$1 == "install" && $3 ~ /composer/' "$table" | wc -l)" -eq 1 ] || { echo "FAIL composer install rule"; fails=$((fails + 1)); }
+
 [ "$fails" -eq 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

@@ -8,10 +8,15 @@ const num = (v) => Number(v) || 0;
 const r1 = (x) => Math.round(x * 10) / 10;
 
 // The task in a terminal's name, "impl-rss-t3" → "t3" for prefix "rss"; null when it names none.
-export function taskOfName(name, prefix) {
+// "final" (the final review) is no task; a round suffix ("rev-rss-t2-2") is dropped when what is
+// left is a task in `known`, as data.js's taskAgents does.
+export function taskOfName(name, prefix, known = null) {
   if (!prefix) return null;
   const esc = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`^[a-z]+-${esc}-(.+)$`, "i").exec(name ?? "")?.[1] ?? null;
+  const task = new RegExp(`^[a-z]+-${esc}-(.+)$`, "i").exec(name ?? "")?.[1] ?? null;
+  if (task === null || task === "final") return null;
+  const base = /^(.+)-\d+$/.exec(task)?.[1];
+  return base && known?.has(base) ? base : task;
 }
 
 // `agents` timing's agents (copied, not changed); `terms` .resources.json's `agents` (by terminal
@@ -30,6 +35,7 @@ export function taskOfName(name, prefix) {
 export function attributeResources(agents, terms, prefix = null) {
   terms = terms && typeof terms === "object" ? terms : {};
   const rows = (agents ?? []).map((a) => ({ ...a, cpu_s: a.cpu_s ?? null, peak_rss_mb: a.peak_rss_mb ?? null, avg_rss_mb: a.avg_rss_mb ?? null }));
+  const known = new Set(rows.map((a) => a.task).filter(Boolean));
   const byName = new Map();
   for (const a of rows) for (const k of [a.label, a.name]) if (k && !byName.has(k)) byName.set(k, a);
   const orch = rows.find((a) => a.role === "orchestrator") ?? null;
@@ -40,7 +46,7 @@ export function attributeResources(agents, terms, prefix = null) {
   const own = (top) => {
     let a = extra.get(top);
     if (!a) {
-      a = { name: top, label: top, role: /^([a-z]+)-/i.exec(top)?.[1]?.toLowerCase() ?? "agent", task: taskOfName(top, prefix), kind: null, total: 0, categories: {}, cpu_s: null, peak_rss_mb: null, avg_rss_mb: null };
+      a = { name: top, label: top, role: /^([a-z]+)-/i.exec(top)?.[1]?.toLowerCase() ?? "agent", task: taskOfName(top, prefix, known), kind: null, total: 0, categories: {}, cpu_s: null, peak_rss_mb: null, avg_rss_mb: null };
       extra.set(top, a);
     }
     return a;

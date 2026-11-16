@@ -101,8 +101,7 @@ Ran: <short sha> <command> — <result>
 
 `Ran:` (one line per test, lint or build run, repeatable) records the commit a run was made against, so
 reviewers and the orchestrator reuse it instead of rerunning it on the same sha; see
-[speed.md](speed.md). The result is `pass` or `fail: <one line>`. Reuse a line only when its sha
-equals the branch's HEAD, the tree is clean and the result starts with `pass`; otherwise rerun.
+[speed.md](speed.md). The result is `pass` or `fail: <one line>`. Reuse a line only when its sha is HEAD, or `git diff --quiet <sha> HEAD` (same tree), the tree is clean, and the result starts with `pass`; otherwise rerun.
 
 A task's `## ` section is matched to the task by its id; its `Result` shows beside the task's
 row in the Proof section. The optional header line `Checks: green — …` or `Checks: red — …` (CI or
@@ -203,7 +202,7 @@ that used the same prefix, is not this run's):
   session names its folder, so its sessions are listed by folder the same way. It is read, read-only,
   by `scripts/opencode-usage.py`, which needs `python3` (there is often no `sqlite3` program); without
   either, opencode adds nothing. Both of opencode's table generations are read (`session` + `message`,
-  `session_v2` + `session_message`); its older JSON files in `storage/` are not. Each is named by its worktree
+  `session_v2` + `session_message`); its older JSON files in `storage/` are not (tokens read the database only; the stats view's timing, `timing.sh`, reads `storage/` too, so a storage-only opencode install gets time but no tokens). Each is named by its worktree
   (`pda-t3`), the integration worktree's as `integration`.
 - **Each response once**: Claude Code writes one line per content block of a response, each with the
   same usage, so it counts each `message.id` once (they are one to one with `requestId`), across files

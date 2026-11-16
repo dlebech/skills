@@ -52,7 +52,7 @@ Files: shared/proof/<file>, shared/proof/<file>
 Ran: <short sha> <command> — <result>
 ```
 
-Record every test, lint or build run as a `Ran:` line with the sha it ran against (`git rev-parse --short HEAD`, clean tree); the result is `pass` or `fail: <one line>`. Reuse a line only when its sha is HEAD, the tree is clean and it starts with `pass`; otherwise rerun.
+Record every test, lint or build run as a `Ran:` line with the sha it ran against (`git rev-parse --short HEAD`, clean tree); the result is `pass` or `fail: <one line>`. Reuse a line only when its sha is HEAD, or `git diff --quiet <sha> HEAD` (same tree), the tree is clean, and the result starts with `pass`; otherwise rerun.
 
 `Files:` is comma-separated paths only; put notes in `Checked:`. Use `##` only for task sections.
 

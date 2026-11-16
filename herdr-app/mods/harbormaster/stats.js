@@ -6,7 +6,7 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { CATEGORIES, cachedTiming, durationText } from "./timing.js";
 import { resourcesOf, resourceSnapshot, otherProcesses, memText } from "./resources.js";
-import { summaryOf, mergeRuns, acrossRuns, liveGroups, cachedHistory, tokenParts, catTotal, isRunProp } from "./statsdata.js";
+import { summaryOf, mergeRuns, acrossRuns, liveGroups, cachedHistory, tokenParts, catTotal, addCats, isRunProp } from "./statsdata.js";
 import { facts, orchestratorsOf, workersOf, captainOf } from "./live.js";
 import { props } from "herdr";
 import { tokenText } from "./context.js";
@@ -152,6 +152,7 @@ function runDetail(view, t, s) {
       .child(`CPU ${cpuText(res.cpu_s)}${res.estimated ? " (estimated)" : ""} · memory peak ${mbText(res.peak_rss_mb)}, average ${mbText(res.avg_rss_mb)}`
         + (progs.length ? ` · ${progs.map(([k, p]) => `${k} ${cpuText(p.cpu_s).replace(" CPU", "")}`).join(", ")}` : ""))))
     .child(v_flex().gap(2).children(s.tasks.map((k) => taskRow(view, t, s, k))))
+    .when(s.tasks.length > 0 && s.agents.some((a) => !a.task), (el) => el.child(othersRow(view, t, s)))
     .when(s.tasks.length === 0 && s.agents.length > 0, (el) => el.children(s.agents.map((a, i) => agentRow(t, `${s.key}-a${i}`, a))));
 }
 
@@ -170,6 +171,30 @@ function taskRow(view, t, s, k) {
         .child(k.cpu_s == null ? "" : `${cpuText(k.cpu_s)} · ${mbText(k.peak_rss_mb)}`)))
     .when(open, (el) => el.child(v_flex().gap(2).pl(18)
       .child(legend(t, `task-${key}`, k.categories))
+      .children(agents.map((a, i) => agentRow(t, `${key}-a${i}`, a)))));
+}
+
+// The agents no task owns: the orchestrator (first), the final reviewer and fixer, and the jobs the
+// orchestrator started with hc run. Without this row their time, CPU and memory show only in the run's totals.
+function othersRow(view, t, s) {
+  const key = `${s.key}#others`;
+  const open = view.statsOpen?.has(key);
+  const agents = s.agents.filter((a) => !a.task).sort((a, b) => (b.role === "orchestrator") - (a.role === "orchestrator"));
+  const sum = (f) => agents.reduce((n, a) => n + (a[f] ?? 0), 0);
+  const cpu = agents.some((a) => a.cpu_s != null) ? sum("cpu_s") : null;
+  const peak = Math.max(0, ...agents.map((a) => a.peak_rss_mb ?? 0));
+  const cats = agents.reduce((m, a) => addCats(m, a.categories), {});
+  return v_flex().gap(2)
+    .child(h_flex().id(`task-${key}`).gap(8).items_center().h(20).text_size(11.5).cursor_pointer()
+      .on_click((_e, cx) => { view.statsOpen ??= new Set(); if (open) view.statsOpen.delete(key); else view.statsOpen.add(key); cx.notify(); })
+      .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(10).flex_none().text_color(t.dim))
+      .child(div().flex_none().w(70).truncate().text_color(t.foreground).child("Others"))
+      .child(div().flex_1().min_w(0).child(catBar(t, `task-${key}-bar`, cats, 6)))
+      .child(div().flex_none().w(52).text_color(t.muted).child(durationText(catTotal(cats))))
+      .child(div().flex_none().w(130).truncate().text_color(t.dim)
+        .child(cpu == null ? "" : `${cpuText(cpu)} · ${mbText(peak)}`)))
+    .when(open, (el) => el.child(v_flex().gap(2).pl(18)
+      .child(div().text_size(11).text_color(t.dim).child("Orchestrator, final review and fixes, and jobs it started"))
       .children(agents.map((a, i) => agentRow(t, `${key}-a${i}`, a)))));
 }
 

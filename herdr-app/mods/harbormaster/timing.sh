@@ -180,6 +180,8 @@ for r in $repos; do
   [ -z "$prefix" ] || printf 'under:%s/%s-\n' "$worktrees/$r" "$prefix" >>"$specs"
 done
 
+# Two other readers know opencode's tables: scripts/opencode-usage.py (tokens) and context.js
+# (context size). Change all three together.
 # opencode sessions → events, one JSON object a line with the session ("s") and its agent name.
 OPENCODE='
 import json, os, sqlite3, sys
