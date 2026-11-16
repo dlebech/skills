@@ -106,7 +106,7 @@ parse is shown as its raw text. Formats: [run-files.md](../skills/herdr-app-orch
 How many tokens a run has used, across its orchestrator and every agent it ran, counted by
 `skills/herdr-app-orchestrator/scripts/tokens.sh` into the run's `status.json` (`tokens`). The
 orchestrator does not run it itself: `set-status.sh` runs it on every publish, and later runs read only
-what the session files gained since, so it stays cheap. It reads Claude Code's and pi's own session
+what the session files gained since, so it stays cheap. It reads Claude Code's, pi's and opencode's own session
 files on the orchestrator's computer, from the run's start on, including those of agents already
 killed and worktrees already removed, those of an orchestrator resumed in a new terminal (best effort
 for a pi orchestrator), and, from its cache, those Claude Code has since deleted; a count never goes
