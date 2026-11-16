@@ -7,6 +7,7 @@
 import { exec } from "herdr";
 import { loadTiming } from "./timing.js";
 import { resourcesOf, chunks } from "./resources.js";
+import { attributeResources, taskResources } from "./attribute.js";
 
 const r1 = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
@@ -16,36 +17,14 @@ const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 // `closedMs` is the closed marker's time, or the delete time. Pure, for tests.
 export function buildLine(run, timing, resources, closedMs, now = Date.now()) {
   const res = resources?.agents ?? {};
-  const resNames = Object.keys(res);
-  // A timing agent's resources: by the name its brief gave it, else its worktree name; the
-  // orchestrator is the one terminal that has no parent among the others.
-  // A row goes to one timing agent only (a restarted agent can have two), and a resumed run
-  // can have several parentless terminals: the orchestrator is the one seen last.
-  const taken = new Set();
-  const matchRes = (a) => {
-    const n = a.role === "orchestrator"
-      ? resNames.filter((x) => !taken.has(x) && (!res[x].parent || !res[res[x].parent])).sort((p, q) => (res[q].last_ms ?? 0) - (res[p].last_ms ?? 0))[0]
-      : [a.label, a.name].find((x) => x && res[x] && !taken.has(x));
-    if (n) taken.add(n);
-    return n ?? null;
-  };
-  const agents = (timing?.agents ?? []).map((a) => {
-    const r = res[matchRes(a)];
-    return {
-      name: a.label || a.name, role: a.role ?? null, task: a.task ?? null, kind: a.kind ?? null,
-      total: a.total ?? null, categories: a.categories ?? {},
-      cpu_s: r?.cpu_s ?? null, peak_rss_mb: r?.peak_rss_mb ?? null, avg_rss_mb: r?.avg_rss_mb ?? null,
-    };
-  });
-  const tasks = (timing?.tasks ?? []).map((t) => {
-    const own = agents.filter((a) => a.task === t.id && a.cpu_s != null);
-    return {
-      id: t.id, total: t.total ?? null, categories: t.categories ?? {},
-      cpu_s: own.length ? r1(own.reduce((s, a) => s + a.cpu_s, 0)) : null,
-      // The agents of a task need not have run together, so this is the largest one's.
-      peak_rss_mb: own.length ? Math.max(...own.map((a) => a.peak_rss_mb ?? 0)) : null,
-    };
-  });
+  // Terminals to agents and tasks by attribute.js, the stats view's rule for open runs too, so a
+  // run's figures stay the same once it is in the history.
+  const agents = attributeResources(timing?.agents ?? [], res, run.prefix ?? null).map((a) => ({
+    name: a.label || a.name, role: a.role ?? null, task: a.task ?? null, kind: a.kind ?? null,
+    total: a.total ?? null, categories: a.categories ?? {},
+    cpu_s: a.cpu_s, peak_rss_mb: a.peak_rss_mb, avg_rss_mb: a.avg_rss_mb,
+  }));
+  const tasks = taskResources(timing?.tasks ?? [], agents);
   const programs = {};
   for (const a of Object.values(res)) {
     for (const [p, v] of Object.entries(a.programs ?? {})) {

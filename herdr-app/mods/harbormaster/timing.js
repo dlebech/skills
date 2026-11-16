@@ -26,6 +26,11 @@ const shipped = (name) => readTextFile(`${appHome()}/mods/harbormaster/${name}`)
 // key → { at, value, pending }
 const cache = new Map();
 
+// Forgets the runs not in `keys` (deleted ones), so the cache holds only runs still shown.
+export function pruneTiming(keys) {
+  for (const k of cache.keys()) if (!keys.has(k) && !cache.get(k).pending) cache.delete(k);
+}
+
 // The last breakdown read for a run, or null: for drawing without waiting.
 export const cachedTiming = (run) => cache.get(run.key)?.value ?? null;
 

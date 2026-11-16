@@ -213,7 +213,8 @@ test("a closed run whose logs are gone is written without timing on the second f
 test("one resources row goes to one timing agent only", () => {
   const dup = { ...timing, agents: [timing.agents[1], { ...timing.agents[1], name: "rss-t1b" }], tasks: [timing.tasks[0]] };
   const l = buildLine({ dir: "/x/a/b", key: "k" }, dup, resources, null, 1);
-  assert.deepEqual(l.agents.map((a) => a.cpu_s), [60, null]);
+  // The second gets none; the orchestrator's terminal, with no orchestrator in this timing, is a row of its own.
+  assert.deepEqual(l.agents.map((a) => [a.name, a.cpu_s]), [["impl-rss-t1", 60], ["impl-rss-t1", null], ["orc-x", 40]]);
   assert.equal(l.tasks[0].cpu_s, 60);
 });
 
@@ -251,4 +252,24 @@ test("deleteRun waits for the history, then deletes; a history that never answer
     assert.equal(order.filter((x) => x === "delete2").length, 2);
     assert.ok(Date.now() - t0 < 1000);
   } finally { tune.deleteWait = 90000; rmSync(root, { recursive: true, force: true }); }
+});
+
+test("buildLine counts a command's terminal for its agent, and a terminal timing does not know as its own row", () => {
+  const res = { agents: {
+    ...resources.agents,
+    // Started by impl-rss-t1 with hc run.
+    "impl-rss-t1-tests": { parent: "impl-rss-t1", cpu_s: 7, peak_rss_mb: 700, avg_rss_mb: 50 },
+    // An agent no session was read for (a grunt), with a command of its own.
+    "grunt-rss-t2": { parent: "orc-x", cpu_s: 3, peak_rss_mb: 100, avg_rss_mb: 80 },
+    "grunt-rss-t2-ci": { parent: "grunt-rss-t2", cpu_s: 2, peak_rss_mb: 20, avg_rss_mb: 10 },
+  } };
+  const l = buildLine({ dir: "/x/a/b", key: "k", prefix: "rss" }, timing, res, null, 1);
+  const by = Object.fromEntries(l.agents.map((a) => [a.name, a]));
+  assert.equal(by["impl-rss-t1"].cpu_s, 67);
+  assert.equal(by["impl-rss-t1"].peak_rss_mb, 700);
+  assert.equal(by.orchestrator.cpu_s, 40);
+  assert.deepEqual([by["grunt-rss-t2"].role, by["grunt-rss-t2"].task, by["grunt-rss-t2"].cpu_s], ["grunt", "t2", 5]);
+  assert.deepEqual(l.tasks.map((t) => [t.id, t.cpu_s]), [["t1", 67], ["t9", null], ["t2", 5]]);
+  // Every terminal's CPU is in some agent.
+  assert.equal(l.agents.reduce((s, a) => s + (a.cpu_s ?? 0), 0), 40 + 60 + 7 + 3 + 2);
 });

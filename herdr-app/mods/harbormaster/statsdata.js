@@ -4,7 +4,10 @@
 // history line. Pure helpers first (tests drive them), then the loading.
 
 import { exec, machines } from "herdr";
-import { loadTiming, cachedTiming } from "./timing.js";
+import { loadTiming, cachedTiming, pruneTiming } from "./timing.js";
+import { attributeResources, taskResources } from "./attribute.js";
+
+export { taskOfName } from "./attribute.js";
 
 const num = (v) => Number(v) || 0;
 const orNull = (v) => (v == null || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
@@ -80,60 +83,11 @@ export function parseHistory(text, machine = null) {
   return [...byKey.values()];
 }
 
-// The task in a terminal's name, "impl-rss-t3" → "t3" for prefix "rss"; null when it names none.
-export function taskOfName(name, prefix) {
-  if (!prefix) return null;
-  const esc = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`^[a-z]+-${esc}-(.+)$`, "i").exec(name ?? "")?.[1] ?? null;
-}
-
 // An open run (data.js) with its timing (timing.sh's JSON or null) and its .resources.json (or
-// null) → the shared shape. Each resources terminal goes to the agent it belongs to: the timing
-// agent with its name as label, else the one its parent chain reaches (the commands an agent
-// started with hc run), else the orchestrator for the run's root; a terminal that reaches none
-// is an agent of its own, with CPU and memory and no time. An agent's CPU adds its terminals';
-// its peak and average memory are its largest terminal's (they were not sampled together).
+// null) → the shared shape. Terminals go to agents and tasks by attribute.js, as in the history.
 export function summaryOf(run, timing, res) {
-  const prefix = run.prefix ?? null;
-  const agents = arr(timing?.agents).map(agentOf);
-  const byLabel = new Map(agents.filter((a) => a.label).map((a) => [a.label, a]));
-  const orch = agents.find((a) => a.role === "orchestrator") ?? null;
-  const terms = obj(res?.agents);
-  const ownerOf = (name, depth = 0) => {
-    if (byLabel.has(name)) return byLabel.get(name);
-    const t = terms[name];
-    if (!t || depth > 20) return null;
-    if (!t.parent) return orch;
-    // A terminal right under the orchestrator that timing does not know is an agent of its own.
-    if (!terms[t.parent] || !terms[t.parent].parent) return null;
-    return ownerOf(t.parent, depth + 1);
-  };
-  const extra = new Map();
-  for (const [name, t] of Object.entries(terms)) {
-    let a = ownerOf(name);
-    if (!a) {
-      // Its own row, named after the top of its chain below the orchestrator.
-      let top = name;
-      for (let d = 0; terms[top]?.parent && terms[terms[top].parent]?.parent && d < 20; d++) top = terms[top].parent;
-      a = extra.get(top);
-      if (!a) {
-        a = agentOf({ name: top, label: top, role: /^([a-z]+)-/i.exec(top)?.[1]?.toLowerCase() ?? "agent", task: taskOfName(top, prefix) });
-        extra.set(top, a);
-      }
-    }
-    a.cpu_s = Math.round(((a.cpu_s ?? 0) + num(t.cpu_s)) * 10) / 10;
-    a.peak_rss_mb = Math.max(a.peak_rss_mb ?? 0, num(t.peak_rss_mb));
-    a.avg_rss_mb = Math.max(a.avg_rss_mb ?? 0, num(t.avg_rss_mb));
-  }
-  const all = [...agents, ...extra.values()];
-  const tasks = arr(timing?.tasks).map(taskOf);
-  for (const a of all) {
-    if (!a.task) continue;
-    let k = tasks.find((x) => x.id === a.task);
-    if (!k) { k = taskOf({ id: a.task }); tasks.push(k); }
-    if (a.cpu_s != null) k.cpu_s = Math.round(((k.cpu_s ?? 0) + a.cpu_s) * 10) / 10;
-    if (a.peak_rss_mb != null) k.peak_rss_mb = Math.max(k.peak_rss_mb ?? 0, a.peak_rss_mb);
-  }
+  const all = attributeResources(arr(timing?.agents).map(agentOf), res?.agents, run.prefix ?? null).map(agentOf);
+  const tasks = taskResources(arr(timing?.tasks), all).map(taskOf);
   return {
     key: run.key, source: "open", live: !run.away, machine: run.machine ?? null,
     run: run.dir, folder: run.folder || null, branch: run.branch, type: run.type ?? null, topic: run.topic ?? null,
@@ -148,10 +102,14 @@ export function summaryOf(run, timing, res) {
 // Open runs and past runs, one row each, newest first. A run in both is its history line once
 // it is closed (the line is final); while open (never closed, or resumed since) the live figures.
 export function mergeRuns(open, history) {
-  const same = (h, o) => h.run === o.run && (h.machine ?? null) === (o.machine ?? null)
-    && (!h.started || !o.started || Date.parse(h.started) === Date.parse(o.started));
-  const shown = open.filter((o) => !(o.closed && history.some((h) => same(h, o))));
-  const past = history.filter((h) => !shown.some((o) => same(h, o)));
+  const where = (x) => `${x.machine ?? ""}:${x.run}`;
+  const byRun = new Map();
+  for (const h of history) byRun.set(where(h), [...(byRun.get(where(h)) ?? []), h]);
+  const sameStart = (h, o) => !h.started || !o.started || Date.parse(h.started) === Date.parse(o.started);
+  const shown = open.filter((o) => !(o.closed && (byRun.get(where(o)) ?? []).some((h) => sameStart(h, o))));
+  const live = new Map();
+  for (const o of shown) live.set(where(o), [...(live.get(where(o)) ?? []), o]);
+  const past = history.filter((h) => !(live.get(where(h)) ?? []).some((o) => sameStart(h, o)));
   const at = (s) => Date.parse(s.started ?? "") || 0;
   return [...shown, ...past].sort((a, b) => at(b) - at(a));
 }
@@ -226,23 +184,31 @@ export function loadHistory() {
   return history.pending;
 }
 
-// Reads the open runs' timing one run at a time (a first read of a big run parses every
-// transcript), those never read first. Runs a history line already covers are skipped.
-// Resolves when done; `onEach` after each run that was read, to redraw.
+// The order runs' timing is read in: live runs already read (a quick re-read, so they stay at
+// most LIVE_TIMING_AGE old), then runs never read (a first read of a big run parses every
+// transcript, up to minutes), then the rest (put away and read: nothing to do).
+export const timingOrder = (r, cached) => (!r.away && cached ? 0 : !cached ? 1 : 2);
+
+// Reads the open runs' timing one run at a time, in timingOrder. Runs a history line already
+// covers are skipped. Every caller's `onEach` hears each run that was read (to redraw), also
+// one that called while a pass was under way; resolves when the pass is done.
 let timingBusy = null;
+const timingListeners = new Set();
 export function refreshTimings(runs, onEach = () => {}) {
+  timingListeners.add(onEach);
   if (timingBusy) return timingBusy;
+  pruneTiming(new Set(runs.map((r) => r.key)));
   const covered = new Set(history.runs.map((h) => `${h.machine ?? ""}:${h.run}`));
   const todo = runs.filter((r) => !(r.away?.how === "closed" && covered.has(`${r.machine ?? ""}:${r.dir}`)))
-    .sort((a, b) => (cachedTiming(a) ? 1 : 0) - (cachedTiming(b) ? 1 : 0));
+    .sort((a, b) => timingOrder(a, cachedTiming(a)) - timingOrder(b, cachedTiming(b)));
   timingBusy = (async () => {
     for (const r of todo) {
       const had = cachedTiming(r);
       // A put-away run does not change; one that could not be read is tried again now and then.
       await loadTiming(r, { maxAge: !had ? FAILED_TIMING_AGE : r.away ? Infinity : LIVE_TIMING_AGE });
-      if (cachedTiming(r) !== had) onEach(r);
+      if (cachedTiming(r) !== had) for (const f of timingListeners) { try { f(r); } catch { /* its view is gone */ } }
     }
-  })().catch(() => {}).finally(() => { timingBusy = null; });
+  })().catch(() => {}).finally(() => { timingBusy = null; timingListeners.clear(); });
   return timingBusy;
 }
 

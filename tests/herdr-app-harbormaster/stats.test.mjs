@@ -4,7 +4,7 @@
 // Run: node --import ./loader.mjs --test stats.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseHistory, summaryOf, mergeRuns, acrossRuns, liveGroups, isRunProp, taskOfName, cats, addCats, catTotal, tokenParts } from "../../herdr-app/mods/harbormaster/statsdata.js";
+import { parseHistory, summaryOf, mergeRuns, acrossRuns, liveGroups, isRunProp, taskOfName, timingOrder, refreshTimings, cats, addCats, catTotal, tokenParts } from "../../herdr-app/mods/harbormaster/statsdata.js";
 
 const line = (o) => JSON.stringify({ v: 1, folder: "/p/skills", branch: "b", type: "feat", started: "2026-11-01T10:00:00Z", wall: 100, critical_path: { model: 60, idle: 40 }, ...o });
 
@@ -184,4 +184,32 @@ test("isRunProp: a run directory, with ~ or a trailing slash", () => {
   assert.ok(isRunProp(s, "~/.herdr/hc-orchestration/skills/x"));
   assert.ok(!isRunProp(s, "~/.herdr/hc-orchestration/skills/xy"));
   assert.ok(!isRunProp(s, null));
+});
+
+test("summaryOf and buildLine give an open run and its history line the same agents and tasks", async () => {
+  const { buildLine } = await import("../../herdr-app/mods/harbormaster/history.js");
+  const open = summaryOf(run, timing, res);
+  const past = parseHistory(JSON.stringify(buildLine(run, timing, res, null, 1)))[0];
+  const pick = (s) => [s.agents.map((a) => [a.label ?? a.name, a.cpu_s, a.peak_rss_mb]), s.tasks.map((k) => [k.id, k.cpu_s, k.peak_rss_mb])];
+  assert.deepEqual(pick(past), pick(open));
+});
+
+test("timingOrder: live runs already read, then never read, then put away", () => {
+  const live = { away: null }, away = { away: { how: "parked" } };
+  assert.deepEqual([timingOrder(live, {}), timingOrder(live, null), timingOrder(away, null), timingOrder(away, {})], [0, 1, 1, 2]);
+});
+
+test("refreshTimings: a second caller during a pass hears each run read too", async () => {
+  const seen = { a: [], b: [] };
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  globalThis.__herdrExec = async () => { await gate; return { code: 0, stdout: JSON.stringify({ version: 1, wall: 1 }), stderr: "" }; };
+  try {
+    const r = { key: "m:/r/listen", dir: "/r/listen", machine: null, away: null };
+    const p1 = refreshTimings([r], (x) => seen.a.push(x.key));
+    const p2 = refreshTimings([r], (x) => seen.b.push(x.key));
+    release();
+    await Promise.all([p1, p2]);
+    assert.deepEqual(seen, { a: ["m:/r/listen"], b: ["m:/r/listen"] });
+  } finally { delete globalThis.__herdrExec; }
 });

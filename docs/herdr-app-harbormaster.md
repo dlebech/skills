@@ -214,10 +214,18 @@ section folds with a click on its title.
   a task for its agents, each with its role, time, CPU and peak. An agent's CPU includes the commands it
   started with `hc run`; its memory peak is its largest terminal's. A task's peak is its largest agent's.
 
-Timing is read in the background, one run at a time: an open run's at most every 90 seconds, a parked
-or closed run's once, and a run the history already has not at all. A big run's first read can take a
-minute or more (its later reads are quick, from `timing.sh`'s cache); until then it shows "reading…".
-The history is read again every minute, the live table with each 5-second poll.
+Timing is read in the background, one run at a time: an open run's at most every 90 seconds (open runs
+already read come first, so a first read of another run does not hold them up), a parked or closed run's
+once, and a run the history already has not at all. A big run's first read can take a minute or more (its
+later reads are quick, from `timing.sh`'s cache); until then it shows "reading…". An open run's figures,
+its wall time included, are as of that last read, so they can be up to two minutes behind. The history
+is read again every minute, the live table with each 5-second poll. The newest 25 runs are listed;
+**Show N older** lists the rest (the sums across runs always count them all).
+
+Which agent and task a terminal's CPU and memory count for is one rule (`attribute.js`), the same for
+open runs and history lines: the agent whose brief named it; for the commands an agent started with
+`hc run`, that agent; for a terminal timing does not know (a grunt, an agent whose session was not read
+yet), a row of its own, its task from its name (`impl-<prefix>-<task>`).
 
 ## Proof
 
@@ -300,6 +308,7 @@ Parking leaves the run directory, worktrees, branches and PRs in place, and the 
 | `herdr-app/mods/harbormaster/timing.sh`, `categories.tsv` | Where a run's time went, from its session logs, and the table that sorts tool calls into categories |
 | `herdr-app/mods/harbormaster/timing.js` | Runs `timing.sh` on the run's machine (`loadTiming(run)`), cached per run; category labels and `durationText` |
 | `herdr-app/mods/harbormaster/history.js` | Appends a closed run's summary to `.history.jsonl` (`writeHistory`, once per closing; `writeHistoryBeforeDelete`) |
+| `herdr-app/mods/harbormaster/attribute.js` | Which agent and task each terminal's CPU and memory count for, for the stats view and the history |
 | `herdr-app/mods/harbormaster/stats.js`, `statsdata.js` | The stats view, and its figures: open and past runs in one shape, the sums across runs, the live table's groups |
 | `herdr-app/mods/harbormaster/harbor.js` | The sea, the reefs, the captain's boat, the rail and the pane headers |
 | `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, spinner, chevrons. All original, CC0 like the rest of this repository |

@@ -85,10 +85,10 @@ function choice(t, id, options, value, set) {
 
 // ---- across runs ----
 
-function across(view, t, runs) {
+function across(view, t, data) {
   const by = view.statsBy ?? "all";
-  const groups = acrossRuns(runs, by);
-  const all = acrossRuns(runs, "all")[0];
+  const groups = data.across[by] ??= acrossRuns(data.runs, by);
+  const all = (data.across.all ??= acrossRuns(data.runs, "all"))[0];
   const counted = all?.runs ?? 0;
   return section(view, t, "across", "Where the time goes", counted ? `${plural(counted, "run")} · ${durationText(all.wall)} wall` : null, () => {
     if (!all) return div().px(2).text_size(11.5).text_color(t.dim).child("No run's time read yet.");
@@ -183,16 +183,25 @@ function agentRow(t, id, a) {
     .child(div().flex_none().w(130).truncate().text_color(t.dim).child(a.cpu_s == null ? "" : `${cpuText(a.cpu_s)} · ${mbText(a.peak_rss_mb)}`));
 }
 
+// The newest SHOWN runs are rows; the rest behind "Show N older", so drawing stays bounded as
+// the history grows.
+const SHOWN = 25;
 function runsSection(view, t, runs) {
   const maxTokens = Math.max(0, ...runs.map((s) => { const p = tokenParts(s.tokens); return p ? p.fresh + p.cached : 0; }));
   const reading = runs.filter((s) => !s.timed).length;
+  const rows = view.statsAll ? runs : runs.slice(0, SHOWN);
+  const older = runs.length - rows.length;
   return section(view, t, "runs", "Runs", [plural(runs.length, "run"), reading ? `reading ${reading}` : null].filter(Boolean).join(" · "), () =>
     v_flex().gap(2)
       .child(h_flex().gap(8).px(8).text_size(10.5).text_color(t.dim)
         .child(div().flex_1().pl(19).child("where its wall time went"))
         .child(div().flex_none().w(124).child("tokens: fresh, cache read"))
         .child(div().flex_none().w(150).child("CPU · memory peak")))
-      .children(runs.map((s) => runRow(view, t, s, maxTokens)))
+      .children(rows.map((s) => runRow(view, t, s, maxTokens)))
+      .when(older > 0 || (view.statsAll && runs.length > SHOWN), (el) => el.child(div().id("runs-more").px(8).h(22).flex().items_center()
+        .text_size(11).text_color(t.muted).cursor_pointer().hover((st) => st.text_color(t.foreground))
+        .on_click((_e, cx) => { view.statsAll = !view.statsAll; cx.notify(); })
+        .child(older > 0 ? `Show ${plural(older, "older run")}` : `Show the newest ${SHOWN} only`)))
       .when(runs.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child("No runs yet."))));
 }
 
@@ -245,9 +254,18 @@ function liveSection(view, t) {
 // ---- the view ----
 
 // Every run's figures: open runs from their timing and resources, past runs from the history.
+// Worked out again only when what they come from changed: the runs, the history, or a run's
+// timing (a new object when it changes) or resources (a new sample), not on every redraw. `across` holds
+// the sums across runs, by grouping, filled as they are drawn.
 export function statsRuns(view) {
+  // .resources.json is parsed again on every poll, so it counts by its sample time, not by object.
+  const refs = [view.runs, cachedHistory(), ...view.runs.flatMap((r) => [cachedTiming(r), resourcesOf(r)?.sampled_ms])];
+  const memo = view.statsMemo;
+  if (memo && memo.refs.length === refs.length && memo.refs.every((x, i) => x === refs[i])) return memo.data;
   const open = view.runs.map((r) => summaryOf(r, cachedTiming(r), resourcesOf(r)));
-  return mergeRuns(open, cachedHistory());
+  const data = { runs: mergeRuns(open, cachedHistory()), across: {} };
+  view.statsMemo = { refs, data };
+  return data;
 }
 
 // props().run, a run directory: that run first and open, with its tasks open, once each (so
@@ -264,13 +282,14 @@ function focusRun(view, runs) {
 }
 
 export function statsView(view, t) {
-  const runs = focusRun(view, statsRuns(view));
+  const data = statsRuns(view);
+  const runs = focusRun(view, data.runs);
   return v_flex().id("stats").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .child(h_flex().flex_none().px(14).pt(10).pb(6).gap(8).items_center()
       .child(div().text_size(13).font_semibold().text_color(t.foreground).child("Stats"))
       .child(div().text_size(11).text_color(t.dim).child("time, tokens, CPU and memory, from logs the runs already leave")))
     .child(v_flex().id("stats-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
-      .child(across(view, t, runs))
+      .child(across(view, t, data))
       // Opened on one run, the runs come before the live table, so that run is in view.
       .when(!props()?.run, (el) => el.child(liveSection(view, t)))
       .child(runsSection(view, t, runs))
