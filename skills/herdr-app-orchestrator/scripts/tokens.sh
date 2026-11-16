@@ -202,7 +202,7 @@ done <"$dir/sessions"
 add_oc orchestrator ${patterns[@]+"${patterns[@]}"}
 patterns=()
 for r in $repos; do
-  patterns+=(${prefix:+"$worktrees/$r/$prefix"-*} "$worktrees/$r/$(branch_slug "$branch")")
+  patterns+=(${prefix:+"$worktrees/$r/$prefix-*"} "$worktrees/$r/$(branch_slug "$branch")")
 done
 add_oc "" "${patterns[@]}"
 for i in "${!oc_names[@]}"; do

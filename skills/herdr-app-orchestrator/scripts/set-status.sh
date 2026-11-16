@@ -157,8 +157,9 @@ status_update "$dir" "$STATUS_TOKENS_FILTER | $(cat <<'JQ'
   | if $progress_set != "" then .progress = (if $progress == "" then null else $progress end) else . end
   | if $tasks != "" then .tasks = ($tasks | split("/") | {merged: (.[0] | tonumber), planned: (.[1] | tonumber)}) else . end
   | if $autonomy != "" then .autonomy = $autonomy else . end
-  | if $budget_set != "" then (if $budget == "" then del(.budget, .budget_asked, .budget_answered) else .budget = ($budget | tonumber) end) else . end
+  # The answer is for the budget the question was asked for, so it is recorded before a new budget replaces it.
   | if $budget_answered != "" and .budget then .budget_answered = .budget else . end
+  | if $budget_set != "" then (if $budget == "" then del(.budget, .budget_asked, .budget_answered) else .budget = ($budget | tonumber) end) else . end
   | .issues = reduce $issues[] as $u (.issues; if index([$u]) then . else . + [$u] end)
   | .prs = reduce $prs[] as $p (.prs;
       if any(.[]; .repo == $p.repo) then map(if .repo == $p.repo then $p else . end) else . + [$p] end)

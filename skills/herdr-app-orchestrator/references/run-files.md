@@ -338,7 +338,8 @@ Nothing: it is a soft budget
 ```
 
 Whatever the answer, run `set-status.sh --budget-answered` (it records `budget_answered`, the budget the
-question was for, so Harbormaster stops offering it; Continue's new budget does that too):
+question was for, so Harbormaster stops offering it; given together with `--budget` it is still the old budget, so the new
+one's crossing is asked again):
 
 - **Continue**: `set-status.sh --budget <the number in the answer, else twice the old one> --budget-answered`, then carry on.
 - **Compact**: the answerer has already put the answer in `inbox/`, typed `/compact` into the orchestrator's

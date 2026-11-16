@@ -687,6 +687,7 @@ export async function answerRun(run, title, answer, free = "") {
 // when it is not, or when the send fails; the answer then waits in the inbox, to be read as
 // any other when the orchestrator is next woken.
 export async function compactRun(run, title, answer) {
+  if (orchestratorState(run, facts()) === "gone") throw new Error("not compacted: its orchestrator is gone or lost; the answer waits for a resume");
   const ok = () => ["idle", "done"].includes(exactStatus(run.terminal, facts()));
   if (!ok()) throw new Error("not compacted: its orchestrator is not idle or done");
   const file = await writeInbox(run, "harbormaster", answerMessage(title, answer));

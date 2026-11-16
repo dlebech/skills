@@ -739,7 +739,7 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
         }))
       .child(open ? "Cancel" : "Reply");
     // /compact is typed into the orchestrator, so only while it sits idle or done.
-    const orchNow = it.run ? exactStatus(it.run.terminal, ctx) ?? (orchestratorState(it.run, ctx) === "gone" ? "gone" : "unknown") : null;
+    const orchNow = it.run ? (orchestratorState(it.run, ctx) === "gone" ? "gone" : exactStatus(it.run.terminal, ctx) ?? "unknown") : null;
     const compactWhy = (o) => (isCompact(o.label) && isBudgetQuestion(it) && !["idle", "done"].includes(orchNow)
       ? `Compact needs the orchestrator idle or done (it is ${orchNow})` : null);
     const buttons = !answered && !why && it.options.length > 0 && h_flex().flex_wrap().gap(6).pl(22)
