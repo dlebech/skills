@@ -228,24 +228,54 @@ export function trackSince(prev, sig, now, seed = null) {
 
 const VERB = { implement: "implementing", review: "in review", fix: "fixing" };
 
-// The run's current step, {text, since}: tasks at work ("t3 implementing", "+N" for more),
-// else CI running on a PR ("CI on #42", since its first check started), else its progress
-// line, else its phase; since is null when not known yet. `stages` are the tasks' shown stages (data.js shownStage), in
-// run.tasks order; `since` is when the progress line or task states last changed.
-export function stepOf(run, { prs = [], stages = [], since = null } = {}) {
-  const active = (run?.tasks ?? []).map((k, i) => ({ k, stage: stages[i] })).filter((x) => VERB[x.stage]);
-  if (active.length) {
-    const [first] = active;
-    return { text: `${first.k.id} ${VERB[first.stage]}${active.length > 1 ? ` +${active.length - 1}` : ""}`, since };
-  }
-  const ci = ciState(prs);
-  if (ci.state === "running") return { text: `CI on ${ci.pr.number ? `#${ci.pr.number}` : "the PR"}`, since: ci.startedAt ?? since };
-  const text = run?.progress || run?.statusLine || run?.phase || "";
-  return { text, since };
+// The parts of a run's step that each keep their own age (tracking.js): its progress line, and
+// each task at work by its state and shown stage, so one task moving on does not reset another's
+// age. Keys: "p:<progress line>", "t:<id>:<state>:<stage>".
+export const progressKey = (text) => `p:${text ?? ""}`;
+export const taskKey = (task, stage) => `t:${task.id}:${task.state ?? ""}:${stage ?? ""}`;
+export const stepParts = (run, stages = []) =>
+  [progressKey(run?.progress), ...(run?.tasks ?? []).flatMap((k, i) => (VERB[stages[i]] ? [taskKey(k, stages[i])] : []))];
+
+// Keeps each part's since: {[key]: ms} for exactly `keys`, a part seen before keeping its own,
+// a new one taking now. A first sight (`prev` null) takes `seed` (as trackSince) for every part.
+// The same object when nothing changed, so the caller writes only on a change.
+export function trackParts(prev, keys, now, seed = null) {
+  const first = seed && seed <= now ? seed : now;
+  const out = {};
+  for (const k of keys) out[k] = prev?.[k] ?? (prev ? now : first);
+  const same = prev && Object.keys(prev).length === keys.length && keys.every((k) => prev[k] === out[k]);
+  return same ? prev : out;
 }
 
-// "CI on #42 · 34m".
-export const stepText = (step, now = Date.now()) => (step?.text ? (step.since ? `${step.text} · ${ageText(now - step.since)}` : step.text) : "");
+// The run's current step, {text, since, more}: tasks at work, named by the longest-running one
+// with its own age ("t3 implementing", `more` the other tasks at work), else CI running on a PR
+// ("CI on #42", since its first check started), else its progress line with its own age, else
+// its phase. `stages` are the tasks' shown stages (data.js shownStage), in run.tasks order;
+// `ages` the parts' since (trackParts, by taskKey and progressKey); `since` is when anything in
+// the step last changed, the fallback for a part not dated yet; since is null when not known.
+export function stepOf(run, { prs = [], stages = [], since = null, ages = null } = {}) {
+  const active = (run?.tasks ?? []).map((k, i) => ({ k, stage: stages[i], since: ages?.[taskKey(k, stages[i])] ?? since }))
+    .filter((x) => VERB[x.stage]);
+  if (active.length) {
+    const first = active.reduce((a, b) => ((b.since ?? Infinity) < (a.since ?? Infinity) ? b : a));
+    return { text: `${first.k.id} ${VERB[first.stage]}`, since: first.since, more: active.length - 1, task: true };
+  }
+  const ci = ciState(prs);
+  if (ci.state === "running") return { text: `CI on ${ci.pr.number ? `#${ci.pr.number}` : "the PR"}`, since: ci.startedAt ?? since, more: 0 };
+  if (run?.progress) return { text: run.progress, since: ages?.[progressKey(run.progress)] ?? since, more: 0 };
+  return { text: run?.statusLine || run?.phase || "", since, more: 0 };
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+// "t4 implementing 1h05m · +2 tasks" (a task's verb reads its age as how long), "CI on #42 · 34m",
+// "writing docs · 3m".
+export function stepText(step, now = Date.now()) {
+  if (!step?.text) return "";
+  const age = step.since ? ageText(now - step.since) : null;
+  const head = age ? `${step.text}${step.task ? " " : " · "}${age}` : step.text;
+  return step.more > 0 ? `${head} · +${plural(step.more, "task")}` : head;
+}
 
 // ---- stalled ----
 
@@ -280,7 +310,7 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 //   pr        prRead() of the run
 //   flow      reviewFlow() of the run
 //   stall     stalled() of the run
-//   stages, since   for stepOf
+//   stages, since, ages   for stepOf
 //   filesOk   false when the run's files are a stale read (its machine did not answer)
 //   closed    data.js isClosed: a finished run whose tab the user closed waits on nothing
 //   now
@@ -292,10 +322,10 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 // run closed); working, ci-running, idle in Working (idle: briefly quiet, not
 // stalled yet); waiting-for in Waiting on others; cant-tell in Can't tell. A Needs you run
 // may still have cantTell: a question read from its files, its PRs unreadable.
-export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, filesOk = true, closed = false, now = Date.now() } = {}) {
+export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, now = Date.now() } = {}) {
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
-  const step = stepOf(run, { prs, stages, since });
+  const step = stepOf(run, { prs, stages, since, ages });
   const base = { cantTell: false, why: null, next: null, step, stall: false, reasons: [] };
   const out = (group, extra) => {
     const r = { ...base, ...extra, group };

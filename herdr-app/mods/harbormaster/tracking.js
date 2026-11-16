@@ -3,7 +3,10 @@
 //     harbormaster.steps, {[run key]: {sig, since}}, persisted, so a run's age survives a
 //     Harbormaster reload or an app restart. Written only when a step changes (rare). A run
 //     seen for the first time is dated by status.json's `updated` (set-status.sh writes it
-//     with every progress change, so it is at or after the real change).
+//     with every progress change, so it is at or after the real change). Beside it, `parts`:
+//     when each part of the step began, the progress line and each task at work by its state
+//     and stage (attention.js stepParts), so a step names its own age, not the time since
+//     anything in the run moved; only the current parts are kept.
 //   - when its agents last showed a sign of life: a change in the orchestrator's and its
 //     agents' status or turn count (hc ls `turn`), an agent starting or ending, or new
 //     terminal output. Module memory only: it changes every few seconds while agents work,
@@ -24,7 +27,7 @@
 //     {[folder name]: "peer" | "self"}, the user's choices over attention.js DEFAULT_FLOWS.
 
 import { exec, shared, setShared } from "herdr";
-import { STALL_MS, stepSig, trackSince, usualCi } from "./attention.js";
+import { STALL_MS, stepSig, trackSince, trackParts, stepParts, usualCi } from "./attention.js";
 import { workersOf, exactStatus, orchestratorState } from "./live.js";
 
 const STEPS_KEY = "harbormaster.steps";
@@ -62,14 +65,18 @@ export function addCiSample(store, pr) {
 
 // ---- step anchors ----
 
-// Updates the step anchors from a poll's runs: a changed step gets now; a run gone from a
-// machine that answered is forgotten. `answered`: the machines (their names, "" for this one) read.
-export function nextSteps(store, runs, answered, now) {
+// Updates the step anchors from a poll's runs: a changed step gets now, and each new part of
+// it (stepParts, with the tasks' shown stages from `stagesOf(run)`) its own now; a run gone
+// from a machine that answered is forgotten. `answered`: the machines (their names, "" for
+// this one) read. An entry from before parts were kept dates its parts by its own since.
+export function nextSteps(store, runs, answered, now, stagesOf = () => []) {
   const next = { ...(store ?? {}) };
   let changed = false;
   for (const r of runs) {
-    const t = trackSince(next[r.key], stepSig(r), now, r.updated);
-    if (t !== next[r.key]) { next[r.key] = t; changed = true; }
+    const prev = next[r.key];
+    const t = trackSince(prev ? { sig: prev.sig, since: prev.since } : null, stepSig(r), now, r.updated);
+    const parts = trackParts(prev?.parts ?? null, stepParts(r, stagesOf(r)), now, prev && !prev.parts ? prev.since : r.updated);
+    if (!prev || t.since !== prev.since || t.sig !== prev.sig || parts !== prev.parts) { next[r.key] = { sig: t.sig, since: t.since, parts }; changed = true; }
   }
   const listed = new Set(runs.map((r) => r.key));
   for (const key of Object.keys(next)) {
@@ -80,6 +87,10 @@ export function nextSteps(store, runs, answered, now) {
 
 // When the run's progress line or plan task states last changed (ms), or null before its first poll.
 export const stepSince = (run) => shared(STEPS_KEY)?.[run.key]?.since ?? null;
+
+// When each part of the run's step began ({[part key]: ms}, attention.js stepParts), or null
+// before its first poll.
+export const stepAges = (run) => shared(STEPS_KEY)?.[run.key]?.parts ?? null;
 
 // ---- agents' activity (module memory) ----
 
@@ -115,11 +126,11 @@ async function probe(run, ctx, entry) {
 }
 
 // After each run read (data.js loadRuns): updates the step anchors and the agents' activity,
-// and reads the screens of runs about to stall.
-export function observeRuns(runs, ctx, answered) {
+// and reads the screens of runs about to stall. `stagesOf(run)`: its tasks' shown stages.
+export function observeRuns(runs, ctx, answered, stagesOf = () => []) {
   const now = Date.now();
   const steps = shared(STEPS_KEY) ?? {};
-  const next = nextSteps(steps, runs, answered, now);
+  const next = nextSteps(steps, runs, answered, now, stagesOf);
   if (next !== steps) setShared(STEPS_KEY, next);
   const listed = new Set(runs.map((r) => r.key));
   for (const key of activity.keys()) if (!listed.has(key)) activity.delete(key);

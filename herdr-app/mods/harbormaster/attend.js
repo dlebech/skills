@@ -2,9 +2,9 @@
 // (data.js), its PR read, its live agents, and the times and settings tracking.js keeps.
 
 import { cachedRuns, prEntryOf, taskAgents, shownStage, isClosed } from "./data.js";
-import { orchestratorState, agentStatus, workersOf, needsYou, needReason } from "./live.js";
+import { orchestratorState, agentStatus, workersOf, needReason } from "./live.js";
 import { assess, prRead, reviewFlow, stalled, ciState } from "./attention.js";
-import { stepSince, lastActivity, ciUsualOf, reviewFlows } from "./tracking.js";
+import { stepSince, stepAges, lastActivity, ciUsualOf, reviewFlows } from "./tracking.js";
 import { needLine } from "./crewrows.js";
 
 // A run read older than this no longer counts as read: the polls have stopped answering.
@@ -33,17 +33,19 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
     flow: reviewFlow(run, reviewFlows()),
     stages: run.tasks.map((k) => shownStage(k, taskAgents(k, run, ctx))),
     since: stepSince(run),
+    ages: stepAges(run),
     filesOk: filesFresh(run, now),
   });
 }
 
 // Whether a run needs you now, one rule for every view that counts it (the overview's header
-// and order, its cards and panes, the harbor): a question, a blocker or dialog, or what its PRs,
-// a stall or a gone orchestrator wait on you for, as the Crew's Needs you group has it; never a
-// parked or closed run. `att`: the run's attentionOf, when the caller has it already.
+// and order, its cards and panes, the harbor, the Crew): exactly the Crew's Needs you group (a
+// question, a blocker or dialog, or what its PRs, a stall or a gone orchestrator wait on you
+// for); never a parked or closed run. A question read from a stale run read is under Can't tell
+// there, and so not counted here either. `att`: the run's attentionOf, when the caller has it.
 export function needsYouNow(run, ctx, att = null) {
   if (run.away) return false;
-  return needsYou(run, orchestratorState(run, ctx)) || (att ?? attentionOf(run, ctx)).group === "needs";
+  return (att ?? attentionOf(run, ctx)).group === "needs";
 }
 
 // What a run needs you for, in a few words, or null: its question, dialog or plan's reason

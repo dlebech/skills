@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   reviewFlow, flowKey, prStep, nextStep, nextStepText, prRead, ciState, ciTimes, usualCi, ageText, stepOf, stepText,
-  trackSince, stepSig, stalled, quietText, assess, byWait, STALL_MS, prMaxAge, prTtl,
+  trackSince, stepSig, stalled, quietText, assess, byWait, STALL_MS, prMaxAge, prTtl, trackParts, stepParts, taskKey, progressKey,
 } from "../../herdr-app/mods/harbormaster/attention.js";
 import { addCiSample, nextSteps, screenSig, CI_KEEP, probeEvery } from "../../herdr-app/mods/harbormaster/tracking.js";
 import { prSummary, PR_FIELDS, carryRuns, withReadTimes, prEntrySame } from "../../herdr-app/mods/harbormaster/data.js";
@@ -194,7 +194,7 @@ test("ages read 34m, 1h12m, 2d3h", () => {
 test("the current step: tasks at work, else CI on a PR, else the progress line", () => {
   const tasks = [{ id: "t1", state: "merged" }, { id: "t3", state: "implementing" }, { id: "t4", state: "review" }];
   const s = stepOf(run({ tasks }), { stages: ["done", "implement", "review"], since: ago(72) });
-  assert.equal(stepText(s, now), "t3 implementing +1 · 1h12m");
+  assert.equal(stepText(s, now), "t3 implementing 1h12m · +1 task");
   const ci = stepOf(run(), { prs: [pr({ checks: checks(1, 0, 2), ci: { startedAt: ago(34), finishedAt: null } })], since: ago(90) });
   assert.equal(stepText(ci, now), "CI on #42 · 34m");
   assert.equal(stepText(stepOf(run({ progress: "writing docs" }), { since: ago(3) }), now), "writing docs · 3m");
@@ -220,6 +220,44 @@ test("step anchors: new runs seeded from updated, gone runs forgotten only from 
   const s2 = nextSteps(s1, [a], new Set([""]), now + MIN);
   assert.ok(s2["box:/b"], "box did not answer: kept");
   assert.equal(nextSteps(s1, [a], new Set(["", "box"]), now + MIN)["box:/b"], undefined);
+});
+
+test("each task at work keeps its own age: a progress change or another task does not reset it", () => {
+  const tasks = (t4, t9) => [{ id: "t4", state: t4 }, { id: "t9", state: t9 }];
+  const stagesOf = (r) => r.tasks.map((k) => (k.state === "implementing" ? "implement" : k.state === "planned" ? null : "done"));
+  const r0 = run({ key: ":/a", updated: ago(70), progress: "t4 started", tasks: tasks("implementing", "planned") });
+  const s1 = nextSteps({}, [r0], new Set([""]), ago(60), stagesOf);
+  // First sight: dated by status.json's updated.
+  assert.equal(s1[":/a"].parts[taskKey(r0.tasks[0], "implement")], ago(70));
+  // t9 starts and the progress line moves on: the run's anchor resets, t4's age does not.
+  const r1 = { ...r0, progress: "t9 started too", tasks: tasks("implementing", "implementing") };
+  const s2 = nextSteps(s1, [r1], new Set([""]), ago(10), stagesOf);
+  assert.equal(s2[":/a"].since, ago(10));
+  assert.equal(s2[":/a"].parts[taskKey(r1.tasks[0], "implement")], ago(70));
+  assert.equal(s2[":/a"].parts[taskKey(r1.tasks[1], "implement")], ago(10));
+  assert.equal(s2[":/a"].parts[progressKey("t9 started too")], ago(10));
+  // Only the current parts are kept: the old progress line is pruned.
+  assert.equal(s2[":/a"].parts[progressKey("t4 started")], undefined);
+  const step = stepOf(r1, { stages: stagesOf(r1), since: s2[":/a"].since, ages: s2[":/a"].parts });
+  assert.equal(stepText(step, now), "t4 implementing 1h10m · +1 task");
+  // Nothing changed: the same store, so nothing is written.
+  assert.equal(nextSteps(s2, [r1], new Set([""]), now, stagesOf), s2);
+  // The progress line, when it is the step, has its own age too.
+  const quiet = { ...r1, tasks: tasks("merged", "merged") };
+  const s3 = nextSteps(s2, [quiet], new Set([""]), ago(5), stagesOf);
+  assert.equal(stepText(stepOf(quiet, { stages: stagesOf(quiet), since: s3[":/a"].since, ages: s3[":/a"].parts }), now), "t9 started too · 10m");
+  // An entry from before parts were kept dates its parts by its own since.
+  const old = { ":/a": { sig: s1[":/a"].sig, since: ago(40) } };
+  assert.equal(nextSteps(old, [r0], new Set([""]), now, stagesOf)[":/a"].parts[progressKey("t4 started")], ago(40));
+});
+
+test("step parts: the progress line and the tasks at work only; trackParts keeps unchanged parts as they are", () => {
+  const r = run({ progress: "p", tasks: [{ id: "t1", state: "merged" }, { id: "t2", state: "planned" }] });
+  assert.deepEqual(stepParts(r, ["done", "implement"]), ["p:p", "t:t2:planned:implement"]);
+  const a = trackParts(null, ["x", "y"], now, ago(3));
+  assert.deepEqual(a, { x: ago(3), y: ago(3) });
+  assert.equal(trackParts(a, ["x", "y"], now + MIN), a);
+  assert.deepEqual(trackParts(a, ["y", "z"], now + MIN), { y: ago(3), z: now + MIN });
 });
 
 test("screen words ignore spinners and ticking timers", () => {

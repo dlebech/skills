@@ -401,7 +401,7 @@ export function loadRuns() {
     // read (`fresh`) are acted on below: nothing is done on a stale read.
     cache = { at: Date.now(), runs, decisions, errors, failed, pending: null, pendingAt: 0 };
     const ctx = facts();
-    observeRuns(runs, ctx, answered);
+    observeRuns(runs, ctx, answered, (r) => r.tasks.map((k) => shownStage(k, taskAgents(k, r, ctx))));
     for (const [on, sample] of samples) ingest(on, sample);
     recordRuns(fresh.filter((r) => !r.away && orchestratorState(r, ctx) !== "gone"), (r) => runTerminals(r, ctx), answered).catch(() => {});
     for (const r of fresh) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});

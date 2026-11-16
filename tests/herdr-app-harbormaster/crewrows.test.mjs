@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assess, runDot, STALL_MS } from "../../herdr-app/mods/harbormaster/attention.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote } from "../../herdr-app/mods/harbormaster/crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, cantWhy, crewEntries, needCount, runlessNeeds, captainNeedNote, watchingText } from "../../herdr-app/mods/harbormaster/crewrows.js";
 
 const MIN = 60000;
 const now = Date.parse("2026-11-16T12:00:00Z");
@@ -45,18 +45,19 @@ test("groupRows sorts each group longest wait first and puts a row without a res
   assert.deepEqual(g.done.map((x) => x.id), ["d"]);
 });
 
-test("a Needs you row leads with its reasons, red", () => {
+test("a Needs you row leads with its reasons and how long the longest has waited, red", () => {
   const a = at(run({ phase: "finished" }), { pr: read([pr({ checks: { pass: 1, fail: 1, pending: 0 } })]) });
   assert.equal(a.group, "needs");
   const l = rowLead(a, now);
-  assert.equal(l.lead, "red CI on #42 · review proof → merge");
+  // Red since its CI finished, 80 minutes ago.
+  assert.equal(l.lead, "red CI on #42 · review proof → merge · 1h20m");
   assert.equal(l.tone, "blocked");
   assert.equal(rowEdge(a), "blocked");
 });
 
 test("a question leads with its text", () => {
   const a = at(run({ question: "Which?", ask: { title: "Which database?" }, askedAt: ago(10), prs: [] }), { pr: read([]) });
-  assert.equal(rowLead(a, now).lead, "Which database?");
+  assert.equal(rowLead(a, now).lead, "Which database? · 10m");
   assert.match(rowTip(a, now)[0], /^Needs you: Which database\?, since 10m ago$/);
 });
 
@@ -81,12 +82,12 @@ test("stalled with red CI as well stays red", () => {
 test("can't tell is grey, in a group of its own, with why in the hover", () => {
   const a = at(run(), { pr: { list: null, readable: false, why: "gh: could not resolve host" } });
   assert.equal(a.group, "cant");
-  assert.deepEqual(rowLead(a, now), { lead: "can't tell", rest: null, tone: "dim" });
+  assert.deepEqual(rowLead(a, now), { lead: "can't tell: GitHub unreadable", rest: null, tone: "dim" });
   assert.equal(rowEdge(a), "dim");
   assert.ok(rowTip(a, now).includes("Can't tell: gh: could not resolve host"));
   const offline = at(run(), { filesOk: false });
   assert.equal(offline.group, "cant");
-  assert.equal(rowLead(offline, now).lead, "can't tell");
+  assert.equal(rowLead(offline, now).lead, "can't tell: machine offline");
   assert.ok(rowTip(offline, now).includes("Can't tell: its machine did not answer"));
 });
 
@@ -96,11 +97,11 @@ test("a question with unreadable PRs still needs you, and the hover says what ca
   assert.ok(rowTip(a, now).includes("Can't tell its pull requests: gh failed"));
 });
 
-test("while agents work, the step and its age lead", () => {
+test("while agents work, the step and its age lead, with no colour", () => {
   const a = at(run({ tasks: [{ id: "t3", state: "implementing" }] }), { working: true, stages: ["implement"], since: ago(72) });
   assert.equal(a.group, "working");
-  assert.deepEqual(rowLead(a, now), { lead: "t3 implementing · 1h12m", rest: null, tone: "muted" });
-  assert.equal(rowEdge(a), "working");
+  assert.deepEqual(rowLead(a, now), { lead: "t3 implementing 1h12m", rest: null, tone: "muted" });
+  assert.equal(rowEdge(a), "neutral");
   assert.ok(rowTip(a, now).includes("Current step: t3 implementing, for 1h12m"));
 });
 
@@ -128,7 +129,7 @@ test("a review wait has a colour of its own, and its hover names the reviewers a
   assert.match(rowTip(two, now)[0], /^Waiting for anna and bo to review PR #42/);
 });
 
-test("amber and the working colour only for stalls and work: an idle run is neutral", () => {
+test("one meaning per colour: work, CI and a brief idle are neutral; amber only for a stall", () => {
   const idle = at(run({ phase: "running" }), { flow: "peer", pr: read([]) , orch: "idle" });
   assert.equal(idle.reasons[0].key, "idle");
   assert.equal(idle.group, "working");
@@ -136,7 +137,16 @@ test("amber and the working colour only for stalls and work: an idle run is neut
   // Briefly idle, not stalled yet: its step and age show how quiet it is.
   assert.equal(rowLead(idle, now).lead, "watching CI · 20m");
   const ci = at(run(), { pr: read([pr({ checks: { pass: 1, fail: 0, pending: 2 }, ci: { startedAt: ago(34), finishedAt: null } })]) });
-  assert.equal(rowEdge(ci), "working");
+  assert.equal(rowEdge(ci), "neutral");
+  assert.equal(rowEdge(at(run(), { working: true })), "neutral");
+  // CI past twice its usual time is a stall: amber, look soon.
+  const slow = at(run(), { stall: { quietMs: 70 * MIN, by: "ci" }, pr: read([pr({ checks: { pass: 1, fail: 0, pending: 2 }, ci: { startedAt: ago(70), finishedAt: null } })]) });
+  assert.equal(slow.group, "needs");
+  assert.equal(rowEdge(slow), "amber");
+  assert.equal(rowLead(slow, now).tone, "amber");
+  // Red only where you must act; cyan for a reviewer.
+  assert.equal(rowEdge(at(run({ phase: "finished" }), { pr: read([pr()]) })), "blocked");
+  assert.equal(rowEdge(at(run({ phase: "finished" }), { flow: "peer", pr: read([pr({ requested: ["anna"] })]) })), "review");
 });
 
 test("Done shows merged — close run with the PR count", () => {
@@ -194,20 +204,86 @@ test("Close all merged takes only Done runs whose PRs are all merged or closed, 
   const ra = at(report, { pr: read([]) });
   assert.equal(ra.group, "needs");
   assert.deepEqual(closableDone([{ r: report, a: ra }]), []);
-  assert.deepEqual(rowLead(ra, now), { lead: "finished — read and close", rest: null, tone: "blocked" });
+  assert.deepEqual(rowLead(ra, now), { lead: "finished — read and close · 1h0m", rest: null, tone: "blocked" });
   assert.deepEqual(badgeOf(ra, true), { label: "finished — read and close", tone: "blocked" });
   // A running run is never closed by it, even if something hands it a Done result.
   assert.deepEqual(closableDone([{ r: run({ key: "e" }), a: rows[0].a }]), []);
   assert.notEqual(at(run(), { pr: read([pr({ state: "MERGED" })]) }).group, "done");
 });
 
-test("an empty Needs you says nothing is for you, only while there are orchestrators", () => {
+test("an empty Needs you says nothing is for you, only while there are orchestrators and nothing counts", () => {
   const needs = GROUPS[0];
-  assert.equal(emptyNote(needs, [], 2), "nothing for you right now 🎉");
-  assert.equal(emptyNote(needs, [{}], 2), null);
-  assert.equal(emptyNote(needs, [], 0), null);
-  assert.equal(emptyNote(GROUPS[1], [], 2), null);
-  assert.equal(emptyNote(GROUPS[2], [], 2), null);
+  assert.equal(emptyNote(needs, 0, 2), "nothing for you right now 🎉");
+  assert.equal(emptyNote(needs, 1, 2), null);
+  assert.equal(emptyNote(needs, 0, 0), null);
+  assert.equal(emptyNote(GROUPS[1], 0, 2), null);
+  assert.equal(emptyNote(GROUPS[2], 0, 2), null);
+});
+
+test("can't tell says why in a few words", () => {
+  assert.equal(cantWhy({ why: "its machine did not answer" }), "machine offline");
+  assert.equal(cantWhy({ why: "its run files could not be read" }), "no run files");
+  assert.equal(cantWhy({ why: "pull requests not read yet" }), "PRs not read yet");
+  assert.equal(cantWhy({ why: "gh: could not resolve host" }), "GitHub unreadable");
+  assert.equal(cantWhy({ why: "the pull request read is stale" }), "GitHub unreadable");
+  assert.equal(cantWhy({}), "GitHub unreadable");
+});
+
+test("the Crew's Needs you count is the overview's, for the same facts", () => {
+  // The overview's header: needCount(the runs needsYouNow picks, the orchestrators, the
+  // captain's open decisions). The Crew: its Needs you rows plus the same decisions.
+  const live = run({ key: "live", terminal: "w:1", tasks: [{ id: "t1", state: "implementing" }] });
+  const gone = run({ key: "gone", terminal: "w:2" });
+  const asked = run({ key: "asked", terminal: "w:3", question: "?", ask: { title: "Go?" }, prs: [] });
+  const parked = run({ key: "parked", terminal: "w:4", away: { how: "parked", at: ago(5) } });
+  const atts = new Map([
+    [live, at(live, { working: true, stages: ["implement"] })],
+    [gone, at(gone, { orch: "gone", pr: read([]) })],
+    [asked, at(asked, { pr: read([]) })],
+    [parked, at(parked, { pr: read([pr({ checks: { pass: 0, fail: 1, pending: 0 } })]) })],
+  ]);
+  assert.equal(atts.get(gone).group, "needs");
+  assert.equal(atts.get(parked).group, "needs", "assess judges its PRs whether parked or not");
+  // As the overview picks them (attend.js needsYouNow: not put away, and in Needs you).
+  const needRuns = [...atts].filter(([r, a]) => !r.away && a.group === "needs").map(([r]) => r);
+  const blockedTerm = { term: { address: "w:9" }, r: null, a: assess(null, { orch: "blocked", now }) };
+  // Live orchestrators: the gone run's is not among them.
+  const orchs = [live, asked, parked].map((r) => ({ term: { address: r.terminal }, r, a: atts.get(r) })).concat([blockedTerm]);
+  const entries = crewEntries(orchs, needRuns, (r) => atts.get(r));
+  const groups = groupRows(entries);
+  for (const decisions of [0, 2]) {
+    assert.equal(groups.needs.length + decisions, needCount(needRuns, orchs, decisions));
+  }
+  assert.deepEqual(groups.needs.map((x) => x.r?.key ?? x.term.address).sort(), ["asked", "gone", "w:9"]);
+  // The gone run has a row of its own, with no terminal, leading with why.
+  const goneRow = entries.find((x) => x.r === gone);
+  assert.equal(goneRow.term, null);
+  assert.match(rowLead(goneRow.a, now).lead, /^orchestrator gone · /);
+  // A parked run's orchestrator row is not counted, so it is not under Needs you either.
+  assert.equal(entries.find((x) => x.r === parked).a.group, "working");
+  assert.deepEqual(runlessNeeds(orchs), [blockedTerm]);
+  // No run needs you, but the captain asks: the heading counts it, and says where it is.
+  assert.equal(needCount([], [], 1), 1);
+  assert.equal(emptyNote(GROUPS[0], needCount([], [], 1), 3), null);
+  assert.equal(captainNeedNote(1), "+ the captain's decision, above");
+  assert.equal(captainNeedNote(2), "+ the captain's 2 decisions, above");
+  assert.equal(captainNeedNote(0), null);
+});
+
+test("the captain says how many runs it watches, then how many of them are finished", () => {
+  assert.equal(watchingText(1, 1), "watching 2 runs · 1 finished");
+  assert.equal(watchingText(1, 0), "watching 1 run");
+  assert.equal(watchingText(0, 0), "watching 0 runs");
+});
+
+test("a working row names its longest-running task with its own age, and the rest as tasks", () => {
+  const tasks = [{ id: "t4", state: "implementing" }, { id: "t9", state: "implementing" }, { id: "t10", state: "review" }];
+  const ages = { "t:t4:implementing:implement": ago(65), "t:t9:implementing:implement": ago(5), "t:t10:review:review": ago(2) };
+  const a = at(run({ tasks }), { working: true, stages: ["implement", "implement", "review"], since: ago(0), ages });
+  assert.equal(rowLead(a, now).lead, "t4 implementing 1h5m · +2 tasks");
+  assert.ok(rowTip(a, now).includes("Current step: t4 implementing, for 1h5m (2 more tasks at work)"));
+  // Working sorts by that age: the run whose task is at it longest first.
+  assert.equal(a.waitSince, ago(65));
 });
 
 test("the group split: working (agents, CI, briefly idle), waiting on a reviewer, can't tell", () => {
