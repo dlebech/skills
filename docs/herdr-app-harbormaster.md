@@ -82,13 +82,16 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 - **When you press Park or Close:** `git worktree list` in the run's folder, to find the integration worktrees whose spaces to close.
 - **Every 30 seconds per open run on another machine, with its orchestrator there:** the same `git worktree list`, to find the integration worktrees to open spaces for. The worktrees it has opened or seen open are kept in Herdr's shared state (`harbormaster.worktrees`).
 - **Every 5 seconds per closed run with a space still on one of its worktree folders:** one `sh -c` that checks whether those folders still exist, so it closes only the spaces whose folder is gone.
+- **While a stats view is open:** `timing.sh` (`sh`, `jq`, `find`, `stat`, `cksum`, `head`, `tail`, and `python3` for opencode's database), on each run's machine, once per open run every 90 seconds, once per parked or closed run that the history does not have, with a timeout of 2 minutes (10 minutes for a run's first read). It reads the agents' session logs and writes the run's `.timing/` cache. Once a minute per machine, `tail -c 4000000` of `.history.jsonl` in the runs root.
+- **When a run closes, and before every Delete:** the history's check and append scripts (`sh`, `grep`, `mkdir`, appending one line) on the run's machine, and `timing.sh` for the run if its cached breakdown is older than 10 minutes.
+- **Every 15 seconds per opencode agent in the crew:** `python3`, reading `opencode.db` read-only, for the context size.
 - **Live from herdr-core:** the terminal labels `role`, `run.status`, `run.type`, `run.topic`, `progress` and `run.prs`, and the `captain-watch` terminal.
 
 - **When a proof thumbnail is shown or opened:** `stat` and `cp` on this computer, or on the run's machine `stat` and `base64`, of that one file (see Proof); the copies are written under `mods/harbormaster/.cache/` in the app's home. A video opens with `xdg-open` (`open` on macOS).
 - **When you answer from the queue:** a run's answer is a file in its `inbox/`, then `hc send` to wake its orchestrator (not when the orchestrator is gone or lost: the message only waits). A captain decision answered into a run's inbox is then removed from `.captain-decisions.json` in the runs root with `jq`, a temporary file and `mv`.
 - **When you press Compact on the budget question:** `hc send <orchestrator> /compact`, then a `sleep 2` loop (for at most 10 minutes) until the compaction is over, then the wake-up for the answer.
 
-When a run closes, or just before you delete it, it also appends a summary of the run (time by category, tokens, CPU and memory, per agent and task) as one line to `.history.jsonl` in the runs root (`~/.herdr/hc-orchestration`) of the run's machine, so its numbers outlive it; the format is in `skills/herdr-app-orchestrator/references/run-files.md`. It writes to a run directory on its own only `.resources.json`, every 5 seconds per open run whose orchestrator is there (a temporary file and `mv`, under a `.resources.json.lock` directory). Otherwise it writes to one only when you press Park, Close or Delete, or answer a question (and, for a captain decision answered into a run's inbox, to `.captain-decisions.json` in the runs root): one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. An answer from the queue is a message there too (`<time>-<ms>-harbormaster.message`). Delete removes the run directory, and this computer's copies of its proof images.
+When a run closes, or just before you delete it, it also appends a summary of the run (time by category, tokens, CPU and memory, per agent and task) as one line to `.history.jsonl` in the runs root (`~/.herdr/hc-orchestration`) of the run's machine, so its numbers outlive it; the format is in `skills/herdr-app-orchestrator/references/run-files.md`. On its own it writes to a run directory only `.resources.json`, every 5 seconds per open run whose orchestrator is there (a temporary file and `mv`, under a `.resources.json.lock` directory), and the `.timing/` cache that `timing.sh` keeps (see Where the time went); in the runs root, only `.history.jsonl` and its `.history.jsonl.lock` directory. Otherwise it writes to one only when you press Park, Close or Delete, or answer a question (and, for a captain decision answered into a run's inbox, to `.captain-decisions.json` in the runs root): one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. An answer from the queue is a message there too (`<time>-<ms>-harbormaster.message`). Delete removes the run directory, and this computer's copies of its proof images.
 
 It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended; and for an open run on another machine: it renames the orchestrator's tab after the run's status, when the tab is unnamed or has one of the orchestrator's own `🐙` names, at most once a minute, opens a space for each integration worktree that has never had one, and finishes parking a run the captain parked there; and names a captain's tab on another machine `⚓ captain`.
 
@@ -189,6 +192,12 @@ call gets one category: of the commands in a shell call, the first that is not g
 it in the repository and run `install.sh` again (an edit in the installed copy is overwritten on the
 next install).
 
+`timing.sh` groups agents by worktree folder (`<worktrees>/<repo>/<prefix>-*` and the integration
+worktree), not by herdr-core's terminal times and parent links, because the terminals are gone once a
+run is over. An agent that worked elsewhere, such as a grunt started in your own checkout, gets no time;
+its CPU and memory are still counted, as those follow the terminals' parent links, and it shows as a row
+with "—" for time.
+
 ## Stats
 
 The stats view (`props.role` `stats`) gathers the figures above for every run on every machine:
@@ -220,7 +229,7 @@ once, and a run the history already has not at all. A big run's first read can t
 later reads are quick, from `timing.sh`'s cache); until then it shows "reading…". An open run's figures,
 its wall time included, are as of that last read, so they can be up to two minutes behind. The history
 is read again every minute, the live table with each 5-second poll. The newest 25 runs are listed;
-**Show N older** lists the rest (the sums across runs always count them all).
+**Show N older** lists the rest. Only the last 4 MB of `.history.jsonl` is read (a line is about 3 kB or more), so after a few hundred runs the oldest drop out of the sums as well; the file is not rotated.
 
 Which agent and task a terminal's CPU and memory count for is one rule (`attribute.js`), the same for
 open runs and history lines: the agent whose brief named it; for the commands an agent started with

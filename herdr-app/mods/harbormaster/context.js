@@ -51,7 +51,8 @@ if not os.path.exists(path):
 db = sqlite3.connect("file:" + path + "?mode=ro", uri=True, timeout=5)
 tables = {r[0] for r in db.execute("select name from sqlite_master where type = 'table'")}
 best = None
-# Both table generations: session + message, session_v2 + session_message.
+# Both table generations: session + message, session_v2 + session_message. Two other readers
+# know them: scripts/opencode-usage.py (tokens) and timing.sh (time); change all three together.
 for s, m, where in (("session", "message", "data like '%\"assistant\"%'"), ("session_v2", "session_message", "type = 'assistant'")):
     if s not in tables or m not in tables:
         continue

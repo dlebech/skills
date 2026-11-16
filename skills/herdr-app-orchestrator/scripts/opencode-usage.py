@@ -20,8 +20,9 @@ storage/ instead; those are not read.
                                      (reasoning counts as output).
   first <data-dir> <directory> <ms>  the earliest session in that directory created at or
                                      after ms (a second of slack), for an orchestrator.
-  last <data-dir> <directory>        "<tokens>\t<model>" of the newest call in that
-                                     directory, for the context size.
+
+Two other readers know opencode's tables: timing.sh (harbormaster mod, time, which also reads
+storage/) and context.js (context size). Change all three together.
 """
 import fnmatch
 import json
@@ -130,21 +131,9 @@ def cmd_first(db, directory, ms):
         print(best[1])
 
 
-def cmd_last(db, directory):
-    best = None
-    for sessions, messages in generations(db):
-        where = " and session_id in (select id from %s where directory = ?)" % sessions
-        for i, _, created, data in assistant_rows(db, sessions, messages, where, (directory,), False):
-            u = usage(data, messages)
-            if u and sum(u[:4]) > 0 and (best is None or created > best[0]):
-                best = (created, sum(u[:4]), u[4])
-    if best:
-        print("%d\t%s" % (best[1], best[2]))
-
-
 def main(argv):
     if len(argv) < 3:
-        sys.exit("usage: opencode-usage.py sessions|rows|first|last <data-dir> ...")
+        sys.exit("usage: opencode-usage.py sessions|rows|first <data-dir> ...")
     cmd, data_dir, rest = argv[1], argv[2], argv[3:]
     try:
         db = connect(data_dir)
@@ -154,8 +143,6 @@ def main(argv):
             cmd_rows(db, rest[0], int(rest[1]))
         elif cmd == "first":
             cmd_first(db, rest[0], int(rest[1]))
-        elif cmd == "last":
-            cmd_last(db, rest[0])
         else:
             sys.exit("unknown command " + cmd)
     except sqlite3.Error as e:
