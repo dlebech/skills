@@ -376,7 +376,7 @@ function standing(p) {
 export function mergeDanger(body) {
   const m = /^##[ \t]+Merge danger[ \t]*\r?\n([\s\S]*?)(?=^#{1,2}[ \t]|(?![\s\S]))/im.exec(body ?? "");
   const line = m?.[1].split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith("```"));
-  const clean = line?.replace(/^[-*>]\s+/, "").replace(/\*\*|__|`/g, "").trim();
+  const clean = line?.replace(/^[-*>]\s+/, "").replace(/\*\*|__|`/g, "").replace(/^[*_]+|[*_]+$/g, "").replace(/^_([A-Za-z-]+ door)_/i, "$1").trim();
   return clean ? clean.slice(0, 200) : null;
 }
 
