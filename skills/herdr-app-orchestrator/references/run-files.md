@@ -74,7 +74,7 @@ below and shows them in the run's Proof section.
 - Every task has a proof line, in any of the task shapes Harbormaster reads: `- Proof: T1 — <the
   evidence>` under a heading task, a `proof` column in a task table, or `Proof: T1 — …` inside
   a list item under `## Tasks`. The tier is `T0` to `T3`; the text after the dash is the evidence.
-- Tiers: `T0` CI or the local test suite is green (the default); `T1` T0 plus test output for the
+- Tiers: `T0` CI or the local test suite is green (the default, so not by itself a sign that a task needs no review); `T1` T0 plus test output for the
   changed behaviour; `T2` T1 plus screenshots or a recording; `T3` T2 plus a guided demo.
 
 ## proof.md and shared/proof/
@@ -97,7 +97,8 @@ Ran: <short sha> <command> — <result>
 
 `Ran:` (one line per test, lint or build run, repeatable) records the commit a run was made against, so
 reviewers and the orchestrator reuse it instead of rerunning it on the same sha; see
-[speed.md](speed.md). A failing run is `— fail: <one line>`.
+[speed.md](speed.md). The result is `pass` or `fail: <one line>`. Reuse a line only when its sha
+equals the branch's HEAD, the tree is clean and the result starts with `pass`; otherwise rerun.
 
 A task's `## ` section is matched to the task by its id; its `Result` shows beside the task's
 evidence in the Proof section. A run with no `proof.md` shows its plan's evidence only.

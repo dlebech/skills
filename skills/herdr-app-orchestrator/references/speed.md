@@ -29,11 +29,12 @@ becomes a fix task. Put this in `common.md`'s definition of "done".
 
 ## 3. No separate review for T0 tasks
 
-A task whose `Proof:` tier is T0 (wording, docs, config; nothing that changes behaviour) gets no
-task review. After its `done` report, verify it as in section 3 step 7 and merge. The final review
+A task gets no task review only when the plan explicitly marks it `Proof: T0` and you judge it
+wording, docs or config with no change in behaviour. T0 is also the default tier, so the run's
+default or a missing `Proof:` line never skips a review. After its `done` report, verify it as in section 3 step 7 and merge. The final review
 covers it. With `final-review=no`, a run that merged T0 tasks without a task review still gets
 a final review of the branch (`task-review=no` already turns it on); skipping it means asking
-the user, once, at the start. Record the choice in `decisions.md`.
+the user, once, at the start (`final-review=no` is honoured only after that answer). Record the choice in `decisions.md`.
 
 ## 4. Grunt agents: cheaper models for watching commands
 
@@ -57,12 +58,13 @@ Keeping it from editing:
 
 - The brief says: do not change files in the worktree, report instead; never run `--fix`, a
   formatter, `git add`, `git commit` or `git checkout`; write only to `shared/`.
-- `claude`: also start it with `--arg --disallowedTools --arg Edit,Write,NotebookEdit`.
-  `start-agent.sh` passes `--arg` values through to `claude` before the task prompt, so this works. Its
-  settings still let it write `shared/` through the shell (`cat > file`), which is how it
-  reports.
-- `pi` and `opencode` have no such flag: the brief is the only guard, so check `git status` in the
-  worktree after its `done` report, and discard its changes with the implementer's agreement if
-  any.
+- `claude`: also start it with `--arg --disallowedTools --arg "Edit,Write,NotebookEdit,Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git restore:*),Bash(git stash:*)"`.
+  `start-agent.sh` passes `--arg` values through to `claude` before the task prompt. This only blocks
+  those tools (it also overrides the `shared/` Edit/Write allow; the grunt reports through the
+  shell). Bash can still write anywhere (`sed -i`, `tee`, formatters), so only the brief
+  constrains the shell.
+- `pi` and `opencode` have no such flag: the brief is the only guard.
+- For every kind, after a grunt's `done` report check `git status` in the worktree and discard
+  any changes it made.
 
 Harbormaster shows a live grunt on its task as stage "implement" (the `grunt-` name is recognised, no stage of its own).

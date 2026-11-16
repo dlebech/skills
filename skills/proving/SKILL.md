@@ -50,7 +50,7 @@ Files: shared/proof/<file>, shared/proof/<file>
 Ran: <short sha> <command> — <result>
 ```
 
-Record every test, lint or build run as a `Ran:` line with the sha it ran against (`git rev-parse --short HEAD`, clean tree), and reuse an existing `Ran:` line for the current sha instead of rerunning it; rerun only when the sha changed or the line is missing.
+Record every test, lint or build run as a `Ran:` line with the sha it ran against (`git rev-parse --short HEAD`, clean tree); the result is `pass` or `fail: <one line>`. Reuse a line only when its sha is HEAD, the tree is clean and it starts with `pass`; otherwise rerun.
 
 ## 5. The PR's Evidence section
 
