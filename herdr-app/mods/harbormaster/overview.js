@@ -56,6 +56,9 @@ function reviewText(pr) {
   return null;
 }
 
+// The text cut to at most n characters at a word, with an ellipsis; short text is returned as is.
+const cutAt = (s, n) => (s.length <= n ? s : `${s.slice(0, n).replace(/\s+\S*$/, "")}…`);
+
 // A PR's Merge danger on its row: red for a one-way door, dim otherwise, and a line that is neither shown as written; the tooltip has the whole line.
 const dangerTag = (t, pr) => {
   const one = oneWay(pr.danger);
@@ -360,7 +363,9 @@ function prDetail(t, pr, i, related = false) {
         .child(div().child(`${pr.repo ?? shortRef(pr.url)}${pr.number ? ` #${pr.number}` : ""}`))
         .when(Boolean(checkText), (el) => el.child(div().text_color(t[checkTone]).child(checkText)))
         .when(Boolean(review), (el) => el.child(div().text_color(t[review[1]]).child(review[0]))))
-      .when(Boolean(pr.danger), (el) => el.child(div().text_size(11).text_color(oneWay(pr.danger) ? t.blocked : t.dim).child(`Merge danger: ${pr.danger}`))))
+      // The pane is narrow, so a long line is cut at a word with an ellipsis; the tooltip has all of it.
+      .when(Boolean(pr.danger), (el) => el.child(div().id(`danger-${pr.url}`).text_size(11).text_color(oneWay(pr.danger) ? t.blocked : t.dim).tooltip(pr.danger)
+        .child(`Merge danger: ${cutAt(pr.danger, 150)}`))))
     .when(Boolean(state), (el) => el.child(pill(t, state, tone)));
 }
 
@@ -408,7 +413,11 @@ function decidedSection(view, t, r) {
 // "Tokens": what the run has used, across its orchestrator and every agent it ran. Each
 // agent's bar is stacked: fresh tokens (input, output, cache writes) in blue, cache reads in
 // green; the exact numbers are on hover. The bars' scale is the run's total.
+// Cache reads are green in every theme: the theme's own "done" colour is blue in some, which made
+// both segments look the same. ansi2 is the theme's green; the fixed one reads on dark and light.
+const GREEN_FALLBACK = "#3fa055";
 function tokensSection(t, r) {
+  const GREEN = t.ansi2 ?? GREEN_FALLBACK;
   const { total, input, output, cacheRead, cacheWrite, byAgent, updated } = r.tokens;
   const n = (v) => v.toLocaleString("en");
   const fresh = (x) => x.input + x.output + x.cacheWrite;
@@ -422,14 +431,14 @@ function tokensSection(t, r) {
       .child(div().flex_none().w(96).truncate().text_color(a.name === "orchestrator" ? t.foreground : t.muted).child(a.name))
       .child(div().flex_1().min_w(0).h(5).rounded(3).bg(t.raised).overflow_hidden().flex()
         .child(div().h_full().flex_none().bg(t.accent ?? t.muted).w(pct(f)))
-        .child(div().h_full().flex_none().bg(t.done).w(pct(a.split ? a.cacheRead : 0))))
+        .child(div().h_full().flex_none().bg(GREEN).w(pct(a.split ? a.cacheRead : 0))))
       .child(div().flex_none().w(44).text_color(t.dim).child(tokenText(a.total)));
   };
   const all = { input, output, cacheRead, cacheWrite };
   return section(t, `Tokens · ${tokenText(total)}`, updated && `counted ${ago(updated)}`)
     .child(h_flex().id(`tok-${r.key}`).gap(10).px(2).text_size(11).tooltip(`${n(total)} tokens: ${tip(all)}`)
       .child(div().text_color(t.accent ?? t.muted).child(`fresh ${tokenText(fresh(all))}`))
-      .child(div().text_color(t.done).child(`cache read ${tokenText(cacheRead)}`))
+      .child(div().text_color(GREEN).child(`cache read ${tokenText(cacheRead)}`))
       .child(div().text_color(t.dim).child(`out ${tokenText(output)}`)))
     .when(Boolean(r.budget), (el) => el.child(div().id(`budget-${r.key}`).px(2).text_size(11).text_color(overBudget(r) ? t.blocked : t.dim)
       .tooltip("A soft budget: crossing it asks you whether to continue, compact or stop; nothing stops by itself")
