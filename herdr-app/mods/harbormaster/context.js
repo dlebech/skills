@@ -158,3 +158,40 @@ export function tokenDetail(tk) {
   return [`${n(tk.total)} tokens in total`, `Input ${n(p.input)}`, `Output ${n(p.output)}`, `Cache writes ${n(p.write)}`, `Cache reads ${n(p.cached)}`,
     "Cache reads are billed at about a tenth of input; the budget counts the total."].join("\n");
 }
+
+// When a run started, for telling runs apart in a narrow Crew card: "09:14" today, "14 Nov" this
+// year, "14 Nov 2025" before; startedTip gives the full "Started 14 Nov 2026, 09:14". Local time;
+// "" without a start (runs from before init-run.sh recorded it).
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const clock = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+const day = (d) => `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+export function startedText(ms, now = Date.now()) {
+  if (!ms) return "";
+  const d = new Date(ms), n = new Date(now);
+  if (d.toDateString() === n.toDateString()) return clock(d);
+  return d.getFullYear() === n.getFullYear() ? day(d) : `${day(d)} ${d.getFullYear()}`;
+}
+export const startedTip = (ms) => (ms ? `Started ${day(new Date(ms))} ${new Date(ms).getFullYear()}, ${clock(new Date(ms))}` : "");
+
+// How long, for a run's age: "45m", "8h 12m", "2d 3h".
+export function spanText(ms) {
+  const m = Math.max(0, Math.floor(ms / 60000));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+// The run pane's line on when a run started and how long it has gone, or "" without a start:
+// "Started today 09:28 · running for 8h 12m", "Started 14 Nov 18:20 · finished after 7h 40m"
+// (until its last status update, which set it finished), "… · stopped after 3h 5m" (parked or
+// closed before it finished; until it was put away).
+export function runAgeText(r, now = Date.now()) {
+  if (!r?.started) return "";
+  const d = new Date(r.started), n = new Date(now);
+  const when = d.toDateString() === n.toDateString() ? `today ${clock(d)}`
+    : `${day(d)}${d.getFullYear() === n.getFullYear() ? "" : ` ${d.getFullYear()}`} ${clock(d)}`;
+  const age = r.phase === "finished" ? `finished after ${spanText((r.updated ?? now) - r.started)}`
+    : r.away ? `stopped after ${spanText((r.away.at ?? now) - r.started)}`
+    : `running for ${spanText(now - r.started)}`;
+  return `Started ${when} · ${age}`;
+}

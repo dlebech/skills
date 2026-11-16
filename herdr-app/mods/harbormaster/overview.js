@@ -5,7 +5,7 @@ import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, decisionQueue, answerRun, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, autonomyTag, tokenColors } from "./ui.js";
-import { tokenText, tokenHeadline, tokenDetail } from "./context.js";
+import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
 import { decidedText, decidedSummary } from "./decided.js";
 import { proofVerdict, proofTasks, tierTip } from "./proof.js";
@@ -435,38 +435,51 @@ function decidedSection(view, t, r) {
     .when(open, (el) => el.children(r.decided.map(row)));
 }
 
-// "Tokens": what the run has used, across its orchestrator and every agent it ran. Each
-// agent's bar is stacked: fresh tokens (input, output, cache writes) in blue, cache reads in
-// green; the exact numbers are on hover. The bars' scale is the run's total.
+// "Tokens": what the run has used, across its orchestrator and every agent it ran. One line of
+// totals: fresh tokens in blue (as in the headline: input, output and cache writes), the output
+// part of them in its own colour, cache reads in green, and the total. The per-agent bars fold out on demand (collapsed by default, not
+// persisted); each is stacked in the same colours, scaled to the run's total, exact numbers on hover.
 // The colours are ui.js's tokenColors, shared with the stats view.
-function tokensSection(t, r) {
-  const { fresh: BLUE, cached: GREEN } = tokenColors(t);
+function tokensSection(view, t, r) {
+  const { fresh: BLUE, cached: GREEN, out: OUT } = tokenColors(t);
   const { total, input, output, cacheRead, cacheWrite, byAgent, updated } = r.tokens;
   const n = (v) => v.toLocaleString("en");
   const fresh = (x) => x.input + x.output + x.cacheWrite;
   const tip = (x) => `fresh ${n(fresh(x))} (in ${n(x.input)}, out ${n(x.output)}, cache write ${n(x.cacheWrite)}) · cache read ${n(x.cacheRead)}`;
   const pct = (v) => `${((100 * v) / total).toFixed(2)}%`;
+  const open = view.tokensOpen?.has(r.key);
   const row = (a) => {
     // A count from before the split has only a total: all of it blue.
-    const f = a.split ? fresh(a) : a.total;
+    const seg = (color, v) => div().h_full().flex_none().bg(color).w(pct(v));
     return h_flex().id(`tok-${r.key}-${a.name}`).gap(8).items_center().px(2).h(18).text_size(11.5)
       .tooltip(a.split ? `${a.name}: ${tip(a)}` : `${a.name}: ${n(a.total)} tokens`)
       .child(div().flex_none().w(96).truncate().text_color(a.name === "orchestrator" ? t.foreground : t.muted).child(a.name))
       .child(div().flex_1().min_w(0).h(5).rounded(3).bg(t.raised).overflow_hidden().flex()
-        .child(div().h_full().flex_none().bg(BLUE).w(pct(f)))
-        .child(div().h_full().flex_none().bg(GREEN).w(pct(a.split ? a.cacheRead : 0))))
+        .child(seg(BLUE, a.split ? a.input + a.cacheWrite : a.total))
+        .child(seg(OUT, a.split ? a.output : 0))
+        .child(seg(GREEN, a.split ? a.cacheRead : 0)))
       .child(div().flex_none().w(44).text_color(t.dim).child(tokenText(a.total)));
   };
-  const all = { input, output, cacheRead, cacheWrite };
-  return section(t, div().id(`tokhead-${r.key}`).tooltip(tokenDetail(r.tokens)).child(`Tokens · ${tokenHeadline(r.tokens)}`), updated && `counted ${ago(updated)}`)
-    .child(h_flex().id(`tok-${r.key}`).gap(10).px(2).text_size(11).tooltip(tokenDetail(r.tokens))
-      .child(div().text_color(BLUE).child(`fresh ${tokenText(fresh(all))}`))
+  return section(t, div().id(`tokhead-${r.key}`).tooltip(tokenDetail(r.tokens)).child("Tokens"), updated && `counted ${ago(updated)}`)
+    .child(h_flex().id(`tok-${r.key}`).flex_wrap().gap_x(10).px(2).text_size(11).tooltip(tokenDetail(r.tokens))
+      .child(div().text_color(BLUE).child(`fresh ${tokenText(input + output + cacheWrite)}`))
+      .child(div().text_color(OUT).child(`of it out ${tokenText(output)}`))
       .child(div().text_color(GREEN).child(`cache read ${tokenText(cacheRead)}`))
-      .child(div().text_color(t.dim).child(`out ${tokenText(output)}`)))
+      .child(div().text_color(t.foreground).child(`total ${tokenText(total)}`)))
     .when(Boolean(r.budget), (el) => el.child(div().id(`budget-${r.key}`).px(2).text_size(11).text_color(overBudget(r) ? t.blocked : t.dim)
       .tooltip("A soft budget: crossing it asks you whether to continue, compact or stop; nothing stops by itself")
       .child(`${overBudget(r) ? "Over" : "Under"} its soft budget of ${tokenText(r.budget)} tokens`)))
-    .children(byAgent.map(row));
+    .when(byAgent.length > 0, (el) => el.child(h_flex().id(`tok-more-${r.key}`).gap(6).px(2).items_center().cursor_pointer().text_size(11).text_color(t.dim)
+      .hover((s) => s.text_color(t.foreground)).tooltip(open ? "Hide the per-agent bars" : "Show each agent's tokens")
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        view.tokensOpen ??= new Set();
+        if (open) view.tokensOpen.delete(r.key); else view.tokensOpen.add(r.key);
+        cx.notify();
+      })
+      .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none())
+      .child(div().child(`By agent · ${byAgent.length}`))))
+    .when(open, (el) => el.children(byAgent.map(row)));
 }
 
 // The Proof section: one verdict line on top (tier, passes, what is missing, checks, merge
@@ -568,6 +581,9 @@ function runDetail(view, t, r, ctx) {
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
     .child(div().id(`head-${r.key}`).cursor_pointer().on_click(() => orch !== "gone" && focusAgent(r.terminal))
       .child(cardHeader(view, t, r, f, runMeta(r, f))))
+    // When it started and how long it has gone, in full size right under the header.
+    .when(Boolean(r.started), (el) => el.child(div().id(`age-${r.key}`).text_size(13).font_medium().text_color(t.foreground)
+      .tooltip(startedTip(r.started)).child(runAgeText(r))))
     .when(need, (el) => el.child(div().id(`need-${r.key}`).cursor_pointer().on_click(() => focusAgent(r.terminal)).child(needBox(t, r, f))))
     .when(Boolean(r.progress) || cardNotes(t, r, f).length > 0, (el) => el.child(v_flex().gap(4)
       .when(Boolean(r.progress), (el) => el.child(div().text_size(13).text_color(t.foreground).child(r.progress)))
@@ -582,7 +598,7 @@ function runDetail(view, t, r, ctx) {
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
     .when(r.decided.length > 0, (el) => el.child(decidedSection(view, t, r)))
     .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(view, t, r, prs)))
-    .when(Boolean(r.tokens), (el) => el.child(tokensSection(t, r)))
+    .when(Boolean(r.tokens), (el) => el.child(tokensSection(view, t, r)))
     .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
       .children(workers.map((w) => workerRow(t, w, ctx, workOf.get(w.address), w.parent !== r.terminal)))))
     .child(actionRow(view, t, r, orch, closed, counts));
@@ -1000,15 +1016,19 @@ export function crew(view, t) {
       : labels["run.prs"] ? plural(String(labels["run.prs"]).split(/[\s,]+/).filter(Boolean).length, "PR") : null;
     const crewOf = workersOf(term.address, ctx);
     const workers = crewOf.length;
-    const detail = (need ? [`needs you: ${reason}`]
-      : state === "finished" ? ["finished", prText]
-      : [state !== "running" ? (PHASE[state] ?? PHASE.unknown).label.toLowerCase() : null, labels.progress ?? r?.progress, prText]
+    // When it started tells apart runs with the same name. It is short and comes before the
+    // longer progress and PR text, so a narrow sidebar truncates those first.
+    const started = startedText(r?.started);
+    const detail = (need ? [`needs you: ${reason}`, started]
+      : state === "finished" ? ["finished", started, prText]
+      : [state !== "running" ? (PHASE[state] ?? PHASE.unknown).label.toLowerCase() : null, started, labels.progress ?? r?.progress, prText]
     ).filter(Boolean).join(" · ");
+    const name = runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic);
     rows.push(row({
       id: `crew-${term.address}`, emoji: OCTOPUS, detail: detail || "orchestrator",
       // The run's type, then its number and topic; without a topic, its branch.
       type: labels["run.type"] || r?.type || null,
-      ...runName(r?.branch ?? term.name ?? term.address, labels["run.topic"] ?? r?.topic),
+      title: name.title, tip: [name.tip, startedTip(r?.started)].filter(Boolean).join("\n") || null,
       tone: need ? "blocked" : "muted", status, address: term.address, crabs: state === "finished" ? 0 : workers, run: r,
       // Badged on its own, like any agent: a run's agents together pass 2 GB while nothing is busy.
       usage: liveUsage(term.address), whose: "The orchestrator and its commands",

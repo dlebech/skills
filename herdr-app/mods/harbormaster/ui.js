@@ -6,7 +6,7 @@ import { settings } from "herdr";
 // Token bars, here and in the stats view: fresh tokens (input, output, cache writes) in the accent,
 // cache reads green in every theme: the theme's own "done" colour is blue in some, which made both
 // segments look the same. ansi2 is the theme's green; the fixed one reads on dark and light.
-export const tokenColors = (t) => ({ fresh: t.accent ?? t.muted, cached: t.ansi2 ?? "#3fa055" });
+export const tokenColors = (t) => ({ fresh: t.accent ?? t.muted, cached: t.ansi2 ?? "#3fa055", out: t.ansi5 ?? "#b07cd8" });
 
 export const CAPTAIN = "\u{1F9D1}‍✈️", OCTOPUS = "\u{1F419}", CRAB = "\u{1F980}";
 
