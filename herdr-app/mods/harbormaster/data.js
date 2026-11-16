@@ -565,10 +565,28 @@ export function prsOf(run) {
   return shared("harbormaster.prs")?.[run.key]?.list ?? null;
 }
 
+// When each run's PRs were last read, {at, okAt} by run key. Module memory, not shared state:
+// it changes with every read, and a shared write redraws every Harbormaster copy, so
+// harbormaster.prs is written only when what a read found changes (prEntrySame). After a reload
+// it is empty until the first read, which comes at once, since the shared entry's own `at` is
+// then the time of its last change.
+const prReads = new Map();
+
+// The entry with the latest read times: the later of the shared entry's and module memory's.
+export function withReadTimes(entry, read) {
+  if (!entry) return null;
+  if (!read) return entry;
+  return { ...entry, at: Math.max(entry.at ?? 0, read.at ?? 0), okAt: Math.max(entry.okAt ?? 0, read.okAt ?? 0) || null };
+}
+
+// Whether a new read found what the stored entry holds: the same PRs, related PRs and errors.
+export const prEntrySame = (a, b) => Boolean(a && b) && JSON.stringify([a.list, a.related, a.error ?? null, a.relatedError ?? null])
+  === JSON.stringify([b.list, b.related, b.error ?? null, b.relatedError ?? null]);
+
 // The run's whole PR read, {at, okAt, error, list, related}, or null before the first: for
 // attention.js prRead, which needs to know whether the list can be trusted.
 export function prEntryOf(run) {
-  return shared("harbormaster.prs")?.[run.key] ?? null;
+  return withReadTimes(shared("harbormaster.prs")?.[run.key] ?? null, prReads.get(run.key));
 }
 
 // The run's related PRs: shown beside its issues, never counted as its own.
@@ -581,7 +599,7 @@ export function relatedOf(run) {
 // entry's `error` says why (null when every PR was read) and `okAt` is the last read
 // that got them all, so a failing gh shows as "can't tell" instead of old data passing as new.
 export async function refreshPrs(run, closed = false) {
-  const have = (shared("harbormaster.prs") ?? {})[run.key];
+  const have = withReadTimes((shared("harbormaster.prs") ?? {})[run.key], prReads.get(run.key));
   const ttl = prTtl(closed);
   if (Date.now() - (prBusy.get(run.key) ?? 0) < PR_STALE || (have && Date.now() - have.at < ttl)) return;
   const started = Date.now();
@@ -605,12 +623,18 @@ export async function refreshPrs(run, closed = false) {
     const relatedError = error;
     error = null;
     const list = await view(run.prs, have?.list);
-    const next = { ...(shared("harbormaster.prs") ?? {}) };
+    const stored = shared("harbormaster.prs") ?? {};
+    const next = { ...stored };
     const at = Date.now();
-    next[run.key] = { at, okAt: error ? have?.okAt ?? null : at, error, relatedError, list, related };
+    const entry = { at, okAt: error ? have?.okAt ?? null : at, error, relatedError, list, related };
+    prReads.set(run.key, { at, okAt: entry.okAt });
+    let changed = !prEntrySame(stored[run.key], entry);
+    if (changed) next[run.key] = entry;
     // Forget runs that are gone.
-    for (const key of Object.keys(next)) if (cache.runs.length && !cache.runs.some((r) => r.key === key)) delete next[key];
-    setShared("harbormaster.prs", next);
+    for (const key of Object.keys(next)) {
+      if (cache.runs.length && !cache.runs.some((r) => r.key === key)) { delete next[key]; prReads.delete(key); changed = true; }
+    }
+    if (changed) setShared("harbormaster.prs", next);
     recordCi(list);
   } finally {
     if (prBusy.get(run.key) === started) prBusy.delete(run.key);
@@ -645,7 +669,8 @@ export const newestFirst = (a, b) => runTime(b) - runTime(a);
 // `live`: runs still working (not finished, not put away); `docked`: finished but still
 // open; `parked`: set aside for later; `shown`: live and docked, the runs the captain
 // keeps watching; `closed`: the rest.
-// The run, need-you and task counts are of `live` only: a finished run's tasks are done.
+// The run and task counts are of `live` only: a finished run's tasks are done. Who needs you
+// is attend.js needsYouNow, one rule for every view.
 export function stats(runs, ctx) {
   const live = runs.filter((r) => r.phase !== "finished" && !r.away);
   const docked = runs.filter((r) => r.phase === "finished" && !r.away && !isClosed(r, ctx));
@@ -659,7 +684,6 @@ export function stats(runs, ctx) {
     parked,
     shown,
     closed: runs.filter((r) => isClosed(r, ctx)),
-    need: live.filter((r) => needsYou(r, orchestratorState(r, ctx))),
     open,
     failing: open.filter((p) => p.checks?.fail).length,
     merged: tasks.reduce((n, c) => n + c.merged, 0),

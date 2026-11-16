@@ -7,7 +7,7 @@ import {
   trackSince, stepSig, stalled, quietText, assess, byWait, STALL_MS, prMaxAge, prTtl,
 } from "../../herdr-app/mods/harbormaster/attention.js";
 import { addCiSample, nextSteps, screenSig, CI_KEEP, probeEvery } from "../../herdr-app/mods/harbormaster/tracking.js";
-import { prSummary, PR_FIELDS, carryRuns } from "../../herdr-app/mods/harbormaster/data.js";
+import { prSummary, PR_FIELDS, carryRuns, withReadTimes, prEntrySame } from "../../herdr-app/mods/harbormaster/data.js";
 import { filesFresh } from "../../herdr-app/mods/harbormaster/attend.js";
 
 const MIN = 60000;
@@ -162,12 +162,15 @@ test("can't tell: the machine is offline or the run files are a stale read", () 
   assert.equal(assess(null, { orch: "blocked", now }).group, "needs");
 });
 
-test("Done: every PR merged or closed and nothing at work; a closed run", () => {
+test("Done: a finished run with every PR merged or closed and nothing at work; a closed run", () => {
   const fin = run({ phase: "finished", updated: ago(100) });
   const d = settled(fin, [pr({ state: "MERGED" }), pr({ number: 43, state: "CLOSED" })]);
   assert.deepEqual([d.group, d.next.label, d.next.count, d.waitSince], ["done", "merged — close run", 2, ago(100)]);
   // Still working (a next PR may come), or asking: not done.
   assert.equal(assess(run(), { working: true, pr: read([pr({ state: "MERGED" })]), now }).group, "working");
+  // A running run between turns, its PR merged, is not done either: it may open another.
+  const between = settled(run(), [pr({ state: "MERGED" })]);
+  assert.deepEqual([between.group, between.reasons[0].key, between.next.label], ["working", "idle", "merged — close run"]);
   assert.equal(settled(run({ question: "q?", ask: { title: "q?" } }), [pr({ state: "MERGED" })]).group, "needs");
   assert.equal(assess(run({ away: { how: "closed", at: ago(1) } }), { pr: read([]), now }).group, "done");
   // No PR at all is never done.
@@ -365,13 +368,62 @@ test("a re-run failed job is aged from its re-run, not from the first checks", (
   assert.equal(stepText(stepOf(run(), { prs }), now), "CI on #42 · 2m");
 });
 
-test("a quiet wait on CI inside its usual time is not a stall; without a baseline the quiet rule applies", () => {
+test("a quiet wait on CI is not a stall, inside its usual time or without a baseline to judge it by", () => {
   const prs = [pr({ checks: checks(0, 0, 3), ci: { startedAt: ago(35), finishedAt: null } })];
   assert.equal(stalled(run(), { now, lastActivity: ago(35), prs, ciUsual: 40 * MIN }), false);
-  assert.deepEqual(stalled(run(), { now, lastActivity: ago(35), prs, ciUsual: null }), { quietMs: 35 * MIN, by: "quiet" });
+  assert.equal(stalled(run(), { now, lastActivity: ago(35), prs, ciUsual: null }), false);
+  // assess drops a quiet stall while CI runs; a CI stall stays.
+  const quiet = assess(run(), { orch: "idle", pr: read(prs), stall: { quietMs: 35 * MIN, by: "quiet" }, now });
+  assert.deepEqual([quiet.group, quiet.stall, quiet.reasons[0].key], ["working", false, "ci-running"]);
+  const ci = assess(run(), { orch: "idle", pr: read(prs), stall: { quietMs: 90 * MIN, by: "ci" }, now });
+  assert.deepEqual([ci.group, ci.reasons[0].key], ["needs", "stalled"]);
+});
+
+test("a finished run with no PR needs you: finished — read and close; closed, it waits on nothing", () => {
+  const fin = run({ phase: "finished", prs: [], progress: "report written", updated: ago(180) });
+  const a = settled(fin, []);
+  assert.deepEqual([a.group, a.reasons.map((x) => x.key), a.reasons[0].text, a.waitSince], ["needs", ["finished"], "finished — read and close", ago(180)]);
+  // Its tab closed (data.js isClosed) or a closed marker: no longer.
+  assert.notEqual(settled(fin, [], { closed: true }).group, "needs");
+  assert.equal(settled({ ...fin, away: { how: "closed", at: ago(1) } }, []).group, "done");
+  // Still at work: not yet.
+  assert.equal(settled(fin, [], { working: true }).group, "working");
+});
+
+test("a run waiting on a reviewer is not stalled: it stays in Waiting on others", () => {
+  const a = assess(run(), { orch: "idle", flow: "peer", pr: read([pr({ requested: ["anna"] })]), stall: { quietMs: 40 * MIN, by: "quiet" }, now });
+  assert.deepEqual([a.group, a.stall, a.reasons.map((x) => x.key)], ["waiting", false, ["waiting-for"]]);
+});
+
+test("a run whose orchestrator is gone or lost never stalls; it needs you to resume it", () => {
+  assert.equal(stalled(run(), { now, lastActivity: ago(120), orch: "gone" }), false);
+  const a = assess(run(), { orch: "gone", pr: read([pr({ requested: ["anna"] })]), flow: "peer", now });
+  assert.deepEqual([a.group, a.stall, a.reasons.map((x) => x.key), a.reasons[0].text], ["needs", false, ["gone"], "orchestrator gone"]);
+  // A live fact: it counts even when the PRs can't be read.
+  const b = assess(run(), { orch: "gone", pr: { list: null, readable: false, why: "gh failed" }, now });
+  assert.deepEqual([b.group, b.cantTell, b.reasons[0].key], ["needs", true, "gone"]);
+  // A finished run whose orchestrator is gone waits on its PRs as before.
+  assert.equal(settled(run({ phase: "finished" }), [pr({ state: "MERGED" })], { orch: "gone" }).group, "done");
+  assert.equal(settled(run({ phase: "finished" }), [pr({ requested: ["anna"] })], { orch: "gone", flow: "peer" }).group, "waiting");
 });
 
 test("screens of a stalled run are read every 5 minutes, not every minute", () => {
   assert.equal(probeEvery(26 * MIN), MIN);
   assert.equal(probeEvery(STALL_MS), 5 * MIN);
+});
+
+test("a PR read that found nothing new is not written; its read time still keeps it fresh", () => {
+  const old = { at: ago(30), okAt: ago(30), error: null, relatedError: null, list: [pr()], related: [] };
+  const again = { ...old, at: ago(1), okAt: ago(1) };
+  assert.equal(prEntrySame(old, again), true);
+  assert.equal(prEntrySame(old, { ...again, list: [pr({ state: "MERGED" })] }), false);
+  assert.equal(prEntrySame(old, { ...again, error: "gh could not read u1" }), false);
+  assert.equal(prEntrySame(old, { ...again, related: [pr({ number: 7 })] }), false);
+  assert.equal(prEntrySame(null, again), false);
+  // The stored entry alone is stale; with the read time kept in memory it is fresh.
+  assert.equal(prRead(run(), old, now).readable, false);
+  const seen = withReadTimes(old, { at: again.at, okAt: again.okAt });
+  assert.deepEqual([seen.at, seen.okAt, prRead(run(), seen, now).readable], [ago(1), ago(1), true]);
+  assert.equal(withReadTimes(old, null), old);
+  assert.equal(withReadTimes(null, { at: ago(1) }), null);
 });

@@ -3,7 +3,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
 import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking } from "./data.js";
-import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needsYou, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
+import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedText, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
@@ -11,7 +11,7 @@ import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, proofCount
 import { oneLine, needHead, questionSections, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
-import { attentionOf } from "./attend.js";
+import { attentionOf, needsYouNow as needsYouOf } from "./attend.js";
 import { stepText, quietText, flowState, flowSetting, runDot } from "./attention.js";
 import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
@@ -404,9 +404,8 @@ function attOf(r, ctx) {
   return m.get(r);
 }
 
-// Whether a run needs you, as the Crew's Needs you group has it (a question, a blocker or
-// dialog, or what its PRs or a stall wait on you for); never a parked or closed run.
-const needsYouNow = (r, ctx) => !r.away && (needsYou(r, orchestratorState(r, ctx)) || attOf(r, ctx).group === "needs");
+// Whether a run needs you (attend.js needsYouNow), with this render's attention.
+const needsYouNow = (r, ctx) => needsYouOf(r, ctx, attOf(r, ctx));
 
 // A run's dot (Crew row, card, pane): working while its orchestrator or any of its agents
 // works, or its CI runs; blocked while any is blocked on a dialog (attention.js runDot). The
@@ -464,6 +463,12 @@ function needBox(view, t, r, f, ctx, where) {
   const it = r.ask ? decisionQueue([r], [], ctx).find((x) => x.kind === "run") : null;
   const box = h_flex().id(`need-${where}-${r.key}`).gap(8).p(8).rounded(7).bg(t.blocked + "1c").items_start()
     .child(div().flex_none().text_color(t.blocked).font_bold().child(r.question ? "?" : "!"));
+  // Its orchestrator is gone: nothing to open, and Resume (with the run's actions) is the way on.
+  if (!it && f.orch === "gone") {
+    return box.child(v_flex().flex_1().min_w(0).gap(2)
+      .child(div().text_size(11).font_semibold().text_color(t.blocked).child("Needs you — its orchestrator is gone"))
+      .child(div().text_size(12).text_color(t.foreground).child(r.question ? (f.reason ?? "").slice(0, 220) : "Resume it to carry on, or park or close the run.")));
+  }
   if (!it) {
     return box.cursor_pointer().on_click(focus).child(v_flex().flex_1().min_w(0).gap(2)
       .child(div().text_size(11).font_semibold().text_color(t.blocked).child(r.question ? "Waiting for your answer — click to open the orchestrator" : "Needs you — click to open the orchestrator"))
@@ -515,7 +520,8 @@ function cardNotes(t, r, f) {
   const note = (text, tone = "muted") => div().text_size(11.5).text_color(t[tone]).child(text);
   return [
     r.away && note(`${f.parked ? "Parked" : "Closed"} ${ago(r.away.at)}${r.away.was ? ` · was: ${r.away.was}` : ""}`),
-    !r.away && f.orch === "gone" && r.phase !== "finished" && note("Orchestrator is gone: resume, park or close this run.", "blocked"),
+    // The Needs you box says so already when it shows.
+    !r.away && !f.need && f.orch === "gone" && r.phase !== "finished" && note("Orchestrator is gone: resume, park or close this run.", "blocked"),
     !r.away && f.orch === "gone" && r.phase === "finished" && note("Orchestrator is gone, only a shell is left in its tab: resume it if the PR needs more work, or park or close the run."),
     r.waiting.length > 0 && note(`Waiting on an answer: ${r.waiting.join(", ")}`),
     r.unhandled > 0 && note(`${plural(r.unhandled, "relayed message")} not read yet`),

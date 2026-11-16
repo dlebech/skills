@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # The captain's open decisions: what it asked the user and is still waiting on.
 #
-# Usage: decisions.sh add <id> [--run <run-directory>] [--option "label: text"]...
+# Usage: decisions.sh add <id> [--run <run as runs.sh prints it>] [--option "label: text"]...
 #                  [--recommended <label>[: why]] [--evidence <text>] [--risk <text>]
 #                  [--blocks <text>] <question>
 #        decisions.sh done <id>...
 #        decisions.sh ls
 #
 # Kept in <root>/.captain-decisions.json, an array of
-#   {"id", "question", "run" (a run directory, or null), "asked" (UTC time)}
+#   {"id", "question", "run" (the run as runs.sh prints it: its directory, or <machine>:<directory> for a run on another machine; or null), "asked" (UTC time)}
 # and, when given, the same sections as a run's question.md (run-files.md):
 #   "options": [{"label", "text"}], "recommended", "evidence", "risk", "blocks"
 # oldest first, so Harbormaster's "Waiting on you" queue can show them beside the
@@ -23,7 +23,7 @@ set -u
 . "$(dirname "$0")/lib.sh"
 
 file=$root/.captain-decisions.json
-usage() { echo "usage: decisions.sh add <id> [--run <run-directory>] [--option \"label: text\"]... [--recommended <label>] [--evidence <text>] [--risk <text>] [--blocks <text>] <question> | done <id>... | ls" >&2; exit 2; }
+usage() { echo "usage: decisions.sh add <id> [--run <run as runs.sh prints it>] [--option \"label: text\"]... [--recommended <label>] [--evidence <text>] [--risk <text>] [--blocks <text>] <question> | done <id>... | ls" >&2; exit 2; }
 # A missing or empty file is no decisions; anything else that is not a list is
 # refused, so a write never replaces a file this script did not write.
 current() {

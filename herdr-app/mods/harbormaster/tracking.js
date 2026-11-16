@@ -12,7 +12,7 @@
 //     too late rather than wrong. Terminal output is not something the mod API reports (panes
 //     refresh only on scroll-state transitions), so the screens of a run quiet by every other
 //     sign for STALL_MS minus 5 minutes are read with `hc read` once a minute (every 5 once
-//     it is stalled), and a change
+//     it is stalled; never while its orchestrator is gone or lost), and a change
 //     in their words (digits and symbols left out, so a spinner or a ticking timer is not
 //     output) counts as life.
 //   - each repository's finished CI runs: shared state harbormaster.ci, {[owner/repo]: [{sha, ms}]},
@@ -25,7 +25,7 @@
 
 import { exec, shared, setShared } from "herdr";
 import { STALL_MS, stepSig, trackSince, usualCi } from "./attention.js";
-import { workersOf, exactStatus } from "./live.js";
+import { workersOf, exactStatus, orchestratorState } from "./live.js";
 
 const STEPS_KEY = "harbormaster.steps";
 const CI_KEY = "harbormaster.ci";
@@ -134,7 +134,8 @@ export function observeRuns(runs, ctx, answered) {
     if (!prev || t.since !== prev.since) entry.since = t.since;
     activity.set(r.key, entry);
     const last = lastActivity(r);
-    if (r.terminal && r.phase === "running" && last && now - last >= PROBE_AFTER && !entry.probing
+    // A gone or lost orchestrator has no screen worth reading: it needs a resume, not a stall check.
+    if (r.terminal && r.phase === "running" && orchestratorState(r, ctx) !== "gone" && last && now - last >= PROBE_AFTER && !entry.probing
       && now - entry.probedAt >= probeEvery(now - last)) {
       probe(r, ctx, entry).catch(() => {});
     }
