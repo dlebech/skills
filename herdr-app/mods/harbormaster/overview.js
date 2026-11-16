@@ -1,7 +1,7 @@
 // The serious views: the runs overview (totals, what's waiting on you, captain, run cards) and the Crew block.
 
 import { div, svg } from "gpui-kit";
-import { openOverlay } from "herdr";
+import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
 import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCi } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
@@ -1748,8 +1748,9 @@ export function crew(view, t) {
   // the live run would get a second, "orchestrator gone" row with a Resume.
   const runOf = (term) => view.runs.find((r) => !r.away && r.terminal === term.address) ?? view.runs.find((r) => r.terminal === term.address);
   const now = Date.now();
-  // The sidebar, not the wider Crew popup: its rows' leads leave out comment counts (rowLead).
-  const narrow = (view.size?.width ?? 300) / zoom() < 340;
+  // The sidebar, not the Crew popup (an overlay): its rows' leads leave out comment counts
+  // (rowLead), so the age survives its narrow width.
+  const narrow = !props()?.overlay;
   // Each orchestrator's attention, once per render: which group it is in and why. An
   // orchestrator without a run directory is judged by its terminal alone (can't tell).
   const orchestrators = orchestratorsOf(ctx)
