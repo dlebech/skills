@@ -82,10 +82,11 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 - **Every 5 seconds per closed run with a space still on one of its worktree folders:** one `sh -c` that checks whether those folders still exist, so it closes only the spaces whose folder is gone.
 - **Live from herdr-core:** the terminal labels `role`, `run.status`, `run.type`, `run.topic`, `progress` and `run.prs`, and the `captain-watch` terminal.
 
+- **When a proof thumbnail is shown or opened:** `stat` and `cp` on this computer, or on the run's machine `stat` and `base64`, of that one file (see Proof); the copies are written under `mods/harbormaster/.cache/` in the app's home. A video opens with `xdg-open` (`open` on macOS).
 - **When you answer from the queue:** a run's answer is a file in its `inbox/`, then `hc send` to wake its orchestrator (not when the orchestrator is gone or lost: the message only waits). A captain decision answered into a run's inbox is then removed from `.captain-decisions.json` in the runs root with `jq`, a temporary file and `mv`.
 - **When you press Compact on the budget question:** `hc send <orchestrator> /compact`, then a `sleep 2` loop (for at most 10 minutes) until the compaction is over, then the wake-up for the answer.
 
-It writes to a run directory only when you press Park, Close or Delete, or answer a question (and, for a captain decision answered into a run's inbox, to `.captain-decisions.json` in the runs root): one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. An answer from the queue is a message there too (`<time>-<ms>-harbormaster.message`). Delete removes the run directory.
+It writes to a run directory only when you press Park, Close or Delete, or answer a question (and, for a captain decision answered into a run's inbox, to `.captain-decisions.json` in the runs root): one `parked` or `closed` file, with the time and the plan's status then, the same marker the captain writes, or for Close with the orchestrator there, a message in the run's `inbox/`, as the captain relays them. An answer from the queue is a message there too (`<time>-<ms>-harbormaster.message`). Delete removes the run directory, and this computer's copies of its proof images.
 
 It changes the window on its own only for a closed run (a `closed` marker): it closes spaces still on one of the run's `~/.herdr/worktrees/<repo>/<branch>` folders once that folder is gone, and the orchestrator's tab once its turn has ended; and for an open run on another machine: it renames the orchestrator's tab after the run's status, when the tab is unnamed or has one of the orchestrator's own `🐙` names, at most once a minute, opens a space for each integration worktree that has never had one, and finishes parking a run the captain parked there; and names a captain's tab on another machine `⚓ captain`.
 
@@ -144,7 +145,11 @@ entry, fails and partials, tasks of tier T2 or higher with a result whose `Files
 screenshots"), the `Checks: green|red` line of proof.md, and the merge danger of the run's PR (`two-way
 door` or `one-way door`). It is in the blocked colour for a fail, red checks or a one-way door, green
 when everything passes, dim otherwise. Below it is one compact row per task: tier, name and a pass,
-partial, fail, not checked or not scoped pill (a spot for screenshot thumbnails is reserved in the row).
+partial, fail, not checked or not scoped pill, and small thumbnails of the task's images from its proof.md
+`Files:` (the first three, then `+n`; a `▶` box for a video: mp4, webm, mov, m4v). A thumbnail click opens the
+screenshot in a Harbormaster overlay, scaled to fit, with its file name, `‹` `›` for the task's other images and
+Esc or ✕ to close. A video opens in the system player. A file over 6 MB is not copied (see below) and says "too
+large to preview".
 Click a row to see its evidence, "Checked:", "Result:" and files. A running run shows the rows; once it
 is finished, parked or closed the section starts collapsed to the verdict line (click it to expand;
 not remembered). Two links open `proof.md` and the
@@ -152,6 +157,35 @@ not remembered). Two links open `proof.md` and the
 can open a file there. In the runs overview, a run's card carries a small tier tag by its name
 (hover for how many tasks are not scoped) and "n unscoped" in its meta line. The formats are in
 [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
+
+### Where the screenshots come from
+
+The app can only draw images from its own folder, and a run on another machine keeps its files there, so
+Harbormaster copies a file the first time its thumbnail is shown: on this computer with `cp`, for a run on
+another machine with `base64` through the connection (`exec` with `on:`), decoded here. Files over 6 MB (base64
+of that nears the connection's 8 MiB output limit) are not copied. The copy is made in the background and the
+thumbnail shows `…` meanwhile, or `big` for a refused file; a file that changed (size or time) is copied again, a
+shown one is looked at again once a minute. Copies live in `mods/harbormaster/.cache/<machine or local>/<run>/`
+in the app's home (a hidden folder, so saving into it doesn't reload the mod), and a run's folder is removed when
+you Delete the run, alone or with Delete older than. A run an agent or a script deleted by hand leaves its copies
+until you delete the folder. `install.sh` copies only the mod's `*.js`, `*.svg` and `mod.json`, so it neither
+ships nor wipes the cache. A video on this computer opens from the run folder without a copy; one from another
+machine is copied first (same limit) and the copy opens.
+
+### Popup of a run's pane, for screenshots
+
+An agent that has to show a run's pane in a screenshot (the proving skill's T2 for a Herdr mod) opens it as a popup,
+without switching your space or tab, takes the shot and closes it:
+
+```sh
+herdr-app do 'harbormaster.show-run:<branch>'   # or the run's directory, or its orchestrator's terminal
+sleep 1; herdr-app shot proof.png
+herdr-app do 'harbormaster.close-popup'
+```
+
+`show-run` with no name shows the newest run that isn't parked or closed. A popup is one at a time (a second
+`show-run` replaces it) and closes itself after a minute if nobody closes it. The commands reach a shown
+Harbormaster (the Crew block of `harbormaster-main`, or the open overview); with none on screen they do nothing.
 
 ## Parked, resumed, and closed runs
 

@@ -9,6 +9,7 @@ import { tokenText } from "./context.js";
 import { decidedText, decidedSummary } from "./decided.js";
 import { proofVerdict, proofTasks } from "./proof.js";
 import { oneLine } from "./question.js";
+import { thumbs } from "./viewer.js";
 
 // How each runPhase() reads on a card.
 const PHASE = {
@@ -469,8 +470,7 @@ function proofSection(view, t, r, prs) {
       .child(h_flex().gap(8).items_center()
         .child(k.tier !== null ? tierTag(t, `pft-${id}`, k.tier, k.planned ? "The proof tier this task is planned for" : "The proof tier recorded in proof.md") : div().flex_none().text_size(10).px(5).text_color(t.blocked).child("—"))
         .child(div().flex_1().min_w(0).truncate().text_size(12).font_semibold().text_color(t.foreground).child(k.name ? `${k.id} ${k.name}` : k.id))
-        // Where t10's screenshot thumbnails go: one element, filled with the task's images.
-        .child(h_flex().id(`pf-thumbs-${id}`).flex_none().gap(4).items_center())
+        .when(k.files.length > 0, (e) => e.child(thumbs(view, t, r, k.id, k.files)))
         .child(hasRes ? pill(t, k.result, RESULT_TONE[k.result]).tooltip(k.why || k.result)
           : k.scoped ? pill(t, "not checked", "dim") : pill(t, "not scoped", "blocked").tooltip("No Proof line in plan.md")))
       .when(more, (el) => el

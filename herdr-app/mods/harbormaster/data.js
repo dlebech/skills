@@ -14,6 +14,7 @@ import { exec, machines, spaces, shared, setShared, run as command } from "herdr
 import { parseQuestion, answerMessage } from "./question.js";
 import { parseDecidedLines } from "./decided.js";
 import { tokenText } from "./context.js";
+import { dropCache } from "./viewer.js";
 import { proofOf, runTier, parseProofMd } from "./proof.js";
 import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
@@ -932,6 +933,8 @@ export async function deleteRun(run) {
   const out = await exec("sh", ["-c", DELETE, "sh", run.dir, run.folder ?? "", run.branch,
     run.localTerminal ?? "", run.away?.how === "closed" ? "1" : ""], { on: run.machine });
   if (out.code !== 0) throw new Error((out.stderr || "could not delete the run directory").trim());
+  // The run's copied proof images go with it (they are on this computer whichever machine it ran on).
+  await dropCache(run).catch(() => {});
   const prs = { ...(shared("harbormaster.prs") ?? {}) };
   delete prs[run.key];
   setShared("harbormaster.prs", prs);
