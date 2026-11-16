@@ -67,19 +67,20 @@ function out(p, t, args) {
 // Linux: one awk reads every /proc/<pid>/stat (getline, so a process that exits midway is
 // skipped, not fatal), the environment of herdr-core's children, and the command line of
 // the processes it prints. No fork per process. Works with gawk, mawk and busybox awk.
-const LINUX_AWK = `
+export const LINUX_AWK = `
 BEGIN {
   if (!hz) hz = 100; if (!pg) pg = 4096
   # busybox awk ends strings at a NUL (so a command line is its program alone) and /\\0/
   # matches anywhere there; gawk and mawk keep NULs, which become spaces.
   z = "ab"; nul = !gsub(/\\0/, "", z)
-  getline up < "/proc/uptime"; close("/proc/uptime"); split(up, u, " ")
+  if (!proc) proc = "/proc"
+  getline up < (proc "/uptime"); close(proc "/uptime"); split(up, u, " ")
   print "S linux " u[1]
   for (i = 1; i < ARGC; i++) {
     f = ARGV[i]; line = ""
     r = (getline line < f); close(f)
     if (r <= 0 || !match(line, /.*\\)/)) continue
-    p = substr(f, 7); sub(/\\/stat$/, "", p)
+    p = f; sub(/\\/stat$/, "", p); sub(/.*\\//, "", p)
     o = index(line, "(")
     cm[p] = substr(line, o + 1, RLENGTH - o - 1)
     n = split(substr(line, RLENGTH + 2), a, " ")
@@ -89,12 +90,12 @@ BEGIN {
   ARGC = 1
   for (p in pp) if (cm[pp[p]] == "herdr-core") {
     # A variable may hold a newline, so read on to the end of the environment.
-    f = "/proc/" p "/environ"
+    f = proc "/" p "/environ"
     while ((getline env < f) > 0) if (match(env, /HC_TERMINAL_ID=[A-Za-z0-9_.-]+/)) { term[p] = substr(env, RSTART + 15, RLENGTH - 15); break }
     close(f)
   }
   for (p in pp) {
-    f = "/proc/" p "/cmdline"; c = ""
+    f = proc "/" p "/cmdline"; c = ""
     if (tid(p, 0) != "-" || own[p] + kid[p] >= ${OTHER_MIN.cpuSeconds * 1000} || rss[p] >= ${OTHER_MIN.rssMb * 1024}) { getline c < f; close(f) }
     gsub(/[\\001-\\037]/, " ", c); if (nul) gsub(/\\0/, " ", c)
     split(c, w, " "); nm[p] = w[1]; sub(/.*\\//, "", nm[p]); if (nm[p] == "") nm[p] = cm[p]; gsub(/[ \\t]/, "_", nm[p])
@@ -106,7 +107,7 @@ ${AWK_TREE}`;
 // macOS: one ps for every process, then one more for the environment of herdr-core's
 // children. Lines up to "ENV" are the first, the rest the second. `time` is the process's own
 // CPU time, [[dd-]hh:]mm:ss.cc; exited children are not known.
-const MAC_AWK = `
+export const MAC_AWK = `
 function ms(s, n, x, i, t) { gsub(/-/, ":", s); n = split(s, x, ":"); t = 0; for (i = 1; i <= n; i++) t = t * (i == n - 2 && n == 4 ? 24 : 60) + x[i]; return int(t * 1000) }
 $0 == "ENV" { env = 1; next }
 env { if (match($0, /HC_TERMINAL_ID=[A-Za-z0-9_.-]+/)) term[$1] = substr($0, RSTART + 15, RLENGTH - 15); next }
@@ -340,7 +341,7 @@ export function mergeRun(prev, terms, usage, now, os) {
 // the version; else exits 3), under a mkdir lock, through a temporary file and mv: two windows polling at
 // once cannot interleave, and the slower one's sample is dropped, not merged twice. A lock
 // left by a killed writer is broken after a minute.
-const WRITE = [
+export const WRITE = [
   'f="$1/.resources.json" want=$2 l="$1/.resources.json.lock"',
   'if ! mkdir "$l" 2>/dev/null; then',
   '  [ -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rmdir "$l" 2>/dev/null',
