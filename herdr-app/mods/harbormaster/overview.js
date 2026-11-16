@@ -1429,6 +1429,15 @@ export function runPane(view, t, p) {
   const r = runOfProps(view.runs, p);
   // A popup opened with "details" (show-run) starts with the question's Details unfolded, once.
   if (p.details && r && !view.detailsShown) { view.folds ??= new Map(); view.folds.set(`q-${r.key}`, true); view.detailsShown = true; }
+  // One opened with "proof" starts with every Proof row listed and the first pending one (else the
+  // first) unfolded, once the run's proof has been read.
+  if (p.proof && r && !view.proofShown && hasProof(r)) {
+    const rows = proofRows(r, stagesOf(r, ctx));
+    const k = rows.find((x) => x.pending) ?? rows[0];
+    view.folds ??= new Map(); view.folds.set(`pf-${r.key}`, true);
+    if (k) { view.proofRows ??= new Set(); view.proofRows.add(`${r.key}-${k.id}`); }
+    view.proofShown = true;
+  }
   return v_flex().id("run-pane").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .child(v_flex().id("run-pane-list").flex_1().min_h(0).p(10).gap(8).overflow_y_scrollbar()
       .child(r ? runDetail(view, t, r, ctx) : view.runs.length

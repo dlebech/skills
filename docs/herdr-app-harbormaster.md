@@ -324,7 +324,7 @@ sleep 1; herdr-app shot proof.png
 herdr-app do 'harbormaster.close-popup'
 ```
 
-`show-run` with no name shows the newest run that isn't parked or closed; `show-run:<branch> details` opens it with its open question's Details unfolded. A popup is one at a time (a second
+`show-run` with no name shows the newest run that isn't parked or closed; `show-run:<branch> details` opens it with its open question's Details unfolded, and `show-run:<branch> proof` with every Proof row listed and the first pending one (else the first) unfolded. A popup is one at a time (a second
 `show-run` replaces it) and closes itself after a minute if nobody closes it. The commands reach a shown
 Harbormaster that isn't the dialog itself (the Crew block of `harbormaster-main`, or the open overview); with none on screen they do nothing. The dialog is a centered one, not a pointer popup, which has nowhere to appear without a pointer.
 
