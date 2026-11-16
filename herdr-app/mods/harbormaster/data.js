@@ -11,6 +11,7 @@
 
 import { exec, machines, spaces, shared, setShared, run as command } from "herdr";
 import { parseQuestion, answerMessage } from "./question.js";
+import { proofOf, runTier, parseProofMd } from "./proof.js";
 import { orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f";
@@ -32,7 +33,10 @@ const SCRIPT = [
   '  [ -e "$d/question.md" ] && { stat -c %Y "$d/question.md" 2>/dev/null || stat -f %m "$d/question.md" 2>/dev/null; }; printf \'\\037\'',
   '  [ -e "$d/parked" ] && { printf +; head -c 400 "$d/parked"; }; printf \'\\037\'',
   '  [ -e "$d/closed" ] && { printf +; head -c 400 "$d/closed"; }; printf \'\\037\'',
-  '  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && n=$((n+1)); done; echo "$n"',
+  '  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && n=$((n+1)); done; printf "%s\\037" "$n"',
+  // proof.md (a "+" before it when there is one), then the names of the files in shared/proof/, capped.
+  '  [ -e "$d/proof.md" ] && { printf +; head -c 12000 "$d/proof.md"; }; printf \'\\037\'',
+  '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40',
   "done",
 ].join("\n");
 
@@ -60,16 +64,20 @@ export function runPhase(text) {
 //     column, a `#` column is the id ("| # | task | ... | status |"; a "deal-assoc: what"
 //     task cell gives the name), else a `task` column is id and name ("| t14 dashboard + nav |");
 //   a list item under "## Tasks" with a "Status:", "1. ui — what it does. Status: merged (9eefaf1)".
+// Each task also has proof: {tier, text} from its "Proof: T1 — the evidence" (a "- Proof:" line
+// below a heading, a `proof` column, or "Proof:" in a list item), else null: not scoped yet.
 const cells = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
 // "merged (9eefaf1); worktree removed" → "merged"; "**done** here" → "done"; "merged d3c8862d" → "merged".
 const stateWords = (s) => s.replace(/[*_`]/g, "").replace(/[(;,.].*$/, "").replace(/\s+[0-9a-f]{6,}\b.*$/i, "").trim().toLowerCase();
-const statusIn = (text) => /\bstatus:\s*([^\n]+)/i.exec(text)?.[1] ?? null;
+// The status text runs to the end of the line, or to a Proof: that follows it in a list item.
+const statusIn = (text) => /\bstatus:\s*((?:(?!\bproof:)[^\n])+)/i.exec(text)?.[1] ?? null;
 const DASH = /\s[—–-]\s+/;
 function tasksOf(plan) {
   const out = [];
   let head = null; // the current table's columns, until the next ## heading
   let inTasks = false; // under a "## Tasks" heading
   let open = null; // the heading task still looking for a Status line below it
+  let last = null; // the latest heading task, for a Proof line below it
   for (const line of (plan ?? "").split("\n")) {
     const h = /^###\s+(\S+)\s+(.*)$/.exec(line);
     if (h) {
@@ -79,18 +87,21 @@ function tasksOf(plan) {
       const status = statusIn(h[2]);
       // Without a Status, words after the dash are the state ("merged") or, with a Status
       // line to come, what the task is about ("pending-approval notifications").
-      const task = { id: h[1], name: /^[\w-]+$/.test(word) ? word : "", state: status ? stateWords(status) : stateWords(after), about: null };
+      const task = { id: h[1], name: /^[\w-]+$/.test(word) ? word : "", state: status ? stateWords(status) : stateWords(after), about: null, proof: null };
       out.push(task);
+      last = task;
       open = status ? null : { task, after };
       continue;
     }
-    if (/^##\s/.test(line)) { head = null; open = null; inTasks = /^##\s+tasks\b/i.test(line); continue; }
+    if (/^##\s/.test(line)) { head = null; open = null; last = null; inTasks = /^##\s+tasks\b/i.test(line); continue; }
     if (open && /^\s*[-*]\s+status:/i.test(line)) {
       open.task.state = stateWords(statusIn(line));
       open.task.about = open.after || null;
       open = null;
       continue;
     }
+    const proofLine = last && /^\s*[-*]\s+[*_]*proof:?[*_]*\s*(.*)$/i.exec(line);
+    if (proofLine) { last.proof = proofOf(proofLine[1]); continue; }
     if (line.trim().startsWith("|")) {
       const row = cells(line);
       if (row.every((c) => /^:?-+:?$/.test(c))) continue;
@@ -98,21 +109,22 @@ function tasksOf(plan) {
       const idAt = ["id", "#", "task"].map((n) => lower.indexOf(n)).find((i) => i >= 0) ?? -1;
       if (idAt >= 0 && lower.includes("status")) {
         const about = ["scope", "task", "name", "what"].map((n) => lower.indexOf(n)).find((i) => i >= 0 && i !== idAt) ?? -1;
-        head = { id: idAt, status: lower.indexOf("status"), about, named: lower[idAt] === "task" };
+        head = { id: idAt, status: lower.indexOf("status"), proof: lower.indexOf("proof"), about, named: lower[idAt] === "task" };
       } else if (head && row[head.id]) {
         let id = row[head.id], name = "", about = row[head.about] || null;
         if (head.named) [, id, name] = /^(\S+)\s*(.*)$/.exec(id);
         const slug = !head.named && about && /^([\w-]+):\s+(.*)$/.exec(about);
         if (slug) [, name, about] = slug;
-        out.push({ id, name, state: stateWords(row[head.status] ?? ""), about });
+        out.push({ id, name, state: stateWords(row[head.status] ?? ""), about, proof: head.proof >= 0 ? proofOf(row[head.proof]) : null });
       }
       continue;
     }
     const li = inTasks && !open ? /^(?:\d+\.|[-*])\s+(\S+)\s+(.*)$/.exec(line) : null;
     const status = li && statusIn(li[2]);
     if (status) {
-      const about = li[2].slice(0, li[2].search(/\bstatus:/i)).split(DASH).slice(1).join(" — ").replace(/[\s.;,]+$/, "");
-      out.push({ id: li[1].replace(/[:—–-]+$/, ""), name: "", state: stateWords(status), about: about || null });
+      const cut = li[2].search(/\b(?:status|proof):/i);
+      const about = li[2].slice(0, cut).split(DASH).slice(1).join(" — ").replace(/[\s.;,]+$/, "");
+      out.push({ id: li[1].replace(/[:—–-]+$/, ""), name: "", state: stateWords(status), about: about || null, proof: proofOf(/\bproof:\s*(.*?)(?=\s*\bstatus:|$)/i.exec(li[2])?.[1]) });
     }
   }
   return out;
@@ -148,9 +160,10 @@ function parseDecisions(machine, text) {
 
 function parse(machine, stdout) {
   return stdout.split(RS).slice(1).filter((s) => s.trim()).map((chunk) => {
-    const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox] = chunk.split(US);
+    const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames] = chunk.split(US);
     const orch = json(orchFile) ?? {};
     const status = json(statusFile) ?? {};
+    const tasks = tasksOf(plan);
     const statusLine = /^Status:\s*(.*)$/m.exec(plan ?? "")?.[1]?.trim() ?? null;
     const folder = orch.folder ?? status.folder ?? "";
     const parts = dir.split("/");
@@ -190,7 +203,13 @@ function parse(machine, stdout) {
       ask: parseQuestion(question),
       askedAt: Number(asked?.trim()) * 1000 || null,
       unhandled: Number(inbox?.trim() || 0),
-      tasks: tasksOf(plan),
+      tasks,
+      // The run's proof: its tier, proof.md's results by task id, and the file names in shared/proof/.
+      proof: {
+        tier: runTier(plan, tasks),
+        md: proofFile?.startsWith("+") ? parseProofMd(proofFile.slice(1)) : null,
+        files: (proofNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
+      },
       // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
       prefix: /^Prefix:\s*`?([\w-]+)/m.exec(plan ?? "")?.[1]?.toLowerCase() ?? null,
     };

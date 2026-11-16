@@ -245,6 +245,7 @@ function cardHeader(view, t, r, f, meta) {
     .child(v_flex().flex_1().min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)
         .when(Boolean(r.type), (el) => el.child(typeTag(t, r.type)))
+        .when(Boolean(r.proof.tier), (el) => el.child(tierTag(t, `tier-${r.key}`, r.proof.tier.tier, `Proof tier${r.proof.tier.byUser ? " (set by user)" : ""}${r.tasks.some((k) => !k.proof) ? `; ${plural(r.tasks.filter((k) => !k.proof).length, "task")} not scoped` : ""}`)))
         .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(13.5).text_color(t.foreground), runName(r.branch, r.topic)))
         .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
       .child(div().truncate().text_size(11.5).text_color(t.dim).child(meta)))
@@ -274,7 +275,8 @@ function cardNotes(t, r, f) {
   ].filter(Boolean);
 }
 
-const runMeta = (r, f) => [r.repo, f.workers.length ? plural(f.workers.length, "agent") : null, r.updated ? ago(r.updated) : null].filter(Boolean).join(" · ");
+const unscopedOf = (r) => (r.proof.tier ? r.tasks.filter((k) => !k.proof).length : 0);
+const runMeta = (r, f) => [r.repo, f.workers.length ? plural(f.workers.length, "agent") : null, unscopedOf(r) ? `${unscopedOf(r)} unscoped` : null, r.updated ? ago(r.updated) : null].filter(Boolean).join(" · ");
 const runEdge = (t, f) => (f.need ? t.blocked : t[f.badge.tone] ?? t.border);
 const relatedTip = (p) => [p.number ? p.title : null, prStateText(p), p.url].filter(Boolean).join(" · ");
 
@@ -329,6 +331,54 @@ function prDetail(t, pr, i, related = false) {
     .when(Boolean(state), (el) => el.child(pill(t, state, tone)));
 }
 
+// ---- proof ----
+
+const RESULT_TONE = { pass: "done", fail: "blocked", partial: "working" };
+
+// A tier as a small tag, "T2"; `tip` says what it is.
+const tierTag = (t, id, tier, tip) => div().id(id).flex_none().text_size(10).font_semibold().px(5).rounded(4)
+  .bg(t.raised).text_color(t.muted).tooltip(tip).child(`T${tier}`);
+
+// A path under the run as a link that opens on this machine; for a run on another machine
+// it is plain text, since nothing here can open a file there.
+function pathLink(t, r, id, rel, label) {
+  if (r.machine) return div().text_size(11).text_color(t.dim).tooltip(`On ${r.machine}`).child(`${label} (${r.dir}/${rel})`);
+  return h_flex().id(id).gap(4).px(6).h(20).items_center().rounded(5).bg(t.raised).text_size(11).text_color(t.muted).cursor_pointer()
+    .hover((s) => s.text_color(t.foreground)).tooltip(`Open ${r.dir}/${rel}`)
+    .on_click((_e, cx) => { cx.stop_propagation(); openUrl(`${r.dir}/${rel}`); })
+    .child(div().child("▤")).child(label);
+}
+
+// The Proof section: the run's tier, each task's tier and evidence with its result from
+// proof.md, tasks not scoped yet flagged, and links to proof.md and shared/proof/.
+function proofSection(t, r) {
+  const { tier, md, files } = r.proof;
+  const results = md?.tasks ?? {};
+  const unscoped = r.tasks.filter((k) => !k.proof).length;
+  const title = tier ? `Proof · T${tier.tier}${tier.byUser ? " (set by user)" : ""}` : "Proof";
+  const row = (k) => {
+    const res = results[k.id];
+    return h_flex().id(`pf-${r.key}-${k.id}`).gap(8).items_start().px(8).py(5).rounded(7).bg(t.raised + "88")
+      .child(k.proof ? tierTag(t, `pft-${r.key}-${k.id}`, k.proof.tier, "The proof tier this task is planned for") : div().flex_none().text_size(10).px(5).text_color(t.blocked).child("—"))
+      .child(v_flex().flex_1().min_w(0).gap(1)
+        .child(div().text_size(12).font_semibold().text_color(t.foreground).child(k.name ? `${k.id} ${k.name}` : k.id))
+        .child(div().text_size(11.5).text_color(k.proof ? t.muted : t.blocked)
+          .child(k.proof ? k.proof.text || "(no evidence named)" : "Not scoped: no Proof line in plan.md"))
+        .when(Boolean(res?.checked), (el) => el.child(div().text_size(11).text_color(t.dim).child(`Checked: ${res.checked}`))))
+      .when(Boolean(res?.result), (el) => el.child(pill(t, res.result, RESULT_TONE[res.result]).tooltip(res.why || res.result)));
+  };
+  // A run planned before proof lines existed: one quiet line, not a red row per task.
+  const none = !tier && !md && files.length === 0 && r.tasks.every((k) => !k.proof);
+  if (none) return section(t, title).child(div().px(2).text_size(11.5).text_color(t.dim).child("No proof planned"));
+  return section(t, title, unscoped > 0 && `${unscoped} not scoped`)
+    .children(r.tasks.map(row))
+    .when(r.tasks.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child("No tasks planned yet")))
+    .child(h_flex().flex_wrap().gap(6).px(2).pt(2).items_center()
+      .when(Boolean(md), (el) => el.child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md")))
+      .when(files.length > 0, (el) => el.child(pathLink(t, r, `pf-dir-${r.key}`, "shared/proof", `shared/proof/ · ${files.length >= 40 ? "40+ files" : plural(files.length, "file")}`)))
+      .when(!md && files.length === 0, (el) => el.child(div().text_size(11).text_color(t.dim).child("No proof captured yet"))));
+}
+
 function issueRow(t, url) {
   return h_flex().id(`isd-${url}`).gap(8).items_center().h(28).px(8).rounded(7).bg(t.raised + "88").cursor_pointer()
     .hover((s) => s.bg(t.hover)).tooltip(url).on_click((_e, cx) => { cx.stop_propagation(); openUrl(url); })
@@ -378,6 +428,7 @@ function runDetail(view, t, r, ctx) {
       .children(related.map((p, i) => prDetail(t, p, i, true)))))
     .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
+    .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(t, r)))
     .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
       .children(workers.map((w) => workerRow(t, w, ctx, workOf.get(w.address), w.parent !== r.terminal)))))
     .child(actionRow(view, t, r, orch, closed, counts));
