@@ -78,7 +78,7 @@ below and shows them in the run's Proof section.
 ## proof.md and shared/proof/
 
 `<run>/proof.md` and the files in `<run>/shared/proof/` are the captured proof, written by
-whoever captures it (the `proving` skill, if available). They are never committed: the PR
+whoever captures it: the `proving` skill if available, otherwise the orchestrator the same way. They are never committed: the PR
 describes them in text. Harbormaster lists the file names (up to 40) and reads `proof.md`:
 
 ```markdown
@@ -94,6 +94,16 @@ Files: shared/proof/<file>, shared/proof/<file>
 
 A task's `## ` section is matched to the task by its id; its `Result` shows beside the task's
 evidence in the Proof section. A run with no `proof.md` shows its plan's evidence only.
+
+## The PR body: Evidence and Merge danger
+
+The orchestrator's PR body has `## Evidence` (per task: what was checked, the result, and the
+local file names from `proof.md`; it replaces "validation and measurements") and `## Merge
+danger`. The first line of `## Merge danger` is `One-way door — <blast radius>` or
+`Two-way door — <blast radius>`, e.g. `Two-way door — Harbormaster mod and two skills; revert the
+squash commit to undo.` Harbormaster reads that line from the PR body and shows it on the PR row,
+red for a one-way door. `pr-humanize` keeps both sections verbatim, between `## For humans` and
+`## For AI`.
 
 ## inbox/: answering and instructing
 

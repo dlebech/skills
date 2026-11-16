@@ -336,7 +336,7 @@ export function taskCounts(run) {
 
 // ---- pull requests (gh), cached in shared state so every copy and layout reuses them ----
 
-const PR_FIELDS = "number,title,state,isDraft,reviewDecision,reviews,author,statusCheckRollup,url,headRefName";
+const PR_FIELDS = "number,title,state,isDraft,reviewDecision,reviews,author,statusCheckRollup,url,headRefName,body";
 // Run key → when its refresh started. Like a run read, a refresh whose task is cancelled
 // never ends, so one older than PR_STALE no longer holds the run back.
 const prBusy = new Map();
@@ -371,6 +371,15 @@ function standing(p) {
   return { approvedBy: with_("APPROVED"), changesBy: with_("CHANGES_REQUESTED") };
 }
 
+// The first line of a PR body's `## Merge danger` section ("Two-way door — …"), or null.
+// Only this line is kept, so the cached PR stays small.
+export function mergeDanger(body) {
+  const m = /^##[ \t]+Merge danger[ \t]*\r?\n([\s\S]*?)(?=^#{1,2}[ \t]|(?![\s\S]))/im.exec(body ?? "");
+  const line = m?.[1].split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith("```"));
+  const clean = line?.replace(/^[-*>]\s+/, "").replace(/\*\*|__|`/g, "").replace(/^[*_]+([^*_]+?)[*_]+/, "$1").trim();
+  return clean ? clean.slice(0, 200) : null;
+}
+
 // What the views need from `gh pr view --json` output. GitHub only sets reviewDecision
 // where the repo requires a review, so the review comes from the reviews themselves,
 // falling back to reviewDecision ("Review needed") when nobody has approved or objected.
@@ -385,9 +394,13 @@ function prSummary(p, repo) {
     changesBy,
     checks: checks(p.statusCheckRollup),
     url: p.url,
+    danger: mergeDanger(p.body),
     repo: repo ?? (/github\.com\/([^/]+\/[^/]+)\//.exec(p.url ?? "")?.[1] ?? null),
   };
 }
+
+// True for a "One-way door — …" line.
+export const oneWay = (danger) => /^\W*one[- ]way/i.test(danger ?? "");
 
 // A PR recorded in status.json that gh hasn't described (yet).
 export const unknownPr = (url, repo = null) =>
