@@ -11,37 +11,66 @@
 # Prints one JSON object (durations in whole seconds, times ISO UTC), version 1:
 #   {"version": 1, "run": "<run directory>", "branch": "...",
 #    "start": "<orchestrator.json started, else the first activity>",
-#    "end": "<the last activity>", "wall": <end - start>,
-#    "categories": {"<category>": <seconds>},   the run's total, all agents summed
-#    "idle": <the orchestrator idle with no agent working and no question open>,
+#    "end": "<the last activity in any session>", "wall": <end - start>,
+#    "critical_path": {"<category>": <seconds>, "idle": <seconds>},
+#    "categories": {"<category>": <seconds>},
+#    "idle": <seconds>,
 #    "agents": [{"name": "orchestrator" | "integration" | "<prefix>-<task>" (as tokens.sh
 #                names them), "label": "<the name its brief gave it, e.g. rev-pda-t2>" | null,
 #                "role": "orchestrator" | "impl" | "rev" | "fix" | "grunt" | "agent",
 #                "task": "<task id>" | null, "kind": "claude" | "pi" | "opencode",
-#                "sessions": <n>, "start", "end", "total": <seconds>, "categories": {...}}],
+#                "sessions": <n>, "start", "end", "total": <seconds, idle left out>,
+#                "categories": {...}}],
 #    "tasks": [{"id": "<task id>", "total": <seconds>, "categories": {...}}],
 #    "tokens": <status.json's tokens> | null, "updated": "<when this was computed>"}
-# Categories (keys only present when non-zero): test, lint, build, install, ci_wait,
-# agent_wait, review, git, model, user_wait, other. Agents work in parallel, so the
-# per-agent and category sums can be far more than the wall time; only the
-# orchestrator's own categories (with idle) add up to about its part of the wall time.
+# Categories (a key is there only when non-zero; read a missing one as 0): test, lint,
+# build, install, ci_wait, agent_wait, review, git, model, user_wait, other.
+# Which figure is for what:
+#   critical_path  where the run's elapsed time went: the orchestrator's own categories
+#                  plus `idle` (the orchestrator between turns with no agent working and
+#                  no question open). They add up to the orchestrator's part of the wall
+#                  time. Use it for "where the time goes"; empty without an orchestrator.
+#   agents, tasks  effort: each agent's (or task's) working time. Agents work in parallel,
+#   categories     so these sums can be far more than the wall time, and `categories`
+#                  (all agents summed, the orchestrator included) counts the
+#                  orchestrator's agent_wait on top of the agents' own time.
 # Agents are listed orchestrator first, then by total; tasks by total.
 #
 # How time is counted, per session (one transcript), from its own timestamps:
 #   - from a tool call to its result: the call's category (categories.tsv); while
-#     calls overlap, the earliest one's;
+#     calls overlap, the earliest one's. One call is one category: a shell call that
+#     runs several commands takes the first of them (in the order they are written)
+#     that is not git or other, else git, else other.
+#   - a call is capped at 30 minutes (agent_wait calls are not): the rest is idle, as
+#     the call was most likely waiting on a permission prompt. A call that has no
+#     result when the next prompt comes (it was cut off, or the session was resumed)
+#     ends at the last event before that prompt; its later time is not counted.
 #   - otherwise, inside a turn: model (the model thinking and writing);
 #   - between turns (after the model ended its turn, until the next input; or any
 #     gap of over 10 minutes with no tool running): not working. For the orchestrator
 #     that is user_wait while a question.md it wrote is open (from the call that wrote
-#     it to an answer: an input naming inbox/ or "Answer to", or one not sent by hc),
-#     else agent_wait while any agent is in a turn, else idle. An agent's idle time
-#     is not counted.
+#     it to an answer: an input naming an inbox/*.message, one starting "Answer to", or
+#     plain text from a person, not a <tagged> message from hc or the harness; or a call
+#     that removes question.md), else agent_wait while any agent is in a turn, else
+#     idle. An agent's idle time is not counted.
+#   - agent_wait: for the orchestrator, waiting on its agents (`hc wait`, `sleep`
+#     while polling, its idle time while agents work); for any other agent, waiting on
+#     its own sub-agents or background jobs (an Agent call, `hc wait`).
 #   - a review agent (role rev) has its time as review, except test, lint, build,
 #     install and ci_wait, which stay, to show checks a reviewer reran.
 # Only activity from the run's start (orchestrator.json `started`) on counts, and up to
-# its `closed` time if it has one. Claude Code sub-agents' transcripts are not read:
-# the parent's Agent call covers their time (agent_wait, or review).
+# its `closed` time if it has one. For a run that is not closed, `end` is the last
+# activity in any of its sessions, so a session continued later in a run's worktree
+# moves it.
+#
+# Limits:
+#   - herdr-core's terminal times (`hc get`: created_ms, finished_ms, parents) are not
+#     used: the terminals are gone after a run, and the transcripts give finer times.
+#     Agents are grouped under their run by worktree, as tokens.sh does.
+#   - Claude Code sub-agents' transcripts are not read: the parent's Agent call covers
+#     their time (agent_wait, or review when its description says so). A sub-agent run
+#     in the background (its call returns at once) is not counted.
+#   - Time waiting on a permission prompt is in the call it was for, up to the cap.
 #
 # Sources, found as skills/herdr-app-orchestrator/scripts/tokens.sh finds them:
 #   orchestrator  the run's `sessions` file: "claude <id>", "pi <file>", "opencode <id>"
@@ -53,11 +82,16 @@
 #                 as many machines have no sqlite3 program) and its older storage/ files.
 # An agent's role and label come from its first prompt, "You are <role>-<name>".
 #
-# Cost: each session's result is cached in the run's .timing/ folder (TIMING_CACHE moves
-# it), keyed by the file's size, inode and mtime, the run's start and end, and the
-# table, so a rerun on an unchanged run reads no transcript. opencode's sessions are
-# cached together, keyed by its database files. Missing files, unknown kinds and a
-# truncated last line are skipped.
+# Cost: in the run's .timing/ folder (TIMING_CACHE moves it), per transcript, the events
+# read from it so far (<key>.ev) and how far it was read (<key>.at: offset, inode, logic
+# checksum, a checksum of its start and of the bytes before the offset), so a growing
+# transcript is read only from where it stopped, in chunks of TIMING_CHUNK bytes (16 MB),
+# each kept as soon as it is read, so a run cut short still makes progress; and its result
+# (<key>.json), with what it depends on (<key>.sig: the file's size, inode and mtime, the
+# run's start and end, the table, and a checksum of this script's jq and Python), so an
+# unchanged run reads no transcript, and a change to this script's logic or the table is
+# picked up. opencode's sessions are cached together, keyed by its database files.
+# Missing files, unknown kinds and a half-written last line are skipped.
 #
 # CLAUDE_CONFIG_DIR, PI_CODING_AGENT_DIR, OPENCODE_DATA_DIR and HERDR_WORKTREES_ROOT move
 # where it looks, for tests; they default to ~/.claude, ~/.pi/agent,
@@ -74,9 +108,13 @@ pi=${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}
 opencode=${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}
 worktrees=${HERDR_WORKTREES_ROOT:-$HOME/.herdr/worktrees}
 cache=${TIMING_CACHE:-$dir/.timing}
+chunk=${TIMING_CHUNK:-16777216}
 mkdir -p "$cache" || exit 1
+# Scratch space of runs that were killed (as by timing.js's timeout).
+find "$cache" -maxdepth 1 -name '.tmp.*' -mmin +10 -exec rm -rf {} + 2>/dev/null
 tmp=$cache/.tmp.$$
 trap 'rm -rf "$tmp"' EXIT
+trap 'exit 1' HUP INT TERM
 mkdir "$tmp" || exit 1
 
 orch=$(jq -c '{branch: (.branch // ""), folder: (.folder // ""), started: (.started // "")}' "$dir/orchestrator.json") || exit 1
@@ -89,9 +127,6 @@ prefix=$(sed -n 's/^Prefix: *//p' "$dir/plan.md" 2>/dev/null | head -1 | tr -d '
 repos=$(sed -n 's/^Repos: *//p' "$dir/plan.md" 2>/dev/null | head -1 | tr ',' '\n' | awk 'NF { print $1 }')
 [ -n "$repos" ] || repos=${folder##*/}
 slug=$(printf '%s' "$branch" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')
-tablesum=$(printf '%s' "$table" | cksum | cut -d' ' -f1)
-# What every cached result depends on besides its file.
-context="$started|$closed|$prefix|$tablesum|1"
 
 claude_dir() { printf '%s/projects/%s' "$claude" "$(printf '%s' "$1" | sed 's/[^A-Za-z0-9-]/-/g')"; }
 pi_dir() { printf '%s/sessions/--%s--' "$pi" "$(printf '%s' "${1#/}" | sed 's|/|-|g')"; }
@@ -140,129 +175,7 @@ for r in $repos; do
   [ -z "$prefix" ] || printf 'under:%s/%s-\n' "$worktrees/$r" "$prefix" >>"$specs"
 done
 
-# Shared jq: times, the classifier, and one session's events → its result.
-LIB='
-def ms: try (capture("^(?<s>[^.Z]+)(\\.(?<f>[0-9]+))?Z$") | ((.s + "Z") | fromdateiso8601) * 1000 + (((.f // "0") + "00")[0:3] | tonumber)) catch null;
-def iso: . / 1000 | floor | todate;
-def secs: . / 1000 | round;
-# A call input as text: a shell command, else what it is about.
-def about: if type != "object" then tostring
-  elif (.command | type) == "string" then .command
-  else [.command, .description, .subagent_type, .skill, .file_path, .filePath, .path, .pattern, .url, .query]
-    | map(select(type == "string")) | join(" ") end;
-def rules: [$table | split("\n")[] | select(length > 0 and (startswith("#") | not)) | split("\t")
-  | select(length >= 2 and .[0] != "") | {cat: .[0], tool: (.[1] // ""), text: (.[2] // "")}];
-# A shell command as its simple commands, here-document bodies dropped.
-def commands: split("\n")
-  | reduce .[] as $l ({out: [], end: null};
-      if .end then (if ($l | gsub("^\\s+|\\s+$"; "")) == .end then .end = null else . end)
-      else .out += [$l] | .end = ([$l | match("<<-?\\s*[\"\u0027]?([A-Za-z_][A-Za-z0-9_]*)").captures[0].string] | first) end)
-  | .out | join("\n") | [splits("[;&|\n]+")]
-  | map(sub("^[\\s(]+"; "") | sub("^([A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)+"; "")) | map(select(length > 0));
-def classify($rules): . as $c | ($c.tool // "") as $tool
-  | (if ($tool | test("^(bash|shell)$"; "i")) then ($c.text // "" | commands) else [$c.text // ""] end) as $parts
-  | (first($rules[] | . as $r | select(($tool | test($r.tool; "i")) and any($parts[]; test($r.text; "i")))) | .cat) // "other";
-# Does a call write the run question.md (not an agent "<name>-question.md")?
-def asks: if (.tool // "") | test("^(write|edit|multiedit)$"; "i") then (.text // "") | test("(^|/)question\\.md$")
-  elif (.tool // "") | test("^(bash|shell)$"; "i") then
-    any(.text // "" | commands[]; test("^(mv|cp|tee)\\b.*[/\\s]question\\.md\\b|>\\s*\\S*/\\.?question\\.(md|tmp)\\b"))
-  else false end;
-def unasks: ((.tool // "") | test("^(bash|shell)$"; "i")) and any(.text // "" | commands[]; test("^rm\\b.*[/\\s]question\\.md\\b"));
-def answer: test("inbox/|Answer to") or (startswith("<hc from=") | not);
-def addc($k; $v): if $v > 0 then .[$k] = (.[$k] // 0) + $v else . end;
-# Events [{t, e: input|model|call|result|end, id, tool, text}] → the session result.
-def summary($meta):
-  ($meta.name == "orchestrator") as $orc | rules as $rules
-  | map(select(.t != null and .t >= $since and ($until == null or .t <= $until))) | sort_by(.t)
-  | ([first(.[] | select(.e == "input") | .text // "" | [match("\\bYou are ((impl|rev|review|reviewer|fix|grunt)-[A-Za-z0-9_-]*[A-Za-z0-9])").captures[0].string] | first | select(. != null))] | first) as $label
-  | (if $orc then "orchestrator" elif $label == null then "agent"
-     else ($label | split("-")[0] | if startswith("rev") then "rev" else . end) end) as $role
-  | reduce .[] as $e ({prev: null, open: {}, idle: true, q: false, ss: null, cats: {}, spans: [], waits: []};
-      (if .prev != null and $e.t > .prev then ($e.t - .prev) as $dt
-        | if (.open | length) > 0 then (.open | to_entries | min_by(.value.t) | .value.cat) as $k | .cats |= addc($k; $dt)
-          elif .idle then .waits += [[.prev, $e.t, (if .q then "user" else "idle" end)]]
-          elif $dt > 600000 then .waits += [[.prev, $e.t, (if .q then "user" else "idle" end)]] | .spans += [[.ss, .prev]] | .ss = null
-          else .cats |= addc("model"; $dt) end
-       else . end)
-      | (if .ss == null and $e.e != "end" then .ss = $e.t | .idle = false else . end)
-      | if $e.e == "input" then (if .q and ($e.text // "" | answer) then .q = false else . end)
-        elif $e.e == "call" then .open[$e.id] = {t: $e.t, cat: ($e | classify($rules))}
-          | (if $orc and ($e | asks) then .q = true elif $orc and ($e | unasks) then .q = false else . end)
-        elif $e.e == "result" then del(.open[$e.id])
-        elif $e.e == "end" then .open = {} | (if .ss != null then .spans += [[.ss, $e.t]] else . end) | .ss = null | .idle = true
-        else . end
-      | .prev = $e.t)
-  | (if .ss != null then .spans += [[.ss, .prev]] else . end)
-  | .cats as $c
-  | (if $role == "rev" then
-      reduce ($c | to_entries[]) as $x ({}; if ($x.key | IN("test", "lint", "build", "install", "ci_wait")) then addc($x.key; $x.value) else addc("review"; $x.value) end)
-     else $c end) as $cats
-  | {name: $meta.name, kind: $meta.kind, file: $meta.file, label: $label, role: $role,
-     start: (.spans | map(.[0]) | min), end: (.spans | map(.[1]) | max),
-     cats: $cats, spans: .spans, waits: (if $orc then .waits else [] end)};
-'
-
-# One transcript line → events.
-CLAUDE='
-fromjson? | select(type == "object" and .isSidechain != true) | (.timestamp // "" | ms) as $t | select($t != null)
-| if .type == "assistant" then
-    ((.message.content // []) | if type == "array" then .[] else empty end | select(.type == "tool_use")
-      | {t: $t, e: "call", id: .id, tool: .name, text: (.input | about)}),
-    {t: $t, e: "model"},
-    (if (.message.stop_reason // "") | IN("end_turn", "stop_sequence") then {t: $t, e: "end"} else empty end)
-  elif .type == "user" then
-    if (.message.content | type) == "array" and any(.message.content[]; .type == "tool_result") then
-      (.message.content[] | select(.type == "tool_result") | {t: $t, e: "result", id: .tool_use_id})
-    elif .isMeta == true then empty
-    else {t: $t, e: "input", text: (.message.content | if type == "string" then . else map(.text? // "") | join(" ") end)} end
-  elif .type == "queue-operation" and .operation == "enqueue" then {t: $t, e: "input", text: (.content // "" | tostring)}
-  else empty end
-'
-PI='
-fromjson? | select(type == "object" and .type == "message") | (.timestamp // "" | ms) as $t | select($t != null)
-| .message as $m
-| if $m.role == "user" then {t: $t, e: "input", text: ($m.content | if type == "string" then . else map(.text? // "") | join(" ") end)}
-  elif $m.role == "assistant" then
-    (($m.content // []) | if type == "array" then .[] else empty end | select(.type == "toolCall")
-      | {t: $t, e: "call", id: .id, tool: .name, text: (.arguments | about)}),
-    {t: $t, e: "model"},
-    (if ($m.stopReason // "") | IN("stop", "aborted", "error") then {t: $t, e: "end"} else empty end)
-  elif $m.role == "toolResult" then {t: $t, e: "result", id: $m.toolCallId}
-  else empty end
-'
-
-jqs() { jq --arg table "$table" --argjson since "${since:-0}" --argjson until "${until:-null}" "$@"; }
-since=$(printf '%s\n' "$started" | jqs -R "$LIB"' ms // 0') || exit 1
-until=$(printf '%s\n' "$closed" | jqs -R "$LIB"' ms') || exit 1
-
-stat_of() { stat -c '%s %i %Y' "$1" 2>/dev/null || stat -f '%z %i %m' "$1" 2>/dev/null; }
-
-out=$tmp/summaries
-: >"$out"
-while IFS="$(printf '\t')" read -r name kind f; do
-  key=$(printf '%s' "$f" | sed 's/[^A-Za-z0-9]/_/g')
-  key=$(printf '%s' "$key" | tail -c 200)
-  st=$(stat_of "$f") || continue
-  sig="$st|$name|$context"
-  if [ -s "$cache/$key.json" ] && [ "$(cat "$cache/$key.sig" 2>/dev/null)" = "$sig" ]; then
-    cat "$cache/$key.json" >>"$out"
-    continue
-  fi
-  case $kind in
-    claude) prog=$CLAUDE; pat='"type":"(assistant|user|queue-operation)"' ;;
-    pi) prog=$PI; pat='"type":"message"' ;;
-    *) continue ;;
-  esac
-  meta=$(jq -nc --arg name "$name" --arg kind "$kind" --arg file "$f" '{name: $name, kind: $kind, file: $file}')
-  # The last line may be half written: fromjson? skips it.
-  if { grep -aE "$pat" "$f" || :; } | jqs -ncR --argjson meta "$meta" "$LIB [inputs | $prog] | summary(\$meta)" >"$tmp/one" &&
-    [ -s "$tmp/one" ]; then
-    cp "$tmp/one" "$cache/$key.json" && printf '%s\n' "$sig" >"$cache/$key.sig"
-    cat "$tmp/one" >>"$out"
-  fi
-done <"$list"
-
-# opencode: every session of the run in one read of its database, cached as a whole.
+# opencode sessions → events, one JSON object a line with the session ("s") and its agent name.
 OPENCODE='
 import json, os, sqlite3, sys
 data, specs = sys.argv[1], sys.argv[2:]
@@ -376,11 +289,213 @@ if os.path.isdir(sd):
                     ps[m["id"]] = [load(open(os.path.join(pdir, f)).read()) for f in sorted(os.listdir(pdir)) if f.endswith(".json")]
             v1(sid, name, ms, ps)
 '
+
+# Shared jq: times, the classifier, and one session's events → its result.
+LIB='
+def ms: try (capture("^(?<s>[^.Z]+)(\\.(?<f>[0-9]+))?Z$") | ((.s + "Z") | fromdateiso8601) * 1000 + (((.f // "0") + "00")[0:3] | tonumber)) catch null;
+def iso: . / 1000 | floor | todate;
+def secs: . / 1000 | round;
+# A call input as text: a shell command, else what it is about.
+def about: if type != "object" then tostring
+  elif (.command | type) == "string" then .command
+  else [.command, .description, .subagent_type, .skill, .file_path, .filePath, .path, .pattern, .url, .query]
+    | map(select(type == "string")) | join(" ") end;
+def shell: test("^(bash|shell)$"; "i");
+# The table: <category> TAB <tool> TAB <text> [TAB orchestrator].
+def rules: [$table | split("\n")[] | select(length > 0 and (startswith("#") | not)) | split("\t")
+  | select(length >= 2 and .[0] != "") | {cat: .[0], tool: (.[1] // ""), text: (.[2] // ""), who: (.[3] // "")}];
+# A shell command as its simple commands, in order: here-document bodies dropped, no
+# split at ; & | or a newline inside quotes, and wrappers (VAR=x, time, timeout N, env,
+# sudo, nice, command, exec, a loop or if body) taken off the front.
+def commands: split("\n")
+  | reduce .[] as $l ({out: [], end: null};
+      if .end then (if ($l | gsub("^\\s+|\\s+$"; "")) == .end then .end = null else . end)
+      else .out += [$l] | .end = ([$l | match("<<-?\\s*[\"\u0027]?([A-Za-z_][A-Za-z0-9_]*)").captures[0].string] | first) end)
+  | .out | join("\n")
+  | gsub("\"(?<q>[^\"]*)\""; "\"" + (.q | gsub("[;&|\n]"; " ")) + "\"")
+  | gsub("\u0027(?<q>[^\u0027]*)\u0027"; "\u0027" + (.q | gsub("[;&|\n]"; " ")) + "\u0027")
+  | [splits("[;&|\n]+")]
+  | map(sub("^[\\s({!]+"; "")
+      | sub("^((time|env|sudo|command|exec|do|then|else|nice(\\s+-n\\s*-?[0-9]+)?|timeout(\\s+-\\S+)*\\s+[0-9.]+[smhd]?|[A-Za-z_][A-Za-z0-9_]*=\\S*)\\s+)+"; "")
+      | .[0:300])
+  | map(select(length > 0));
+def parts: if (.tool // "" | shell) then (.parts // (.text // "" | commands)) else [.text // ""] end;
+def classify($rules; $orc): (.tool // "") as $tool | parts as $parts
+  | [$rules[] | . as $r | select(($tool | test($r.tool; "i")) and ($r.who == "" or ($r.who == "orchestrator" and $orc)))] as $rs
+  | [$parts[] | . as $p | ([$rs[] | . as $r | select($p | test($r.text; "i")) | .cat] | first) // "other"] as $cats
+  | ([$cats[] | select(. != "git" and . != "other")] | first)
+    // (if any($cats[]; . == "git") then "git" else "other" end);
+# Does a call write the run question.md (not an agent "<name>-question.md"), or remove it?
+def asks: if (.tool // "") | test("^(write|edit|multiedit)$"; "i") then (.text // "") | test("(^|/)question\\.md$")
+  elif (.tool // "") | shell then any(parts[]; test("^(mv|cp|tee)\\b.*[/\\s]question\\.md\\b|>\\s*\\S*/\\.?question\\.(md|tmp)\\b"))
+  else false end;
+def unasks: ((.tool // "") | shell) and any(parts[]; test("^rm\\b.*[/\\s]question\\.md\\b"));
+# Does an input answer the open question: an inbox message, "Answer to", or a person
+# typing (not a <tagged> message from hc or the harness, nor a compaction summary)?
+def answer: test("/inbox/\\S+\\.message|^\\s*Answer to")
+  or ((test("^\\s*<") or test("^This session is being continued")) | not);
+def addc($k; $v): if $v > 0 then .[$k] = (.[$k] // 0) + $v else . end;
+# Not working from $a to $b: waiting on the user while a question is open, else idle.
+def pause($a; $b): .waits += [[$a, $b, (if .q then "user" else "idle" end)]]
+  | if .ss != null then .spans += [[.ss, $a]] | .ss = null else . end;
+# Events [{t, e: input|model|call|result|end, id, tool, parts|text, queued}] → the result.
+def summary($meta):
+  ($meta.name == "orchestrator") as $orc | rules as $rules
+  | map(select(.t != null and .t >= $since and ($until == null or .t <= $until))) | sort_by(.t)
+  | ([first(.[] | select(.e == "input") | .text // "" | [match("\\bYou are ((impl|rev|review|reviewer|fix|grunt)-[A-Za-z0-9_-]*[A-Za-z0-9])").captures[0].string] | first | select(. != null))] | first) as $label
+  | (if $orc then "orchestrator" elif $label == null then "agent"
+     else ($label | split("-")[0] | if startswith("rev") then "rev" else . end) end) as $role
+  | reduce .[] as $e ({prev: null, open: {}, idle: true, q: false, ss: null, cats: {}, spans: [], waits: [], excess: 0};
+      (if .prev != null and $e.t > .prev then ($e.t - .prev) as $dt
+        | if (.open | length) > 0 and $e.e == "input" and ($e.queued | not) then .open = {} | pause(.prev; $e.t)
+          elif (.open | length) > 0 then (.open | to_entries | min_by(.value.t) | .value) as $o
+            | if $o.cat == "agent_wait" then .cats |= addc("agent_wait"; $dt)
+              else ([0, ([$dt, $o.t + 1800000 - .prev] | min)] | max) as $in
+                | .cats |= addc($o.cat; $in) | .excess += ($dt - $in) end
+          elif .idle or $dt > 600000 then pause(.prev; $e.t)
+          else .cats |= addc("model"; $dt) end
+       else . end)
+      | (if .ss == null and $e.e != "end" then .ss = $e.t | .idle = false else . end)
+      | if $e.e == "input" then (if .q and ($e.text // "" | answer) then .q = false else . end)
+        elif $e.e == "call" then .open[$e.id] = {t: $e.t, cat: ($e | classify($rules; $orc))}
+          | (if $orc and ($e | asks) then .q = true elif $orc and ($e | unasks) then .q = false else . end)
+        elif $e.e == "result" then del(.open[$e.id])
+        elif $e.e == "end" then .open = {} | (if .ss != null then .spans += [[.ss, $e.t]] else . end) | .ss = null | .idle = true
+        else . end
+      | .prev = $e.t)
+  | (if .ss != null then .spans += [[.ss, .prev]] else . end)
+  | .excess as $excess | .cats as $c
+  | (if $role == "rev" then
+      reduce ($c | to_entries[]) as $x ({}; if ($x.key | IN("test", "lint", "build", "install", "ci_wait")) then addc($x.key; $x.value) else addc("review"; $x.value) end)
+     elif $orc then $c | addc("_idle"; $excess)
+     else $c end) as $cats
+  | {name: $meta.name, kind: $meta.kind, file: $meta.file, label: $label, role: $role,
+     start: (.spans | map(.[0]) | min), end: (.spans | map(.[1]) | max),
+     cats: $cats, spans: .spans, waits: (if $orc then .waits else [] end)};
+'
+
+# One transcript line → events. A shell call keeps its commands, already split, not
+# its text, which may be a long here-document.
+CLAUDE='
+fromjson? | select(type == "object" and .isSidechain != true) | (.timestamp // "" | ms) as $t | select($t != null)
+| if .type == "assistant" then
+    ((.message.content // []) | if type == "array" then .[] else empty end | select(.type == "tool_use")
+      | {t: $t, e: "call", id: .id, tool: .name}
+        + if (.name // "" | shell) then {parts: (.input | about | commands)} else {text: (.input | about | .[0:500])} end),
+    {t: $t, e: "model"},
+    (if (.message.stop_reason // "") | IN("end_turn", "stop_sequence") then {t: $t, e: "end"} else empty end)
+  elif .type == "user" then
+    if (.message.content | type) == "array" and any(.message.content[]; .type == "tool_result") then
+      (.message.content[] | select(.type == "tool_result") | {t: $t, e: "result", id: .tool_use_id})
+    elif .isMeta == true then empty
+    else {t: $t, e: "input", text: (.message.content | if type == "string" then . else map(.text? // "") | join(" ") end | .[0:2000])} end
+  elif .type == "queue-operation" and .operation == "enqueue" then {t: $t, e: "input", queued: true, text: (.content // "" | tostring | .[0:2000])}
+  else empty end
+'
+PI='
+fromjson? | select(type == "object" and .type == "message") | (.timestamp // "" | ms) as $t | select($t != null)
+| .message as $m
+| if $m.role == "user" then {t: $t, e: "input", text: ($m.content | if type == "string" then . else map(.text? // "") | join(" ") end | .[0:2000])}
+  elif $m.role == "assistant" then
+    (($m.content // []) | if type == "array" then .[] else empty end | select(.type == "toolCall")
+      | {t: $t, e: "call", id: .id, tool: .name}
+        + if (.name // "" | shell) then {parts: (.arguments | about | commands)} else {text: (.arguments | about | .[0:500])} end),
+    {t: $t, e: "model"},
+    (if ($m.stopReason // "") | IN("stop", "aborted", "error") then {t: $t, e: "end"} else empty end)
+  elif $m.role == "toolResult" then {t: $t, e: "result", id: $m.toolCallId}
+  else empty end
+'
+# Lines worth parsing; spaces allowed, for a log written by another JSON writer.
+CLAUDE_PAT='"type": *"(assistant|user|queue-operation)"'
+PI_PAT='"type": *"message"'
+
+jqs() { jq --arg table "$table" --argjson since "${since:-0}" --argjson until "${until:-null}" "$@"; }
+since=$(printf '%s\n' "$started" | jqs -R "$LIB"' ms // 0') || exit 1
+until=$(printf '%s\n' "$closed" | jqs -R "$LIB"' ms') || exit 1
+# What every cached result depends on besides its file: a change to this logic or the
+# table makes every session be read again.
+logic=$(printf '%s' "$LIB$CLAUDE$PI$OPENCODE$CLAUDE_PAT$PI_PAT" | cksum | cut -d' ' -f1)
+context="$started|$closed|$prefix|$(printf '%s' "$table" | cksum | cut -d' ' -f1)|$logic"
+
+stat_of() { stat -c '%s %i %Y' "$1" 2>/dev/null || stat -f '%z %i %m' "$1" 2>/dev/null; }
+# Moves a finished file into the cache whole, so a reader never sees half of it.
+keep() { mv "$1" "$2"; }
+
+# A checksum of what a file held up to `off`: its first 4 kB and the 256 bytes before off.
+signature() {
+  h=4096 t=256
+  [ "$2" -ge "$h" ] || h=$2
+  [ "$2" -ge "$t" ] || t=$2
+  { head -c "$h" "$1"; tail -c +$(($2 - t + 1)) "$1" | head -c "$t"; } | cksum | cut -d' ' -f1
+}
+
+# events <file> <key> <kind> <size> <inode>: brings <key>.ev up to date, reading only
+# what was added since, up to the last whole line, a chunk at a time; rereads a file that
+# was replaced, shrank or rewritten, or when the logic changed.
+events() {
+  case $3 in
+    claude) prog=$CLAUDE pat=$CLAUDE_PAT ;;
+    pi) prog=$PI pat=$PI_PAT ;;
+    *) return 1 ;;
+  esac
+  ev=$cache/$2.ev at=$cache/$2.at off=0
+  if [ -e "$ev" ] && [ -e "$at" ] && read -r o_off o_inode o_logic o_sig <"$at" &&
+    [ "$o_inode" = "$5" ] && [ "$o_logic" = "$logic" ] && [ "$o_off" -le "$4" ] &&
+    [ "$(signature "$1" "$o_off")" = "$o_sig" ]; then
+    off=$o_off
+  else
+    rm -f "$at" && : >"$ev" || return 1
+  fi
+  lim=$chunk
+  while [ "$off" -lt "$4" ]; do
+    n=$(($4 - off)) cut=0
+    [ "$n" -le "$lim" ] || { n=$lim; cut=1; }
+    tail -c +$((off + 1)) "$1" | head -c "$n" >"$tmp/chunk" || return 1
+    if [ -n "$(tail -c 1 "$tmp/chunk")" ]; then
+      n=$((n - $(tail -n 1 "$tmp/chunk" | wc -c)))
+      if [ "$n" -le 0 ]; then
+        # The end of the file, still being written; or a line longer than the chunk.
+        [ "$cut" = 1 ] || break
+        lim=$((lim * 2))
+        continue
+      fi
+    fi
+    head -c "$n" "$tmp/chunk" | { grep -aE "$pat" || :; } | jqs -cR "$LIB $prog" >"$tmp/ev" || return 1
+    cat "$tmp/ev" >>"$ev" || return 1
+    off=$((off + n)) lim=$chunk
+    printf '%s %s %s %s\n' "$off" "$5" "$logic" "$(signature "$1" "$off")" >"$tmp/at" && keep "$tmp/at" "$at" || return 1
+  done
+}
+
+out=$tmp/summaries
+: >"$out"
+while IFS="$(printf '\t')" read -r name kind f; do
+  key=$(printf '%s' "$f" | sed 's/[^A-Za-z0-9]/_/g')
+  key=$(printf '%s' "$key" | tail -c 200)
+  st=$(stat_of "$f") || continue
+  sig="$st|$name|$context"
+  if [ -s "$cache/$key.json" ] && [ "$(cat "$cache/$key.sig" 2>/dev/null)" = "$sig" ]; then
+    cat "$cache/$key.json" >>"$out"
+    continue
+  fi
+  set -- $st
+  meta=$(jq -nc --arg name "$name" --arg kind "$kind" --arg file "$f" '{name: $name, kind: $kind, file: $file}')
+  if events "$f" "$key" "$kind" "$1" "$2" &&
+    jqs -sc --argjson meta "$meta" "$LIB summary(\$meta)" "$cache/$key.ev" >"$tmp/one" && [ -s "$tmp/one" ]; then
+    keep "$tmp/one" "$cache/$key.json" && printf '%s\n' "$sig" >"$tmp/sig" && keep "$tmp/sig" "$cache/$key.sig"
+    cat "$cache/$key.json" >>"$out"
+  else
+    echo "timing.sh: could not read $f" >&2
+  fi
+done <"$list"
+
+# opencode: every session of the run in one read of its database, cached as a whole and
+# read again when the database, or a file in its older storage/, changed.
 if [ -e "$opencode/opencode.db" ] || [ -d "$opencode/storage/session" ]; then
   if command -v python3 >/dev/null 2>&1; then
-    st="$(stat_of "$opencode/opencode.db") $(stat_of "$opencode/opencode.db-wal") $(stat_of "$opencode/storage/message")"
-    sig="$st|$(cksum <"$specs" | cut -d' ' -f1)|$context"
-    if [ -e "$cache/opencode.json" ] && [ "$(cat "$cache/opencode.sig" 2>/dev/null)" = "$sig" ]; then
+    sig="$(stat_of "$opencode/opencode.db") $(stat_of "$opencode/opencode.db-wal")|$(cksum <"$specs" | cut -d' ' -f1)|$context"
+    if [ -e "$cache/opencode.json" ] && [ "$(cat "$cache/opencode.sig" 2>/dev/null)" = "$sig" ] &&
+      [ -z "$(find "$opencode/storage" -newer "$cache/opencode.json" -print 2>/dev/null | head -1)" ]; then
       cat "$cache/opencode.json" >>"$out"
     else
       # Specs as arguments, so a folder name is never spliced into the program.
@@ -389,8 +504,8 @@ if [ -e "$opencode/opencode.db" ] || [ -d "$opencode/storage/session" ]; then
       if python3 -I -c "$OPENCODE" "$opencode" "$@" >"$tmp/oc.events" 2>"$tmp/oc.err" &&
         jqs -sc "$LIB"' group_by(.s)[] | summary({name: .[0].name, kind: "opencode", file: ("opencode:" + .[0].s)})' \
           "$tmp/oc.events" >"$tmp/oc.json"; then
-        cp "$tmp/oc.json" "$cache/opencode.json" && printf '%s\n' "$sig" >"$cache/opencode.sig"
-        cat "$tmp/oc.json" >>"$out"
+        keep "$tmp/oc.json" "$cache/opencode.json" && printf '%s\n' "$sig" >"$tmp/sig" && keep "$tmp/sig" "$cache/opencode.sig"
+        cat "$cache/opencode.json" >>"$out"
       else
         echo "timing.sh: could not read opencode's sessions: $(head -c 300 "$tmp/oc.err")" >&2
       fi
@@ -427,6 +542,8 @@ def rounded: with_entries(.value |= secs) | with_entries(select(.value > 0));
 | {version: 1, run: $run, branch: $branch,
    start: (if $start then $start | iso else null end), end: (if $last then $last | iso else null end),
    wall: (if $start and $last then ($last - $start) | secs else 0 end),
+   critical_path: ($agents | map(select(.name == "orchestrator"))
+     | addall(map(.categories)) + {idle: (map(._idle) | add // 0 | secs)} | with_entries(select(.value > 0))),
    categories: (addall($agents | map(.categories)) | with_entries(select(.value > 0))),
    idle: ($agents | map(._idle) | add // 0 | secs),
    agents: ($agents | map(del(._idle))),
