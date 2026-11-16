@@ -445,7 +445,12 @@ function proofSection(view, t, r, prs) {
   const danger = prs.find((p) => p.danger)?.danger;
   const verdict = proofVerdict({ tier, md, tasks: r.tasks, danger });
   // A run planned before proof lines existed: one quiet line, not a red row per task.
-  if (!verdict) return section(t, "Proof").child(div().px(2).text_size(11.5).text_color(t.dim).child("No proof planned"));
+  if (!verdict) {
+    // Files in shared/proof/ without a plan or proof.md still get their folder link.
+    return section(t, "Proof").child(div().px(2).text_size(11.5).text_color(t.dim).child("No proof planned"))
+      .when(files.length > 0, (el) => el.child(h_flex().px(2).pt(2)
+        .child(pathLink(t, r, `pf-dir-${r.key}`, "shared/proof", `shared/proof/ · ${files.length >= 40 ? "40+ files" : plural(files.length, "file")}`))));
+  }
   const over = view.proofOpen?.get(r.key);
   const finished = r.phase === "finished" || Boolean(r.away);
   const open = over ?? !finished;

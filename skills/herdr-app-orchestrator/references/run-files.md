@@ -98,7 +98,7 @@ Files: shared/proof/<file>, shared/proof/<file>
 A task's `## ` section is matched to the task by its id; its `Result` shows beside the task's
 row in the Proof section. The optional header line `Checks: green — …` or `Checks: red — …` (CI or
 the local suite on the integration branch) shows as "checks green" in the verdict line. A T2 or T3
-task whose `Files:` has no image (png, jpg, jpeg, gif, webp) counts as "missing: n screenshots".
+task with a `Result:` whose `Files:` has no image (png, jpg, jpeg, gif, webp) counts as "missing: n screenshots".
 A run with no `proof.md` shows its plan's evidence only.
 
 ## The PR body: Evidence and Merge danger

@@ -56,7 +56,7 @@ export const isImage = (name) => IMAGE.test(name ?? "");
 
 // One task's proof, from plan.md's Proof line and proof.md's entry:
 // {id, name, tier (its own, else the planned one), planned, result ("pass" | "partial" | "fail" | null), why, checked, files, images, missing}.
-// `missing` is a T2+ task with no image in its Files list. The tasks are plan.md's, then proof.md's others.
+// `missing` is a T2+ task with a proof.md result but no image in its Files list. The tasks are plan.md's, then proof.md's others.
 export function proofTasks(tasks, md) {
   const seen = new Set();
   const row = (id, name, planned) => {
@@ -67,7 +67,7 @@ export function proofTasks(tasks, md) {
     return {
       id, name, planned, tier, result: e?.result ?? null, why: e?.why ?? "", checked: e?.checked ?? "", files,
       images: files.filter(isImage), scoped: Boolean(planned || e),
-      missing: tier !== null && tier >= 2 && !files.some(isImage),
+      missing: Boolean(e?.result) && tier !== null && tier >= 2 && !files.some(isImage),
     };
   };
   const rows = tasks.map((k) => row(k.id, k.name, k.proof));
