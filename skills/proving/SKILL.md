@@ -49,12 +49,14 @@ Checks: green — <what ran>
 ## <task id> <task name>
 Tier: T1
 Checked: <what was checked>
-Result: pass | fail | partial — <one line>
+Result: pass | fail | partial | pending — <one line>
 Files: shared/proof/<file>, shared/proof/<file>
 Ran: <short sha> <command> — <result>
 ```
 
 Record every test, lint or build run as a `Ran:` line with the sha it ran against (`git rev-parse --short HEAD`, clean tree); the result is `pass` or `fail: <one line>`. Reuse a line only when its sha is HEAD, or `git diff --quiet <sha> HEAD` (same tree), the tree is clean, and the result starts with `pass`; otherwise rerun.
+
+Use `pending — <why>` only while the task's proof is still being gathered elsewhere (a later task takes its screenshots: `pending — waiting for t4`), and replace it with the real result once it is in; Harbormaster shows a pending task as nothing for the user to do yet.
 
 `Files:` is comma-separated paths only; put notes in `Checked:`. Use `##` only for task sections.
 

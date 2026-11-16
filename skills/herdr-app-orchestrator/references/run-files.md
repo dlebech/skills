@@ -95,7 +95,7 @@ Checks: green — <what ran, e.g. the repo's checks on the integration branch>
 ## <task id> <task name>
 Tier: T1
 Checked: <what was checked>
-Result: pass | fail | partial — <one line>
+Result: pass | fail | partial | pending — <one line>
 Files: shared/proof/<file>, shared/proof/<file>
 Ran: <short sha> <command> — <result>
 ```
@@ -108,6 +108,12 @@ A task's `## ` section is matched to the task by its id; its `Result` shows besi
 row in the Proof section. The optional header line `Checks: green — …` or `Checks: red — …` (CI or
 the local suite on the integration branch) shows as "checks green" in the verdict line. A T2 or T3
 task with a `Result:` whose `Files:` has no image or video (png, jpg, jpeg, gif, webp; mp4, webm, mov, m4v) counts as "n tasks without a screenshot" (tasks, not images; an image missing from `shared/proof/` does not count). `Files:` is comma-separated paths only: a note in parentheses after a path is ignored, and notes belong in `Checked:`. Only a `## ` section with a `Result:` or `Tier:` is a task; Harbormaster reads the first 64 kB of proof.md and marks the verdict "(proof.md cut)" past that.
+`pending` says the proof is still being gathered and is not the user's yet, with why
+(`Result: pending — waiting for t4`, when a later task takes this one's screenshots). Harbormaster
+also reads a task that is not done yet (planned, implementing, in review, fixing) as pending,
+whatever its result short of `fail`. A pending task shows calm, with no Accept or Ask to prove, and
+the verdict counts it apart (`1/8 pass · 2 pending`); once the run is finished, a `pending` result
+reads as not checked and needs a look. Replace it with the real result once the proof is in.
 A run with no `proof.md` shows its plan's evidence only.
 
 ### Accepting proof, or asking for it

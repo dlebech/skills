@@ -704,10 +704,20 @@ export function decisionQueue(runs, decisions, ctx) {
     items.push({
       id: `dec-${d.key}`, kind: "decision", title: d.question, options: d.options, recommended: d.recommended, why: d.why,
       evidence: d.evidence, risk: d.risk, blocks: d.blocks, since: d.asked, decision: d,
-      run: d.run ? runs.find((r) => r.dir === d.run && r.machine === d.machine) ?? null : null,
+      run: decisionRun(d, runs),
     });
   }
   return items.sort((a, b) => (a.since ?? Infinity) - (b.since ?? Infinity));
+}
+
+// The run a captain decision is about, or null. Its `run` is a directory on the decision's own
+// machine, or "<machine>:<directory>" for a run on another (as herdr-app-captain's runs.sh names
+// it); a directory is absolute, so a leading "/" is never a machine name.
+export function decisionRun(d, runs) {
+  if (!d.run) return null;
+  const m = /^([^/:][^:]*):(\/.*)$/.exec(d.run);
+  const [machine, dir] = m ? [m[1], m[2]] : [d.machine ?? null, d.run];
+  return runs.find((r) => r.dir === dir && (r.machine ?? null) === machine) ?? null;
 }
 
 // ---- putting runs away and bringing them back ----
