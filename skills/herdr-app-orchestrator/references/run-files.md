@@ -199,8 +199,8 @@ a `- [user]` line in `decisions.md`, renames the message `.handled` and acts on 
 a finished run means proving its done tasks to the new tier, which sets the run back to running.
 Until `status.json` or `plan.md` shows the level, while the message is unhandled, the tag reads
 `T3 requested…`. A level request does not count as an answer to an open `question.md`. Neither
-does an ask to prove (`prove <task> to T<n>: …`, see [Accepting proof](#accepting-proof-or-asking-for-it))
-or an ask what is blocking (below).
+does an ask to prove (`prove <task> to T<n>: …`, see [Accepting proof](#accepting-proof-or-asking-for-it)),
+an ask what is blocking or an ask to address review comments (below).
 
 ### Asking what is blocking
 
@@ -219,6 +219,43 @@ The orchestrator looks at what its run waits on. If it needs the user, it asks w
 its progress line with `set-status.sh --progress`, so the user sees it move. Either way it renames
 the message `.handled`. Until the run's progress line, task states or status change, or while the
 message is unhandled, the row reads `asked…`.
+
+### Addressing review comments
+
+For an open PR that is approved or has changes requested, Harbormaster counts its open review
+comments: unresolved review threads not opened by the PR's author and whose last reply does not
+start `🤖 AI:`, and the text of people's approving, change-requesting or commenting reviews with
+no `🤖 AI:` comment after them. The run then reads `approved · 3 comments`, and its card and pane offer
+**Address comments** with **Ask me** (the default at L0 and L1) and **Handle them** (the default at
+L2). Either writes a message (source `harbormaster-comments`, woken like an answer) whose first
+line is `address comments on <PR url>: ask` or `…: handle`, then what Harbormaster sees:
+
+```
+address comments on https://github.com/o/api/pull/1799: ask
+Harbormaster sees 2 open review comments on PR #1799 (approved):
+- anna on app/X.php:42: Routes API errors never reach Sentry (thread PRRT_kwDO…)
+- anna in a review: Approved, but #1 and #2 should be looked at first (https://github.com/…#pullrequestreview-…)
+Asked from Harbormaster: read the threads, then write one question.md listing each comment with your proposal (…)
+```
+
+The orchestrator sets its status to running and reads the threads itself (`gh api graphql`, the
+PR's `reviewThreads` with `isResolved` and their comments, and its `reviews`); the list in the message
+can be cut short.
+
+- `ask`: it writes one `question.md` (section 6 of the skill) listing each comment with its proposal:
+  fix, reply or leave, and why. Options: **Do as proposed**, **Let me pick** (the user says per
+  comment in free text) and **Leave them**. It then acts on the answer as for `handle`, on the
+  comments the answer covers.
+- `handle`: it fixes what it agrees with, as tasks under the normal review rules, and pushes. It
+  replies on every thread it acted on with a reply starting `🤖 AI:` that says what it did (with the
+  commit) or why not, and resolves the threads it addressed (`resolveReviewThread`); a thread it
+  disagrees with gets its `🤖 AI:` reply and stays open for the reviewer. A review's own text gets
+  one PR comment starting `🤖 AI:`. It reports in its progress line.
+
+It never merges, never dismisses a review and leaves the reviewer's approval alone. It renames the
+message `.handled`. The `🤖 AI:` prefix tells the reviewer the reply is an agent's, and tells
+Harbormaster the comment is answered: it stops counting it. Until the PR's open comments or the
+run's status change, or while the message is unhandled, the row reads `asked…`.
 
 An orchestrator that is gone or lost is never woken (its terminal is gone, or only a shell, which would run the wake-up as a command): the message waits, and Harbormaster says so ("waits in its inbox until the run is resumed"). The resumed orchestrator reads waiting messages in name order, so an answer is not lost.
 
