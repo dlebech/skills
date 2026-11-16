@@ -109,6 +109,31 @@ import sqlite3, sys
 c = sqlite3.connect(sys.argv[1]); c.execute(\"delete from message where id = 'm_new'\"); c.commit()" "$OPENCODE_DATA_DIR/opencode.db"
 check "after a message is deleted" 1158 "$(count .total)"
 
+# opencode writes an assistant message with no tokens and fills them in later, in place.
+python3 - "$OPENCODE_DATA_DIR/opencode.db" "$(date -u -d "$started" +%s%3N)" zero <<'PY'
+import sqlite3, sys, json
+c = sqlite3.connect(sys.argv[1]); t = int(sys.argv[2]) + 9500
+c.execute("insert into message values ('m_zero', 'ses_A', ?, ?, ?)",
+          (t, t, json.dumps({"role": "assistant", "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}}})))
+c.commit()
+PY
+check "a message still empty" 1158 "$(count .total)"
+python3 - "$OPENCODE_DATA_DIR/opencode.db" "$(date -u -d "$started" +%s%3N)" <<'PY'
+import sqlite3, sys, json
+c = sqlite3.connect(sys.argv[1]); t = int(sys.argv[2]) + 9600
+c.execute("update message set time_updated = ?, data = ? where id = 'm_zero'",
+          (t, json.dumps({"role": "assistant", "tokens": {"input": 100, "output": 100, "reasoning": 0, "cache": {"read": 100, "write": 100}}})))
+c.commit()
+PY
+check "the message filled in" 1558 "$(count .total)"
+
+# A failed read of the database is an error, and is read again once it works.
+cp "$OPENCODE_DATA_DIR/opencode.db" "$tmp/good.db"
+rm -rf "$run/.tokens"; echo garbage >"$OPENCODE_DATA_DIR/opencode.db"
+"$tokens" --print "$run" >/dev/null 2>&1; check "a corrupt database fails" 1 $?
+cp "$tmp/good.db" "$OPENCODE_DATA_DIR/opencode.db"
+check "and recovers (the cache was wiped, so the deleted message is gone)" 1554 "$(count .total)"
+
 # No database: nothing from opencode, and no failure.
 rm -rf "$run/.tokens"; check "no opencode data" 0 "$(OPENCODE_DATA_DIR=$tmp/none count .total)"
 exit $fail

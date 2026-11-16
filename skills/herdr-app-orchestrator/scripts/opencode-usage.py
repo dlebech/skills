@@ -102,7 +102,8 @@ def cmd_sessions(db, patterns):
                 stamp = db.execute(
                     "select coalesce(max(time_updated), 0) || '/' || count(*) from %s where session_id = ?" % messages,
                     (i,)).fetchone()[0]
-                found[i] = (d, stamp)
+                # A session in both generations: either one gaining a message changes it.
+                found[i] = (d, found[i][1] + "+" + stamp if i in found else stamp)
     for i, (d, stamp) in sorted(found.items()):
         print("%s\t%s\t%s" % (i, d, stamp))
 

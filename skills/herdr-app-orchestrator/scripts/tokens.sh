@@ -171,6 +171,8 @@ trap 'rm -f "$stamp.$$" "$cache/.chunk.$$" "$cache/tokens.json.$$" "$cache"/*.ts
 if [ -s "$cache/tokens.json" ] && [ -e "$stamp" ] && [ "$(<"$stamp")" = "${#files[@]}" ] &&
   [ -n "$(find "$stamp" -mmin -1 2>/dev/null)" ] &&
   { [ ${#files[@]} -eq 0 ] || [ -z "$(find "${files[@]}" -newer "$stamp" -print -quit 2>/dev/null)" ]; } &&
+  # opencode.db's WAL changes with every opencode session on the machine, so with one
+  # running this rarely holds; the full read below is cheap (a stamp query per session).
   [ -z "$(find "$opencode" -maxdepth 1 -name 'opencode.db*' -newer "$stamp" -print -quit 2>/dev/null)" ]; then
   publish "$(<"$cache/tokens.json")"
   exit 0
@@ -183,13 +185,14 @@ echo "${#files[@]}" >"$stamp.$$" || exit 1
 # The orchestrator's sessions, with their sub-sessions, then those in the run's worktrees.
 oc_names=() oc_ids=() oc_stamps=()
 add_oc() {
-  local name=$1 id dir stamp
+  local name=$1 id dir stamp listed
   shift
   [ $# -gt 0 ] || return 0
+  listed=$(opencode_usage sessions "$@") || { echo "could not read opencode's database in $opencode" >&2; exit 1; }
   while IFS=$'\t' read -r id dir stamp; do
     [ -n "$id" ] || continue
     oc_names+=("${name:-${dir##*/}}"); oc_ids+=("$id"); oc_stamps+=("$stamp")
-  done < <(opencode_usage sessions "$@")
+  done <<<"$listed"
 }
 patterns=()
 while read -r kind id; do
@@ -283,9 +286,15 @@ for i in "${!oc_ids[@]}"; do
   [ ! -e "$at" ] || IFS=$'\t' read -r o_stamp _ _ o_since _ <"$at" || o_stamp=-
   [ "$o_stamp" != "${oc_stamps[$i]}" ] || [ "$o_since" != "$started" ] || continue
   [ "$o_since" = "$started" ] || : >"$cache/$key.tsv" || exit 1
-  # Rows once seen stay, so a message opencode deletes later still counts.
-  { cat "$cache/$key.tsv" 2>/dev/null; opencode_usage rows "${oc_ids[$i]}" "$since_ms"; } |
-    awk -F'\t' '!seen[$1]++' >"$cache/$key.tsv.$$" && mv "$cache/$key.tsv.$$" "$cache/$key.tsv" &&
+  # opencode writes an assistant message with no tokens and fills them in when the step
+  # ends, so a message seen again takes the larger of each kind; one gone from the read
+  # (deleted since) stays as cached. A failed read caches nothing and leaves the stamp.
+  rows=$(opencode_usage rows "${oc_ids[$i]}" "$since_ms") || { echo "could not read opencode's database in $opencode" >&2; exit 1; }
+  { cat "$cache/$key.tsv" 2>/dev/null; [ -z "$rows" ] || printf '%s\n' "$rows"; } |
+    awk -F'\t' '{ if (!($1 in id)) order[++n] = $1; id[$1]
+      for (k = 2; k <= 5; k++) if ($k + 0 > v[$1, k]) v[$1, k] = $k + 0 }
+      END { for (j = 1; j <= n; j++) { m = order[j]; print m "\t" v[m, 2] + 0 "\t" v[m, 3] + 0 "\t" v[m, 4] + 0 "\t" v[m, 5] + 0 } }' \
+      >"$cache/$key.tsv.$$" && mv "$cache/$key.tsv.$$" "$cache/$key.tsv" &&
     printf '%s\t-\t-\t%s\t-\t%s\topencode\n' "${oc_stamps[$i]}" "$started" "${oc_names[$i]}" >"$at.$$" &&
     mv "$at.$$" "$at" || { echo "could not update the cache in $cache" >&2; exit 1; }
 done
