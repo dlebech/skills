@@ -440,7 +440,7 @@ export function mergeDanger(body) {
   const m = /^##[ \t]+Merge danger[ \t]*\r?\n([\s\S]*?)(?=^#{1,2}[ \t]|(?![\s\S]))/im.exec(body ?? "");
   const line = m?.[1].split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith("```"));
   const clean = line?.replace(/^[-*>]\s+/, "").replace(/\*\*|__|`/g, "").replace(/^[*_]+([^*_]+?)[*_]+/, "$1").trim();
-  return clean ? clean.slice(0, 200) : null;
+  return clean ? clean.slice(0, 600) : null;
 }
 
 // What the views need from `gh pr view --json` output. GitHub only sets reviewDecision
