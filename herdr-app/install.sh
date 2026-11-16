@@ -30,7 +30,10 @@ ours() { # <file> <jq test>: true when the file is missing or passes the test
 ours "$home/layouts/harbormaster-sea.json" '.id == "hs-root"' \
   || die "layouts/harbormaster-sea.json exists and isn't Harbormaster's; move it aside first"
 mkdir -p "$home/mods/harbormaster" "$home/layouts"
-cp "$here"/mods/harbormaster/*.js "$here"/mods/harbormaster/*.svg "$here"/mods/harbormaster/mod.json "$home/mods/harbormaster/"
+# timing.sh and categories.tsv are read by timing.js and run as text, so they need no
+# execute bit there.
+cp "$here"/mods/harbormaster/*.js "$here"/mods/harbormaster/*.svg "$here"/mods/harbormaster/mod.json \
+  "$here"/mods/harbormaster/timing.sh "$here"/mods/harbormaster/categories.tsv "$home/mods/harbormaster/"
 cp "$here"/layouts/harbormaster-sea.json "$here"/layouts/harbormaster-sea.svg "$home/layouts/"
 echo "installed mods/harbormaster and the harbormaster-sea layout"
 # board.js became overview.js.

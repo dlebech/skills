@@ -17,6 +17,7 @@ and it keeps nothing the files do not.
 | `sessions` | `tokens.sh` | `tokens.sh` | Every session the orchestrator's terminal has had, one `<kind> <session id or file>` a line (below). |
 | `.tokens/` | `tokens.sh` | `tokens.sh` | Its cache: each session file's parsed usage and how far it was read (below). |
 | `.resources.json` | Harbormaster | Harbormaster, run history | CPU and memory per agent and program, added to on each 5 s poll while the run is open (below). |
+| `.timing/` | Harbormaster's `timing.sh` | `timing.sh` | Its cache: each session's events read so far and its time by category, keyed by the file's size, inode and mtime and the script's logic. Safe to delete. |
 | `decisions.md` | orchestrator | anyone | The decisions log: what was decided, by whom, why (the line format is below). |
 | `question.md` | orchestrator | Harbormaster, captain, you | The open question to you, if any (below). Removed once answered. |
 | `inbox/*.message` | anyone who answers or instructs | orchestrator | Messages to the orchestrator (below). The orchestrator renames a message it has read to `.handled`. |
