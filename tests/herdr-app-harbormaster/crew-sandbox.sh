@@ -24,6 +24,9 @@
 #   unreadable-pr finished, PR in a repo that does not exist (gh fails)   -> Everything else, can't tell
 #   quiet-run     running, "t2 implementing", no PR, nothing moves       -> idle, then stalled
 #                 ("quiet Nm", Needs you, Ask) 30 minutes after the app started (module memory)
+#   toast-run     running, three decisions; ask it a question by hand     -> a toast (see make_runs)
+#   parked-open   parked 3 days ago, open PR cli/cli#14927                 -> Parked, "review proof → merge · 3d…"
+#   parked-merged parked 5 days ago, PR #42 (merged)                      -> Parked, "merged — close run · 5d…"
 # For the Needs-you box's lines and buttons (t11), read-only gh views of real PRs:
 #   approved-merge  finished, folder "snevagten" (peer), snevagten/snelogin#1308 and #1372,
 #                   approved by a colleague                               -> approved — merge
@@ -39,7 +42,7 @@
 # Env: CREW_SESSION (default harbormaster-crew-sandbox), CREW_DISPLAY (default 97).
 set -euo pipefail
 
-[ $# -ge 2 ] || { sed -n '2,32p' "$0" >&2; exit 2; }
+[ $# -ge 2 ] || { sed -n '2,35p' "$0" >&2; exit 2; }
 S=$(mkdir -p "$1" && cd "$1" && pwd)
 cmd=$2
 shift 2
@@ -109,6 +112,23 @@ make_runs() {
   mkrun unreadable-pr finished fix "Unreadable PR" "${day}T09:05:00Z" 2/2 merged merged --progress "PR #1 up" \
     --pr dlebech/no-such-repo-nyo https://github.com/dlebech/no-such-repo-nyo/pull/1
   mkrun quiet-run running feat "Quiet run" "${day}T10:30:00Z" 1/2 merged implementing --progress "t2 implementing"
+  # Toasts and decisions new since you looked: a working run with three decisions. Later, by
+  # hand, append "- [decided] …" lines to its decisions.md (new since you looked), and write its
+  # question.md and set-status.sh "waiting for user: …" (a toast a minute later).
+  mkrun toast-run running feat "Toast run" "${day}T07:15:00Z" 1/2 merged implementing --progress "t2 implementing"
+  printf -- '- [decided] %sT07:20:00Z Layout: one column — the sidebar is narrow\n- [decided] %sT07:40:00Z Tests: node runner — no dependencies\n- [user] %sT07:55:00Z Colours: theme only — the user asked\n' "$day" "$day" "$day" >"$S/runs/skills/toast-run/decisions.md"
+  # Parked runs: one with an open PR (a public one), one with a merged PR; out of the Crew.
+  local parked
+  mkrun parked-open finished feat "Parked open" "${day}T05:00:00Z" 2/2 merged merged --progress "PR up, waiting on QA" \
+    --pr cli/cli https://github.com/cli/cli/pull/14927
+  parked=$(jq -r .terminal "$S/runs/skills/parked-open/orchestrator.json")
+  printf '%s\tfinished\n' "$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)" >"$S/runs/skills/parked-open/parked"
+  hc label "$parked" role= >/dev/null
+  mkrun parked-merged finished fix "Parked merged" "${day}T04:00:00Z" 2/2 merged merged --progress "PR merged" \
+    --pr dlebech/skills https://github.com/dlebech/skills/pull/42
+  parked=$(jq -r .terminal "$S/runs/skills/parked-merged/orchestrator.json")
+  printf '%s\tfinished\n' "$(date -u -d '5 days ago' +%Y-%m-%dT%H:%M:%SZ)" >"$S/runs/skills/parked-merged/parked"
+  hc label "$parked" role= >/dev/null
   RUN_FOLDER=$S/work/snevagten mkrun approved-merge finished feat "Approved merge" "${day}T07:00:00Z" 2/2 merged merged --progress "PRs approved" \
     --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1308 --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1372
   mkrun red-ci finished fix "Red CI" "${day}T07:30:00Z" 2/2 merged merged --progress "PR up, CI red" \
