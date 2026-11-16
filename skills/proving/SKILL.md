@@ -12,10 +12,12 @@ Capture evidence that a change works, at the depth a tier asks for, so a reviewe
 
 | Tier | Evidence |
 | --- | --- |
-| T0 | CI, or the repo's local test suite, is green. |
-| T1 | T0, plus output of the tests or commands that exercise the changed behaviour. |
-| T2 | T1, plus screenshots or a recording of the change working. |
-| T3 | T2, plus a guided demo. |
+| T0 | Tests green (CI, or the repo's local suite). |
+| T1 | Tests green, plus output for the changed behaviour. |
+| T2 | Tests green, output for the changed behaviour, and screenshots or a recording. |
+| T3 | Tests green, output for the changed behaviour, screenshots or a recording, and a guided demo. |
+
+Each row stands alone and is cumulative. Harbormaster shows these texts on hover over a tier tag: they are copied into `herdr-app/mods/harbormaster/proof.js` (`TIER_TEXT`) and `tests/herdr-app-harbormaster/tiers.sh` fails when the two differ, so change both together.
 
 ## 2. Find where proof goes
 
