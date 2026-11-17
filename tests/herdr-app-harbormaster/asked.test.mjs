@@ -116,7 +116,7 @@ test("a merely approved PR with no comments does not pull a working run into Nee
 const graph = (threads) => ({ data: { repository: { pullRequest: { author: { login: "dlebech" },
   reviewThreads: { nodes: threads.map((t) => ({ id: t.id, isResolved: false, path: "a.php", line: 1,
     first: { nodes: [{ author: { __typename: t.bot ? "Bot" : "User", login: t.bot ? "coderabbitai" : "mfalkenbrink" }, authorAssociation: t.bot ? "NONE" : "MEMBER", body: `Fix ${t.id}`, url: `u-${t.id}` }] },
-    last: { nodes: [{ body: t.reply ? "🤖 AI: done" : `Fix ${t.id}` }] } })) },
+    last: { nodes: [{ body: t.reply ? "🤖 AI: done" : `Fix ${t.id}`, author: { login: "dlebech" }, authorAssociation: "MEMBER" }] } })) },
   reviews: { nodes: [] }, comments: { nodes: [] } } } } });
 const sigOf = (threads) => commentsSig(null, { comments: commentSummary(graph(threads)) });
 

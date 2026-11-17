@@ -79,7 +79,7 @@ test("with comments and an open plan: address them, no 'then merge'", () => {
 const by = (login) => ({ __typename: login === "coderabbitai" ? "Bot" : "User", login });
 const th = (id, who, bodies) => ({ id, isResolved: false, path: "a.php", line: 1,
   first: { nodes: [{ author: by(who), authorAssociation: who === "coderabbitai" ? "NONE" : "MEMBER", body: bodies[0], url: `u-${id}` }] },
-  last: { nodes: bodies.slice(-5).map((body) => ({ body })) } });
+  last: { nodes: bodies.slice(-5).map((body) => ({ body, author: body.startsWith("🤖") ? by("dlebech") : by(who), authorAssociation: body.startsWith("🤖") ? "MEMBER" : "NONE" })) } });
 const graph = (threads) => ({ data: { repository: { pullRequest: { author: { login: "me" }, reviewThreads: { nodes: threads }, reviews: { nodes: [] }, comments: { nodes: [] } } } } });
 
 test("a bot's thread stays answered after the bot thanks the AI reply; a person's follow-up counts again", () => {

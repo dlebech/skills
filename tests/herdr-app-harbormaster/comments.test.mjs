@@ -33,7 +33,7 @@ test("counted: unresolved threads by others and reviewers' review text; not reso
     thread("T1", "anna", "**1. Errors never reach Sentry**\n\nWhen it fails…"),
     thread("T2", "anna", "fixed already", { isResolved: true }),
     thread("T3", "me", "note to self"),
-    thread("T4", "bo", "rename this", { last: { nodes: [{ body: `${AI_PREFIX} renamed in abc123` }] } }),
+    thread("T4", "bo", "rename this", { last: { nodes: [{ body: `${AI_PREFIX} renamed in abc123`, author: by("me"), authorAssociation: "MEMBER" }] } }),
     thread("T5", "coderabbitai", "<!-- x -->\n\n**<picture><img src=x></picture> Minor** · **Correctness**\n\n**Fall back when out of order.**\n\nIf…", { line: null }),
   ], [
     review("cy", "APPROVED", "Approved, but #1 and #2 should be looked at.\nMore."),
@@ -41,7 +41,7 @@ test("counted: unresolved threads by others and reviewers' review text; not reso
     review("coderabbitai", "COMMENTED", "**Actionable comments posted: 9**", "2026-11-16T21:00:00Z"),
     review("me", "COMMENTED", "own words", "2026-11-16T21:00:00Z"),
     review("cy", "COMMENTED", "Two more findings, none blocking.", "2026-11-16T10:00:00Z"),
-  ], [{ body: `${AI_PREFIX} answered the review`, createdAt: "2026-11-16T12:00:00Z" }]));
+  ], [{ body: `${AI_PREFIX} answered the review`, createdAt: "2026-11-16T12:00:00Z", author: by("me"), authorAssociation: "MEMBER" }]));
   // One of each class: anna's open thread and cy's approval text (a note, it has no thread of its
   // own) count; bo's replied thread and cy's older review text (a later 🤖 AI: comment) are answered.
   assert.deepEqual([s.count, s.threads, s.notes, s.answered, s.summaries], [2, 1, 1, 2, 0]);
@@ -62,7 +62,7 @@ test("a review submitted with threads is a summary, not counted (the #1372 shape
   // review those threads came with, whose text sums them up: 8 threads, +2 from coderabbitai.
   const s = commentSummary(answer([
     ...Array.from({ length: 8 }, (_, i) => thread(`M${i}`, "mfalkenbrink", `**S${i + 1}. point**`)),
-    thread("M8", "mfalkenbrink", "S9", { last: { nodes: [{ body: `${AI_PREFIX} leaving as is: out of scope` }] } }),
+    thread("M8", "mfalkenbrink", "S9", { last: { nodes: [{ body: `${AI_PREFIX} leaving as is: out of scope`, author: by("me"), authorAssociation: "MEMBER" }] } }),
     thread("C1", "coderabbitai", "**Guard the index.**"),
     thread("C2", "coderabbitai", "**Clamp the zoom.**"),
   ], [review("mfalkenbrink", "APPROVED", "#1 og #2 bør kigges på før merge", undefined, { comments: { totalCount: 9 } })]));
@@ -96,7 +96,7 @@ test("the #1799 shape: every thread resolved, a standalone COMMENTED review is t
   // Fifteen resolved threads, all submitted with the approval; the earlier COMMENTED review has
   // none of its own and holds findings no thread has. Resolved threads appear nowhere.
   const s = commentSummary(answer(
-    Array.from({ length: 15 }, (_, i) => thread(`M${i}`, "mfalkenbrink", `point ${i}`, { isResolved: true, last: { nodes: [{ body: `${AI_PREFIX} Fixed in 6268` }] } })),
+    Array.from({ length: 15 }, (_, i) => thread(`M${i}`, "mfalkenbrink", `point ${i}`, { isResolved: true, last: { nodes: [{ body: `${AI_PREFIX} Fixed in 6268`, author: by("me"), authorAssociation: "MEMBER" }] } })),
     [review("mfalkenbrink", "COMMENTED", "S3: de betalte rute-POST'er har ingen throttle", "2026-11-16T21:38:14Z", { comments: { totalCount: 0 } }),
       review("mfalkenbrink", "APPROVED", "Godkendt. Ingen blokerende fejl", undefined, { comments: { totalCount: 15 } })]));
   assert.deepEqual([s.count, s.threads, s.notes, s.answered, s.summaries, s.bots], [1, 0, 1, 0, 1, {}]);
@@ -104,7 +104,7 @@ test("the #1799 shape: every thread resolved, a standalone COMMENTED review is t
   const p = { number: 1799, url: URL, state: "OPEN", review: "APPROVED", approvedBy: ["mfalkenbrink"], changesBy: [], requested: [], comments: s };
   assert.equal(nextStepText(nextStep([p], "peer")), "approved · 1 review note");
   // The note, answered by a 🤖 AI: PR comment after it, stops counting and is listed as answered.
-  const done = commentSummary(answer([], [review("mfalkenbrink", "COMMENTED", "S3: the paid route POSTs have no throttle", "2026-11-16T21:38:14Z")], [{ body: `${AI_PREFIX} answered each point`, createdAt: "2026-11-16T22:00:00Z" }]));
+  const done = commentSummary(answer([], [review("mfalkenbrink", "COMMENTED", "S3: the paid route POSTs have no throttle", "2026-11-16T21:38:14Z")], [{ body: `${AI_PREFIX} answered each point`, createdAt: "2026-11-16T22:00:00Z", author: by("me"), authorAssociation: "MEMBER" }]));
   assert.deepEqual([done.count, done.answered, done.items[0].kind], [0, 1, "answered"]);
 });
 
@@ -181,9 +181,9 @@ test("the gh call asks GitHub's GraphQL API for the PR by owner, name and number
   const args = commentsArgs(URL);
   assert.deepEqual([args[0], args[1], args.slice(-6)], ["api", "graphql", ["-F", "owner=o", "-F", "name=api", "-F", "number=1799"]]);
   assert.match(args[3], /^query=query\(/);
-  // Only what is read: no authors on the last reply or conversation comments.
-  assert.match(COMMENTS_QUERY, /last:comments\(last:5\)\{nodes\{body\}\}/);
-  assert.match(COMMENTS_QUERY, /comments\(last:50\)\{nodes\{body createdAt\}\}/);
+  // Only what is read: the author and standing of the last replies and conversation comments, to see who answered.
+  assert.match(COMMENTS_QUERY, /last:comments\(last:5\)\{nodes\{body author\{login\} authorAssociation\}\}/);
+  assert.match(COMMENTS_QUERY, /comments\(last:50\)\{nodes\{body createdAt author\{login\} authorAssociation\}\}/);
   assert.equal(commentsArgs("https://example.com/x"), null);
 });
 
@@ -437,4 +437,34 @@ test("askCommentsAll writes one message for all the PRs; the next read shows eve
     rmSync(root, { recursive: true, force: true });
     delete globalThis.__herdrExec;
   }
+});
+
+// ---- t25: an AI reply answers only from the PR's author or a person with standing ----
+
+const reply = (login, association, body = `${AI_PREFIX} done`) => ({ body, author: by(login), authorAssociation: association });
+
+test("a stranger's AI reply leaves a member's thread counted; the PR author's or a member's answers it", () => {
+  const counted = (r) => commentSummary(answer([thread("T1", "anna", "rename", { last: { nodes: [r] } })])).count;
+  assert.equal(counted(reply("passerby", "NONE")), 1);
+  assert.equal(counted(reply("passerby", "FIRST_TIME_CONTRIBUTOR")), 1);
+  assert.equal(counted(reply("me", "NONE")), 0);       // the PR's author, whatever their association
+  assert.equal(counted(reply("zed", "COLLABORATOR")), 0);
+});
+
+test("a stranger's AI comment does not answer a review note; the PR author's or a member's does", () => {
+  const note = review("cy", "COMMENTED", "S3: the route has no throttle", "2026-11-16T21:38:14Z");
+  const counted = (c) => commentSummary(answer([], [note], [{ ...c, createdAt: "2026-11-16T22:00:00Z" }])).count;
+  assert.equal(counted(reply("passerby", "NONE")), 1);
+  assert.equal(counted(reply("me", "NONE")), 0);
+  assert.equal(counted(reply("zed", "MEMBER")), 0);
+  // A stranger's AI review does not answer it either.
+  const strangerReview = review("passerby", "COMMENTED", `${AI_PREFIX} done`, "2026-11-16T22:00:00Z", { authorAssociation: "NONE" });
+  assert.equal(commentSummary(answer([], [note, strangerReview])).count, 1);
+});
+
+test("a bot's thread with a member's AI reply stays answered after the bot's thanks; a stranger's reply leaves it counted", () => {
+  const thanks = { body: "Thanks for the fix!", author: by("coderabbitai"), authorAssociation: "NONE" };
+  const bot = (r) => commentSummary(answer([thread("B1", "coderabbitai", "Fix this", { last: { nodes: [r, thanks] } })]));
+  assert.deepEqual([bot(reply("me", "MEMBER")).answered, bot(reply("me", "MEMBER")).bots], [1, {}]);
+  assert.deepEqual(bot(reply("passerby", "NONE")).bots, { coderabbitai: 1 });
 });
