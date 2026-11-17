@@ -40,7 +40,7 @@ const checksUrl = (pr) => (/^https:\/\//i.test(pr?.failed?.url ?? "") ? pr.faile
 // The order the lines come in: what blocks a run outright first (a question or dialog, a gone
 // orchestrator), then a broken build, then the PR steps, most urgent first, then a stall, then
 // the cleanup of a finished run.
-const ORDER = ["question", "gone", "red-ci", "changes requested", "approved — merge", "review proof → merge", "request review", "stalled", "finished"];
+const ORDER = ["question", "gone", "red-ci", "changes requested", "approved — merge", "review proof → merge", "request review", "stalled", "review-pending", "finished"];
 
 // "T2 · 5/10 proven · 1 fail" from {tier, pass, total, fail}, or null with no proof to read.
 export function proofText(proof) {
@@ -215,6 +215,8 @@ function reasonItem(r, a, ctx) {
     }
     case "stalled":
       return { line: `${r.text[0].toUpperCase()}${r.text.slice(1)}${a.step?.text ? ` at ${a.step.text}` : ""}: ask what's blocking it`, actions: [{ kind: "ask-blocking", label: "Ask what's blocking" }] };
+    case "review-pending":
+      return { line: "Your review is still pending: submit it on GitHub", actions: openPrs(r.pr ? [r.pr] : []).map((x) => ({ ...x, primary: true })) };
     case "finished": {
       // Only a report about the whole run; without one the orchestrator gave its final report
       // in its terminal.

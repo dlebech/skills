@@ -29,6 +29,7 @@ export function toastParts(run, att) {
     // A dialog is not told: Herdr posts its own toast when an agent needs you.
     if (r.key === "question") { if (r.text !== "blocked on a dialog") parts.push({ id: `question:${run.askedAt ?? r.text}`, text: `Asks you: ${r.text}` }); }
     else if (r.key === "gone") parts.push({ id: "gone", text: "Its orchestrator is gone: resume it" });
+    else if (r.key === "review-pending") parts.push({ id: "review-pending", text: "Submit your pending review" });
     else if (r.key === "finished") parts.push({ id: "finished", text: "Finished — read its report and close it" });
     else if (r.key === "red-ci") parts.push({ id: `pr/red-ci:${r.text}`, text: r.text.replace(/^red CI/, "Red CI") });
     else if (r.key !== "stalled") {

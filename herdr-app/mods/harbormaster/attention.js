@@ -64,7 +64,12 @@ export const flowSetting = (flow, fallback) => (flow === fallback ? null : flow)
 // the review the user has yet to ask for, then the reviewer they wait on, then cleanup.
 // What a finished run with no PR shows in Needs you.
 export const FINISHED_LABEL = "finished — read and close";
-export const LABELS = ["changes requested", "approved — merge", "review proof → merge", "request review", "review from", "merged — close run"];
+export const LABELS = ["changes requested", "approved — merge", "review proof → merge", "request review", "review from", "merged — close run", "reviewed — close run"];
+// A finished review run (type "rev", no PR of its own, the PR it reviewed in `related`) by what
+// became of that review: submitted (or the PR is merged or closed) → Done; still pending on
+// GitHub → Needs you, the user submits it there.
+export const REVIEWED_LABEL = "reviewed — close run";
+export const PENDING_LABEL = "submit your pending review";
 // The labels that put a run in Needs you (when nothing is still working on it).
 const NEEDS_LABELS = new Set(["changes requested", "approved — merge", "review proof → merge", "request review"]);
 // The steps the run's own plan comes before: its PR is not the user's to review or merge while
@@ -78,6 +83,20 @@ export const heldByPlan = (run, next) => Boolean(next) && AFTER_PLAN.has(next.la
 
 export const isOpenPr = (pr) => pr?.state === "OPEN" || pr?.state === "DRAFT";
 const isShut = (pr) => pr?.state === "MERGED" || pr?.state === "CLOSED";
+
+// What became of a finished review run's review, from the PR it reviewed (`related`: PR summaries,
+// data.js prSummary, whose `mine` is the viewer's latest review state): {kind: "reviewed", pr} when
+// the PR is merged or closed or the viewer's review is submitted (anything but PENDING),
+// {kind: "pending", pr} while it is still pending, or null when nothing tells (not a review run,
+// the PR or the viewer unread, or no review by the viewer at all: its drafts may be in Herdr).
+export function reviewRunStep(run, related) {
+  if (run?.type !== "rev") return null;
+  const pr = (related ?? []).find((p) => p && p.state !== "UNKNOWN" && p.number != null);
+  if (!pr) return null;
+  if (isShut(pr)) return { kind: "reviewed", pr };
+  if (!pr.mine) return null;
+  return { kind: pr.mine === "PENDING" ? "pending" : "reviewed", pr };
+}
 
 // One PR's next step: {label, rank, who}, or null when its state is unknown. `who` is the
 // requested reviewers' names for "review from" (the user waits for their review).
@@ -368,7 +387,7 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 // run closed); working, ci-running, idle in Working (idle: briefly quiet, not
 // stalled yet); waiting-for in Waiting on others; cant-tell in Can't tell. A Needs you run
 // may still have cantTell: a question read from its files, its PRs unreadable.
-export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, proofFailed = false, proofRead = false, proofClean = false, changesAsked = false, askedPrs = null, now = Date.now() } = {}) {
+export function assess(run, { related = null, orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, proofFailed = false, proofRead = false, proofClean = false, changesAsked = false, askedPrs = null, now = Date.now() } = {}) {
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
   const step = stepOf(run, { prs, stages, since, ages });
@@ -410,6 +429,14 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   // Done: a finished run with every PR merged or closed, and nothing still at work or asking.
   // A running run between PRs is not done, however idle it looks.
   if (run.phase === "finished" && prs.length && prs.every(isShut) && !working && !reasons.length) return out("done", { next });
+  // A finished review run whose review was submitted (or whose PR is gone) is done; one whose
+  // review is still pending asks the user to submit it. Without a reading it stays "finished".
+  const reviewed = run.phase === "finished" && !prs.length && !working && !closed ? reviewRunStep(run, related) : null;
+  if (reviewed?.kind === "reviewed" && !reasons.length) {
+    const label = REVIEWED_LABEL;
+    return out("done", { next: { label, rank: rank(label), who: [], count: 1, same: 1, pr: reviewed.pr, prs: [reviewed.pr], comments: null, draft: false } });
+  }
+  if (reviewed?.kind === "pending") reasons.push({ key: "review-pending", text: PENDING_LABEL, pr: reviewed.pr, since: run.updated ?? null });
   const ci = ciState(prs);
   // Waiting on a reviewer is a wait on a person, not a stall (only CI past its usual time
   // stalls while CI runs).
@@ -440,7 +467,7 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   }
   // A finished run with no PR (a review or an exploration) leaves a report: reading it and
   // closing the run is the user's to do. Not Done: Done is merged PRs, which it has none of.
-  if (run.phase === "finished" && !prs.length && !working && !closed) reasons.push({ key: "finished", text: FINISHED_LABEL, since: run.updated ?? null });
+  if (run.phase === "finished" && !prs.length && !working && !closed && !reviewed) reasons.push({ key: "finished", text: FINISHED_LABEL, since: run.updated ?? null });
   if (reasons.length) return out("needs", { reasons, next, stall });
   const why = working ? { key: "working", text: "agents working" }
     : ci.state === "running" ? { key: "ci-running", text: "CI running" }

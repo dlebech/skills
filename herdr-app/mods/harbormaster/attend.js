@@ -1,7 +1,7 @@
 // One run's attention (attention.js assess) from what Harbormaster knows now: its files
 // (data.js), its PR read, its live agents, and the times and settings tracking.js keeps.
 
-import { prEntryOf, taskAgents, shownStage, isClosed, isParked, filesFresh } from "./data.js";
+import { prEntryOf, relatedOf, taskAgents, shownStage, isClosed, isParked, filesFresh } from "./data.js";
 import { orchestratorState, orchestratorsOf, agentStatus, workersOf, needReason } from "./live.js";
 import { assess, prRead, reviewFlow, stalled, ciState } from "./attention.js";
 import { gatheringStage, proofRead } from "./proof.js";
@@ -28,6 +28,7 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
   const stall = stalled(run, { now, lastActivity: lastActivity(run), prs, ciUsual: ci.pr?.repo ? ciUsualOf(ci.pr.repo) : null, orch });
   const stages = run.tasks.map((k) => shownStage(k, taskAgents(k, run, ctx)));
   return assess(run, {
+    related: run.type === "rev" ? relatedOf(run) : null,
     orch, working, pr, stall, now, closed,
     flow: reviewFlow(run, reviewFlows()),
     stages,

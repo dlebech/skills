@@ -4,10 +4,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   reviewFlow, flowKey, prStep, nextStep, nextStepText, prRead, ciState, ciTimes, usualCi, ageText, stepOf, stepText,
-  trackSince, stepSig, stalled, quietText, assess, byWait, STALL_MS, prMaxAge, prTtl, trackParts, stepParts, taskKey, progressKey,
+  trackSince, stepSig, stalled, quietText, assess, byWait, STALL_MS, prMaxAge, prTtl, trackParts, stepParts, taskKey, progressKey, reviewRunStep,
 } from "../../herdr-app/mods/harbormaster/attention.js";
 import { addCiSample, nextSteps, screenSig, CI_KEEP, probeEvery } from "../../herdr-app/mods/harbormaster/tracking.js";
-import { prSummary, PR_FIELDS, carryRuns, withReadTimes, prEntrySame } from "../../herdr-app/mods/harbormaster/data.js";
+import { prSummary, viewerReview, PR_FIELDS, carryRuns, withReadTimes, prEntrySame } from "../../herdr-app/mods/harbormaster/data.js";
 import { filesFresh } from "../../herdr-app/mods/harbormaster/attend.js";
 
 const MIN = 60000;
@@ -503,4 +503,44 @@ test("an approval, a change request and red CI count while the plan is still ope
   assert.deepEqual(settled(open, [pr({ review: "CHANGES_REQUESTED", changesBy: ["anna"] })]).reasons.map((r) => r.key), ["changes requested"]);
   const red = settled(open, [pr({ checks: checks(1, 1) })]);
   assert.deepEqual(red.reasons.map((r) => r.key), ["red-ci"]);
+});
+
+// ---- finished review runs: what became of the review ----
+
+// The three real runs (snelogin#1394, snevagten-api#1821 approved; #1831 pending), as gh's reviews list gave them.
+const REV = { 1394: [["coderabbitai", "COMMENTED"], ["mykz", "COMMENTED"], ["dlebech", "APPROVED"]], 1821: [["coderabbitai", "COMMENTED"], ["dlebech", "APPROVED"]],
+  1831: [["dlebech", "PENDING"], ["coderabbitai", "COMMENTED"], ["mykz", "COMMENTED"]] };
+const revPr = (n, state = "OPEN") => prSummary({ number: n, state, url: `https://github.com/o/r/pull/${n}`, author: { login: "x" },
+  reviews: REV[n].map(([login, st]) => ({ author: { login }, state: st })) }, "o/r", "dlebech");
+const revRun = (o = {}) => run({ type: "rev", phase: "finished", prs: [], ...o });
+const revAssess = (n, state, o = {}) => assess(revRun(), { related: [revPr(n, state)], orch: "idle", pr: read([]), now, ...o });
+
+test("viewerReview: the viewer's pending review wins, else their last submitted one, else none", () => {
+  const rs = REV[1831].map(([login, state]) => ({ author: { login }, state }));
+  assert.equal(viewerReview(rs, "dlebech"), "PENDING");
+  assert.equal(viewerReview(rs, "nobody"), null);
+  assert.equal(viewerReview([{ author: { login: "d" }, state: "COMMENTED" }, { author: { login: "d" }, state: "APPROVED" }], "d"), "APPROVED");
+  assert.equal(prSummary({ number: 1, state: "OPEN", url: "u", reviews: [] }, "o/r").mine, null);
+});
+
+test("an approved review run is Done: reviewed — close run, and Close all merged can take it", () => {
+  for (const n of [1394, 1821]) {
+    const a = revAssess(n);
+    assert.deepEqual([a.group, a.next.label, a.reasons.length], ["done", "reviewed — close run", 0]);
+  }
+});
+
+test("a review run with a pending review needs you: submit your pending review, with the PR to open", () => {
+  const a = revAssess(1831);
+  assert.deepEqual([a.group, a.reasons.map((r) => r.text)], ["needs", ["submit your pending review"]]);
+  assert.equal(a.reasons[0].pr.number, 1831);
+});
+
+test("a review run whose PR is merged or closed is Done whatever the review; no review at all stays finished", () => {
+  assert.equal(revAssess(1831, "MERGED").group, "done");
+  assert.equal(revAssess(1831, "CLOSED").next.label, "reviewed — close run");
+  const none = assess(revRun(), { related: [prSummary({ number: 5, state: "OPEN", url: "u", reviews: [] }, "o/r", "dlebech")], orch: "idle", pr: read([]), now });
+  assert.deepEqual([none.group, none.reasons[0].text], ["needs", "finished — read and close"]);
+  assert.equal(reviewRunStep(revRun(), [{ state: "UNKNOWN", number: null }]), null);
+  assert.equal(reviewRunStep(run({ prs: [] }), [revPr(1394)]), null);
 });

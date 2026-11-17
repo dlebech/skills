@@ -121,7 +121,8 @@ export const pillReason = (a) => (a?.group === "needs" ? a.reasons.find((r) => r
 // "red CI on #42" over a run whose label is review proof, never a step the box puts second.
 export function badgeOf(a, finished = false) {
   // A finished run with no PR has no PR label: its own reason is the pill.
-  if (!a?.next && a?.group === "needs" && a.reasons.some((r) => r.key === "finished")) return { label: FINISHED_LABEL, tone: "blocked" };
+  const own = !a?.next && a?.group === "needs" ? a.reasons.find((r) => r.key === "finished" || r.key === "review-pending") : null;
+  if (own) return { label: own.text, tone: "blocked" };
   if (!a?.next) return null;
   const tone = a.group === "needs" ? "blocked" : a.group === "done" ? "done" : finished ? "muted" : null;
   // With review comments, a `tip` saying who said what.

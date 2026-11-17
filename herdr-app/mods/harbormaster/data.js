@@ -551,13 +551,33 @@ export function mergeDanger(body) {
   return clean ? clean.slice(0, 600) : null;
 }
 
+// The viewer's own latest review on a PR: "PENDING" while they have one unsubmitted (GitHub allows
+// one, and it is the newest), else the state of their last submitted review, or null.
+export function viewerReview(reviews, viewer) {
+  const mine = (reviews ?? []).filter((r) => r.author?.login === viewer);
+  if (mine.some((r) => r.state === "PENDING")) return "PENDING";
+  return mine.length ? mine[mine.length - 1].state : null;
+}
+
+// Who the viewer is on a machine (`gh api user`), asked once per machine; null when gh cannot say
+// (asked again next refresh).
+const viewers = new Map();
+async function viewerOf(run) {
+  const key = run.machine ?? "";
+  if (viewers.has(key)) return viewers.get(key);
+  const res = await exec("gh", ["api", "user", "-q", ".login"], { on: run.machine }).catch(() => null);
+  const login = res?.code === 0 ? res.stdout.trim() : "";
+  if (login) viewers.set(key, login);
+  return login || null;
+}
+
 // What the views need from `gh pr view --json` output. GitHub only sets reviewDecision
 // where the repo requires a review, so the review comes from the reviews themselves,
 // falling back to reviewDecision ("Review needed") when nobody has approved or objected.
 // `requested`: the reviewers asked and yet to answer (a user's login, a team's name);
 // GitHub drops one from reviewRequests once they review. `ci`: when its checks started and,
 // once none is pending, finished (attention.js ciTimes).
-export function prSummary(p, repo) {
+export function prSummary(p, repo, viewer = null) {
   const { approvedBy, changesBy, reviewedAt } = standing(p);
   return {
     number: p.number,
@@ -567,6 +587,7 @@ export function prSummary(p, repo) {
     approvedBy,
     changesBy,
     reviewedAt,
+    mine: viewer ? viewerReview(p.reviews, viewer) : null,
     requested: (p.reviewRequests ?? []).map((r) => r?.login ?? r?.name ?? r?.slug).filter(Boolean),
     checks: checks(p.statusCheckRollup),
     failed: firstFailing(p.statusCheckRollup),
@@ -633,13 +654,15 @@ export async function refreshPrs(run, closed = false) {
   prBusy.set(run.key, started);
   try {
     let error = null;
+    // Only a review run's related PR needs the viewer: whether their review there is submitted.
+    const viewer = run.type === "rev" ? await viewerOf(run) : null;
     const view = async (recorded, before, own = false) => {
       const out = [];
       for (const pr of recorded) {
         if (!pr.url) continue;
         const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
         const p = res?.code === 0 ? json(res.stdout) : null;
-        if (p) { out.push(own ? await withComments(prSummary(p, pr.repo), run, before?.find((x) => x.url === pr.url)) : prSummary(p, pr.repo)); continue; }
+        if (p) { out.push(own ? await withComments(prSummary(p, pr.repo), run, before?.find((x) => x.url === pr.url)) : prSummary(p, pr.repo, own ? null : viewer)); continue; }
         error ??= `gh could not read ${pr.url}: ${(res?.stderr || res?.stdout || `exit ${res?.code}`).trim().split("\n")[0].slice(0, 200)}`;
         const old = before?.find((x) => x.url === pr.url && x.state !== "UNKNOWN");
         out.push(old ? { ...old, stale: true } : unknownPr(pr.url, pr.repo));
