@@ -62,7 +62,7 @@ test("start-agent.sh's outcomes read calmly", () => {
 
 test("the last profile and each repository's drafts mode are remembered; direct never is", () => {
   let p = parsePrefs("not json");
-  assert.deepEqual(p, { profile: null, drafts: {} });
+  assert.deepEqual(p, { profile: null, drafts: {}, folders: [] });
   p = remember(p, { kind: "issue", profile: { ...DEFAULT_PROFILE, implementer: "opus" }, repo: "/r" });
   assert.equal(p.profile.implementer, "opus");
   p = remember(p, { kind: "review", profile: DEFAULT_PROFILE, repo: "/r", drafts: "pending" });

@@ -7,6 +7,7 @@
 
 import { exec, spaces, panes } from "herdr";
 import { whereOf, repoOf } from "./spacegroups.js";
+import { spaceFolders, parseFound, scanParents, FIND_SCRIPT } from "./folders.js";
 
 // "git@github.com:o/r.git", "https://github.com/o/r" → "o/r" (lower-cased: GitHub ignores case).
 export function ownerRepo(url) {
@@ -31,16 +32,18 @@ async function inspect(cwd) {
   return repo;
 }
 
-// This machine's open repository spaces: [{space, name, root, origin}], one per repository.
+// This machine's open repository spaces: [{space, name, root, origin}], one per repository. From
+// openFolders(), the spaces' own folders: the old way read only each space's first pane (whose
+// live folder may be elsewhere than the space's, and the dedupe by root hid a second space),
+// so a space could drop out of the list.
 export async function repoSpaces() {
-  const ps = panes(), seen = new Set(), out = [];
-  for (const s of spaces()) {
-    if (s.machine) continue; // start-agent.sh and git run here
-    const cwd = whereOf(s, ps);
-    const repo = cwd ? await inspect(cwd) : null;
+  const seen = new Set(), out = [];
+  for (const e of await openFolders()) {
+    if (e.machine || !e.space) continue; // start-agent.sh and git run here
+    const repo = await inspect(e.folder);
     if (!repo || repo.kind !== "primary" || seen.has(repo.root)) continue;
     seen.add(repo.root);
-    out.push({ space: s.id, name: base(repo.root), root: repo.root, origin: repo.origin });
+    out.push({ space: e.space, name: base(repo.root), root: repo.root, origin: repo.origin });
   }
   return out;
 }
@@ -80,3 +83,41 @@ export async function knownRepos() {
   const open = await repoSpaces();
   return [...open, ...await cloneRepos(open).catch(() => [])];
 }
+
+// ---- the folders the New run dialog offers (folders.js has the rules) ----
+
+// Every open space by its folder, as Herdr's Spaces list has them, not only the repositories: a
+// folder holding several is a place for one orchestrator. Git is asked only to leave out the
+// linked worktrees of runs (their repository is listed instead).
+export async function openFolders() {
+  const ps = panes(), all = spaces(), roots = new Map(); // linked worktree folder → its repository
+  await Promise.all(all.map(async (s) => {
+    const where = s.folder || whereOf(s, ps);
+    const repo = where && !s.machine ? await inspect(where).catch(() => null) : null;
+    if (repo?.kind === "worktree") roots.set(where, repo.root);
+  }));
+  return spaceFolders(all, (s) => whereOf(s, ps), (f) => roots.get(f) ?? null);
+}
+
+// The `folder` of every run directory (<runs root>/<folder>/<branch>/orchestrator.json).
+export async function runFolders(root) {
+  const r = await sh('ls -t "$1"/*/*/orchestrator.json 2>/dev/null | while read -r f; do jq -r ".folder // empty" "$f" 2>/dev/null; done', [root]).catch(() => null);
+  return String(r?.stdout ?? "").split("\n").filter((l) => l.startsWith("/"));
+}
+
+// Folders under the parents, two levels deep: one find, cached a few minutes per set of parents.
+const SCAN_MS = 5 * 60000;
+const scanCache = new Map(); // parents → {at, list}
+export async function scanFolders(entries, home) {
+  const { deep, shallow } = scanParents(entries, home);
+  if (!deep.length && !shallow) return [];
+  const key = `${shallow}\n${deep.join("\n")}`, c = scanCache.get(key);
+  if (c && Date.now() - c.at < SCAN_MS) return c.list;
+  const r = await exec("sh", ["-c", FIND_SCRIPT, "_", shallow ?? "-", ...deep], { timeout: 4000 }).catch(() => null);
+  const list = parseFound(r?.stdout);
+  if (r && list.length) scanCache.set(key, { at: Date.now(), list }); // a timeout or nothing is asked again
+  return list;
+}
+
+// Whether a typed path is a folder here.
+export const isFolder = async (path) => (await sh('[ -d "$1" ]', [path]).catch(() => null))?.code === 0;

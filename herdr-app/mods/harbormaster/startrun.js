@@ -2,6 +2,8 @@
 // orchestrator prompt, the profile line, the start-agent.sh arguments and the remembered
 // choices. Pure, so the tests drive it; newrun.js does the exec and the drawing.
 
+import { RECENT_MAX } from "./folders.js";
+
 export const KINDS = [
   { id: "issue", label: "Issue(s)", hint: "Issue numbers or URLs", example: "12 14 or a GitHub issue URL" },
   { id: "review", label: "Review PR", hint: "Pull request number or URL", example: "123 or a GitHub PR URL" },
@@ -100,8 +102,9 @@ export function parsePrefs(text) {
     const j = JSON.parse(text);
     const profile = j?.profile && typeof j.profile === "object" ? j.profile : null;
     const drafts = j?.drafts && typeof j.drafts === "object" ? j.drafts : {};
-    return { profile, drafts };
-  } catch { return { profile: null, drafts: {} }; }
+    const folders = Array.isArray(j?.folders) ? j.folders.filter((f) => typeof f === "string" && f) : [];
+    return { profile, drafts, folders };
+  } catch { return { profile: null, drafts: {}, folders: [] }; }
 }
 
 // The review-drafts mode a repository starts with: its remembered one, never "direct".
@@ -109,8 +112,10 @@ export const draftsFor = (prefs, repo) => (["herdr", "pending"].includes(prefs?.
 
 // The prefs after a start. A review does not touch the profile (its preset is not the user's
 // habit); "direct" is never remembered, and leaves what the repository had.
+// The folder goes first in the recents (newest first, each once, at most RECENT_MAX).
 export function remember(prefs, { kind, profile, repo, drafts }) {
-  const next = { profile: prefs?.profile ?? null, drafts: { ...(prefs?.drafts ?? {}) } };
+  const folders = [repo, ...(prefs?.folders ?? []).filter((f) => f !== repo)].slice(0, RECENT_MAX);
+  const next = { profile: prefs?.profile ?? null, drafts: { ...(prefs?.drafts ?? {}) }, folders };
   if (kind === "review") { if (drafts !== "direct") next.drafts[repo] = drafts; }
   else next.profile = profile;
   return next;

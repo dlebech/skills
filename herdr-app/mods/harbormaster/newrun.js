@@ -7,8 +7,9 @@
 
 import { div } from "gpui-kit";
 import { InputState, Input, v_flex, h_flex } from "gpui-base";
-import { exec, focused, openOverlay, closeOverlay, props, notify, readTextFile, writeTextFile } from "herdr";
-import { repoSpaces, knownRepos, spaceIdFor } from "./repospaces.js";
+import { exec, focused, openOverlay, closeOverlay, props, notify, readTextFile, writeTextFile, spaces, home, checking } from "herdr";
+import { repoSpaces, knownRepos, spaceIdFor, openFolders, runFolders, scanFolders, isFolder } from "./repospaces.js";
+import { recentFolders, listFolders, matchFolders, literalFolder, tilde, base, newSpaceId } from "./folders.js";
 import {
   KINDS, DRAFTS, profileText, parseProfile, profileFor, buildPrompt, inputProblem, runAgentName, startArgs,
   startOutcome, parsePrefs, draftsFor, remember, markReviewStarted, clearReviewStarted,
@@ -42,8 +43,9 @@ const findScript = async () => {
   return r?.code === 0 ? r.stdout : null;
 };
 
-// Starts the run: {ok, address} or {ok: false, error, started?}; it never throws. `repo` is a
-// repoSpaces() entry, or a clone's ({space: null}: start-agent.sh then opens its space).
+// Starts the run: {ok, address} or {ok: false, error, started?}; it never throws. `repo` is
+// {space, name, root}: the folder's open space, or {space: null} for a folder with none, where
+// start-agent.sh makes Herdr open one (sp-<name>) in the background, as the captain's Start a run does.
 export async function launch(args) {
   try { return await launchRun(args); }
   catch (e) { return { ok: false, error: `Could not start it: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}` }; }
@@ -52,7 +54,7 @@ export async function launch(args) {
 async function launchRun({ repo, kind, input, profile, drafts }) {
   const problem = inputProblem(kind, input);
   if (problem) return { ok: false, error: problem };
-  if (!repo) return { ok: false, error: "Open the repository in a space first, then start the run there" };
+  if (!repo) return { ok: false, error: "Pick a folder first" };
   const script = await findScript();
   if (!script) return { ok: false, error: "The orchestrator skill is not installed: npx skills add dlebech/skills --skill herdr-app-orchestrator" };
   const name = runAgentName(repo.name, kind, input);
@@ -61,7 +63,7 @@ async function launchRun({ repo, kind, input, profile, drafts }) {
   await sh('mkdir -p "$(dirname "$1")"', [taskFile]);
   await writeTextFile(taskFile, buildPrompt({ kind, input, profile, drafts }) + "\n", null);
   // start-agent.sh waits for the agent to take its task, up to two minutes.
-  const res = await exec("bash", [script, ...startArgs({ name, cwd: repo.root, taskFile, spaceId: repo.space ?? spaceIdFor(repo.name) })], { timeout: 150000 }).catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
+  const res = await exec("bash", [script, ...startArgs({ name, cwd: repo.root, taskFile, spaceId: repo.space ?? repo.spaceId ?? spaceIdFor(repo.name) })], { timeout: 150000 }).catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
   await sh('rm -f "$1"', [taskFile]).catch(() => {});
   const out = startOutcome(res.code, res.stdout, res.stderr);
   if (out.ok || out.started) {
@@ -119,42 +121,109 @@ async function reviewNow(root, repo, pr) {
   return out;
 }
 
-// Opens the dialog; every field is optional. `repo` is a folder or a repository's name.
+// Opens the dialog; every field is optional. `repo` is a folder or its name.
 export function openNewRun({ repo, kind, input } = {}) {
-  return openOverlay({ mod: "harbormaster", kind: "dialog", width: 520, height: 560, props: { role: "newrun", repo, kind, input } });
+  return openOverlay({ mod: "harbormaster", kind: "dialog", width: 520, height: 620, props: { role: "newrun", repo, kind, input } });
 }
 
 // ---- the dialog ----
 
-// Called from the view's init: the fields, and the repositories and remembered choices read async.
+let bound = false;
+const ROWS = 7; // list rows that fit; the rest scroll in with the highlight
+
+// Called from the view's init: the fields, and the folders and remembered choices read async.
 export function initNewRun(view, cx) {
   const p = props() ?? {};
   const kind = KINDS.some((k) => k.id === p.kind) ? p.kind : "issue";
-  const nr = view.nr = { kind, repos: [], repo: null, picking: false, drafts: "herdr", prefs: null, error: null, busy: false, prefill: "" };
+  const nr = view.nr = { kind, entries: [], found: [], typedDir: null, folder: null, open: false, sel: 0, query: "", shown: "",
+    home: home(), top: 0, memo: null, drafts: "herdr", prefs: null, error: null, busy: false, prefill: "" };
   nr.text = InputState.new({ placeholder: "" });
   nr.profile = InputState.new({ placeholder: "implementer=sonnet reviewer=opus specialist=opus autonomy=L1" });
+  nr.where = InputState.new({ placeholder: "Type to find a folder" });
   nr.text.set_value(String(p.input ?? ""));
   nr.text.on("submit", (_e, cx) => start(view, cx));
   nr.profile.on("submit", (_e, cx) => start(view, cx));
+  nr.where.on("submit", (_e, cx) => (nr.open && shownList(nr).length ? choose(view, shownList(nr)[nr.sel], cx) : start(view, cx)));
+  nr.where.on("change", (_e, cx) => typed(view, cx));
+  nr.where.on("focus", (_e, cx) => openList(view, cx));
   nr.text.focus();
+  // Escape closes the list before it closes the dialog: bound to an action inside the open list's own context.
+  if (!bound) { try { bound = cx.bind_keys([{ keystroke: "escape", action: "harbormaster-folder-list-close", context: "HarborFolderList" }]) > 0; } catch { /* no binding: Esc closes the dialog */ } }
+  if (checking()) return; // herdr-app check runs init for real: no find, git or jq then
   cx.spawn(async (cx) => {
-    const [repos, prefs] = await Promise.all([repoSpaces().catch(() => []), loadPrefs()]);
-    nr.repos = repos;
+    const [spaceEntries, prefs] = await Promise.all([openFolders().catch(() => []), loadPrefs()]);
+    const runs = await runFolders(await rootDir());
     nr.prefs = prefs;
-    nr.repo = chooseRepo(repos, p.repo);
-    nr.drafts = draftsFor(prefs, nr.repo?.root);
+    nr.entries = listFolders({ spaces: spaceEntries, recents: recentFolders(prefs.folders, runs) });
+    const pick = chooseFolder(nr.entries, p.repo);
+    if (pick) setFolder(view, pick);
+    nr.drafts = draftsFor(prefs, nr.folder?.folder);
     setProfile(nr);
+    cx.notify();
+    // The folders typed text may find: scanned once the lists are known, cheap and cached.
+    nr.found = await scanFolders(nr.entries, nr.home).catch(() => []);
     cx.notify();
   });
 }
 
-// The repository asked for, else the focused space's, else the first open.
-function chooseRepo(repos, want) {
+// The folder asked for (a path or a name), else the focused space's, else the first listed.
+function chooseFolder(entries, want) {
   const f = (() => { try { return focused(); } catch { return null; } })();
-  const by = (fn) => repos.find(fn);
-  return (want && by((r) => r.root === want || r.name === want || r.origin === String(want).toLowerCase()))
-    || (f && (by((r) => r.space === f.space) || by((r) => f.cwd && (f.cwd === r.root || f.cwd.startsWith(`${r.root}/`)))))
-    || repos[0] || null;
+  const by = (fn) => entries.find(fn);
+  return (want && by((e) => e.folder === want || base(e.folder) === want || e.name === want))
+    || (f && (by((e) => e.space && e.space === f.space) || by((e) => f.cwd && (f.cwd === e.folder || f.cwd.startsWith(`${e.folder}/`)))))
+    || entries[0] || null;
+}
+
+// Makes it the chosen folder and shows it in the input without that counting as typing.
+function setFolder(view, entry) {
+  const nr = view.nr;
+  nr.folder = entry;
+  nr.shown = tilde(entry.folder, nr.home);
+  nr.where.set_value(nr.shown);
+  nr.drafts = draftsFor(nr.prefs, entry.folder);
+}
+
+function choose(view, entry, cx) {
+  const nr = view.nr;
+  if (!entry) return;
+  setFolder(view, entry);
+  nr.open = false; nr.error = null;
+  cx.notify();
+}
+
+// Opens the list with everything in it and selects the text, so typing replaces the folder.
+function openList(view, cx) {
+  const nr = view.nr;
+  if (nr.open || !nr.entries.length) return;
+  nr.open = true; nr.sel = 0; nr.top = 0; nr.query = "";
+  nr.where.set_selected_range({ start: 0, end: nr.where.value().length });
+  cx.notify();
+}
+
+// What the list shows: everything listed while the text is the chosen folder, else the matches.
+// Memoised on what it depends on: render, keys and Start all ask.
+export function shownList(nr) {
+  const k = [nr.query, nr.entries, nr.found, nr.typedDir];
+  if (nr.memo && nr.memo.k.every((x, i) => x === k[i])) return nr.memo.list;
+  const hits = matchFolders(nr.query, nr.entries, nr.found);
+  const list = nr.typedDir && !hits.some((h) => h.folder === nr.typedDir.folder) ? [...hits, nr.typedDir] : hits;
+  nr.memo = { k, list };
+  return list;
+}
+
+// The folder input changed: typing opens the list and matches; a typed path is checked on disk.
+function typed(view, cx) {
+  const nr = view.nr, text = nr.where.value();
+  if (text === nr.shown) return;
+  nr.open = true; nr.sel = 0; nr.top = 0; nr.error = null;
+  nr.query = text.trim();
+  const lit = literalFolder(nr.query, nr.home);
+  nr.typedDir = null;
+  cx.notify();
+  if (lit) cx.spawn(async (cx) => {
+    if (await isFolder(lit.folder) && nr.query === text.trim()) { nr.typedDir = lit; cx.notify(); }
+  });
 }
 
 // Prefills the profile line, unless the user has edited it since the last prefill.
@@ -164,15 +233,36 @@ function setProfile(nr) {
   nr.profile.set_value(nr.prefill);
 }
 
+// What Start runs in, or null: the chosen folder; a typed text that names a listed folder exactly
+// (its path, ~ path or name); or, with the list open, the row highlighted. Never a guess.
+export function target(nr) {
+  const text = nr.where.value().trim();
+  if (text === nr.shown) return nr.folder;
+  if (!text) return null;
+  const exact = nr.entries.find((e) => !e.machine && (e.folder === text || tilde(e.folder, nr.home) === text || (e.name === text && e.space)));
+  return exact ?? (nr.open ? shownList(nr)[nr.sel] ?? null : null);
+}
+
 async function start(view, cx) {
   const nr = view.nr;
   if (nr.busy) return;
+  let pick = target(nr);
+  if (pick && pick !== nr.folder) setFolder(view, pick);
+  // A space opened meanwhile counts; and a new space's id must not be another folder's.
+  const open = spaces();
+  if (pick && !pick.space && !pick.machine) {
+    const there = (await openFolders().catch(() => [])).find((e) => e.folder === pick.folder && e.space && !e.machine);
+    pick = there ?? pick;
+  }
   const { profile, bad } = parseProfile(nr.profile.value(), profileFor(nr.kind, nr.prefs?.profile));
-  const problem = bad.length ? `Not understood: ${bad.join(" ")}` : inputProblem(nr.kind, nr.text.value());
-  if (problem) { nr.error = problem; nr.hint = true; cx.notify(); return; }
-  nr.busy = true; nr.error = null; nr.hint = false; cx.notify();
+  const problem = !pick ? "Pick a folder from the list"
+    : pick.machine ? `That space is on ${pick.machine}: start the run from the Herdr window there`
+    : bad.length ? `Not understood: ${bad.join(" ")}` : inputProblem(nr.kind, nr.text.value());
+  if (problem) { nr.error = problem; nr.hint = true; nr.open = false; cx.notify(); return; }
+  nr.busy = true; nr.error = null; nr.hint = false; nr.open = false; cx.notify();
+  const repo = { space: pick.space, name: base(pick.folder), root: pick.folder, spaceId: pick.space ? null : newSpaceId(pick.folder, open) };
   let out;
-  try { out = await launch({ repo: nr.repo, kind: nr.kind, input: nr.text.value(), profile, drafts: nr.drafts }); }
+  try { out = await launch({ repo, kind: nr.kind, input: nr.text.value(), profile, drafts: nr.drafts }); }
   catch (e) { out = { ok: false, error: String(e?.message ?? e) }; }
   finally { nr.busy = false; }
   // Started: the new tab is the confirmation. Not quite (the trust prompt, a dialog): say where, calmly.
@@ -192,28 +282,52 @@ const framed = (t, state) => div().px(10).py(4).rounded(6).bg(t.raised).child(In
 
 const field = (t, label, ...kids) => v_flex().gap(6).child(div().text_size(11).font_medium().text_color(t.dim).child(label)).children(kids.filter(Boolean));
 
+// One row of the folder list: the folder's name, where it is, and which it is (space or recent).
+const folderRow = (t, nr, e, i, pick) => h_flex().id(`nr-f-${i}`).px(8).h(30).gap(8).items_center().rounded(5).text_size(12.5)
+  .when(i === nr.sel, (el) => el.bg(t.hover)).cursor_pointer().hover((s) => s.bg(t.hover))
+  .on_click((_e, cx) => { cx.stop_propagation(); pick(e, cx); })
+  .child(div().flex_none().text_color(e === nr.folder ? t.accent : t.foreground).child(base(e.folder)))
+  .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim)
+    .child(`${e.space && e.name !== base(e.folder) ? `${e.name} · ` : ""}${e.machine ? `${e.machine}:` : ""}${tilde(e.folder, nr.home)}`))
+  .child(div().flex_none().text_size(11).text_color(t.dim).child(e.space ? "space" : e.recent ? "recent" : ""));
+
 export function newRunView(view, t) {
   const nr = view.nr;
   if (!nr) return div();
   const kind = KINDS.find((k) => k.id === nr.kind);
   const set = (patch, cx) => { Object.assign(nr, patch, { error: null }); cx.notify(); };
-  const repoRow = h_flex().id("nr-repo").items_center().gap(8).px(10).h(30).rounded(6).bg(t.raised).cursor_pointer()
-    .on_click((_e, cx) => set({ picking: !nr.picking }, cx))
-    .child(div().flex_1().min_w(0).text_size(13).text_color(nr.repo ? t.foreground : t.dim).child(nr.repo?.name ?? (nr.prefs ? "No repository open" : "…")))
-    .child(div().text_size(11).text_color(t.dim).child(nr.picking ? "▴" : "▾"));
-  const list = nr.picking && v_flex().gap(2).p(4).rounded(6).bg(t.raised)
-    .children(nr.repos.map((r, i) => h_flex().id(`nr-r-${i}`).px(8).h(26).items_center().rounded(5).text_size(12.5)
-      .text_color(r === nr.repo ? t.accent : t.muted).cursor_pointer().hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => { nr.repo = r; nr.drafts = draftsFor(nr.prefs, r.root); set({ picking: false }, cx); })
-      .child(r.name)));
+  const items = nr.open ? shownList(nr) : [];
+  const pick = (e, cx) => choose(view, e, cx);
+  // Up, Down, Escape move in the list the input opens under it; Enter is the input's own submit.
+  const keys = (ev, cx) => {
+    if (!nr.open) { if (ev.key === "down") openList(view, cx); return; }
+    if (ev.key === "down" || ev.key === "up") {
+      const n = shownList(nr).length;
+      if (n) {
+        nr.sel = (nr.sel + (ev.key === "down" ? 1 : n - 1)) % n;
+        nr.top = Math.max(0, Math.min(nr.top, nr.sel), nr.sel - ROWS + 1); // the highlight stays in view
+      }
+      cx.stop_propagation(); cx.notify();
+    }
+  };
+  const top = Math.min(nr.top, Math.max(0, items.length - ROWS));
+  const more = items.length - top - ROWS;
+  const list = nr.open && v_flex().gap(2).p(4).rounded(6).bg(t.raised)
+    .children(items.length ? [...items.slice(top, top + ROWS).map((e, i) => folderRow(t, nr, e, top + i, pick)),
+      ...(more > 0 ? [div().px(8).h(20).text_size(11).text_color(t.dim).child(`+${more} more: keep typing or press Down`)] : [])]
+      : [div().px(8).h(28).flex().items_center().text_size(12).text_color(t.dim).child(nr.entries.length ? "No folder matches" : "…")]);
   const drafts = nr.kind === "review" && field(t, "Review comments",
     h_flex().gap(6).children(DRAFTS.map((d) => pill(t, `nr-d-${d.id}`, d.label, nr.drafts === d.id, (cx) => set({ drafts: d.id }, cx), d.tip))),
-    nr.drafts === "direct" && div().text_size(11).text_color(t.dim).child("Posted in your name at once. Not remembered as this repository's default."));
+    nr.drafts === "direct" && div().text_size(11).text_color(t.dim).child("Posted in your name at once. Not remembered as this folder's default."));
+  const startable = Boolean(target(nr));
+  const note = !nr.open && (startable
+    ? !target(nr).space && !target(nr).machine && div().text_size(11).text_color(t.dim).child("No space for it yet: Herdr opens one in the background")
+    : nr.where.value().trim() && div().text_size(11).text_color(t.dim).child("Pick a folder from the list"));
   return v_flex().size_full().p(20).gap(16).bg(t.background)
     .child(div().text_size(15).font_semibold().text_color(t.foreground).child("New run"))
-    .child(field(t, "Repository", repoRow, list || null))
+    .child(field(t, "Folder", div().when(nr.open, (e) => e.key_context("HarborFolderList").on_action("harbormaster-folder-list-close", (_e, cx) => { nr.open = false; cx.notify(); })).on_key_down(keys).on_mouse_down("left", (_e, cx) => openList(view, cx)).child(framed(t, nr.where)), list || note || null))
     .child(field(t, "What", h_flex().gap(6).children(KINDS.map((k) => pill(t, `nr-k-${k.id}`, k.label, nr.kind === k.id,
-      (cx) => { nr.kind = k.id; setProfile(nr); nr.drafts = draftsFor(nr.prefs, nr.repo?.root); set({}, cx); })))))
+      (cx) => { nr.kind = k.id; setProfile(nr); nr.drafts = draftsFor(nr.prefs, nr.folder?.folder); set({}, cx); })))))
     .child(field(t, kind.hint, framed(t, nr.text), div().text_size(11).text_color(t.dim).child(kind.example)))
     .child(field(t, "Profile", framed(t, nr.profile)))
     .children([drafts].filter(Boolean))
@@ -222,7 +336,7 @@ export function newRunView(view, t) {
     .child(h_flex().gap(8).justify_end()
       .child(pill(t, "nr-cancel", nr.done ? "Close" : "Cancel", false, () => { try { closeOverlay(props().overlay); } catch { /* closed */ } }))
       .child(div().id("nr-start").px(14).h(28).rounded(6).flex().items_center().text_size(12.5).font_semibold()
-        .bg(t.accent).text_color(t.background).when(nr.busy || nr.done || !nr.repo, (e) => e.opacity(0.45))
-        .when(!nr.busy && !nr.done && nr.repo, (e) => e.cursor_pointer().on_click((_e, cx) => { start(view, cx); }))
+        .bg(t.accent).text_color(t.background).when(nr.busy || nr.done || !startable, (e) => e.opacity(0.45))
+        .when(!nr.busy && !nr.done && startable, (e) => e.cursor_pointer().on_click((_e, cx) => { start(view, cx); }))
         .child(nr.busy ? "Starting…" : "Start")));
 }
