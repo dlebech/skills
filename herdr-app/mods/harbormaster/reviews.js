@@ -24,7 +24,7 @@ export function parseReviewRequests(text) {
   })).sort((a, b) => b.updated - a.updated);
 }
 
-const key = (url) => String(url).replace(/[?#].*$/, "").replace(/\/+$/, "").replace(/\/(files|commits)$/, "").toLowerCase();
+export const key = (url) => String(url).replace(/[?#].*$/, "").replace(/\/+$/, "").replace(/\/(files|commits)$/, "").toLowerCase();
 
 // The live run whose issues or related PRs name the PR, or null. `runs` are the open ones. A
 // bare "52" or "#52" in its issues counts when the run's folder is the PR's repository.
@@ -48,26 +48,35 @@ export function withContext(list, repos, runs) {
 }
 
 // ---- the poll: one cache for every copy of the mod ----
-let cache = { at: 0, list: [], repos: [], error: null, loading: false };
-
-export async function refreshReviews(force = false) {
-  if (cache.loading || (!force && Date.now() - cache.at < POLL_MS)) return;
-  cache.loading = true;
-  try {
-    const res = await exec("gh", ["search", "prs", "--review-requested=@me", "--state=open", "--limit", "30", "--json", FIELDS], { timeout: 20000 });
-    const repos = await repoSpaces().catch(() => cache.repos);
-    cache = res.code === 0
-      ? { at: Date.now(), list: parseReviewRequests(res.stdout), repos, error: null, loading: false }
-      : { ...cache, at: Date.now(), repos, error: "can't reach GitHub", loading: false };
-  } catch {
-    cache = { ...cache, at: Date.now(), error: "can't reach GitHub", loading: false };
+// A cached poll of one gh command: `parse` turns its stdout into a list, or null when there is
+// nothing usable. With `partial`, a failing exit still counts when its stdout parses (gh api graphql
+// exits 1 for any error in a response that also carries data). Failing quietly keeps the last list.
+export function poller(args, parse, { partial = false } = {}) {
+  let cache = { at: 0, list: [], repos: [], error: null, loading: false };
+  const fail = (extra = {}) => ({ ...cache, at: Date.now(), error: "can't reach GitHub", loading: false, ...extra });
+  async function refresh(force = false) {
+    if (cache.loading || (!force && Date.now() - cache.at < POLL_MS)) return;
+    cache.loading = true;
+    try {
+      const res = await exec("gh", args, { timeout: 20000 });
+      const repos = await repoSpaces().catch(() => cache.repos);
+      const list = res.code === 0 || partial ? parse(res.stdout) : null;
+      cache = list ? { at: Date.now(), list, repos, error: null, loading: false } : fail({ repos });
+    } catch {
+      cache = fail();
+    }
   }
+  // The cache; starts a poll when it is old, never waits for it.
+  return { refresh, get: () => { refresh().catch(() => {}); return cache; }, error: () => cache.error };
 }
+
+const requests = poller(["search", "prs", "--review-requested=@me", "--state=open", "--limit", "30", "--json", FIELDS], parseReviewRequests);
+export const refreshReviews = requests.refresh;
 
 // [{repo, number, title, url, author, updated, local, run}] and the quiet error, from the cache;
-// ctx: {runs} the live runs. Starts a poll when the cache is old, never waits for it.
+// ctx: {runs} the live runs.
 export function reviewRequests(ctx = {}) {
-  refreshReviews().catch(() => {});
-  return withContext(cache.list, cache.repos, ctx.runs ?? []);
+  const c = requests.get();
+  return withContext(c.list, c.repos, ctx.runs ?? []);
 }
-export const reviewError = () => cache.error;
+export const reviewError = requests.error;

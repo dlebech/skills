@@ -1,9 +1,26 @@
 #!/usr/bin/env bash
 # A fake `gh` for crew-sandbox.sh's two-prs run: `pr view` and the review-comments query for
 # owner fake-two answer from here (PR 1799: 2 open threads, 1372: 9, 44, 60 and 61: none; 60-64 have one green check (10 min, a CI baseline of 3+ samples for fake-two/api); 70 has a check running for 45 min; all approved by
-# mfalkenbrink). Anything else runs the real gh ($REAL_GH).
+# mfalkenbrink). `api graphql` with a `viewer` query (mypr.js) answers 5 open PRs of dlebech: 11 red CI, 12 changes requested,
+# 13 approved and mergeable, 14 two new comments since the push, 15 quiet; 16 is in a run; 17-20 have no reviewDecision (repo without required reviews): 17 anna's APPROVED stands, 18 her CHANGES_REQUESTED, 19 approved but CI pending, 20 approved with mergeable UNKNOWN. Anything else runs the real gh ($REAL_GH).
 args="$*"
 case "$args" in
+  *"api graphql"*viewer*)
+    jq -n 'def pr($n; $o): {number:$n,title:"Mine \($n)",url:"https://github.com/acme/app/pull/\($n)",isDraft:false,updatedAt:"2026-11-17T02:00:00Z",reviewDecision:null,mergeable:"MERGEABLE",
+        repository:{nameWithOwner:"acme/app"},latestOpinionatedReviews:{nodes:[]},reviews:{nodes:[]},comments:{nodes:[]},reviewThreads:{nodes:[]},
+        commits:{nodes:[{commit:{committedDate:"2026-11-17T01:00:00Z",statusCheckRollup:{state:"SUCCESS",contexts:{nodes:[]}}}}]}} * $o;
+      {data:{viewer:{login:"dlebech",pullRequests:{nodes:[
+        pr(11; {commits:{nodes:[{commit:{committedDate:"2026-11-17T01:00:00Z",statusCheckRollup:{state:"FAILURE",contexts:{nodes:[{__typename:"CheckRun",name:"build",conclusion:"FAILURE",detailsUrl:"https://ci/11"}]}}}}]}}),
+        pr(12; {reviewDecision:"CHANGES_REQUESTED",reviews:{nodes:[{author:{login:"anna",__typename:"User"},state:"CHANGES_REQUESTED",submittedAt:"2026-11-17T01:30:00Z",body:"no"}]}}),
+        pr(13; {reviewDecision:"APPROVED",reviews:{nodes:[{author:{login:"anna",__typename:"User"},state:"APPROVED",submittedAt:"2026-11-17T01:40:00Z",body:""}]}}),
+        pr(14; {comments:{nodes:[{author:{login:"anna",__typename:"User"},createdAt:"2026-11-17T01:10:00Z"},{author:{login:"dlebech",__typename:"User"},createdAt:"2026-11-17T01:11:00Z"},{author:{login:"ci-bot",__typename:"Bot"},createdAt:"2026-11-17T01:12:00Z"},{author:{login:"bo",__typename:"User"},createdAt:"2026-11-17T00:00:00Z"}]},
+          reviewThreads:{nodes:[{isResolved:false,comments:{nodes:[{author:{login:"anna",__typename:"User"},createdAt:"2026-11-17T01:20:00Z"}]}}]}}),
+        pr(15; {}), pr(16; {reviewDecision:"APPROVED"}),
+        pr(17; {latestOpinionatedReviews:{nodes:[{author:{login:"anna",__typename:"User"},state:"APPROVED",submittedAt:"2026-11-17T01:50:00Z"}]},reviews:{nodes:[{author:{login:"anna",__typename:"User"},state:"APPROVED",submittedAt:"2026-11-17T01:50:00Z",body:""}]}}),
+        pr(18; {latestOpinionatedReviews:{nodes:[{author:{login:"anna",__typename:"User"},state:"CHANGES_REQUESTED",submittedAt:"2026-11-17T01:55:00Z"},{author:{login:"bo",__typename:"User"},state:"APPROVED",submittedAt:"2026-11-17T01:56:00Z"}]}}),
+        pr(19; {reviewDecision:"APPROVED",commits:{nodes:[{commit:{committedDate:"2026-11-17T01:00:00Z",statusCheckRollup:{state:"PENDING",contexts:{nodes:[]}}}}]}}),
+        pr(20; {reviewDecision:"APPROVED",mergeable:"UNKNOWN"})]}}}}'
+    ;;
   *github.com/fake-two/*)
     n=$(grep -o 'pull/[0-9]*' <<<"$args" | head -1 | cut -d/ -f2)
     u=$(grep -o 'https://github.com/fake-two/[^ ]*' <<<"$args" | head -1)
