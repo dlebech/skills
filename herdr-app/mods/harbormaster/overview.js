@@ -966,8 +966,8 @@ const section = (t, title, ...rest) => boxed(t, v_flex().gap(4))
   .child(h_flex().gap(6).px(2).items_center().text_size(11).font_semibold().text_color(t.dim).child(title)
     .children(rest.filter(Boolean).map((x) => div().font_normal().child(x))));
 
-// Every fold in the pane looks the same: a dim chevron and a one-line summary in normal text;
-// colour only on status words. Open state per key in
+// Folds with a header (Claims, Decisions, Tokens) look the same: a dim chevron, the section's
+// name in semibold, then a one-line summary in normal text; colour only on status words. Open state per key in
 // view.folds, closed by default and not persisted.
 export const isOpen = (view, key) => Boolean(view.folds?.get(key));
 // `title`: a header like Decisions', the section's name in semibold text ahead of the summary,
@@ -1177,9 +1177,11 @@ function tokensSection(view, t, r) {
     { text: `cache read ${tokenText(cacheRead)}`, color: t.muted },
     { text: `total ${tokenText(total)}`, bold: true },
   ];
-  return section(t, "Tokens", updated && `counted ${ago(updated)}`)
-    .child(byAgent.length > 0 ? foldLine(view, t, key, `${tokenDetail(r.tokens)}\n${open ? "Hide" : "Show"} each agent's tokens`, items)
-      : h_flex().id(key).px(2).flex_wrap().items_center().text_size(11.5).text_color(t.foreground).tooltip(tokenDetail(r.tokens)).children(joined(t, items)))
+  const head = [updated && { el: div().flex_none().text_color(t.dim).child(`counted ${ago(updated)}`) }];
+  return boxed(t, v_flex().gap(4))
+    .child(byAgent.length > 0 ? foldLine(view, t, key, `${tokenDetail(r.tokens)}\n${open ? "Hide" : "Show"} each agent's tokens`, [...items, ...head], null, "Tokens")
+      : h_flex().id(key).px(2).flex_wrap().items_center().text_size(11.5).text_color(t.foreground).tooltip(tokenDetail(r.tokens))
+        .children(joined(t, [{ text: "Tokens", bold: true }, ...items, ...head])))
     .when(Boolean(r.budget), (el) => el.child(div().id(`budget-${r.key}`).px(2).text_size(11).text_color(overBudget(r) ? t.blocked : t.dim)
       .tooltip("A soft budget: crossing it asks you whether to continue, compact or stop; nothing stops by itself")
       .child(`${overBudget(r) ? "Over" : "Under"} its soft budget of ${tokenText(r.budget)} tokens`)))
@@ -1206,7 +1208,11 @@ function claimsSection(view, t, r, stages) {
   const reviewRow = rev && div().id(`pf-reviewed-${r.key}`).px(2).truncate().text_size(11.5)
     .text_color(rev.tone === "amber" ? AMBER(t) : t.dim).tooltip(rev.tip).child(rev.text);
   if (!hasClaims(r)) {
-    return section(t, "Claims").child(checksRow ?? div().px(2).text_size(11.5).text_color(t.dim).child("No claims: planned before claims"));
+    // No fold, but the same header line as with claims: "Claims · <checks>".
+    return boxed(t, v_flex().gap(4)).child(h_flex().gap(6).px(2).items_center().min_w(0).text_size(11.5).text_color(t.foreground)
+      .child(div().flex_none().font_semibold().child("Claims"))
+      .child(div().flex_none().text_color(t.dim).child("·"))
+      .child(checksRow ?? div().text_color(t.dim).child("No claims: planned before claims")));
   }
   const s = claimsSummary(t, r, stages);
   const finished = isFinished(r);

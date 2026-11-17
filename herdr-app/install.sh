@@ -55,7 +55,7 @@ fi
 # 2. harbormaster-main: a clone of Herdr's main layout (made here, so whatever main
 #    looks like in this Herdr), made calm. A Crew block is added above the Agents list
 #    when there is none (a fresh clone), then needs-layout.jq drops Herdr's Agents block,
-#    keeps Herdr's Spaces block (half of Crew's height) and gives Crew the Needs-you box
+#    keeps Herdr's Spaces block, moved just below Crew (half of Crew's height) and gives Crew the Needs-you box
 #    and the height that is left. This happens once: main from an older install is
 #    upgraded in place, and a main that already has Crew with the box is left alone.
 main="$home/layouts/harbormaster-main.json"
