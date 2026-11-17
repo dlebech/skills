@@ -128,7 +128,8 @@ export function nextStep(prs, flow) {
 // nextStep with the PRs whose comments are being handled (`asked`: a Set of PR URLs) set aside
 // while the others wait on you: {next, partial}. With some, not all, of an approval's or change
 // request's PRs asked, the step is recomputed over the rest (its counts and words follow) and
-// carries `asked`, the PRs set aside, for the box's rows; `partial` is true. Otherwise the plain
+// carries `asked`, the PRs set aside, for the box's rows, and `all`, every PR of the step in the
+// run's order; `partial` is true. Otherwise the plain
 // step (every PR asked, or none, or the rest wait on something else).
 export function nextStepAsking(prs, flow, asked) {
   const full = nextStep(prs, flow);
@@ -139,7 +140,8 @@ export function nextStepAsking(prs, flow, asked) {
   if (!done.length || !rest.length) return { next: full, partial: false };
   const left = nextStep(rest, flow);
   if (!left || !COMMENT_LABELS.has(left.label)) return { next: full, partial: false };
-  return { next: { ...left, asked: done }, partial: true };
+  // `all`: the step's PRs, asked or not, in the run's own order, so a toast's id never changes.
+  return { next: { ...left, asked: done, all: (prs ?? []).filter((p) => done.includes(p) || left.prs.includes(p)) }, partial: true };
 }
 
 // A next step as the Crew shows it: "review from anna, bo", then "· 3 PRs" with several PRs.
@@ -150,13 +152,16 @@ export function nextStepAsking(prs, flow, asked) {
 //             approval with comments still reads "approved", not "approved — merge"
 //   red       CI is red on the run: "review proof", no "→ merge" (needaction.js says the same)
 //   failed    a proof task failed: "proof failed", never "→ merge" (the box says to read it first)
+//   plan      the run's plan is still open (tasks.js planOpen): an approval reads "approved · plan open",
+//             never "→ merge", since the run's own tasks come before the merge
 // A self-flow draft reads "review proof → ready": it is marked ready before it is merged.
-export function nextStepText(step, { comments = true, red = false, failed = false } = {}) {
+export function nextStepText(step, { comments = true, red = false, failed = false, plan = false } = {}) {
   if (!step) return "";
   const said = commentsText(step.comments);
   const label = step.label === "review from" ? `review from ${step.who.join(", ") || "a reviewer"}`
     : step.label === "review proof → merge" ? (failed ? "proof failed" : red ? "review proof" : step.draft ? "review proof → ready" : step.label)
     : said && step.label === "approved — merge" ? (comments ? `approved · ${said}` : "approved")
+    : plan && step.label === "approved — merge" ? "approved · plan open"
     : said && comments ? `${step.label} · ${said}`
     : step.label;
   return step.count > 1 ? `${label} · ${step.count} PRs` : label;
@@ -165,7 +170,7 @@ export function nextStepText(step, { comments = true, red = false, failed = fals
 // nextStepText for an assessed run (assess), with what it knows beside the step: red CI and a
 // failed proof. One rule for the views that word the step outside assess (parkedLabel, toasts).
 export const stepTextOf = (att, opts = {}) => nextStepText(att?.next, {
-  red: Boolean(att?.reasons?.some((r) => r.key === "red-ci")), failed: Boolean(att?.proofFailed), ...opts,
+  red: Boolean(att?.reasons?.some((r) => r.key === "red-ci")), failed: Boolean(att?.proofFailed), plan: Boolean(att?.planOpen), ...opts,
 });
 
 
@@ -350,7 +355,8 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 //   closed    data.js isClosed: a finished run whose tab the user closed waits on nothing
 //   proofFailed  a proof task failed (attend.js): the review-proof step reads "proof failed"
 //   now
-// Returns {group: "needs" | "working" | "waiting" | "cant" | "done", cantTell, why, reasons: [{key, text, since}],
+// Returns {group: "needs" | "working" | "waiting" | "cant" | "done", cantTell, why, held (the plan holds
+// the step back), planOpen (an approval whose plan is still open: told without "merge"), reasons: [{key, text, since}],
 // next (nextStep), step (stepOf), stall, proofFailed, waitSince (ms: the longest-waiting reason's anchor,
 // for sorting; oldest first)}. Reason keys: question, gone (an unfinished run whose
 // orchestrator is gone or lost: Resume is what it needs), stalled, red-ci, and the next-step
@@ -362,7 +368,7 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
   const step = stepOf(run, { prs, stages, since, ages });
-  const base = { held: false, cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), working: Boolean(working), askedPrs: askedPrs ?? new Set() };
+  const base = { held: false, planOpen: false, cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), working: Boolean(working), askedPrs: askedPrs ?? new Set() };
   const out = (group, extra) => {
     const r = { ...base, ...extra, group };
     const anchors = r.reasons.map((x) => x.since).filter(Boolean);
@@ -392,6 +398,8 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   const { next, partial } = nextStepAsking(prs, flow, askedPrs);
   base.next = next;
   base.held = heldByPlan(run, next);
+  // An approval stays (a reviewer acted) but is not told to merge while the run's own plan is open.
+  base.planOpen = next?.label === "approved — merge" && planOpen(run);
   // Only an un-asked PR with something to address (comments, or changes requested) pulls a
   // working run into Needs you: a plain approval can wait until the run stops.
   const urgent = partial && (next.label === "changes requested" || hasComments(next.comments));
@@ -414,7 +422,7 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
     if (next && NEEDS_LABELS.has(next.label) && !heldByPlan(run, next)) {
       const reviewed = next.label === "changes requested" || next.label === "approved — merge" ? next.pr.reviewedAt ?? null : null;
       // `short`: without the comment count, for the narrow sidebar (crewrows.js rowLead).
-      const opts = { red: ci.state === "red", failed: Boolean(proofFailed) };
+      const opts = { red: ci.state === "red", failed: Boolean(proofFailed), plan: base.planOpen };
       reasons.push({ key: next.label, text: nextStepText(next, opts), short: nextStepText(next, { ...opts, comments: false }), since: reviewed ?? settled });
     }
   }

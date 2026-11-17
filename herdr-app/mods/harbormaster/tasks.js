@@ -31,8 +31,13 @@ export function taskCounts(run) {
 }
 
 // Whether a run still has planned tasks to do: not finished, and fewer done than planned.
+// plan.md's tasks alone decide when it lists any: some task neither done nor dropped. A stale,
+// too-high `planned` in status.json (the plan was cut without marking tasks dropped) must not
+// hold a ready PR back; the counts decide only when plan.md lists no tasks.
 export function planOpen(run) {
   if (!run || run.phase === "finished") return false;
+  const tasks = run.tasks ?? [];
+  if (tasks.length) return tasks.some((task) => taskTone(task.state) !== "done" && !isDropped(task.state));
   const { done, planned } = taskCounts(run);
   return planned > done;
 }

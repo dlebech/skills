@@ -8,6 +8,7 @@
 
 import { ageText, ciState } from "./attention.js";
 import { andList } from "./words.js";
+import { taskCounts } from "./tasks.js";
 import { hasComments, commentsText, defaultMode, askAllLabel, offersAll } from "./comments.js";
 
 const numOf = (p) => (p?.number ? `#${p.number}` : null);
@@ -55,13 +56,13 @@ function addressPrs(prs, run, asked = []) {
   const can = Boolean(run?.dir && run.localTerminal && !run.away && !run.question);
   const first = defaultMode(run?.autonomy);
   const asks = can ? prs.filter((p) => p?.url && hasComments(p.comments)) : [];
-  if (!asks.length) return openPrs(prs);
+  // An asked PR: "#1799 · asked…" with its Open. Built first: it shows even when nothing else can be asked.
+  const done = asked.filter((p) => p?.url).flatMap((p) => [{ kind: "asked", label: "asked…", pr: p, row: numOf(p) ?? "the PR" }, ...openPrs([p]).map((x) => ({ ...x, row: numOf(p) ?? "the PR" }))]);
+  if (!asks.length) return [...done, ...openPrs(prs)];
   const several = prs.length + asked.length > 1;
   const row = (p) => (several ? { row: [numOf(p) ?? "the PR", commentsText(p.comments)].filter(Boolean).join(" · ") } : {});
   const open = (p) => openPrs([p]).map((x) => ({ ...x, ...row(p) }));
   const rest = prs.filter((p) => p?.url && !asks.includes(p)).slice(0, Math.max(0, MAX_OPEN - asks.length));
-  // An asked PR: "#1799 · asked…" with its Open.
-  const done = asked.filter((p) => p?.url).flatMap((p) => [{ kind: "asked", label: "asked…", pr: p, row: numOf(p) ?? "the PR" }, ...openPrs([p]).map((x) => ({ ...x, row: numOf(p) ?? "the PR" }))]);
   const all = offersAll(asks) ? ["ask", "handle"].map((mode) => ({ kind: "address-all", label: askAllLabel(mode), mode, prs: asks, primary: mode === first, row: `All ${asks.length}` })) : [];
   return [
     ...done,
@@ -139,9 +140,13 @@ function reasonItem(r, a, ctx) {
       const who = [...new Set(same.flatMap((p) => p.approvedBy ?? []))];
       const at = Math.max(0, ...same.map((p) => p.reviewedAt ?? 0)) || null;
       const by = who.length ? ` by ${andList(who)}` : "";
-      // The comments come before the merge: address them, then merge.
+      // The comments come before the merge: address them, then merge. While the run's own plan is
+      // open (a.planOpen) the reviewer's approval stands but there is nothing to merge yet.
+      const plan = a.planOpen;
+      const tasks = plan ? taskCounts(run ?? {}) : null;
       const line = hasComments(next?.comments)
-        ? `Approved${by}${ago(at, now)} with ${commentsText(next.comments)} on ${prsText(same)}: address them, then merge`
+        ? `Approved${by}${ago(at, now)} with ${commentsText(next.comments)} on ${prsText(same)}: address them${plan ? "" : ", then merge"}`
+        : plan ? `${prsText(same)} approved${by}${ago(at, now)} · merge once the plan is done (${tasks.done}/${tasks.planned} tasks)`
         : `Merge ${prsText(same)} · approved${by}${ago(at, now)}`;
       return { line, actions: addressPrs(same, run, next?.asked) };
     }

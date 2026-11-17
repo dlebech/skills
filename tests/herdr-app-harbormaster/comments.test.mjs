@@ -182,7 +182,7 @@ test("the gh call asks GitHub's GraphQL API for the PR by owner, name and number
   assert.deepEqual([args[0], args[1], args.slice(-6)], ["api", "graphql", ["-F", "owner=o", "-F", "name=api", "-F", "number=1799"]]);
   assert.match(args[3], /^query=query\(/);
   // Only what is read: no authors on the last reply or conversation comments.
-  assert.match(COMMENTS_QUERY, /last:comments\(last:1\)\{nodes\{body\}\}/);
+  assert.match(COMMENTS_QUERY, /last:comments\(last:5\)\{nodes\{body\}\}/);
   assert.match(COMMENTS_QUERY, /comments\(last:50\)\{nodes\{body createdAt\}\}/);
   assert.equal(commentsArgs("https://example.com/x"), null);
 });

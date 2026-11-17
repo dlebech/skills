@@ -40,8 +40,9 @@ function post(run, parts, ctx) {
 
 // After a run read: steps the toast store and posts what is new, while the toasts are on (off,
 // the store still steps, so turning them on again tells only what is new from then).
-function observeToasts(runs, ctx, failed, now) {
-  const seen = runs.map((r) => ({ key: r.key, ...(r.stale ? { known: false, prKnown: false, parts: [] } : toastParts(r, attentionOf(r, ctx, now))) }));
+// `atts`: each live run's attention (observeTelling reads it once), by run.
+function observeToasts(runs, atts, ctx, failed, now) {
+  const seen = runs.map((r) => ({ key: r.key, ...(r.stale ? { known: false, prKnown: false, parts: [] } : toastParts(r, atts.get(r))) }));
   const store = shared(NOTIFIED_KEY) ?? {};
   const { store: next, toasts } = nextToasts(store, seen, now, { failed, me: ME });
   if (next === store) return;
@@ -76,9 +77,12 @@ export function observeTelling(runs, ctx, now = Date.now()) {
   const seen = shared(SEEN_KEY) ?? {};
   const nextS = nextSeen(seen, runs, { failed });
   if (nextS !== seen) setShared(SEEN_KEY, nextS);
-  observeToasts(runs, ctx, failed, now);
-  // Asks for Address comments that no longer hold go from their store (asked.js).
+  // Each live run's attention once: it reads the PRs, CI, stall, proof and asks, and both the
+  // toasts and the prune below need it.
   const live = runs.filter((r) => !r.stale);
-  const busy = new Set(live.filter((r) => attentionOf(r, ctx, now).working).flatMap((r) => (prsOf(r) ?? []).map((p) => p.url)));
+  const atts = new Map(live.map((r) => [r, attentionOf(r, ctx, now)]));
+  observeToasts(runs, atts, ctx, failed, now);
+  // Asks for Address comments that no longer hold go from their store (asked.js).
+  const busy = new Set(live.filter((r) => atts.get(r).working).flatMap((r) => (prsOf(r) ?? []).map((p) => p.url)));
   pruneAsked(live.flatMap((r) => prsOf(r) ?? []), busy);
 }

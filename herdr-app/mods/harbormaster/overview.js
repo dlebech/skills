@@ -380,14 +380,15 @@ function ciAction(view, t, r, action, id) {
 
 const MODE_TIP = {
   ask: "Ask me: its orchestrator writes you one question listing each comment with what it proposes (fix, reply or leave, and why); it acts on your answer",
-  handle: "Handle them: its orchestrator fixes what it agrees with, pushes, replies on each thread it acted on (\"🤖 AI: …\"), resolves the threads it addressed and reports; it never merges",
+  handle: "Handle them: its orchestrator fixes what it agrees with, pushes, replies on each thread it acted on (\"🤖 AI: …\"), never resolving one, and reports; it never merges",
 };
 
 // Address comments, on a run's card and pane: for each of its approved or changes-requested PRs
-// with open review comments, "Address N comments on #42" and two buttons, Ask me and Handle them,
+// with open review comments, "Address 9 threads on #42" and two buttons, Ask me and Handle them,
 // the run's autonomy's default (comments.js defaultMode) highlighted; a click writes an inbox
-// message for that PR (data.js askComments) and the row reads "asked…" until the PR's open
-// comments change, or while the message is unread. Null when there are none, the run
+// message for that PR (data.js askComments) and the row reads "asked…" while the message is
+// unread and, once read, until the PR's open comments change (while the run works, until a new
+// one appears). Null when there are none, the run
 // is put away, or its orchestrator is not known here; and while the run has an open question
 // (an Ask me's question is answered in its box, and a second ask would only queue a duplicate).
 function commentsAction(view, t, r, att, id) {
@@ -415,7 +416,7 @@ function addressAsked(r, p, att = null) {
   return att?.askedPrs ? att.askedPrs.has(p.url) : commentsAsked(r, p, askedStore()[p.url]);
 }
 const askedNote = (t, id) => div().id(id).flex_none().text_size(11).text_color(t.muted)
-  .tooltip("Asked its orchestrator to address these comments; waiting for its open comments to change").child("asked…");
+  .tooltip("Asked its orchestrator to address these comments; while its orchestrator works on them, or until its open comments change (a comment the reviewer adds later ends it)").child("asked…");
 const modeTip = (r, mode) => `${MODE_TIP[mode]}.${mode === defaultMode(r.autonomy) ? ` The default at ${r.autonomy ?? "L0"}.` : ""}`;
 
 // The click of an Ask me or Handle them: writes the run's inbox message for the PR (data.js
