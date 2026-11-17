@@ -33,11 +33,14 @@ export function toastParts(run, att) {
     else if (r.key === "red-ci") parts.push({ id: `pr/red-ci:${r.text}`, text: r.text.replace(/^red CI/, "Red CI") });
     else if (r.key !== "stalled") {
       const which = nums(att.next?.prs);
+      // The id names every PR of the step, asked about or not, in the run's order: asking about
+      // some of them (the step is then recomputed over the rest) never makes a new id.
+      const idPrs = nums(att.next?.all ?? att.next?.prs);
       // The step's words, as the pill and the Crew say them (red CI, a draft, a failed proof),
       // one PR at a time; the id keeps the key, so a toast already told is not told again.
-      const label = (r.key === "approved — merge" && att.next?.comments?.count) || r.key === "review proof → merge"
+      const label = (r.key === "approved — merge" && (att.next?.comments?.count || att.planOpen)) || r.key === "review proof → merge"
         ? stepTextOf({ ...att, next: { ...att.next, count: 1 } }) : r.key;
-      parts.push({ id: `pr/${r.key}:${which.join(",")}`, text: which.length ? `${which.join(", ")} ${label}` : label });
+      parts.push({ id: `pr/${r.key}:${idPrs.join(",")}`, text: which.length ? `${which.join(", ")} ${label}` : label });
     }
   }
   return { known: true, prKnown, parts };

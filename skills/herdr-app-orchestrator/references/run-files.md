@@ -245,10 +245,11 @@ into classes, so the number on the row always says what it counts:
 
 Resolved threads appear nowhere. Only the repository's owners, members and collaborators count, and
 bots; threads the PR's author opened are not feedback. The run then reads `approved · 9 threads`,
-`approved · 1 review note` or `approved · 2 threads, 1 note`, and its card and pane offer
-**Address comments** with **Ask me** (the default at L0 and L1) and **Handle them** (the default at
+`approved · 1 review note` or `approved · 2 threads, 1 note`, and its need box (or, outside Needs you's
+box, its card and pane) offers **Address comments** with **Ask me** (the default at L0 and L1) and **Handle them** (the default at
 L2). Either writes a message (source `harbormaster-comments`, woken like an answer) whose first
-line is `address comments on <PR url>: ask` or `…: handle`, then what Harbormaster sees:
+line is `address comments on <PR url>: ask` or `…: handle`, then what Harbormaster sees. **Ask me about
+all** and **Handle all** send one such message per PR, so several can arrive together:
 
 ```
 address comments on https://github.com/o/api/pull/1799: ask
@@ -264,7 +265,7 @@ Review summaries (sum up their threads, not counted):
 - anna in a review: "#1 should be looked at first" (https://github.com/…)
 Bots' open threads (counted apart):
 - coderabbitai on app/Y.php:7: "Guard the index." (thread PRRT_kwDO…)
-Asked from Harbormaster: read the threads and notes, then write one question.md listing each comment with your proposal (…) Never merge.
+Asked from Harbormaster: read the threads, notes and summaries (a point a review summary makes that no thread covers is answered in that `🤖 AI:` PR comment, as for a note; summaries are not counted), then write one question.md listing each comment with your proposal (…) Never merge.
 ```
 
 The orchestrator sets its status to running and reads the threads itself (`gh api graphql`, the

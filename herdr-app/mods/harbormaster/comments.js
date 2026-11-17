@@ -8,12 +8,12 @@
 // which, like an ask what is blocking, answers no question (data.js NOT_ANSWERS).
 
 // One gh call per PR (data.js withComments): its review threads with their first comment (who,
-// with their standing on the repository) and their last one's text (is it an agent's answer?),
+// with their standing on the repository) and the text of their last five (is one an agent's answer?),
 // its reviews with their bodies, and its last conversation comments' text and time (to see which
 // review bodies were already answered). Only what commentSummary reads: the answer is large anyway.
 export const COMMENTS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
 author{login}
-reviewThreads(first:100){nodes{id isResolved path line originalLine first:comments(first:1){nodes{author{__typename login} authorAssociation body url}} last:comments(last:1){nodes{body}}}}
+reviewThreads(first:100){nodes{id isResolved path line originalLine first:comments(first:1){nodes{author{__typename login} authorAssociation body url}} last:comments(last:5){nodes{body}}}}
 reviews(last:50){nodes{state body url submittedAt authorAssociation author{__typename login} comments{totalCount}}}
 comments(last:50){nodes{body createdAt}}}}}`;
 
@@ -63,10 +63,11 @@ export const COMMENTS_KEEP = 40;
 //   {count, threads, notes, answered, summaries, bots, items: [{kind, who, text, where, thread,
 //   url, bot?}]}, where `kind` is the class:
 //   "thread"   a person's unresolved review thread whose last comment is not an agent's "🤖 AI:"
-//              reply. Counted (`threads`).
+//              reply (a bot's thread: with no such reply at all). Counted (`threads`).
 //   "note"     a person's review text (approved, changes requested or commented) that holds
 //              feedback of its own, with no "🤖 AI:" comment or review after it. Counted (`notes`).
-//   "answered" a thread whose last comment is an "🤖 AI:" reply, or a note with such a comment
+//   "answered" a thread whose last comment is an "🤖 AI:" reply (a bot's: any comment, the bot may
+//              reply to the reply), or a note with such a comment
 //              after it: waiting on the reviewer, who resolves it. Shown, not counted (`answered`).
 //   "summary"  a review's text that sums up the threads submitted with it. Shown, not counted
 //              (`summaries`).
@@ -96,7 +97,10 @@ export function commentSummary(data) {
     const line = t.line ?? t.originalLine;
     const item = { kind: "thread", who, text: commentText(first.body), where: t.path ? `${t.path}${line ? `:${line}` : ""}` : null, thread: t.id ?? null, url: first.url ?? null };
     if (bot) item.bot = true;
-    if (fromAi(t.last?.nodes?.[0]?.body)) { answered.push({ ...item, kind: "answered" }); continue; }
+    // A person's thread is answered while the AI reply is the last word (their follow-up counts
+    // again); a bot's once the AI replied at all, since a bot thanks the fix and rarely resolves.
+    const tail = t.last?.nodes ?? [];
+    if (bot ? tail.some((c) => fromAi(c.body)) : fromAi(tail[tail.length - 1]?.body)) { answered.push({ ...item, kind: "answered" }); continue; }
     if (bot) { botItems.push(item); bots[who] = (bots[who] ?? 0) + 1; } else open.push(item);
   }
   const aiTimes = [...(pr.comments?.nodes ?? []), ...(pr.reviews?.nodes ?? []).map((r) => ({ ...r, createdAt: r.submittedAt }))]
@@ -280,18 +284,29 @@ export const commentsSig = (run, pr) => `${(pr?.comments?.items ?? []).map((x) =
 export const commentsAsked = (run, pr, asked = null) => (run?.commentsAsked ?? []).includes(pr?.url) || (asked != null && asked.sig === commentsSig(run, pr));
 
 // ---- The asked state, kept across reloads ----
-// What the user asked to be handled, per PR URL: {sig, at} (commentsSig at the click, and when),
-// kept in shared state harbormaster.commentsAsked (asked.js). The unread inbox message alone is
-// not enough: the orchestrator renames it once it reads it, long before the threads are done.
+// What the user asked to be handled, per PR URL: {sig, ids, at} (commentsSig at the click, the ids
+// of the counted comments then, and when), kept in shared state harbormaster.commentsAsked
+// (asked.js). The unread inbox message alone is not enough: the orchestrator renames it once it
+// reads it, long before the threads are done.
 
 export const ASKED_KEEP_MS = 7 * 24 * 3600 * 1000;
 
-// Whether `store` holds a live ask for the PR: not older than a week and, unless the run is still
-// at work (`working`: its orchestrator is handling the comments, so they change under it), with
-// its comments unmoved.
+// The ids of a PR's counted comments (people's and bots', open threads and notes), as the message
+// to the orchestrator listed them. An answer changes an item's kind, never its id.
+const itemId = (x) => x.thread ?? x.url ?? x.text;
+export const countedIds = (pr) => (pr?.comments?.items ?? []).filter(isOpen).map(itemId);
+
+// Whether the PR has a counted comment the ask did not list (`e.ids` at the click): a reviewer wrote
+// more since. An ask stored without ids (before they were kept) has no such comment.
+const hasNewCounted = (e, pr) => Array.isArray(e?.ids) && countedIds(pr).some((id) => !e.ids.includes(id));
+
+// Whether `store` holds a live ask for the PR: not older than a week and, while the run is at work
+// (`working`: its orchestrator is handling the comments, so they change under it), with no new
+// counted comment since the click; otherwise with its comments unmoved.
 export const askedEntry = (store, pr, now = Date.now(), working = false) => {
   const e = store?.[pr?.url];
-  return Boolean(e) && now - (e.at ?? 0) <= ASKED_KEEP_MS && (working || e.sig === commentsSig(null, pr));
+  if (!e || now - (e.at ?? 0) > ASKED_KEEP_MS) return false;
+  return working ? !hasNewCounted(e, pr) : e.sig === commentsSig(null, pr);
 };
 
 // The URLs among `prs` with a live ask in `store`.
@@ -304,7 +319,7 @@ export const askedAmong = (store, run, prs, now = Date.now(), working = false) =
 // or of the ones for all).
 export const markAsked = (store, run, prs, now = Date.now()) => ({
   ...(store ?? {}),
-  ...Object.fromEntries(prs.filter((p) => p?.url).map((p) => [p.url, { sig: commentsSig(run, p), at: now }])),
+  ...Object.fromEntries(prs.filter((p) => p?.url).map((p) => [p.url, { sig: commentsSig(run, p), ids: countedIds(p), at: now }])),
 });
 
 // `store` without the PR (a failed send), or the same object when it was not there.
@@ -316,7 +331,8 @@ export function unmarkAsked(store, url) {
 
 // `store` without what no longer holds: asks older than a week, and asks for a PR now merged or
 // closed, or whose open comments moved once its run stopped working (the PR's comments unread
-// are not "moved"; `busy`: a Set of the URLs of PRs whose run is working, kept while it does).
+// are not "moved"; `busy`: a Set of the URLs of PRs whose run is working, kept while it does, unless
+// a counted comment the ask did not list has appeared).
 // `prs` are the PRs as read. The same object when nothing goes, so the caller writes only on a change.
 export function prunedAsked(store, prs, now = Date.now(), busy = new Set()) {
   if (!store) return store;
@@ -326,7 +342,8 @@ export function prunedAsked(store, prs, now = Date.now(), busy = new Set()) {
     const p = byUrl.get(url);
     if (!p) return true;
     if (p.state === "MERGED" || p.state === "CLOSED") return false;
-    if (!p.comments || commentsUnknown(p.comments) || busy.has(url)) return true;
+    if (!p.comments || commentsUnknown(p.comments)) return true;
+    if (busy.has(url)) return !hasNewCounted(e, p);
     return e.sig === commentsSig(null, p);
   });
   return keep.length === Object.keys(store).length ? store : Object.fromEntries(keep);

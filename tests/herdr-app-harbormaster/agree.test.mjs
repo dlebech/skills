@@ -208,3 +208,24 @@ test("tasks the plan dropped are neither open nor done, on the strip's count and
   assert.equal(planOpen({ ...r, tasks: [...r.tasks, { state: "planned" }], planned: 5 }), true);
   assert.equal(planOpen({ ...r, phase: "finished", tasks: [{ state: "planned" }], planned: 1 }), false);
 });
+
+test("an approval over an open plan: pill, Crew lead, toast and parked label say 'approved · plan open', never merge", () => {
+  const open = run({ phase: "running", tasks: [{ id: "t1", state: "done" }, { id: "t2", state: "planned" }], planned: 2 });
+  const list = [pr({ approvedBy: ["m"], review: "APPROVED", reviewedAt: ago(500) })];
+  const a = at(open, list, { flow: "peer" });
+  assert.equal(a.group, "needs");
+  assert.equal(a.planOpen, true);
+  assert.equal(badgeOf(a, false).label, "approved · plan open");
+  assert.equal(rowLead(a, now).lead.split(" · ").slice(0, 2).join(" · "), "approved · plan open");
+  assert.deepEqual(toastParts(open, a).parts.map((p) => p.text), ["#42 approved · plan open"]);
+  const parked = { how: "parked", at: ago(3 * 1440) };
+  assert.equal(parkedLabel(a, parked, now), "approved · plan open · 3d");
+  // With open comments the comments wording stays, still without merge.
+  const withC = [pr({ approvedBy: ["m"], review: "APPROVED", reviewedAt: ago(500), comments: { count: 9, threads: 9, notes: 0, bots: {}, items: [] } })];
+  const b = at(open, withC, { flow: "peer" });
+  assert.equal(badgeOf(b, false).label, "approved · 9 threads");
+  assert.equal(parkedLabel(b, parked, now), "approved · 9 threads · 3d");
+  // Plan done: the original wording.
+  const done = run({ phase: "running", tasks: [{ id: "t1", state: "done" }, { id: "t2", state: "done" }], planned: 2 });
+  assert.equal(badgeOf(at(done, list, { flow: "peer" }), false).label, "approved — merge");
+});

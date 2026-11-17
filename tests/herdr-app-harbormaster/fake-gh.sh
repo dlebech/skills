@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A fake `gh` for crew-sandbox.sh's two-prs run: `pr view` and the review-comments query for
-# owner fake-two answer from here (PR 1799: 2 open threads, 1372: 9; both approved by
+# owner fake-two answer from here (PR 1799: 2 open threads, 1372: 9, 44: none; both approved by
 # mfalkenbrink). Anything else runs the real gh ($REAL_GH).
 args="$*"
 case "$args" in
@@ -13,7 +13,7 @@ case "$args" in
     ;;
   *"api graphql"*"owner=fake-two"*)
     n=$(grep -o 'number=[0-9]*' <<<"$args" | head -1 | cut -d= -f2)
-    t=2; [ "$n" = 1372 ] && t=9
+    t=2; [ "$n" = 1372 ] && t=9; [ "$n" = 44 ] && t=0
     jq -n --argjson t "$t" '{data:{repository:{pullRequest:{author:{login:"dlebech"},
       reviewThreads:{nodes:[range($t)|{id:"th\(.)",isResolved:false,path:"app/X.php",line:(10+.),first:{nodes:[{author:{__typename:"User",login:"mfalkenbrink"},authorAssociation:"MEMBER",body:"Comment \(.)",url:"u"}]},last:{nodes:[{body:"Comment"}]}}]},
       reviews:{nodes:[]},comments:{nodes:[]}}}}}'
