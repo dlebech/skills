@@ -392,14 +392,15 @@ const smallButton = (t, id, label, tip, onClick, off = false) => h_flex().id(id)
   .on_click((_e, cx) => { cx.stop_propagation(); if (!off) onClick(cx); })
   .child(label);
 
-function nextAction(m, it, id) {
+export function nextAction(m, it, id) {
   const { t } = m;
   if (it.kind === "review") {
     // Started from here and its run not seen yet (newrun.js reviewStarting): never a second Review.
     if (reviewStarting(it.url)) return div().flex_none().text_size(11).text_color(t.dim).tooltip("Its review run is starting; it shows as reviewing once its run files name the PR").child("starting…");
     if (!it.local) return null;
     return smallButton(t, `${id}-act`, "Review", "Start a review run in its repository's space, with your remembered review settings", (cx) => {
-      startReview({ repo: it.local, pr: it.number, url: it.url }).catch(() => {}).finally(() => cx.notify());
+      // The click's cx is gone once startReview awaits: the redraw after it uses a task's own.
+      cx.spawn(async (cx) => { await startReview({ repo: it.local, pr: it.number, url: it.url }).catch(() => {}); cx.notify(); });
       cx.notify();
     });
   }

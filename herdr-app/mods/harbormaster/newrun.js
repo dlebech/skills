@@ -250,30 +250,38 @@ export function target(nr, fromList = false) {
   return exact ?? (fromList && nr.open ? shownList(nr)[nr.sel] ?? null : null);
 }
 
-async function start(view, cx, fromList = false) {
+// Start (the button, or Enter): what is wrong is said at once; else "Starting…" and the start
+// runs in a task. The click's cx is gone after its first await (a stale-context error that
+// nothing shows), so everything after one uses the task's own.
+function start(view, cx, fromList = false) {
   const nr = view.nr;
-  if (nr.busy) return;
-  let pick = target(nr, fromList);
+  if (nr.busy || nr.done) return;
+  const pick = target(nr, fromList);
   if (pick && pick !== nr.folder) setFolder(view, pick);
-  // A space opened meanwhile counts; and a new space's id must not be another folder's.
-  const open = spaces();
-  if (pick && !pick.space && !pick.machine) {
-    const there = (await openFolders().catch(() => [])).find((e) => e.folder === pick.folder && e.space && !e.machine);
-    pick = there ?? pick;
-  }
   const { profile, bad } = parseProfile(nr.profile.value(), profileFor(nr.kind, nr.prefs?.profile));
   const problem = !pick ? "Pick a folder from the list"
     : pick.machine ? `That space is on ${pick.machine}: start the run from the Herdr window there`
     : bad.length ? `Not understood: ${bad.join(" ")}` : inputProblem(nr.kind, nr.text.value());
   if (problem) { nr.error = problem; nr.hint = true; nr.open = false; cx.notify(); return; }
-  nr.busy = true; nr.error = null; nr.hint = false; nr.open = false; cx.notify();
-  const repo = { space: pick.space, name: base(pick.folder), root: pick.folder, spaceId: pick.space ? null : newSpaceId(pick.folder, open) };
+  nr.busy = true; nr.error = null; nr.hint = false; nr.open = false;
+  const ask = { pick, profile, kind: nr.kind, input: nr.text.value(), drafts: nr.drafts, overlay: props()?.overlay };
+  cx.notify();
+  cx.spawn((cx) => startNow(view, cx, ask));
+}
+
+async function startNow(view, cx, { pick, profile, kind, input, drafts, overlay }) {
+  const nr = view.nr;
   let out;
-  try { out = await launch({ repo, kind: nr.kind, input: nr.text.value(), profile, drafts: nr.drafts }); }
-  catch (e) { out = { ok: false, error: String(e?.message ?? e) }; }
-  finally { nr.busy = false; }
+  try {
+    // A space opened meanwhile counts; and a new space's id must not be another folder's.
+    const open = spaces();
+    if (!pick.space) pick = (await openFolders().catch(() => [])).find((e) => e.folder === pick.folder && e.space && !e.machine) ?? pick;
+    const repo = { space: pick.space, name: base(pick.folder), root: pick.folder, spaceId: pick.space ? null : newSpaceId(pick.folder, open) };
+    out = await launch({ repo, kind, input, profile, drafts });
+  } catch (e) { out = { ok: false, error: `Could not start it: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}` }; }
+  nr.busy = false;
   // Started: the new tab is the confirmation. Not quite (the trust prompt, a dialog): say where, calmly.
-  if (out.ok) { try { closeOverlay(props().overlay); } catch { /* closed */ } return; }
+  if (out.ok) { try { closeOverlay(overlay); } catch { /* closed */ } return; }
   nr.error = out.error;
   if (out.started) nr.done = true;
   cx.notify();
@@ -344,6 +352,7 @@ export function newRunView(view, t) {
       .child(pill(t, "nr-cancel", nr.done ? "Close" : "Cancel", false, () => { try { closeOverlay(props().overlay); } catch { /* closed */ } }))
       .child(div().id("nr-start").px(14).h(28).rounded(6).flex().items_center().text_size(12.5).font_semibold()
         .bg(t.accent).text_color(t.background).when(nr.busy || nr.done || !startable, (e) => e.opacity(0.45))
-        .when(!nr.busy && !nr.done && startable, (e) => e.cursor_pointer().on_click((_e, cx) => { start(view, cx); }))
+        // Dim without a folder, but still clickable: the click says what is missing.
+        .when(!nr.busy && !nr.done, (e) => e.cursor_pointer().on_click((_e, cx) => { start(view, cx); }))
         .child(nr.busy ? "Starting…" : "Start")));
 }
