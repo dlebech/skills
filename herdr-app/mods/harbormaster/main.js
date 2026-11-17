@@ -12,6 +12,7 @@
 import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
 import { props, theme, nextCommand, checking, openOverlay, closeOverlay, shared, setShared } from "herdr";
+import { expireNote } from "./note.js";
 import { loadRuns, cachedRuns, refreshPrs, isClosed, isParked, newestFirst } from "./data.js";
 import { facts, crewAddresses } from "./live.js";
 import { loadContexts } from "./context.js";
@@ -183,7 +184,8 @@ export default class Harbormaster extends View {
   }
 
   refresh(cx) {
-    if (this.expireBusy()) cx.notify();
+    // A note past its time goes with the same refresh, so no timer is needed for it.
+    if (this.expireBusy() | expireNote(this)) cx.notify();
     expirePopup();
     cx.spawn(async (cx) => {
       const runs = await this.load(cx);

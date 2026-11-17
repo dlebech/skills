@@ -13,6 +13,7 @@
 #   root <file>     a capture of the whole Xvfb screen, to find screen coordinates for click
 #   click <x> <y>   left click at screen coordinates on the Xvfb display (XTest; never the user's)
 #   hover <x> <y>   move the pointer there (tooltips)
+#   scroll <x> <y> [n]  wheel down n notches (default 10) with the pointer there
 #   hc <args>       hc against the scratch session (e.g. hc label t4 role=)
 #   env             print the environment lines (eval them to run herdr-app/hc by hand)
 #   down            stop the scratch app, its Xvfb and the scratch hc session; the scratch dir stays
@@ -93,6 +94,9 @@ x, y, click = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3] == "click"
 # Two moves, so the app sees the pointer arrive (hover) even when it was already near.
 xt.XTestFakeMotionEvent(d, -1, x - 4, y - 1, 0); x11.XFlush(d); time.sleep(0.15)
 xt.XTestFakeMotionEvent(d, -1, x, y, 0); x11.XFlush(d); time.sleep(0.3)
+if sys.argv[3] == "scroll":
+    for _ in range(int(sys.argv[4])):
+        xt.XTestFakeButtonEvent(d, 5, 1, 0); xt.XTestFakeButtonEvent(d, 5, 0, 0); x11.XFlush(d); time.sleep(0.03)
 if click:
     xt.XTestFakeButtonEvent(d, 1, 1, 0); x11.XFlush(d); time.sleep(0.08)
     xt.XTestFakeButtonEvent(d, 1, 0, 0); x11.XFlush(d); time.sleep(0.2)
@@ -260,6 +264,7 @@ case $cmd in
   root) sandbox_env; import -window root "$1" ;;
   click) sandbox_env; xtest "$1" "$2" click ;;
   hover) sandbox_env; xtest "$1" "$2" move ;;
+  scroll) sandbox_env; xtest "$1" "$2" scroll "${3:-10}" ;;
   hc) sandbox_env; hc "$@" ;;
   env)
     echo "export HERDR_APP_HOME=$S/home HC_SESSION=$session HERDR_ORCHESTRATION_ROOT=$S/runs"

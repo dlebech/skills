@@ -8,6 +8,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { exec, writeTextFile, appHome, openOverlay, closeOverlay } from "herdr";
 import { makeCopier, isImage, isVideo, mediaPath } from "./media.js";
 import { openUrl } from "./live.js";
+import { setNote } from "./note.js";
 
 const copier = () => makeCopier({ exec, writeTextFile, home: appHome() });
 const RECHECK = 60000; // a shown file is looked at again after this long, in case it changed
@@ -91,7 +92,7 @@ function playVideo(view, run, rel, cx) {
     try { openUrl(mediaPath(run.dir, rel)); } catch (e) { view.actionError = e.message; cx.notify(); }
     return;
   }
-  view.actionNote = `Copying ${rel.split("/").pop()}…`;
+  setNote(view, `Copying ${rel.split("/").pop()}…`);
   view.actionError = null;
   cx.notify();
   cx.spawn(async (cx) => {
