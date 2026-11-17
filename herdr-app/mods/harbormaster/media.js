@@ -96,3 +96,7 @@ export function makeCopier({ exec, writeTextFile, home }) {
     return out;
   };
 }
+
+// What openUrl may hand to the system opener: an http(s) page, or a local absolute path (a run's
+// proof file). Any other scheme (file:, smb:, a custom handler) is refused.
+export const openable = (url) => typeof url === "string" && (/^https?:\/\//i.test(url) || /^(\/|[A-Za-z]:[\\/])/.test(url));

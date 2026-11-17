@@ -1,6 +1,7 @@
 // Live facts from herdr-core (terminals, agents, panes) and the few actions the views take.
 
 import { isWake } from "./wake.js";
+import { openable } from "./media.js";
 import { exec, terminals, agents, panes, spaces, run, window, focused } from "herdr";
 
 // The terminal and agent lists every helper below reads, taken once per render.
@@ -262,6 +263,8 @@ export function replyToCaptain(address, decision, text) {
 }
 
 export function openUrl(url) {
+  // A second line of defence: hand the system opener only a web page or a local path, never file:, smb: or a custom scheme.
+  if (!openable(url)) { console.log(`harbormaster: not opening ${String(url).slice(0, 80)}`); return; }
   const platform = window()?.platform;
   const cmd = platform === "macos" ? "open" : platform === "windows" ? "explorer" : "xdg-open";
   exec(cmd, [url]).catch(() => {});

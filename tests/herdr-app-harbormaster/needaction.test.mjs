@@ -299,3 +299,10 @@ test("the Details fold names what is in it, and is left out when it holds nothin
   assert.equal(detailsLabel([{ label: "Evidence" }], []), "Details: evidence");
   assert.equal(detailsLabel([{ label: "Evidence" }], opts), "Details: evidence, what each option does");
 });
+
+test("the failing check opens only from an https URL; any other scheme falls back to the PR's checks tab", () => {
+  for (const url of ["file:///etc/passwd", "smb://host/share", "x-app://run", "http://example.com/c", "javascript:alert(1)"]) {
+    const [it] = items(run(), [pr({ checks: checks(0, 1), failed: { name: "lint", url } })], { flow: "self" });
+    assert.equal(it.actions[0].url, "https://github.com/o/skills/pull/42/checks", url);
+  }
+});

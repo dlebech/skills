@@ -13,9 +13,9 @@
 // review bodies were already answered). Only what commentSummary reads: the answer is large anyway.
 export const COMMENTS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
 author{login}
-reviewThreads(first:100){nodes{id isResolved path line originalLine first:comments(first:1){nodes{author{__typename login} authorAssociation body url}} last:comments(last:5){nodes{body}}}}
+reviewThreads(first:100){nodes{id isResolved path line originalLine first:comments(first:1){nodes{author{__typename login} authorAssociation body url}} last:comments(last:5){nodes{body author{login} authorAssociation}}}}
 reviews(last:50){nodes{state body url submittedAt authorAssociation author{__typename login} comments{totalCount}}}
-comments(last:50){nodes{body createdAt}}}}}`;
+comments(last:50){nodes{body createdAt author{login} authorAssociation}}}}}`;
 
 // The gh arguments for a PR's comments, or null for a URL that is not a GitHub PR.
 export function commentsArgs(url) {
@@ -37,6 +37,11 @@ const counts = (author, association) => isBot(author) || (Boolean(author?.login)
 // A reply from an agent starts with this, so the reviewer can tell it from the user's own.
 export const AI_PREFIX = "🤖 AI:";
 const fromAi = (body) => (body ?? "").trimStart().startsWith(AI_PREFIX);
+
+// An AI reply answers only when a person with standing wrote it: the PR's author (the orchestrator
+// replies as the user) or an owner, member or collaborator. Anyone can reply in a public thread,
+// and a stranger's "🤖 AI: done" must not take a member's comment off the count.
+const aiReply = (c, prAuthor) => fromAi(c?.body) && ((Boolean(prAuthor) && c.author?.login === prAuthor) || MEMBERS.has(c.authorAssociation));
 
 // A review body that is only an acknowledgement: one short line (under 20 characters once
 // markup is dropped) with no list or code, such as "LGTM 👍", "Looks good" or "Approved".
@@ -100,11 +105,11 @@ export function commentSummary(data) {
     // A person's thread is answered while the AI reply is the last word (their follow-up counts
     // again); a bot's once the AI replied at all, since a bot thanks the fix and rarely resolves.
     const tail = t.last?.nodes ?? [];
-    if (bot ? tail.some((c) => fromAi(c.body)) : fromAi(tail[tail.length - 1]?.body)) { answered.push({ ...item, kind: "answered" }); continue; }
+    if (bot ? tail.some((c) => aiReply(c, author)) : aiReply(tail[tail.length - 1], author)) { answered.push({ ...item, kind: "answered" }); continue; }
     if (bot) { botItems.push(item); bots[who] = (bots[who] ?? 0) + 1; } else open.push(item);
   }
   const aiTimes = [...(pr.comments?.nodes ?? []), ...(pr.reviews?.nodes ?? []).map((r) => ({ ...r, createdAt: r.submittedAt }))]
-    .filter((c) => fromAi(c.body)).map((c) => Date.parse(c.createdAt ?? "")).filter(Boolean);
+    .filter((c) => aiReply(c, author)).map((c) => Date.parse(c.createdAt ?? "")).filter(Boolean);
   const lastAi = aiTimes.length ? Math.max(...aiTimes) : 0;
   for (const r of pr.reviews?.nodes ?? []) {
     const who = r.author?.login;

@@ -34,7 +34,8 @@ const mergePrs = (prs) => prs.filter((p) => p?.url).slice(0, MAX_OPEN)
 
 // The first failing check of a PR's statusCheckRollup as data.js keeps it ({name, url}), and
 // where its Open button goes: the check's own page, else the PR's checks tab.
-const checksUrl = (pr) => pr?.failed?.url || (pr?.url ? `${pr.url.replace(/\/+$/, "")}/checks` : null);
+// Only an https:// URL is opened: a check's URL comes from whoever posted the check.
+const checksUrl = (pr) => (/^https:\/\//i.test(pr?.failed?.url ?? "") ? pr.failed.url : null) || (pr?.url ? `${pr.url.replace(/\/+$/, "")}/checks` : null);
 
 // The order the lines come in: what blocks a run outright first (a question or dialog, a gone
 // orchestrator), then a broken build, then the PR steps, most urgent first, then a stall, then
