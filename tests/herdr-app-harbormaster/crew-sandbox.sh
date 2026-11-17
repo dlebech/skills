@@ -66,7 +66,8 @@
 #
 # Needs xvfb-run, ImageMagick's import (root only), jq, gh, python3 and libXtst. The window lands
 # at screen offset (162, 90) on the 1600x1000 screen; add that to a shot's coordinates for click.
-# Env: CREW_SESSION (default harbormaster-crew-sandbox), CREW_DISPLAY (default 97).
+# Env: CREW_SESSION (default harbormaster-crew-sandbox), CREW_DISPLAY (default 97), CREW_LAYOUT (main, the default,
+# or needs: the harbormaster-needs layout that install.sh made in the sandbox).
 set -euo pipefail
 
 [ $# -ge 2 ] || { sed -n '2,35p' "$0" >&2; exit 2; }
@@ -147,12 +148,11 @@ make_runs() {
     --pr dlebech/no-such-repo-nyo https://github.com/dlebech/no-such-repo-nyo/pull/1
   mkrun quiet-run running feat "Quiet run" "${day}T10:30:00Z" 1/2 merged implementing --progress "t2 implementing"
   ORCH_STATE=working mkrun busy-run running feat "Busy run" "${day}T07:00:00Z" 0/2 implementing implementing --progress "both tasks under way"
-  # busy-run's workers, for its run pane's Agents list: two implementers (shells reporting a status; a
-  # "claude"-named binary does not make Herdr detect an agent, so no agent icon is shown here) and, nested under the first, a build (plain shell) and a php server; a node helper under the second.
+  # busy-run's workers, for its run pane's Agents list: two implementers (shells reporting a status, so no
+  # agent icon is shown here: Herdr does not detect an agent from a name) and, nested under the first, a build (plain shell) and a php server; a node helper under the second.
   local busy w1 w2; busy=$(jq -r .terminal "$S/runs/skills/busy-run/orchestrator.json")
-  mkdir -p "$S/fake-bin" && cp "$(readlink -f "$(command -v sh)")" "$S/fake-bin/claude"
-  w1=$(hc run --json --bg --no-notify --parent "$busy" --name impl-x-t1 --cwd "$S" sh -c "printf '\\033]7501;state=working\\007'; exec $S/fake-bin/claude -c \"exec sleep infinity\"" | jq -r '.terminal // .address')
-  w2=$(hc run --json --bg --no-notify --parent "$busy" --name impl-x-t2 --cwd "$S" sh -c "printf '\\033]7501;state=idle\\007'; exec $S/fake-bin/claude -c \"exec sleep infinity\"" | jq -r '.terminal // .address')
+  w1=$(hc run --json --bg --no-notify --parent "$busy" --name impl-x-t1 --cwd "$S" sh -c "printf '\\033]7501;state=working\\007'; exec sleep infinity" | jq -r '.terminal // .address')
+  w2=$(hc run --json --bg --no-notify --parent "$busy" --name impl-x-t2 --cwd "$S" sh -c "printf '\\033]7501;state=idle\\007'; exec sleep infinity" | jq -r '.terminal // .address')
   hc run --bg --no-notify --parent "$w1" --name x-t1-build --cwd "$S" sh -c 'echo build; exec sleep infinity' >/dev/null
   hc run --bg --no-notify --parent "$w1" --name x-t1-serve --cwd "$S" php -r 'sleep(100000);' >/dev/null
   hc run --bg --no-notify --parent "$w2" --name x-t2-helper --cwd "$S" node -e 'setInterval(()=>{},1e6)' >/dev/null
@@ -269,7 +269,8 @@ case $cmd in
         cp -r "$HOME/.config/herdr-app/mods/$m" "$S/home/mods/"
     done
     "$repo/herdr-app/install.sh" >/dev/null
-    herdr-app do layout.switch '{"name":"harbormaster-main"}' >/dev/null
+    # install.sh above made harbormaster-needs in the sandbox's own home; CREW_LAYOUT=needs shows that one.
+    herdr-app do layout.switch "{\"name\":\"harbormaster-${CREW_LAYOUT:-main}\"}" >/dev/null
     make_runs
     sleep 2
     # The first-run welcome frame: close it with its ×.

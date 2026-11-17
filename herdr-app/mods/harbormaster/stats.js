@@ -7,7 +7,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { CATEGORIES, cachedTiming, durationText } from "./timing.js";
 import { resourcesOf, resourceSnapshot, otherProcesses, memText, HOT } from "./resources.js";
 import { summaryOf, mergeRuns, acrossRuns, liveGroups, createSteady, cachedHistory, catTotal, addCats, isRunProp,
-  liveTable, groupProcesses, hottest, hottestText, timeSplit, recentRuns, RECENT, QUIET_CPU } from "./statsdata.js";
+  liveTable, groupProcesses, hottest, hottestText, timeSplit, recentRuns, QUIET_CPU } from "./statsdata.js";
 import { facts, orchestratorsOf, workersOf, captainOf } from "./live.js";
 import { props } from "herdr";
 import { tokenText, tokenShort, tokenHeadline, tokenDetail } from "./context.js";
@@ -284,7 +284,7 @@ function runsSection(view, t, runs) {
     v_flex().gap(1)
       .when(runs.length > 0, (el) => el.child(runHeader(t)))
       .children(rows.map((s) => runRow(view, t, s)))
-      .when(older > 0 || (view.statsAll && runs.length > RECENT), (el) => el.child(div().id("runs-more").px(8).h(26).flex().items_center()
+      .when(older > 0 || (view.statsAll && runs.length > recentRuns(runs).rows.length), (el) => el.child(div().id("runs-more").px(8).h(26).flex().items_center()
         .text_size(BODY).text_color(t.muted).cursor_pointer().hover((st) => st.text_color(t.foreground))
         .on_click((_e, cx) => { view.statsAll = !view.statsAll; cx.notify(); })
         .child(older > 0 ? `+ ${plural(older, "older run")}` : "Show recent only")))

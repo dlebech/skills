@@ -173,7 +173,7 @@ const byCpu = (a, b) => b.cpu - a.cpu || b.rssKb - a.rssKb;
 // ---- steadiness: the live table is read over minutes, so it must not jump with every sample ----
 
 // Smoothing, row order and the busy/quiet split that change only on a clear, lasting difference.
-// One per view (module memory, not shared state); the sample time `at` (any increasing number)
+// One per module: every stats view reads the same steady figures; the sample time `at` (any increasing number)
 // is set once per sample with begin(), and every call after it in the same sample gives the same
 // answer, so a redraw between samples changes nothing.
 export const STEADY = { tauMs: 25000, rel: 0.25, abs: 2, streak: 2, keepMs: 5 * 60000 };
@@ -202,10 +202,10 @@ export function createSteady(cfg = {}) {
     // two figures. {cpu, rssKb} in, the same out.
     smooth(key, cpu, rssKb = 0) {
       let e = ema.get(key);
-      if (!e) e = { at, seen: at, cpu, rssKb, out: null };
+      if (!e) e = { at, seen: at, cpu, rssKb };
       else if (e.at !== at) {
         const a = 1 - Math.exp(-(at - e.at) / c.tauMs);
-        e = { at, seen: at, cpu: e.cpu + a * (cpu - e.cpu), rssKb: e.rssKb + a * (rssKb - e.rssKb), out: null };
+        e = { at, seen: at, cpu: e.cpu + a * (cpu - e.cpu), rssKb: e.rssKb + a * (rssKb - e.rssKb) };
       }
       e.seen = at;
       ema.set(key, e);

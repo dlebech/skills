@@ -299,6 +299,13 @@ test("recentRuns: the newest five, the rest counted as older unless all are aske
   assert.deepEqual(recentRuns(runs.slice(0, 2)).older, 0);
 });
 
+test("recentRuns: every open run is listed, so showing all changes nothing while only they and the recent ones exist", () => {
+  const runs = [...Array.from({ length: 3 }, (_, i) => ({ key: `o${i}`, source: "open", live: true })), ...Array.from({ length: 4 }, (_, i) => ({ key: `p${i}` }))];
+  assert.equal(recentRuns(runs).rows.length, 7);
+  assert.equal(recentRuns(runs).older, 0);
+  assert.equal(recentRuns(runs, true).rows.length, runs.length);
+});
+
 test("tokenShort: the card's fresh-first headline, short", () => {
   const tk = { total: 95_100_000, input: 100_000, output: 1_000_000, cache_write: 2_000_000, cache_read: 92_000_000 };
   assert.equal(tokenHeadline(tk), "3.1M tok (+92M cached)");

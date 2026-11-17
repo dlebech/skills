@@ -745,7 +745,8 @@ function needBox(view, t, r, f, ctx, where) {
     const first = items[0].actions[0];
     const link = first?.kind === "focus" && first.address === r.terminal ? null : orchLink(t, r, f, `need-orch-${where}-${r.key}`);
     return box.child(v_flex().flex_1().min_w(0).gap(6)
-      .when(!ready, (el) => el.child(div().text_size(11).font_semibold().text_color(tint).child("Needs you")))
+      // The sidebar's box sits under the red "Needs you · N" heading already; a second label is a line spent on nothing.
+      .when(!ready && where !== "sidebar", (el) => el.child(div().text_size(11).font_semibold().text_color(tint).child("Needs you")))
       .children(needLines(view, t, r, f, items, where))
       .when(ready && view.replying === changesId(r), (el) => el.child(v_flex().gap(4)
         .child(Input.new(view.reply))
