@@ -22,7 +22,7 @@ import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closabl
 import { blockingAsked, askSig } from "./blocking.js";
 import { commentsAsked, defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
-import { needActions, doLine, ownAddressRows } from "./needaction.js";
+import { needActions, doLine, ownAddressRows, isPrimary, detailsLabel } from "./needaction.js";
 
 // How each runPhase() reads on a card. Running is muted, not the working colour: colour means
 // something to look at (see AMBER), and the run's spinning dot already says it works.
@@ -294,6 +294,8 @@ function opaque(c, bg = null) {
   const a = hex(c, 7) / 255;
   return `#${[1, 3, 5].map((i) => Math.round(hex(c, i) * a + hex(bg, i) * (1 - a)).toString(16).padStart(2, "0")).join("")}`;
 }
+// The selected Crew row's fill: the accent faintly over the sidebar, on any edge colour.
+const SELECTED = (t) => opaque(`${opaque(t.accent)}40`, t.chrome);
 const edgeColor = (t, edge) => opaque(edge === "amber" ? AMBER(t) : edge === "review" ? t.ansi6 ?? t.accent : edge === "neutral" ? t.border : t[edge] ?? t.border, t.chrome);
 
 // ---- ask what's blocking, the review flow, close all merged ----
@@ -641,10 +643,10 @@ function needButton(view, t, r, f, x, id, where, primary) {
 // The need items as lines, each with its buttons; the first item's first button stands out, unless
 // the actions say which does (`primary`). Actions about one PR each (`row`: "#1799 · 15 comments")
 // go in a row per PR, led by it.
-function needLines(view, t, r, f, items, where) {
+function needLines(view, t, r, f, items, where, underQuestion = false) {
   return items.map((it, i) => {
     const buttons = it.actions.map((x, j) => ({ row: x.row ?? null,
-      el: needButton(view, t, r, f, x, `need-${where}-${r.key}-${i}-${j}`, where, x.primary ?? (i === 0 && j === 0)) })).filter((b) => b.el);
+      el: needButton(view, t, r, f, x, `need-${where}-${r.key}-${i}-${j}`, where, isPrimary(x, i, j, underQuestion)) })).filter((b) => b.el);
     const rows = [];
     for (const b of buttons) {
       if (!rows.length || rows[rows.length - 1].row !== b.row) rows.push({ row: b.row, els: [] });
@@ -699,32 +701,37 @@ function needBox(view, t, r, f, ctx, where) {
   const open = isOpen(view, key);
   const a = answerParts(view, t, it, ctx, "box");
   const sections = questionSections(r.ask, r.question);
-  const count = it.options.length ? plural(it.options.length, "option") : "reply in your own words";
+  // The details, folded: what is long. The options are already above as buttons, so here they are
+  // their whole text, a line each, for choosing between them.
   const fold = h_flex().id(`qfold-${where}-${r.key}`).gap(6).items_center().min_w(0).rounded(4).cursor_pointer()
-    .text_size(11.5).text_color(t.muted).hover((st) => st.bg(t.hover).text_color(t.foreground))
-    .tooltip(open ? "Hide the question's details" : "The whole question, its options and Reply")
+    .text_size(11.5).text_color(t.foreground).hover((st) => st.bg(t.hover))
+    .tooltip(open ? "Hide the question's details" : "The whole question, what each option does, the evidence and the risk")
     .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); cx.notify(); })
-    .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
-    .child(div().flex_none().font_semibold().child("Details"))
-    .child(div().truncate().text_color(t.dim).child([count, it.since ? `asked ${ago(it.since)}` : null].filter(Boolean).join(" · ")));
+    .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.muted))
+    .child(div().truncate().child(detailsLabel(sections, it.options)))
+    .child(div().flex_none().text_color(t.dim).child(it.since ? `asked ${ago(it.since)}` : ""));
   // A section's text whole, as paragraphs (question.js), under its small label.
   const part = (label, text, color) => v_flex().gap(2)
     .when(Boolean(label), (el) => el.child(div().text_size(10.5).font_semibold().text_color(color ?? t.dim).child(label)))
     .children(paragraphs(text).map((l) => div().text_size(11.5).text_color(t.foreground).child(l)));
   const options = it.options.length > 0 && v_flex().gap(4)
-    .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("Options"))
-    .children(it.options.map((o, i) => h_flex().gap(8).items_start()
-      .child(a.optionButton(i))
-      .child(div().flex_1().min_w(0).pt(3).text_size(11.5).text_color(t.muted).child(plain(o.text)))));
+    .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("What each option does"))
+    .children(it.options.map((o, i) => div().text_size(11.5).text_color(t.muted)
+      .child(`${i === it.recommended ? "★ " : ""}${o.label}${o.text && o.text !== o.label ? `: ${plain(o.text)}` : ""}`)));
   const tone = { Recommended: t.accent, Risk: t.blocked };
-  const details = open && v_flex().id(`qdetail-${where}-${r.key}`).gap(8).pt(4)
-    // Clicks in here answer or type; they never fall through to the card's open-the-orchestrator.
+  const details = open && detailsLabel(sections, it.options) && v_flex().id(`qdetail-${where}-${r.key}`).gap(8).pt(4)
+    // Clicks in here never fall through to the card's open-the-orchestrator.
     .on_click((_e, cx) => cx.stop_propagation())
     .children(sections.filter((x) => !x.label || x.label === "Question").map((x) => part(x.label, x.text)))
     .when(Boolean(options), (el) => el.child(options))
-    .children(sections.filter((x) => x.label && x.label !== "Question").map((x) => part(x.label, x.text, tone[x.label])))
-    .when(Boolean(a.replyBtn), (el) => el.child(h_flex().child(a.replyBtn)))
-    .when(Boolean(a.input), (el) => el.child(a.input));
+    .children(sections.filter((x) => x.label && x.label !== "Question").map((x) => part(x.label, x.text, tone[x.label])));
+  // The answers: a button per option (the recommended one highlighted, its text on hover) and Reply,
+  // right under what is asked, so they read as its answers and nothing else does.
+  const answers = (it.options.length > 0 || a.replyBtn) && h_flex().id(`qans-${where}-${r.key}`).flex_wrap().gap(6).items_center()
+    .children(it.options.map((_o, i) => a.optionButton(i)))
+    .when(Boolean(a.replyBtn), (el) => el.child(a.replyBtn));
+  // Anything else it needs you for (a red CI, a PR to merge), as without a question, set apart.
+  const others = all.filter((x) => x.key !== "question");
   return box.child(v_flex().flex_1().min_w(0).gap(4)
     .child(div().id(`qtitle-${where}-${r.key}`).cursor_pointer().text_size(12.5).font_medium().text_color(t.foreground)
       .tooltip(f.orch !== "gone" ? "Open the orchestrator" : "The orchestrator is gone: answer here, it waits in the run's inbox")
@@ -732,11 +739,14 @@ function needBox(view, t, r, f, ctx, where) {
     // What waits on the answer, the urgency cue, right under what is asked.
     .when(Boolean(head.blocks), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(oneLine(head.blocks, 160))))
     .when(Boolean(head.rec), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(oneLine(head.rec, 200))))
+    .when(Boolean(answers), (el) => el.child(div().pt(2).child(answers)))
+    .when(Boolean(a.input), (el) => el.child(a.input))
     .when(Boolean(a.note), (el) => el.child(a.note))
-    .child(fold)
+    .when(Boolean(detailsLabel(sections, it.options)), (el) => el.child(fold))
     .when(Boolean(details), (el) => el.child(details))
-    // Anything else it needs you for (a red CI, a PR to merge), as without a question.
-    .children(needLines(view, t, r, f, all.filter((x) => x.key !== "question"), where))
+    .when(others.length > 0, (el) => el.child(v_flex().id(`qalso-${where}-${r.key}`).gap(6).mt(4).pt(8).border_t(1).border_color(t.border)
+      .child(div().text_size(11).font_semibold().text_color(t.muted).child("Also needs you"))
+      .children(needLines(view, t, r, f, others, where, true))))
     .children([boxConfirm(view, t, r, f, where)].filter(Boolean)));
 }
 
@@ -1776,8 +1786,11 @@ export function crew(view, t) {
     const here = address != null && address === current;
     const color = tone === "amber" ? AMBER(t) : t[tone] ?? t.dim;
     return h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
-    .rounded(7).bg(here ? edge + "33" : edge + "14").cursor_pointer().hover((st) => st.bg(here ? edge + "40" : edge + "26"))
-    .when(here, (el) => el.border(1).border_color(edge + "aa"))
+    // The selected row has a ring in the theme's accent, whatever its edge: the edge's own tint is
+    // grey in Working, so a ring of it would not show. The ring is always there, clear when not
+    // selected, so selecting never moves the row. The left bar keeps the group's colour.
+    .rounded(7).bg(here ? SELECTED(t) : edge + "14").cursor_pointer().hover((st) => st.bg(here ? SELECTED(t) : edge + "26"))
+    .border(2).border_color(here ? t.accent : "#00000000")
     .on_click(open)
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
     .when(Boolean(mark), (el) => el.child(div().flex_none().text_size(12).child(mark)))

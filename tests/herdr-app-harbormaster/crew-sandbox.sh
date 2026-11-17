@@ -41,12 +41,17 @@
 #   review-proof  finished, dlebech/wapi-beatbox#1, proof.md T2 1/2 pass  -> review proof → merge
 #   report-run    finished, no PR, shared/final-report.md (+ t1-report.md) -> finished — read and close
 #   asks-question running, question.md with Options, Recommended and Blocks -> a question box
+#   asks-and-pr   finished plan (2/2), open self-flow PR dlebech/wapi-beatbox#1 with proof, and a
+#                 question.md                                            -> a question box with "Also needs you" under it
+#   plan-open     running, 1/3 tasks done, the same open PR                -> Working: no "review proof → merge" until the plan is done
 # For an approval over two PRs with comments (t17), fake PRs through fake-gh.sh (installed as
 # <scratch>/bin/gh, first on the app's PATH; it answers only owner "fake-two", the real gh the rest):
 #   two-prs       running, folder "snevagten" (peer), fake-two/api#1799 (2 comments) and fake-two/web#1372 (9; one PR per repo in status.json),
 #                 both approved by mfalkenbrink. Its orchestrator's state follows the file
 #                 <scratch>/state-two-prs ("working" or "idle"; none = idle): `echo working > ...`
 #                 as the orchestrator does after Handle them
+# CREW_ORCH_STATE=idle makes every fake orchestrator report a status, so it is an agent Herdr can focus
+# (agent.focus --terminal <t>) and the Crew shows it selected; without it only busy-run is one.
 # Hide a run from the Crew with `hc label <t> role=` and bring it back with role=orchestrator.
 #
 # Needs xvfb-run, ImageMagick's import (root only), jq, gh, python3 and libXtst. The window lands
@@ -97,7 +102,7 @@ make_runs() {
   # branch status type topic started-UTC tasks t1-state t2-state [set-status args...]
   local first=1
   mkrun() {
-    local branch=$1 status=$2 type=$3 topic=$4 started=$5 tasks=$6 s1=$7 s2=$8 out term tab d=$S/runs/skills/$1 f=${RUN_FOLDER:-$folder} state=${ORCH_STATE:-}
+    local branch=$1 status=$2 type=$3 topic=$4 started=$5 tasks=$6 s1=$7 s2=$8 out term tab d=$S/runs/skills/$1 f=${RUN_FOLDER:-$folder} state=${ORCH_STATE:-${CREW_ORCH_STATE:-}}
     shift 8
     if [ $first = 1 ]; then
       first=0
@@ -192,6 +197,12 @@ Low; labels only.
 ## Blocks
 t4 shots, t5 docs
 Q
+  mkrun asks-and-pr running feat "Asks and PR" "${day}T09:20:00Z" 2/2 merged merged --progress "waiting on a decision" \
+    --pr dlebech/wapi-beatbox https://github.com/dlebech/wapi-beatbox/pull/1
+  cp "$S/runs/skills/review-proof/proof.md" "$S/runs/skills/asks-and-pr/proof.md"
+  cp "$S/runs/skills/asks-question/question.md" "$S/runs/skills/asks-and-pr/question.md"
+  mkrun plan-open running feat "Plan open" "${day}T09:10:00Z" 1/3 merged implementing --progress "t2 implementing" \
+    --pr dlebech/wapi-beatbox https://github.com/dlebech/wapi-beatbox/pull/1
 }
 
 case $cmd in

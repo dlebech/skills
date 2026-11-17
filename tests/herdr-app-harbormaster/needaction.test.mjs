@@ -271,3 +271,31 @@ test("after an ask, a working run offers no Address buttons anywhere: not in a b
   // In Needs you for another reason, with no Address in its box: the card's own rows.
   assert.equal(ownAddressRows(true, [{ actions: [{ kind: "open" }] }]), true);
 });
+
+// ---- a question box: what is primary, what the fold says ----
+
+test("while a question is open its options are the primary action, and no other reason's button is", async () => {
+  const { isPrimary } = await import("../../herdr-app/mods/harbormaster/needaction.js");
+  // No question: the first item's first button, or the one the action names.
+  assert.equal(isPrimary({}, 0, 0), true);
+  assert.equal(isPrimary({}, 0, 1), false);
+  assert.equal(isPrimary({ primary: true }, 1, 2), true);
+  assert.equal(isPrimary({ primary: false }, 0, 0), false);
+  // Under a question: never, even where the action says so.
+  assert.equal(isPrimary({}, 0, 0, true), false);
+  assert.equal(isPrimary({ primary: true }, 0, 0, true), false);
+});
+
+test("the Details fold names what is in it, and is left out when it holds nothing", async () => {
+  const { detailsLabel } = await import("../../herdr-app/mods/harbormaster/needaction.js");
+  const secs = [{ label: "" }, { label: "Question" }, { label: "Evidence" }, { label: "Risk" }];
+  const opts = [{ label: "Accept", text: "Accept the prompt and go on" }, { label: "Skip", text: "" }];
+  assert.equal(detailsLabel(secs, opts), "Details: question, evidence, risk, what each option does");
+  assert.equal(detailsLabel(secs, []), "Details: question, evidence, risk");
+  // A title-only question has no sections; options that only repeat their buttons add nothing.
+  assert.equal(detailsLabel([], []), null);
+  assert.equal(detailsLabel([], [{ label: "Yes", text: "Yes" }, { label: "No", text: "" }]), null);
+  // "question" only when a Question or untitled section exists.
+  assert.equal(detailsLabel([{ label: "Evidence" }], []), "Details: evidence");
+  assert.equal(detailsLabel([{ label: "Evidence" }], opts), "Details: evidence, what each option does");
+});

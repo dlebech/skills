@@ -478,3 +478,29 @@ test("a PR read that found nothing new is not written; its read time still keeps
   assert.equal(withReadTimes(old, null), old);
   assert.equal(withReadTimes(null, { at: ago(1) }), null);
 });
+
+// ---- no merge while work is planned ----
+
+test("a run with planned tasks left is not told to review proof or request a review until its plan is done", () => {
+  const open = run({ tasks: [{ id: "t1", state: "done" }, { id: "t2", state: "implementing" }], planned: 3 });
+  const a = settled(open, [pr()]);
+  assert.equal(a.reasons.some((r) => r.key === "review proof → merge"), false);
+  assert.notEqual(a.group, "needs");
+  // Peer flow's "request review" waits the same way.
+  assert.equal(settled(open, [pr({ state: "DRAFT" })], { flow: "peer" }).reasons.some((r) => r.key === "request review"), false);
+  // Every planned task done: it counts again, finished or not.
+  const all = run({ tasks: [{ id: "t1", state: "done" }, { id: "t2", state: "merged" }], planned: 2 });
+  assert.deepEqual(settled(all, [pr()]).reasons.map((r) => r.key), ["review proof → merge"]);
+  // Finished, whatever the task list says.
+  assert.deepEqual(settled(run({ ...open, phase: "finished" }), [pr()]).reasons.map((r) => r.key), ["review proof → merge"]);
+  // Nothing planned (no plan.md): as before.
+  assert.deepEqual(settled(run(), [pr()]).reasons.map((r) => r.key), ["review proof → merge"]);
+});
+
+test("an approval, a change request and red CI count while the plan is still open", () => {
+  const open = run({ tasks: [{ id: "t1", state: "implementing" }], planned: 2 });
+  assert.deepEqual(settled(open, [pr({ review: "APPROVED", approvedBy: ["anna"] })], { flow: "peer" }).reasons.map((r) => r.key), ["approved — merge"]);
+  assert.deepEqual(settled(open, [pr({ review: "CHANGES_REQUESTED", changesBy: ["anna"] })]).reasons.map((r) => r.key), ["changes requested"]);
+  const red = settled(open, [pr({ checks: checks(1, 1) })]);
+  assert.deepEqual(red.reasons.map((r) => r.key), ["red-ci"]);
+});

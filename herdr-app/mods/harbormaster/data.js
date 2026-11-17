@@ -20,6 +20,8 @@ import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, proveRequest, withAcceptance, resultLine } from "./proof.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
+import { taskTone, taskCounts } from "./tasks.js";
+export { taskTone, taskCounts };
 import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
 import { blockingRequest, blockingPending, ciRequest } from "./blocking.js";
 import { commentsArgs, commentSummary, commentsRequest, pendingComments } from "./comments.js";
@@ -444,15 +446,6 @@ function runTerminals(r, ctx) {
 
 // ---- tasks ----
 
-// A task's state word(s) → "done" | "working" | "blocked" | null (not started).
-export function taskTone(state) {
-  const s = state ?? "";
-  if (/^(merged|done|finished|complete)/.test(s)) return "done";
-  if (/block|fail|stuck/.test(s)) return "blocked";
-  if (/^(planned|todo|pending|queued|not started|waiting to start)/.test(s) || !s) return null;
-  return "working";
-}
-
 // Where a task is in its life cycle, from its state words: "planned" | "implement" |
 // "review" | "fix" | "done" | "blocked", or null for a state that names no stage
 // ("validating"). Agrees with taskTone on done, blocked and not started.
@@ -494,19 +487,6 @@ export function shownStage(task, agents) {
   const stage = taskStage(task.state);
   if (stage && stage !== "planned") return stage;
   return agents[0]?.stage ?? stage;
-}
-
-// How many tasks a run has done (`done`) and planned: one count for the overview's header, the
-// cards, the pane and a confirm's "N of M tasks done" alike. Done is plan.md's tasks whose state
-// reads done (taskTone), as the task strip shows them; status.json's `merged` only when plan.md
-// lists no tasks, since an orchestrator updates it less often (one said 7 merged of 14 done).
-// Planned is the larger of status.json's and plan.md's count: a plan may list its tasks late.
-export function taskCounts(run) {
-  const tasks = run.tasks ?? [];
-  return {
-    done: tasks.length ? tasks.filter((task) => taskTone(task.state) === "done").length : run.merged ?? 0,
-    planned: Math.max(run.planned ?? 0, tasks.length),
-  };
 }
 
 // taskCounts for a record (the stats view, the history line), so a run's row says what its card

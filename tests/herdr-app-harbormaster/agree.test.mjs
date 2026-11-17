@@ -179,3 +179,32 @@ test("## Recommended may give its option's number with a comma", () => {
   const l = parseQuestion("# Which?\n\n## Options\n1. Postgres, managed: costs\n2. SQLite: simpler\n\n## Recommended\nPostgres, managed: it scales\n");
   assert.equal(l.recommended, 0);
 });
+
+test("a run whose plan is still open is told nothing about merging: pill, Crew lead, toast and parked label agree", () => {
+  const open = run({ phase: "running", tasks: [{ id: "t1", state: "done" }, { id: "t2", state: "planned" }], planned: 2 });
+  const a = at(open, [pr()]);
+  assert.equal(a.group, "working");
+  assert.equal(a.held, true);
+  assert.equal(badgeOf(a, false), null);
+  assert.doesNotMatch(rowLead(a, now).lead, /merge|review proof/);
+  assert.deepEqual(toastParts(open, a).parts, []);
+  assert.equal(parkedLabel(a, { at: ago(3 * 1440) }, now), null);
+  // The same run parked with its orchestrator gone: still no merge.
+  const gone = at(open, [pr()], { orch: "gone" });
+  assert.deepEqual(gone.reasons.map((r) => r.key), ["gone"]);
+  assert.equal(parkedLabel(gone, { at: ago(3 * 1440) }, now), null);
+  assert.doesNotMatch(badgeOf(gone, false)?.label ?? "", /merge/);
+  // Once its tasks are done the same PR reads as before.
+  const done = run({ phase: "running", tasks: [{ id: "t1", state: "done" }, { id: "t2", state: "merged" }], planned: 2 });
+  assert.equal(parkedLabel(at(done, [pr()]), { at: ago(3 * 1440) }, now), "review proof → merge · 3d");
+});
+
+test("tasks the plan dropped are neither open nor done, on the strip's count and in the plan rule alike", async () => {
+  const { taskCounts: counts, planOpen } = await import("../../herdr-app/mods/harbormaster/tasks.js");
+  const r = { phase: "running", planned: 4, tasks: [{ state: "done" }, { state: "merged" }, { state: "skipped" }, { state: "dropped — superseded" }] };
+  assert.deepEqual(counts(r), { done: 2, planned: 2 });
+  assert.equal(taskCounts(r).planned, 2);
+  assert.equal(planOpen(r), false);
+  assert.equal(planOpen({ ...r, tasks: [...r.tasks, { state: "planned" }], planned: 5 }), true);
+  assert.equal(planOpen({ ...r, phase: "finished", tasks: [{ state: "planned" }], planned: 1 }), false);
+});

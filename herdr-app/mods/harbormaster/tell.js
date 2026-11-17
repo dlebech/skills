@@ -133,7 +133,8 @@ export function nextSeen(store, runs, { failed = [] } = {}) {
 // been parked), or null when its PRs say nothing (none, or they could not be read). Red CI comes
 // first, as the Crew row and the pill put it: "red CI · review proof · 3d".
 export function parkedLabel(att, away, now = Date.now()) {
-  if (!att?.next || att.cantTell) return null;
+  // A plan still open holds the merge step back (attention.js heldByPlan): nothing to say yet.
+  if (!att?.next || att.cantTell || att.held) return null;
   const red = att.reasons?.some((r) => r.key === "red-ci");
   const label = `${red ? "red CI · " : ""}${stepTextOf(att)}`;
   if (!away?.at) return label;
