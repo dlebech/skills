@@ -1,0 +1,56 @@
+# Start a new run: profiles, options and the steps of section 1
+
+Read this when you start a new run, before section 1's step 1. A resumed run (its arguments are a `spec.md` inside an existing run directory, or `init-run.sh` printed `existing`) does not need it: its `spec.md` holds what was settled here.
+
+## Profiles
+
+Parse `$ARGUMENTS` for the work source, constraints, options, and optional profiles. A profile is an agent `kind` (`claude`, `pi`, or `opencode`; others may work but are untested) and, optionally, a model in that kind's own form (`sonnet` for `claude`; `provider/id`, such as `ollama/ornith-1.5:9b`, for `pi` and `opencode`):
+
+- `agent=<kind>` and `model=<model>` are shorthand defaults for all roles.
+- `implementer=<kind>` and `implementer-model=<model>` override implementation and fixes.
+- `reviewer=<kind>` and `reviewer-model=<model>` override review.
+- `autonomy=L0|L1|L2` sets how much you decide yourself (default `L0`; the skill's section 6).
+- `budget=<tokens>` (`30M`, `50M`; cache reads dominate a run's total) is a soft token budget: start with `set-status.sh --budget <it>`. What to do when it is reached is in [status.md](status.md#soft-budget). Default: none.
+- `grunt=<kind>` and `grunt-model=<model>` define an optional cheap profile for agents that only run and watch commands and never edit files (tests, lint, builds, CI, gathering proof); `grunt-model` alone means your implementer's kind. Default: none; everything works as without it. [speed.md](speed.md) §4 says how it is kept from editing.
+- `specialist=<kind>` and `specialist-model=<model>` define an optional stronger profile for a user-assigned or unusually complex task, and for the final review of a large branch.
+- Natural-language equivalents are valid, such as “use Sonnet for implementation, Haiku for review, Opus for complex tasks.”
+
+The orchestrator itself needs a capable model, whatever its kind: `claude`, `pi`, and `opencode` can all run this skill, but a small local model tends to skip the process and do the work itself. Such models are fine as implementers and reviewers on small tasks.
+
+Role overrides take precedence. With no configuration, use your own kind (the `status.app` of `hc get $HC_TERMINAL_ID`: `claude-code` means `claude`) and its normal default model. If it cannot start that kind, ask the user which kind to use.
+
+Check that each configured kind is installed with `command -v <kind>`, and models with the kind's own list (`pi --list-models`, `opencode models`). If a requested model cannot be verified, or a kind is unavailable, ask the user rather than silently substituting.
+
+## Options
+
+- `push-task-branches` (default `yes`): push task branches to the remote as a backup, so work survives a crash. Never open PRs for them. Use `no` when the remote must stay clean or there is no remote.
+- `merge` (default `squash`): `squash` lands each task as one commit with a message you write, so the final PR's history reads like a reviewable changelog. `merge` keeps each task's full commit history in non-fast-forward merges, at the cost of a noisier PR.
+- `draft-pr` (default `ask`): ask once at the start whether to open the integration branch as a draft PR right after the first merge. An early draft PR runs CI on every merge, which catches failures local runs hide.
+- `task-review` (default `yes`): review each task before it merges (the skill's section 4), except a task the plan explicitly marks `Proof: T0` that you judge wording or config only, which only the final review covers ([speed.md](speed.md) §3). `no` reviews only the integration branch, which suits a run of one issue or of small tasks; it turns `final-review` on without asking.
+- `final-review` (default `ask`): once every planned task is merged, review the whole integration branch ([finish.md](finish.md)). Ask at the start, not at the end, so the run does not stall waiting for an answer. `no` is honoured only if no T0 task skipped its review, else ask at the start. If the user set both this and `task-review` to `no`, confirm in the start-of-run questions that the run should have no review.
+- `review-rounds` (default `1`): how many times each review runs, task or final, each round with a new agent after the previous round's fixes. Run every round, even after a clean one.
+- `sub-issues` (default `ask`, issues only): which open sub-issues of the named issues to include ([issues.md](issues.md)).
+- `type`: what kind of run this is (`--type` in [status.md](status.md)). Otherwise decide it yourself.
+- `branch`: the integration branch name. Otherwise use the repository's branch naming convention; for issues, `issue-<number>` for one or `issue-<main>-<slug>` for several, where the main issue is the parent or the first named; otherwise a short slug of the goal.
+
+Write the run's profiles and options, with the answers to the start-of-run questions, into `spec.md`, so a resumed run keeps them.
+
+## Repositories
+
+The run covers the repository you were started in. Started in a folder that is not a repository, such as one holding a frontend and a backend repository, it covers the repositories directly inside it that the work touches: tell them apart by what the spec, issues, and code say, list them in `spec.md` and the start-of-run summary, and ask only when it is unclear. Issues may live in yet another repository; that one gets no branch unless the work changes it. Record the repositories in `plan.md`, below the prefix, as `Repos: <name> <path>, ...`. Everything that says "repository" applies to each of them.
+
+## The steps in detail
+
+The numbers are section 1's steps.
+
+1. **Branch name.** A `spec.md` inside an existing run directory names its run's branch. The name is provisional until step 4.
+2. **`init-run.sh`.** The run directory is named after the last part of the repository's path, or of the folder holding several. The script records your terminal, tab, and start folder, so `herdr-app-captain` and a fresh session can find the run. Run it again whenever you resume in another terminal; a resumed run that the user had parked or closed is active again. Run it from the repository's own checkout, never from the integration worktree or its space; it warns about that, and about a terminal with no tab. On a new run, `plan.md` already has its Status line. `question.md` holds your open question to the user, if any. `inbox/` receives relayed user messages. `shared/` is the only part sub-agents get access to: it holds a copy of `spec.md`, which you refresh whenever `spec.md` changes, plus briefs, review findings, and generated output.
+3. **Draft the spec** from the work source, and write `spec.md` and `decisions.md` (the decisions log) in the run directory:
+   - **Session (default):** distill this conversation. Include the goal, acceptance criteria, constraints, decisions already made and why, rejected alternatives worth remembering, open questions, and what is out of scope. Prefer the conversation's latest position over earlier ones it replaced. Point at files, docs, or links discussed rather than paraphrasing them.
+   - **Description in the arguments:** expand it with what the repository shows; keep what only the user can answer for the start-of-run questions in step 4.
+   - **Plan or spec file:** read it and link to it from `spec.md`; record only what you add. If it is a `spec.md` inside an existing run directory, this is a handover or a resumed run: use that directory and continue from its `plan.md`.
+   - **GitHub issues** (numbers, `#numbers`, or URLs): resolve them as in [issues.md](issues.md). The session's discussion of them also goes in.
+4. **Start-of-run questions.** Publish the run's type and topic first ([status.md](status.md)), so the user can tell this run apart while it waits for them. Then ask, as one question (the skill's section 6): any agent kind or model you could not settle, whether to accept Claude Code's folder trust prompt for this run's worktrees (when a `claude` agent will run in one; the skill's Starting an agent), the `draft-pr` and `final-review` questions when they are still `ask`, the sub-issue choice and any closed or unreadable issue, the repositories when you are not sure which the work touches, and, when you drafted the spec from a session or a short description, a brief summary of it (goal, acceptance criteria, open questions, out of scope) and the branch name to confirm. Skip the spec confirmation for a plan file or issues unless something is ambiguous. Update `spec.md` with the answers. If the user picks another branch name, move the run directory to match, then run `init-run.sh` again with the new name and `set-status.sh` to rename the tab.
+5. **Default branch.** Discover it with `gh repo view --json defaultBranchRef`, or `git symbolic-ref refs/remotes/origin/HEAD` without GitHub, and fetch it without changing the user's checkout. If there is uncommitted work in the user's checkout that the spec depends on, ask whether to commit it to the integration branch first.
+6. **Integration worktree.** Inspect existing branches and worktrees first. `integration-worktree.sh` reuses a worktree that already has the branch, creates one when there is none, opens it as a space in the Herdr app the way its Open worktree menu does, nested under the repository's own space in the sidebar with the run's branch, ahead/behind, and changes, and prints its path. Opening a space shows it, so the script switches the view back, a brief flicker; a space already showing the worktree is reused. When the user's Herdr window is on another computer, connected over ssh, the script warns that it could not reach the window: that is expected, since Harbormaster in the user's window opens the space. Do not retry or report it. Task worktrees stay hidden. Leave the space open when the run finishes; closing the run (the skill's section 9) removes it.
+7. **Prefix.** It groups every name from this run together in Herdr's lists: the issue number (`1190`), or otherwise the first word or two of the integration branch (`plan-outline`). Agent names allow only `a-z 0-9 - _`, at most 32 characters, and must be unique among live terminals, so no emojis there.
