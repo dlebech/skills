@@ -7,12 +7,12 @@
 
 import { div } from "gpui-kit";
 import { InputState, Input, v_flex, h_flex } from "gpui-base";
-import { exec, focused, openOverlay, closeOverlay, props, notify, readTextFile, writeTextFile, spaces, home, checking } from "herdr";
+import { exec, focused, terminals, openOverlay, closeOverlay, props, notify, readTextFile, writeTextFile, spaces, home, checking } from "herdr";
 import { repoSpaces, knownRepos, repoRoot, openFolders, runFolders, scanFolders, isFolder } from "./repospaces.js";
 import { recentFolders, listFolders, matchFolders, literalFolder, tilde, base, newSpaceId } from "./folders.js";
 import {
   KINDS, DRAFTS, profileText, parseProfile, profileFor, buildPrompt, inputProblem, runAgentName, startArgs,
-  startOutcome, parsePrefs, draftsFor, remember, markReviewStarted, clearReviewStarted,
+  startOutcome, parsePrefs, CAPTAIN_PROMPT, captainProblem, captainName, captainArgs, draftsFor, remember, markReviewStarted, clearReviewStarted,
 } from "./startrun.js";
 export { reviewStarting } from "./startrun.js";
 
@@ -55,21 +55,44 @@ async function launchRun({ repo, kind, input, profile, drafts }) {
   const problem = inputProblem(kind, input);
   if (problem) return { ok: false, error: problem };
   if (!repo) return { ok: false, error: "Pick a folder first" };
+  const name = runAgentName(repo.name, kind, input);
+  return startAgent({
+    repo, name, prompt: buildPrompt({ kind, input, profile, drafts }), args: startArgs,
+    // Remembered once it started, so a typo'd start leaves the last good profile alone.
+    remembered: async () => ({ kind, profile, repo: await repoRoot(repo.root), drafts }),
+  });
+}
+
+// Starts the captain in a folder, the same way: {ok, address} or {ok: false, error, started?}; never throws.
+export async function launchCaptain({ repo }) {
+  try {
+    const live = terminals();
+    const problem = captainProblem(live);
+    if (problem) return { ok: false, error: problem };
+    if (!repo) return { ok: false, error: "Pick a folder first" };
+    return await startAgent({
+      repo, name: captainName(live), prompt: CAPTAIN_PROMPT, args: captainArgs,
+      remembered: async () => ({ kind: "captain", profile: null, repo: repo.root, drafts: "herdr" }),
+    });
+  } catch (e) { return { ok: false, error: `Could not start it: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}` }; }
+}
+
+// The one start path of a run and the captain: the prompt in a task file, start-agent.sh with
+// `args({name, cwd, taskFile, spaceId})`, the file removed, and on a start `remembered()` (the choices to keep) saved.
+async function startAgent({ repo, name, prompt, args, remembered }) {
   const script = await findScript();
   if (!script) return { ok: false, error: "The orchestrator skill is not installed: npx skills add dlebech/skills --skill herdr-app-orchestrator" };
-  const name = runAgentName(repo.name, kind, input);
   const taskFile = `${await rootDir()}/.newrun-${name}.txt`;
   // A fresh machine may have no runs root yet (the captain, which makes it, is optional).
   await sh('mkdir -p "$(dirname "$1")"', [taskFile]);
-  await writeTextFile(taskFile, buildPrompt({ kind, input, profile, drafts }) + "\n", null);
+  await writeTextFile(taskFile, prompt + "\n", null);
   // start-agent.sh waits for the agent to take its task, up to two minutes.
-  const res = await exec("bash", [script, ...startArgs({ name, cwd: repo.root, taskFile, spaceId: repo.space ?? repo.spaceId ?? newSpaceId(repo.root, spaces()) })], { timeout: 150000 }).catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
+  const res = await exec("bash", [script, ...args({ name, cwd: repo.root, taskFile, spaceId: repo.space ?? repo.spaceId ?? newSpaceId(repo.root, spaces()) })], { timeout: 150000 }).catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
   await sh('rm -f "$1"', [taskFile]).catch(() => {});
   const out = startOutcome(res.code, res.stdout, res.stderr);
   if (out.ok || out.started) {
-    // Remembered once it started, so a typo'd start leaves the last good profile alone.
-    const key = await repoRoot(repo.root);
-    await updatePrefs((prefs) => remember(prefs, { kind, profile, repo: key, drafts })).catch(() => {});
+    const what = await remembered().catch(() => null);
+    if (what) await updatePrefs((prefs) => remember(prefs, what)).catch(() => {});
   }
   return out;
 }
@@ -127,6 +150,11 @@ export function openNewRun({ repo, kind, input } = {}) {
   return openOverlay({ mod: "harbormaster", kind: "dialog", width: 520, height: 620, props: { role: "newrun", repo, kind, input } });
 }
 
+// The same dialog with only the folder, for starting the captain (the "no captain running" spots).
+export function openStartCaptain() {
+  return openOverlay({ mod: "harbormaster", kind: "dialog", width: 520, height: 440, props: { role: "newrun", kind: "captain" } });
+}
+
 // ---- the dialog ----
 
 let bound = false;
@@ -135,7 +163,7 @@ const ROWS = 7; // list rows that fit; the rest scroll in with the highlight
 // Called from the view's init: the fields, and the folders and remembered choices read async.
 export function initNewRun(view, cx) {
   const p = props() ?? {};
-  const kind = KINDS.some((k) => k.id === p.kind) ? p.kind : "issue";
+  const kind = p.kind === "captain" || KINDS.some((k) => k.id === p.kind) ? p.kind : "issue";
   const nr = view.nr = { kind, entries: [], found: [], typedDir: null, folder: null, open: false, sel: 0, query: "", shown: "",
     home: home(), top: 0, memo: null, drafts: "herdr", prefs: null, error: null, busy: false, prefill: "" };
   nr.text = InputState.new({ placeholder: "" });
@@ -146,8 +174,9 @@ export function initNewRun(view, cx) {
   nr.profile.on("submit", (_e, cx) => start(view, cx));
   nr.where.on("submit", (_e, cx) => (nr.open && shownList(nr).length ? choose(view, shownList(nr)[nr.sel], cx) : start(view, cx, true)));
   nr.where.on("change", (_e, cx) => typed(view, cx));
-  nr.where.on("focus", (_e, cx) => openList(view, cx));
-  nr.text.focus();
+  nr.where.on("focus", (_e, cx) => { if (nr.quiet) nr.quiet = false; else openList(view, cx); });
+  // The captain dialog has only the folder: focus it, without opening the list over Start.
+  if (kind === "captain") { nr.quiet = true; nr.where.focus(); } else nr.text.focus();
   // Escape closes the list before it closes the dialog: bound to an action inside the open list's own context.
   if (!bound) { try { bound = cx.bind_keys([{ keystroke: "escape", action: "harbormaster-folder-list-close", context: "HarborFolderList" }]) > 0; } catch { /* no binding: Esc closes the dialog */ } }
   if (checking()) return; // herdr-app check runs init for real: no find, git or jq then
@@ -250,30 +279,40 @@ export function target(nr, fromList = false) {
   return exact ?? (fromList && nr.open ? shownList(nr)[nr.sel] ?? null : null);
 }
 
-async function start(view, cx, fromList = false) {
+// Start (the button, or Enter): what is wrong is said at once; else "Starting…" and the start
+// runs in a task. The click's cx is gone after its first await (a stale-context error that
+// nothing shows), so everything after one uses the task's own.
+function start(view, cx, fromList = false) {
   const nr = view.nr;
-  if (nr.busy) return;
-  let pick = target(nr, fromList);
+  if (nr.busy || nr.done) return;
+  const pick = target(nr, fromList);
   if (pick && pick !== nr.folder) setFolder(view, pick);
-  // A space opened meanwhile counts; and a new space's id must not be another folder's.
-  const open = spaces();
-  if (pick && !pick.space && !pick.machine) {
-    const there = (await openFolders().catch(() => [])).find((e) => e.folder === pick.folder && e.space && !e.machine);
-    pick = there ?? pick;
-  }
-  const { profile, bad } = parseProfile(nr.profile.value(), profileFor(nr.kind, nr.prefs?.profile));
+  const captain = nr.kind === "captain";
+  const { profile, bad } = captain ? { profile: null, bad: [] } : parseProfile(nr.profile.value(), profileFor(nr.kind, nr.prefs?.profile));
   const problem = !pick ? "Pick a folder from the list"
-    : pick.machine ? `That space is on ${pick.machine}: start the run from the Herdr window there`
+    : pick.machine ? `That space is on ${pick.machine}: start ${captain ? "the captain" : "the run"} from the Herdr window there`
+    : captain ? captainProblem(terminals())
     : bad.length ? `Not understood: ${bad.join(" ")}` : inputProblem(nr.kind, nr.text.value());
   if (problem) { nr.error = problem; nr.hint = true; nr.open = false; cx.notify(); return; }
-  nr.busy = true; nr.error = null; nr.hint = false; nr.open = false; cx.notify();
-  const repo = { space: pick.space, name: base(pick.folder), root: pick.folder, spaceId: pick.space ? null : newSpaceId(pick.folder, open) };
+  nr.busy = true; nr.error = null; nr.hint = false; nr.open = false;
+  const ask = { pick, profile, kind: nr.kind, input: nr.text.value(), drafts: nr.drafts, overlay: props()?.overlay };
+  cx.notify();
+  cx.spawn((cx) => startNow(view, cx, ask));
+}
+
+async function startNow(view, cx, { pick, profile, kind, input, drafts, overlay }) {
+  const nr = view.nr;
   let out;
-  try { out = await launch({ repo, kind: nr.kind, input: nr.text.value(), profile, drafts: nr.drafts }); }
-  catch (e) { out = { ok: false, error: String(e?.message ?? e) }; }
-  finally { nr.busy = false; }
+  try {
+    // A space opened meanwhile counts; and a new space's id must not be another folder's.
+    const open = spaces();
+    if (!pick.space) pick = (await openFolders().catch(() => [])).find((e) => e.folder === pick.folder && e.space && !e.machine) ?? pick;
+    const repo = { space: pick.space, name: base(pick.folder), root: pick.folder, spaceId: pick.space ? null : newSpaceId(pick.folder, open) };
+    out = kind === "captain" ? await launchCaptain({ repo }) : await launch({ repo, kind, input, profile, drafts });
+  } catch (e) { out = { ok: false, error: `Could not start it: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}` }; }
+  nr.busy = false;
   // Started: the new tab is the confirmation. Not quite (the trust prompt, a dialog): say where, calmly.
-  if (out.ok) { try { closeOverlay(props().overlay); } catch { /* closed */ } return; }
+  if (out.ok) { try { closeOverlay(overlay); } catch { /* closed */ } return; }
   nr.error = out.error;
   if (out.started) nr.done = true;
   cx.notify();
@@ -301,7 +340,8 @@ const folderRow = (t, nr, e, i, pick) => h_flex().id(`nr-f-${i}`).px(8).h(30).ga
 export function newRunView(view, t) {
   const nr = view.nr;
   if (!nr) return div();
-  const kind = KINDS.find((k) => k.id === nr.kind);
+  const captain = nr.kind === "captain";
+  const kind = KINDS.find((k) => k.id === nr.kind) ?? KINDS[0];
   const set = (patch, cx) => { Object.assign(nr, patch, { error: null }); cx.notify(); };
   const items = nr.open ? shownList(nr) : [];
   const pick = (e, cx) => choose(view, e, cx);
@@ -331,19 +371,20 @@ export function newRunView(view, t) {
     ? !target(nr).space && !target(nr).machine && div().text_size(11).text_color(t.dim).child("No space for it yet: Herdr opens one in the background")
     : nr.where.value().trim() && div().text_size(11).text_color(t.dim).child("Pick a folder from the list"));
   return v_flex().size_full().p(20).gap(16).bg(t.background)
-    .child(div().text_size(15).font_semibold().text_color(t.foreground).child("New run"))
+    .child(div().text_size(15).font_semibold().text_color(t.foreground).child(captain ? "Start captain" : "New run"))
     .child(field(t, "Folder", div().when(nr.open, (e) => e.key_context("HarborFolderList").on_action("harbormaster-folder-list-close", (_e, cx) => { nr.open = false; cx.notify(); })).on_key_down(keys).on_mouse_down("left", (_e, cx) => openList(view, cx)).child(framed(t, nr.where)), list || note || null))
-    .child(field(t, "What", h_flex().gap(6).children(KINDS.map((k) => pill(t, `nr-k-${k.id}`, k.label, nr.kind === k.id,
-      (cx) => { nr.kind = k.id; setProfile(nr); nr.drafts = draftsFor(nr.prefs, draftKey(nr)); set({}, cx); })))))
-    .child(field(t, kind.hint, framed(t, nr.text), div().text_size(11).text_color(t.dim).child(kind.example)))
-    .child(field(t, "Profile", framed(t, nr.profile)))
-    .children([drafts].filter(Boolean))
+    .children(captain ? [div().text_size(11).text_color(t.dim).child("Runs /herdr-app-captain in a new tab of that folder's space, without switching your view")] : [])
+    .children(captain ? [] : [field(t, "What", h_flex().gap(6).children(KINDS.map((k) => pill(t, `nr-k-${k.id}`, k.label, nr.kind === k.id,
+      (cx) => { nr.kind = k.id; setProfile(nr); nr.drafts = draftsFor(nr.prefs, draftKey(nr)); set({}, cx); })))),
+      field(t, kind.hint, framed(t, nr.text), div().text_size(11).text_color(t.dim).child(kind.example)),
+      field(t, "Profile", framed(t, nr.profile)), drafts].filter(Boolean))
     .child(div().flex_1())
     .children([nr.error && div().text_size(12).text_color(nr.done || nr.hint ? t.muted : t.blocked).child(nr.error)].filter(Boolean))
     .child(h_flex().gap(8).justify_end()
       .child(pill(t, "nr-cancel", nr.done ? "Close" : "Cancel", false, () => { try { closeOverlay(props().overlay); } catch { /* closed */ } }))
       .child(div().id("nr-start").px(14).h(28).rounded(6).flex().items_center().text_size(12.5).font_semibold()
         .bg(t.accent).text_color(t.background).when(nr.busy || nr.done || !startable, (e) => e.opacity(0.45))
-        .when(!nr.busy && !nr.done && startable, (e) => e.cursor_pointer().on_click((_e, cx) => { start(view, cx); }))
+        // Dim without a folder, but still clickable: the click says what is missing.
+        .when(!nr.busy && !nr.done, (e) => e.cursor_pointer().on_click((_e, cx) => { start(view, cx); }))
         .child(nr.busy ? "Starting…" : "Start")));
 }

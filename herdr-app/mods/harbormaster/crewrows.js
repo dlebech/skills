@@ -3,6 +3,7 @@
 // their colour, and its hover. Pure, so the tests drive it; crew.js draws it.
 
 import { byWait, nextStepText, stepText, ageText, reviewWaitText, FINISHED_LABEL } from "./attention.js";
+import { ORDER as REASON_ORDER } from "./needaction.js";
 import { commentLines, commentsText, hasComments } from "./comments.js";
 
 // The groups, in the order the Crew shows them: what you must act on, what is at work, what
@@ -18,13 +19,28 @@ export const GROUPS = [
   { key: "done", title: "Done", folded: true },
 ];
 
-// Rows ({a: assess result, ...}) by group, each longest wait first. A row without a result
+// Rows ({a: assess result, ...}) by group, each longest wait first (Needs you: byNeed, below). A row without a result
 // can't be told.
 export function groupRows(rows) {
   const out = Object.fromEntries(GROUPS.map((g) => [g.key, []]));
   for (const x of rows) (out[x.a?.group] ?? out.cant).push(x);
-  for (const list of Object.values(out)) list.sort((x, y) => byWait(x.a ?? {}, y.a ?? {}));
+  for (const [key, list] of Object.entries(out)) if (key !== "needs") list.sort((x, y) => byWait(x.a ?? {}, y.a ?? {}));
+  out.needs = out.needs.map((x) => [importance(x.a), x]).sort((p, q) => byNeed(p[1], q[1], p[0], q[0])).map((p) => p[1]);
   return out;
+}
+
+// How important a Needs-you run is: its most urgent reason's place in needaction.js ORDER (0 first).
+const importance = (a) => Math.min(REASON_ORDER.length, ...(a?.reasons ?? []).map((r) => { const i = REASON_ORDER.indexOf(r.key); return i < 0 ? REASON_ORDER.length : i; }));
+
+// Needs-you order, which only real changes move: most important first, then longest waiting,
+// then by key so equals never swap. Nothing about which entry is open, seen or hovered is in it.
+export function byNeed(x, y, ix = importance(x.a), iy = importance(y.a)) {
+  const i = ix - iy;
+  if (i) return i;
+  const w = (x.a?.waitSince ?? Infinity) === (y.a?.waitSince ?? Infinity) ? 0 : (x.a?.waitSince ?? Infinity) < (y.a?.waitSince ?? Infinity) ? -1 : 1;
+  if (w) return w;
+  const kx = String(needKey(x)), ky = String(needKey(y));
+  return kx < ky ? -1 : kx > ky ? 1 : 0;
 }
 
 // Only stalled: what waits on the user is a nudge, not a decision, so amber, not red.
@@ -195,8 +211,10 @@ export const runlessNeeds = (orchs) => orchs.filter((x) => !x.r && x.a?.group ==
 export const needCount = (needRuns, orchs, decisions) => needRuns.length + runlessNeeds(orchs).length + decisions;
 
 // The line under Needs you while the captain has open decisions: they count in the heading,
-// and the captain's own row (above, where it always is) is where to answer them.
-export const captainNeedNote = (decisions) => (decisions > 0 ? `+ the captain's ${decisions === 1 ? "decision" : `${decisions} decisions`}, above` : null);
+// and the captain's own row (above, where it always is) is where to answer them; with no
+// captain running, the ⚓+ pill above is where to start one.
+export const captainNeedNote = (decisions, running = true) => (decisions > 0
+  ? `+ the captain's ${decisions === 1 ? "decision" : `${decisions} decisions`}${running ? ", above" : ": no captain running, start one with ⚓+ above"}` : null);
 
 // What the captain's row says it watches, from stats(): "watching 2 runs · 1 finished", every
 // run it keeps an eye on (running and finished but open), then how many of them are finished.
@@ -246,13 +264,16 @@ export function captainMark({ status = null, msg = null, watching = false } = {}
   return "idle";
 }
 
-// The Needs-you entries under the open box, as compact rows: at most `limit`, the rest behind
-// "+ n more" until unfolded (`open`). {shown, extra}: `extra` is how many the fold holds, shown
-// or not, so the toggle can say "+ 3 more" and fold them back.
-export function needsRest(entries, expanded, { limit = 3, open = false } = {}) {
-  const rest = entries.filter((x) => x !== expanded);
-  const extra = Math.max(0, rest.length - limit);
-  return { shown: open ? rest : rest.slice(0, limit), extra };
+// The Needs-you entries in list order, the open one among them (`box`: draw it as the box), so
+// opening one never moves another: the first `limit`, the rest behind "+ n more" until unfolded
+// (`open`). The open entry stays in its place even beyond the limit. {slots: [{x, box}], extra}:
+// `extra` is how many the fold holds, shown or not, so the toggle can say "+ 3 more".
+export function needsSlots(entries, expanded, { limit = 4, open = false } = {}) {
+  // An open entry past the limit is shown, so the fold holds one fewer.
+  const past = expanded && entries.indexOf(expanded) >= limit ? 1 : 0;
+  const extra = open ? Math.max(0, entries.length - limit) : Math.max(0, entries.length - limit - past);
+  const slots = entries.map((x, i) => ({ x, box: x === expanded, show: open || i < limit || x === expanded }));
+  return { slots: slots.filter((s) => s.show).map(({ x, box }) => ({ x, box })), extra };
 }
 
 // A compact Crew row's second line: what the run is doing now, in its own words (status.json's

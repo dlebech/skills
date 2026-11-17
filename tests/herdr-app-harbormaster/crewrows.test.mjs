@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { assess, runDot, STALL_MS } from "../../herdr-app/mods/harbormaster/attention.js";
 import { needsYouNow } from "../../herdr-app/mods/harbormaster/attend.js";
 import { decisionQueue } from "../../herdr-app/mods/harbormaster/data.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, cantWhy, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText, workerTree } from "../../herdr-app/mods/harbormaster/crewrows.js";
+import { GROUPS, groupRows, byNeed, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, cantWhy, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText, workerTree } from "../../herdr-app/mods/harbormaster/crewrows.js";
 
 const MIN = 60000;
 const now = Date.parse("2026-11-16T12:00:00Z");
@@ -281,6 +281,7 @@ test("the Crew's Needs you count is the overview's, for the same facts", () => {
   assert.equal(captainNeedNote(1), "+ the captain's decision, above");
   assert.equal(captainNeedNote(2), "+ the captain's 2 decisions, above");
   assert.equal(captainNeedNote(0), null);
+  assert.equal(captainNeedNote(2, false), "+ the captain's 2 decisions: no captain running, start one with ⚓+ above");
 });
 
 test("the captain says how many runs it watches, then how many of them are finished", () => {
@@ -365,4 +366,17 @@ test("workerTree: a guide continues past an ancestor that has later siblings", (
   const w = (address, parent) => ({ address, parent });
   const rows = workerTree([w("a", "O"), w("b", "a"), w("c", "b"), w("d", "a")], "O");
   assert.deepEqual(rows.map((x) => [x.w.address, x.depth, x.guides]), [["a", 0, []], ["b", 1, []], ["c", 2, [true]], ["d", 1, []]]);
+});
+
+test("Needs you: most important first, then longest waiting, then by key; opening or seeing one changes nothing", () => {
+  const e = (key, reason, waitSince, extra = {}) => ({ r: { key }, a: { group: "needs", reasons: [{ key: reason }], waitSince, ...extra } });
+  const rows = [e("m1", "approved — merge", ago(90)), e("q-new", "question", ago(5)), e("q-old", "question", ago(50)), e("ci", "red-ci", ago(200)), e("m0", "approved — merge", ago(90))];
+  const order = (list) => groupRows(list).needs.map((x) => x.r.key);
+  const before = order(rows);
+  assert.deepEqual(before, ["q-old", "q-new", "ci", "m0", "m1"]);
+  // Selecting (the open key) and marking a proof seen (proofRead, ready) are not in the sort key.
+  const seen = rows.map((x) => ({ ...x, a: { ...x.a, proofRead: true, ready: true } }));
+  assert.deepEqual(order(seen), before);
+  assert.deepEqual(order([...rows].reverse()), before, "input order never matters");
+  assert.ok(byNeed(e("x", "question", ago(1)), e("y", "finished", ago(999))) < 0, "importance beats age");
 });

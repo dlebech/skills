@@ -10,11 +10,11 @@ import { programIcon, plural, runName } from "./ui.js";
 import { startedTip } from "./context.js";
 import { liveUsage } from "./resources.js";
 import { attentionOf } from "./attend.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, captainNeedNote, captainMark, needsRest, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, captainNeedNote, captainMark, needsSlots, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
 import { reviewError } from "./reviews.js";
 import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
-import { openNewRun, startReview, reviewStarting } from "./newrun.js";
+import { openNewRun, openStartCaptain, startReview, reviewStarting } from "./newrun.js";
 import { primaryOf, isMergeAsk } from "./needaction.js";
 import { claimsAsk, checksLine, reviewedLine, withSaid, claimActions } from "./claims.js";
 import {
@@ -119,30 +119,38 @@ const statusMsg = (term) => term?.report?.msg ?? (typeof term?.status === "objec
 // "captain ↗" at the header's right: red with a count while it has decisions for you, an eye
 // while it only watches, the spinner only while it really replies (crewrows.js captainMark).
 // Clicking does what the captain card did: focus it, with the overview beside it. No captain:
-// nothing, unless decisions still wait for one.
+// a compact "⚓+" pill, styled like "+ New run" (a longer label squeezes the title), that opens the Start captain dialog (a folder to
+// start it in); "⚓+ · 3" while decisions wait for one.
+function startCaptainLink(t, asks) {
+  return h_flex().id("crew-start-captain").flex_none().px(7).h(22).items_center().rounded(5).bg(t.raised)
+    .text_size(11.5).font_medium().text_color(asks ? t.blocked : t.muted).cursor_pointer()
+    .hover((st) => st.text_color(asks ? t.blocked : t.foreground).bg(t.hover))
+    .tooltip(`Start captain\n${asks ? `${plural(asks, "decision")} for you, and no captain running. ` : "No captain running. "}Pick the folder to start it in`)
+    .on_click((_e, cx) => { cx.stop_propagation(); openStartCaptain(); })
+    .child(asks ? `⚓+ · ${asks}` : "⚓+");
+}
+
 function captainLink(m) {
   const { view, t, ctx, cap, asks } = m;
   const term = cap.terminal;
-  if (!term && !asks) return null;
-  const mark = term ? captainMark({ status: agentStatus(term, ctx), msg: statusMsg(term), watching: cap.watching }) : "idle";
+  if (!term) return startCaptainLink(t, asks);
+  const mark = captainMark({ status: agentStatus(term, ctx), msg: statusMsg(term), watching: cap.watching });
   const tone = asks ? t.blocked : t.muted;
   const icon = mark === "watching" ? svg("mods/harbormaster/eye.svg").size(12).flex_none().text_color(tone)
     : mark === "working" || mark === "blocked" ? statusDot(t, mark) : null;
   const state = { watching: `Watching: ${watchedText(stats(view.runs, ctx))}, idle until something needs it`, working: "Working", blocked: "Waiting on a prompt in its terminal",
     idle: cap.watching ? "Idle" : "Idle, not watching runs" }[mark];
-  const tip = term
-    ? [`The captain · ${state}`, asks ? `${plural(asks, "decision")} for you` : null, "Click to open it, with the overview beside it"].filter(Boolean).join("\n")
-    : `${plural(asks, "decision")} for you, and no captain running: start /herdr-app-captain to answer`;
+  const tip = [`The captain · ${state}`, asks ? `${plural(asks, "decision")} for you` : null, "Click to open it, with the overview beside it"].filter(Boolean).join("\n");
   return h_flex().id("crew-captain-link").flex_none().gap(5).items_center().px(6).h(22).rounded(5)
     .text_size(11.5).text_color(tone).tooltip(tip)
-    .when(Boolean(term), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover).text_color(asks ? t.blocked : t.foreground))
-      .on_click(() => focusWithPane(term.address)))
+    .cursor_pointer().hover((st) => st.bg(t.hover).text_color(asks ? t.blocked : t.foreground))
+    .on_click(() => focusWithPane(term.address))
     .when(Boolean(icon), (el) => el.child(icon))
     .child(asks ? `captain · ${asks} ↗` : "captain ↗");
 }
 
 // The sidebar's one header row.
-function harborHeader(m) {
+export function harborHeader(m) {
   const { t } = m;
   // The label gives way first (it ellipsizes), then the spacer: the captain link never clips.
   return h_flex().id("crew-header").flex_none().h(36).pl(PAD * 2).pr(PAD).gap(8).items_center().min_w(0).overflow_hidden()
@@ -340,8 +348,9 @@ function needCard(m, x) {
   const go = openRun(m, x);
   const focus = (_e, cx) => { cx.stop_propagation(); if (x.term) go(); };
   return v_flex().id("crew-needs-box").relative().overflow_hidden().flex_none().min_w(0).gap(6).pl(PAD + 3).pr(PAD).pt(7).pb(8).rounded(6)
-    .bg(edge + "1a").on_click((_e, cx) => cx.stop_propagation())
-    .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
+    // The selected one: a stronger tint, an edge-coloured outline and a wider bar; the rows are quieter.
+    .bg(edge + "33").border(1).border_color(edge).on_click((_e, cx) => cx.stop_propagation())
+    .child(div().absolute().left(0).top(0).bottom(0).w(5).bg(edge))
     .child(v_flex().gap(1).min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)
         .child(div().id(`${id}-title`).flex_1().min_w(0).flex().cursor_default()
@@ -353,8 +362,8 @@ function needCard(m, x) {
     .children(boxActions(m, x, f, items));
 }
 
-// Needs you: the box (the oldest item open, or the one clicked), then the others as compact rows,
-// at most three before "+ n more". Nothing waiting: one calm line.
+// Needs you: the entries in their stable order, the open one (the first, or the one clicked) drawn
+// as the box in its place, the others as compact rows, at most four before "+ n more". Nothing waiting: one calm line.
 function needsSection(m) {
   const { view, t, groups, needs, entries, asks } = m;
   const g = GROUPS[0];
@@ -368,13 +377,12 @@ function needsSection(m) {
   const pick = (x) => (_e, cx) => { view.needsOpen = needKey(x); cx.notify(); if (x.term) openRun(m, x)(); };
   const moreKey = "crew-needs-more";
   const open = unfolded(view, moreKey, false);
-  const { shown, extra } = needsRest(list, expanded, { open });
-  const capNote = captainNeedNote(asks);
+  const { slots, extra } = needsSlots(list, expanded, { open });
+  const capNote = captainNeedNote(asks, !!m.cap?.terminal);
   return [
     h_flex().id("crew-group-needs").flex_none().h(22).px(PAD).items_center().text_size(10.5).font_semibold().text_color(t.blocked).child(`${g.title} · ${needs}`),
     ...(capNote ? [div().id("crew-needs-captain").flex_none().px(PAD).min_w(0).truncate().text_size(10.5).text_color(t.dim).child(capNote.replace(", above", ": captain ↗ above"))] : []),
-    ...(expanded ? [needCard(m, expanded)] : []),
-    ...shown.map((x) => needRow(m, x, canExpand(x) ? pick(x) : null)),
+    ...slots.map(({ x, box }) => (box ? needCard(m, x) : needRow(m, x, canExpand(x) ? pick(x) : null))),
     ...(extra > 0 ? [h_flex().id("crew-needs-more").flex_none().px(PAD).h(20).items_center()
       .child(quietLink(t, "crew-needs-more-toggle", open ? "show fewer" : `+ ${extra} more waiting`, open ? "Fold them back" : "Every other thing waiting on you", toggleFold(view, moreKey, open)))] : []),
   ];
@@ -392,14 +400,15 @@ const smallButton = (t, id, label, tip, onClick, off = false) => h_flex().id(id)
   .on_click((_e, cx) => { cx.stop_propagation(); if (!off) onClick(cx); })
   .child(label);
 
-function nextAction(m, it, id) {
+export function nextAction(m, it, id) {
   const { t } = m;
   if (it.kind === "review") {
     // Started from here and its run not seen yet (newrun.js reviewStarting): never a second Review.
     if (reviewStarting(it.url)) return div().flex_none().text_size(11).text_color(t.dim).tooltip("Its review run is starting; it shows as reviewing once its run files name the PR").child("starting…");
     if (!it.local) return null;
     return smallButton(t, `${id}-act`, "Review", "Start a review run in its repository's space, with your remembered review settings", (cx) => {
-      startReview({ repo: it.local, pr: it.number, url: it.url }).catch(() => {}).finally(() => cx.notify());
+      // The click's cx is gone once startReview awaits: the redraw after it uses a task's own.
+      cx.spawn(async (cx) => { await startReview({ repo: it.local, pr: it.number, url: it.url }).catch(() => {}); cx.notify(); });
       cx.notify();
     });
   }

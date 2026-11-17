@@ -4,7 +4,7 @@
 // Run: node --import ./loader.mjs --test calmcrew.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { captainMark, SHELLS_ONLY, needsRest, subtitleOf, prRef } from "../../herdr-app/mods/harbormaster/crewrows.js";
+import { captainMark, SHELLS_ONLY, needsSlots, subtitleOf, prRef } from "../../herdr-app/mods/harbormaster/crewrows.js";
 import { primaryOf, isMergeAsk } from "../../herdr-app/mods/harbormaster/needaction.js";
 
 test("the captain watches while idle with its watcher, or working only on background shells", () => {
@@ -29,13 +29,20 @@ test("only a whole shells-still-running message counts", () => {
   assert.ok(!SHELLS_ONLY.test(""));
 });
 
-test("under the box, at most three rows, the rest behind + n more until unfolded", () => {
+test("Needs you shows the first four in list order, the rest behind + n more until unfolded; the open one keeps its place", () => {
   const list = ["a", "b", "c", "d", "e", "f"];
-  assert.deepEqual(needsRest(list, "a"), { shown: ["b", "c", "d"], extra: 2 });
-  assert.deepEqual(needsRest(list, "a", { open: true }), { shown: ["b", "c", "d", "e", "f"], extra: 2 });
-  assert.deepEqual(needsRest(["a", "b"], "a"), { shown: ["b"], extra: 0 });
+  const ids = (r) => r.slots.map((s) => s.x + (s.box ? "*" : ""));
+  assert.deepEqual(ids(needsSlots(list, "a")), ["a*", "b", "c", "d"]);
+  assert.equal(needsSlots(list, "a").extra, 2);
+  // Opening another one moves nothing: same order, only the box moves.
+  assert.deepEqual(ids(needsSlots(list, "c")), ["a", "b", "c*", "d"]);
+  assert.deepEqual(ids(needsSlots(list, "f")), ["a", "b", "c", "d", "f*"], "an open entry past the limit stays in its place");
+  assert.equal(needsSlots(list, "f").extra, 1, "the open entry past the limit is not counted as hidden");
+  assert.equal(needsSlots(list, "e").extra, 1);
+  assert.deepEqual(ids(needsSlots(list, "a", { open: true })), ["a*", "b", "c", "d", "e", "f"]);
+  assert.deepEqual(ids(needsSlots(["a", "b"], "a")), ["a*", "b"]);
   // No entry can be drawn open (no run directory): every one is a row.
-  assert.deepEqual(needsRest(["x", "y"], null), { shown: ["x", "y"], extra: 0 });
+  assert.deepEqual(ids(needsSlots(["x", "y"], null)), ["x", "y"]);
 });
 
 test("a compact row's second line is the run's progress note, else its plan status, on one line", () => {
