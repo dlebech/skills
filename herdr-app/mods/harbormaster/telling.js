@@ -11,7 +11,8 @@
 // toast in the shared store (`by`) and posts it only if its claim still stands after writing.
 
 import { shared, setShared, notify } from "herdr";
-import { cachedRuns } from "./data.js";
+import { cachedRuns, prsOf } from "./data.js";
+import { pruneAsked } from "./asked.js";
 import { attentionOf } from "./attend.js";
 import { orchestratorState } from "./live.js";
 import { runName } from "./ui.js";
@@ -76,4 +77,6 @@ export function observeTelling(runs, ctx, now = Date.now()) {
   const nextS = nextSeen(seen, runs, { failed });
   if (nextS !== seen) setShared(SEEN_KEY, nextS);
   observeToasts(runs, ctx, failed, now);
+  // Asks for Address comments that no longer hold go from their store (asked.js).
+  pruneAsked(runs.flatMap((r) => (r.stale ? [] : prsOf(r) ?? [])));
 }

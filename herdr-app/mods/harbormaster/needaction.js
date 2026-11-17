@@ -8,7 +8,7 @@
 
 import { ageText, ciState } from "./attention.js";
 import { andList } from "./words.js";
-import { hasComments, commentsText, defaultMode } from "./comments.js";
+import { hasComments, commentsText, defaultMode, askAllLabel, offersAll } from "./comments.js";
 
 const numOf = (p) => (p?.number ? `#${p.number}` : null);
 // "#1799 and #1372", or "the PR" / "its 2 PRs" when GitHub gave no numbers.
@@ -46,23 +46,31 @@ export function proofText(proof) {
 // Address comments in the box (comments.js): for each of `prs` with open review comments, Ask me
 // and Handle them, the run's autonomy's default first-class (`primary`), then its Open; the
 // other PRs' Open after. With several PRs each action carries `row`, the PR it is about
-// ("#1799 · 15 comments"), so the box draws a row per PR. Only for a run whose orchestrator is
-// here to ask, not put away, with no open question (an Ask me's question would queue behind it):
-// as the card's own Address row was.
-function addressPrs(prs, run) {
+// ("#1799 · 15 comments"), so the box draws a row per PR. `asked`: PRs whose comments are being
+// handled (attention.js nextStepAsking): each keeps its row, "asked…" in place of the buttons.
+// With two or more PRs still to ask, a last row asks about all of them (Ask me about all /
+// Handle all). Only for a run whose orchestrator is here to ask, not put away, with no open
+// question (an Ask me's question would queue behind it): as the card's own Address row was.
+function addressPrs(prs, run, asked = []) {
   const can = Boolean(run?.dir && run.localTerminal && !run.away && !run.question);
   const first = defaultMode(run?.autonomy);
   const asks = can ? prs.filter((p) => p?.url && hasComments(p.comments)) : [];
   if (!asks.length) return openPrs(prs);
-  const row = (p) => (prs.length > 1 ? { row: [numOf(p) ?? "the PR", commentsText(p.comments)].filter(Boolean).join(" · ") } : {});
+  const several = prs.length + asked.length > 1;
+  const row = (p) => (several ? { row: [numOf(p) ?? "the PR", commentsText(p.comments)].filter(Boolean).join(" · ") } : {});
   const open = (p) => openPrs([p]).map((x) => ({ ...x, ...row(p) }));
   const rest = prs.filter((p) => p?.url && !asks.includes(p)).slice(0, Math.max(0, MAX_OPEN - asks.length));
+  // An asked PR: "#1799 · asked…" with its Open.
+  const done = asked.filter((p) => p?.url).flatMap((p) => [{ kind: "asked", label: "asked…", pr: p, row: numOf(p) ?? "the PR" }, ...openPrs([p]).map((x) => ({ ...x, row: numOf(p) ?? "the PR" }))]);
+  const all = offersAll(asks) ? ["ask", "handle"].map((mode) => ({ kind: "address-all", label: askAllLabel(mode), mode, prs: asks, primary: mode === first, row: `All ${asks.length}` })) : [];
   return [
+    ...done,
     ...asks.flatMap((p) => [
-      ...["ask", "handle"].map((mode) => ({ kind: "address", label: mode === "ask" ? "Ask me" : "Handle them", mode, pr: p, primary: mode === first, ...row(p) })),
+      ...["ask", "handle"].map((mode) => ({ kind: "address", label: mode === "ask" ? "Ask me" : "Handle them", mode, pr: p, primary: mode === first && !all.length, ...row(p) })),
       ...open(p),
     ]),
     ...rest.flatMap(open),
+    ...all,
   ];
 }
 
@@ -80,6 +88,8 @@ export function runReports(paths) {
 // One reason's {key, line, tip, actions}. Action kinds (overview.js clicks them):
 //   open {url}          opens a PR or check on GitHub
 //   address {pr, mode}  Address comments on a PR: Ask me ("ask") or Handle them ("handle")
+//   address-all {prs, mode}  the same for every PR in `prs` at once (Ask me about all, Handle all)
+//   asked {pr}          a PR whose comments were asked about: "asked…", no buttons
 //   proof               unfolds the run's proof
 //   ask-ci {pr, check}  asks the orchestrator to see to the red CI (an inbox message)
 //   ask-blocking        a stalled run's Ask what's blocking
@@ -123,7 +133,7 @@ function reasonItem(r, a, ctx) {
       const who = [...new Set(same.flatMap((p) => p.changesBy ?? []))];
       const said = commentsText(next?.comments);
       const at = Math.max(0, ...same.map((p) => p.reviewedAt ?? 0)) || null;
-      return { line: `${andList(who) || "A reviewer"} asked for changes on ${prsText(same)}${said ? ` · ${said}` : ""}${at ? ` ·${ago(at, now)}` : ""}`, actions: addressPrs(same, run) };
+      return { line: `${andList(who) || "A reviewer"} asked for changes on ${prsText(same)}${said ? ` · ${said}` : ""}${at ? ` ·${ago(at, now)}` : ""}`, actions: addressPrs(same, run, next?.asked) };
     }
     case "approved — merge": {
       const who = [...new Set(same.flatMap((p) => p.approvedBy ?? []))];
@@ -133,7 +143,7 @@ function reasonItem(r, a, ctx) {
       const line = hasComments(next?.comments)
         ? `Approved${by}${ago(at, now)} with ${commentsText(next.comments)} on ${prsText(same)}: address them, then merge`
         : `Merge ${prsText(same)} · approved${by}${ago(at, now)}`;
-      return { line, actions: addressPrs(same, run) };
+      return { line, actions: addressPrs(same, run, next?.asked) };
     }
     case "review proof → merge": {
       const p = proofText(proof);

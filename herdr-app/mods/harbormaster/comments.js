@@ -206,3 +206,55 @@ export const commentsSig = (run, pr) => `${(pr?.comments?.items ?? []).map((x) =
 // Whether a PR's Address comments shows "asked…": its message is unread (run.commentsAsked has
 // its URL), or it was asked from here (`asked`: {sig} at the click) and nothing has moved since.
 export const commentsAsked = (run, pr, asked = null) => (run?.commentsAsked ?? []).includes(pr?.url) || (asked != null && asked.sig === commentsSig(run, pr));
+
+// ---- The asked state, kept across reloads ----
+// What the user asked to be handled, per PR URL: {sig, at} (commentsSig at the click, and when),
+// kept in shared state harbormaster.commentsAsked (asked.js). The unread inbox message alone is
+// not enough: the orchestrator renames it once it reads it, long before the threads are done.
+
+export const ASKED_KEEP_MS = 7 * 24 * 3600 * 1000;
+
+// Whether `store` holds a live ask for the PR: not older than a week, its comments unmoved.
+export const askedEntry = (store, pr, now = Date.now()) => {
+  const e = store?.[pr?.url];
+  return Boolean(e) && now - (e.at ?? 0) <= ASKED_KEEP_MS && e.sig === commentsSig(null, pr);
+};
+
+// The URLs among `prs` with a live ask in `store`.
+export const askedUrls = (store, prs, now = Date.now()) => new Set((prs ?? []).filter((p) => p?.url && askedEntry(store, p, now)).map((p) => p.url));
+
+// `store` with each of `prs` marked asked now (a new object; the click of Ask me / Handle them,
+// or of the ones for all).
+export const markAsked = (store, run, prs, now = Date.now()) => ({
+  ...(store ?? {}),
+  ...Object.fromEntries(prs.filter((p) => p?.url).map((p) => [p.url, { sig: commentsSig(run, p), at: now }])),
+});
+
+// `store` without the PR (a failed send), or the same object when it was not there.
+export function unmarkAsked(store, url) {
+  if (!store || !(url in store)) return store;
+  const { [url]: _gone, ...rest } = store;
+  return rest;
+}
+
+// `store` without what no longer holds: asks older than a week, and asks for a PR now merged or
+// closed or whose open comments moved (the PR's comments unread are not "moved"). `prs` are the
+// PRs as read. The same object when nothing goes, so the caller writes only on a change.
+export function prunedAsked(store, prs, now = Date.now()) {
+  if (!store) return store;
+  const byUrl = new Map((prs ?? []).filter((p) => p?.url).map((p) => [p.url, p]));
+  const keep = Object.entries(store).filter(([url, e]) => {
+    if (now - (e?.at ?? 0) > ASKED_KEEP_MS) return false;
+    const p = byUrl.get(url);
+    if (!p) return true;
+    if (p.state === "MERGED" || p.state === "CLOSED") return false;
+    if (!p.comments || commentsUnknown(p.comments)) return true;
+    return e.sig === commentsSig(null, p);
+  });
+  return keep.length === Object.keys(store).length ? store : Object.fromEntries(keep);
+}
+
+// What "Ask me about all" / "Handle all" label as, and whether the box offers them: with two or
+// more PRs that can still be asked.
+export const askAllLabel = (mode) => (mode === "ask" ? "Ask me about all" : "Handle all");
+export const offersAll = (askable) => (askable?.length ?? 0) >= 2;

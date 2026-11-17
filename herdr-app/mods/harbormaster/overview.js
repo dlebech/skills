@@ -17,9 +17,10 @@ import { stepText, quietText, flowState, flowSetting, runDot } from "./attention
 import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } from "./tell.js";
 import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
+import { askedStore, markPrsAsked, unmarkPrAsked } from "./asked.js";
 import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, crewEntries, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
-import { commentsAsked, commentsSig, defaultMode, commentLines, hasComments, botCount } from "./comments.js";
+import { commentsAsked, defaultMode, commentLines, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
 import { needActions, doLine, ownAddressRows } from "./needaction.js";
 
@@ -372,9 +373,8 @@ function ciAction(view, t, r, action, id) {
     });
 }
 
-// PRs asked to address their comments from here, by PR URL: {sig} (comments.js commentsSig at
-// the click). The unread message (run.commentsAsked) carries it across copies and reloads.
-const commentsAskedHere = new Map();
+// PRs asked to address their comments, by PR URL: {sig, at} in shared state (asked.js), so every
+// copy and a reload know; the unread message (run.commentsAsked) says it too until it is read.
 
 const MODE_TIP = {
   ask: "Ask me: its orchestrator writes you one question listing each comment with what it proposes (fix, reply or leave, and why); it acts on your answer",
@@ -409,9 +409,7 @@ function commentsAction(view, t, r, att, id) {
 // Whether a PR's Address comments was asked and nothing has moved since (comments.js commentsAsked),
 // dropping a click from here whose PR's comments have moved on.
 function addressAsked(r, p) {
-  const mine = commentsAskedHere.get(p.url);
-  if (mine && mine.sig !== commentsSig(r, p)) commentsAskedHere.delete(p.url);
-  return commentsAsked(r, p, commentsAskedHere.get(p.url));
+  return commentsAsked(r, p, askedStore()[p.url]);
 }
 const askedNote = (t, id) => div().id(id).flex_none().text_size(11).text_color(t.muted)
   .tooltip("Asked its orchestrator to address these comments; waiting for its open comments to change").child("asked…");
@@ -419,19 +417,25 @@ const modeTip = (r, mode) => `${MODE_TIP[mode]}.${mode === defaultMode(r.autonom
 
 // The click of an Ask me or Handle them: writes the run's inbox message for the PR (data.js
 // askComments); the button reads "asked…" until the PR's open comments change.
-const addressSend = (view, r, p, mode) => (cx) => {
-  commentsAskedHere.set(p.url, { sig: commentsSig(r, p) });
+const addressSend = (view, r, p, mode) => addressSendAll(view, r, [p], mode);
+
+// The click of Ask me about all / Handle all: the same message for each PR, one after the other.
+// Each PR reads "asked…" at once; one whose message did not reach the inbox is unmarked.
+const addressSendAll = (view, r, prs, mode) => (cx) => {
+  markPrsAsked(r, prs);
   view.actionError = null;
   cx.notify();
   cx.spawn(async (cx) => {
-    try {
-      const out = await askComments(r, p, mode);
-      if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
-      else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
-    } catch (e) {
-      // Written but not woken: the ask is in the inbox, so it stays asked.
-      if (!e?.inInbox) commentsAskedHere.delete(p.url);
-      view.actionError = `${r.branch}: ${e?.message ?? e}`;
+    for (const p of prs) {
+      try {
+        const out = await askComments(r, p, mode);
+        if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
+        else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
+      } catch (e) {
+        // Written but not woken: the ask is in the inbox, so it stays asked.
+        if (!e?.inInbox) unmarkPrAsked(p.url);
+        view.actionError = `${r.branch}: ${e?.message ?? e}`;
+      }
     }
     view.redraw = true;
     try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
@@ -608,6 +612,10 @@ function needButton(view, t, r, f, x, id, where, primary) {
     // Ask me and Handle them share one "asked…" once either was clicked.
     case "address": return addressAsked(r, x.pr) ? (x.mode === "ask" ? askedNote(t, id) : null)
       : actionButton(t, id, x.label, modeTip(r, x.mode), addressSend(view, r, x.pr, x.mode), primary);
+    // Asked and being handled: its row says so, with Open beside.
+    case "asked": return askedNote(t, id);
+    case "address-all": return addressAsked(r, x.prs[0]) && x.prs.every((p) => addressAsked(r, p)) ? null
+      : actionButton(t, id, x.label, `${modeTip(r, x.mode)} For each of the ${x.prs.length} PRs.`, addressSendAll(view, r, x.prs.filter((p) => !addressAsked(r, p)), x.mode), primary);
     case "focus": return actionButton(t, id, x.label, "Show its terminal", () => focusAgent(x.address), primary);
     case "ask-ci": return ciAction(view, t, r, x, id);
     case "ask-blocking": return blockingAction(view, t, r, f.att, id);
