@@ -246,3 +246,12 @@ test("an old run (no claims) is judged by its checks line alone: green is clean,
   // Nothing to read: never ready by its proof.
   assert.deepEqual(proofStateOf(old(""), ["done", "done"]), { failed: false, clean: false, sig: "" });
 });
+
+test("reading the proof changes neither a run's reason keys nor its wait anchor, so the Needs-you order stays put", () => {
+  const key = (a) => a.reasons.map((r) => r.key);
+  const unread = at(run(), [pr()], { proofRead: false, proofClean: false });
+  const read_ = at(run(), [pr()], { proofRead: true, proofClean: true });
+  assert.equal(unread.group, "needs");
+  assert.deepEqual(key(read_), key(unread));
+  assert.equal(read_.waitSince, unread.waitSince);
+});

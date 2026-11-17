@@ -10,7 +10,7 @@ import { programIcon, plural, runName } from "./ui.js";
 import { startedTip } from "./context.js";
 import { liveUsage } from "./resources.js";
 import { attentionOf } from "./attend.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, captainNeedNote, captainMark, needsRest, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, captainNeedNote, captainMark, needsSlots, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
 import { reviewError } from "./reviews.js";
 import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
@@ -222,9 +222,9 @@ function needRow(m, x, onOpen) {
   const open = onOpen ?? openRun(m, x);
   const id = `crew-need-${needKey(x)}`;
   return v_flex().id(id).relative().overflow_hidden().flex_none().gap(1).pl(PAD + 3).pr(PAD).py(5).rounded(6)
-    .bg(edge + "14").cursor_pointer().hover((st) => st.bg(edge + "26"))
+    .bg(edge + "0d").cursor_pointer().hover((st) => st.bg(edge + "26"))
     .tooltip([name.tip ?? name.title, ...rowTip(a, now), onOpen ? OPEN_HERE : null].filter(Boolean).join("\n")).on_click(open)
-    .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
+    .child(div().absolute().left(0).top(0).bottom(0).w(2).bg(edge + "99"))
     .child(titleText(t, name, 12.5, true))
     .child(div().min_w(0).truncate().text_size(11).text_color(color).child(lead));
 }
@@ -340,8 +340,9 @@ function needCard(m, x) {
   const go = openRun(m, x);
   const focus = (_e, cx) => { cx.stop_propagation(); if (x.term) go(); };
   return v_flex().id("crew-needs-box").relative().overflow_hidden().flex_none().min_w(0).gap(6).pl(PAD + 3).pr(PAD).pt(7).pb(8).rounded(6)
-    .bg(edge + "1a").on_click((_e, cx) => cx.stop_propagation())
-    .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
+    // The selected one: a stronger tint, an edge-coloured outline and a wider bar; the rows are quieter.
+    .bg(edge + "33").border(1).border_color(edge).on_click((_e, cx) => cx.stop_propagation())
+    .child(div().absolute().left(0).top(0).bottom(0).w(5).bg(edge))
     .child(v_flex().gap(1).min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)
         .child(div().id(`${id}-title`).flex_1().min_w(0).flex().cursor_default()
@@ -353,8 +354,8 @@ function needCard(m, x) {
     .children(boxActions(m, x, f, items));
 }
 
-// Needs you: the box (the oldest item open, or the one clicked), then the others as compact rows,
-// at most three before "+ n more". Nothing waiting: one calm line.
+// Needs you: the entries in their stable order, the open one (the first, or the one clicked) drawn
+// as the box in its place, the others as compact rows, at most four before "+ n more". Nothing waiting: one calm line.
 function needsSection(m) {
   const { view, t, groups, needs, entries, asks } = m;
   const g = GROUPS[0];
@@ -368,13 +369,12 @@ function needsSection(m) {
   const pick = (x) => (_e, cx) => { view.needsOpen = needKey(x); cx.notify(); if (x.term) openRun(m, x)(); };
   const moreKey = "crew-needs-more";
   const open = unfolded(view, moreKey, false);
-  const { shown, extra } = needsRest(list, expanded, { open });
+  const { slots, extra } = needsSlots(list, expanded, { open });
   const capNote = captainNeedNote(asks);
   return [
     h_flex().id("crew-group-needs").flex_none().h(22).px(PAD).items_center().text_size(10.5).font_semibold().text_color(t.blocked).child(`${g.title} · ${needs}`),
     ...(capNote ? [div().id("crew-needs-captain").flex_none().px(PAD).min_w(0).truncate().text_size(10.5).text_color(t.dim).child(capNote.replace(", above", ": captain ↗ above"))] : []),
-    ...(expanded ? [needCard(m, expanded)] : []),
-    ...shown.map((x) => needRow(m, x, canExpand(x) ? pick(x) : null)),
+    ...slots.map(({ x, box }) => (box ? needCard(m, x) : needRow(m, x, canExpand(x) ? pick(x) : null))),
     ...(extra > 0 ? [h_flex().id("crew-needs-more").flex_none().px(PAD).h(20).items_center()
       .child(quietLink(t, "crew-needs-more-toggle", open ? "show fewer" : `+ ${extra} more waiting`, open ? "Fold them back" : "Every other thing waiting on you", toggleFold(view, moreKey, open)))] : []),
   ];

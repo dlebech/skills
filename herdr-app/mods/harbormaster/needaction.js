@@ -40,7 +40,7 @@ const checksUrl = (pr) => (/^https:\/\//i.test(pr?.failed?.url ?? "") ? pr.faile
 // The order the lines come in: what blocks a run outright first (a question or dialog, a gone
 // orchestrator), then a broken build, then the PR steps, most urgent first, then a stall, then
 // the cleanup of a finished run.
-const ORDER = ["question", "gone", "red-ci", "changes requested", "approved — merge", "review proof → merge", "request review", "stalled", "review-pending", "finished"];
+export const ORDER = ["question", "gone", "red-ci", "changes requested", "approved — merge", "review proof → merge", "request review", "stalled", "review-pending", "finished"];
 
 // "T2 · 5/10 proven · 1 fail" from {tier, pass, total, fail}, or null with no proof to read.
 export function proofText(proof) {
