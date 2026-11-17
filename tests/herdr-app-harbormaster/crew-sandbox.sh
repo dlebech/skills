@@ -41,6 +41,12 @@
 #   review-proof  finished, dlebech/wapi-beatbox#1, proof.md T2 1/2 pass  -> review proof → merge
 #   report-run    finished, no PR, shared/final-report.md (+ t1-report.md) -> finished — read and close
 #   asks-question running, question.md with Options, Recommended and Blocks -> a question box
+# For an approval over two PRs with comments (t17), fake PRs through fake-gh.sh (installed as
+# <scratch>/bin/gh, first on the app's PATH; it answers only owner "fake-two", the real gh the rest):
+#   two-prs       running, folder "snevagten" (peer), fake-two/api#1799 (2 comments) and fake-two/web#1372 (9; one PR per repo in status.json),
+#                 both approved by mfalkenbrink. Its orchestrator's state follows the file
+#                 <scratch>/state-two-prs ("working" or "idle"; none = idle): `echo working > ...`
+#                 as the orchestrator does after Handle them
 # Hide a run from the Crew with `hc label <t> role=` and bring it back with role=orchestrator.
 #
 # Needs xvfb-run, ImageMagick's import (root only), jq, gh, python3 and libXtst. The window lands
@@ -111,7 +117,9 @@ make_runs() {
     hc label "$term" role=orchestrator >/dev/null
     echo "$branch: $term"
   }
-  printf '%s\n' 'echo "fake orchestrator $1"' '[ -z "$2" ] || printf "\033]7501;state=%s\007" "$2"' 'exec sleep infinity' >"$S/fake-orch.sh"
+  printf '%s\n' 'echo "fake orchestrator $1"' '[ -z "$2" ] || printf "\033]7501;state=%s\007" "$2"' \
+    "[ \"\$1\" != two-prs ] || (while :; do [ -f \"$S/state-\$1\" ] && printf '\\033]7501;state=%s\\007' \"\$(cat \"$S/state-\$1\")\"; sleep 2; done) &" \
+    'exec sleep infinity' >"$S/fake-orch.sh"
   local day; day=$(date -u +%Y-%m-%d)
   mkrun run-stats finished feat "Run stats" "${day}T08:10:00Z" 2/2 merged merged --progress "PR #42 up" \
     --pr dlebech/skills https://github.com/dlebech/skills/pull/42
@@ -149,6 +157,8 @@ make_runs() {
   parked=$(jq -r .terminal "$S/runs/skills/parked-merged/orchestrator.json")
   printf '%s\tfinished\n' "$(date -u -d '5 days ago' +%Y-%m-%dT%H:%M:%SZ)" >"$S/runs/skills/parked-merged/parked"
   hc label "$parked" role= >/dev/null
+  RUN_FOLDER=$S/work/snevagten mkrun two-prs running feat "Two PRs" "${day}T04:00:00Z" 2/2 merged merged --progress "PRs approved" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/1799 --pr fake-two/web https://github.com/fake-two/web/pull/1372
   RUN_FOLDER=$S/work/snevagten mkrun approved-merge finished feat "Approved merge" "${day}T07:00:00Z" 2/2 merged merged --progress "PRs approved" \
     --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1308 --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1372
   mkrun red-ci finished fix "Red CI" "${day}T07:30:00Z" 2/2 merged merged --progress "PR up, CI red" \
@@ -186,6 +196,7 @@ Q
 
 case $cmd in
   up)
+    mkdir -p "$S/bin" && cp "$(dirname "$0")/fake-gh.sh" "$S/bin/gh" && sed -i 's|\$REAL_GH|'"$(command -v gh)"'|' "$S/bin/gh"
     [ ! -e "$S/runs" ] || { echo "crew-sandbox: $S/runs exists; run down and remove it, or use a new dir" >&2; exit 1; }
     mkdir -p "$S/home" "$S/runs"
     for f in layouts themes settings.json keys.json; do
@@ -193,7 +204,7 @@ case $cmd in
     done
     # The app runs in the caller's hc session (a background job like any other); the
     # sandbox's terminals live in their own session, so they never show in the user's lists.
-    hc run --bg --name "$app" --cwd "$S" env -u WAYLAND_DISPLAY HERDR_APP_HOME="$S/home" HC_SESSION="$session" \
+    hc run --bg --name "$app" --cwd "$S" env -u WAYLAND_DISPLAY PATH="$S/bin:$PATH" HERDR_APP_HOME="$S/home" HC_SESSION="$session" \
       HERDR_ORCHESTRATION_ROOT="$S/runs" \
       xvfb-run -n "$num" -f "$S/Xauthority" -s "-screen 0 1600x1000x24" herdr-app >/dev/null
     sandbox_env
