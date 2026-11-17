@@ -66,7 +66,19 @@ export const FINISHED_LABEL = "finished — read and close";
 export const LABELS = ["changes requested", "approved — merge", "review proof → merge", "request review", "review from", "merged — close run"];
 // The labels that put a run in Needs you (when nothing is still working on it).
 const NEEDS_LABELS = new Set(["changes requested", "approved — merge", "review proof → merge", "request review"]);
+// The steps the run's own plan comes before: its PR is not the user's to review or merge while
+// tasks are still planned. An approval, a change request and red CI count anyway: a reviewer acted.
+const AFTER_PLAN = new Set(["review proof → merge", "request review"]);
 const rank = (label) => LABELS.indexOf(label);
+
+// Whether a run still has planned tasks to do: not finished, and fewer tasks done than planned
+// (data.js taskCounts, whose rule for a done task this repeats: attention.js cannot import data.js).
+export function planOpen(run) {
+  if (!run || run.phase === "finished") return false;
+  const tasks = run.tasks ?? [];
+  const done = tasks.length ? tasks.filter((k) => /^(merged|done|finished|complete)/.test(k.state ?? "")).length : run.merged ?? 0;
+  return Math.max(run.planned ?? 0, tasks.length) > done;
+}
 
 export const isOpenPr = (pr) => pr?.state === "OPEN" || pr?.state === "DRAFT";
 const isShut = (pr) => pr?.state === "MERGED" || pr?.state === "CLOSED";
@@ -402,7 +414,7 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   if ((!working || urgent) && gate.state !== "running") {
     const settled = Math.max(run.updated ?? 0, ci.finishedAt ?? 0) || null;
     if (!working && ci.state === "red") reasons.push({ key: "red-ci", text: `red CI on #${ci.pr.number}`, since: ci.finishedAt ?? settled });
-    if (next && NEEDS_LABELS.has(next.label)) {
+    if (next && NEEDS_LABELS.has(next.label) && !(AFTER_PLAN.has(next.label) && planOpen(run))) {
       const reviewed = next.label === "changes requested" || next.label === "approved — merge" ? next.pr.reviewedAt ?? null : null;
       // `short`: without the comment count, for the narrow sidebar (crewrows.js rowLead).
       const opts = { red: ci.state === "red", failed: Boolean(proofFailed) };

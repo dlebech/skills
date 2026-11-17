@@ -271,3 +271,25 @@ test("after an ask, a working run offers no Address buttons anywhere: not in a b
   // In Needs you for another reason, with no Address in its box: the card's own rows.
   assert.equal(ownAddressRows(true, [{ actions: [{ kind: "open" }] }]), true);
 });
+
+// ---- a question box: what is primary, what the fold says ----
+
+test("while a question is open its options are the primary action, and no other reason's button is", async () => {
+  const { isPrimary } = await import("../../herdr-app/mods/harbormaster/needaction.js");
+  // No question: the first item's first button, or the one the action names.
+  assert.equal(isPrimary({}, 0, 0), true);
+  assert.equal(isPrimary({}, 0, 1), false);
+  assert.equal(isPrimary({ primary: true }, 1, 2), true);
+  assert.equal(isPrimary({ primary: false }, 0, 0), false);
+  // Under a question: never, even where the action says so.
+  assert.equal(isPrimary({}, 0, 0, true), false);
+  assert.equal(isPrimary({ primary: true }, 0, 0, true), false);
+});
+
+test("the Details fold names what is in it", async () => {
+  const { detailsLabel } = await import("../../herdr-app/mods/harbormaster/needaction.js");
+  const secs = [{ label: "" }, { label: "Question" }, { label: "Evidence" }, { label: "Risk" }];
+  assert.equal(detailsLabel(secs), "Details: question, evidence, risk");
+  assert.equal(detailsLabel(secs, true), "Details: question, evidence, risk, what each option does");
+  assert.equal(detailsLabel([], false), "Details: question");
+});

@@ -207,3 +207,17 @@ export const ownAddressRows = (need, items) => !!need && !(items ?? []).some((it
 
 // The line a Crew row's hover ends with: "Do: Merge #42 · approved by anna 1h ago", or null.
 export const doLine = (items) => (items?.length ? `Do: ${items[0].line}` : null);
+
+// Whether a need item's button stands out. Without a question the first item's first button does,
+// unless the action says which (`primary`). While a question is open its options are the primary
+// action and every other reason's buttons are plain, so none reads as an answer to it.
+export const isPrimary = (x, i, j, underQuestion = false) => !underQuestion && (x.primary ?? (i === 0 && j === 0));
+
+// The Details fold's label, naming what is inside: "Details: question, evidence, risk". The
+// options are only listed there (as their whole text) when `options`; a free-form question with
+// nothing else says "Details: the question".
+export function detailsLabel(sections, options = false) {
+  const named = (sections ?? []).map((x) => (x.label || "question").toLowerCase());
+  const parts = [...new Set([...(named.length ? named : ["question"]), ...(options ? ["what each option does"] : [])])];
+  return `Details: ${parts.join(", ")}`;
+}
