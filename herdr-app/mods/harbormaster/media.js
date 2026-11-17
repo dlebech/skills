@@ -97,6 +97,17 @@ export function makeCopier({ exec, writeTextFile, home }) {
   };
 }
 
-// What openUrl may hand to the system opener: an http(s) page, or a local absolute path (a run's
-// proof file). Any other scheme (file:, smb:, a custom handler) is refused.
-export const openable = (url) => typeof url === "string" && (/^https?:\/\//i.test(url) || /^(\/|[A-Za-z]:[\\/])/.test(url));
+// What openUrl may hand to the system opener: an http(s) page, or a local absolute path with no
+// ".." segment that is a directory (no extension) or a document, image or video (a run's proof
+// files). Any other scheme (file:, smb:, a custom handler) and any other file (x.desktop, x.sh) is refused.
+const OPENABLE_EXT = new Set(["md", "txt", "log", "png", "jpg", "jpeg", "gif", "webp", "svg", "mp4", "webm", "mov", "m4v"]);
+export function openable(url) {
+  if (typeof url !== "string") return false;
+  if (/^https?:\/\//i.test(url)) return true;
+  if (!/^(\/|[A-Za-z]:[\\/])/.test(url)) return false;
+  const parts = url.split(/[\\/]/).filter(Boolean);
+  if (parts.includes("..")) return false;
+  const last = parts[parts.length - 1] ?? "";
+  const dot = last.lastIndexOf(".");
+  return dot <= 0 ? !last.startsWith(".") || dot < 0 : OPENABLE_EXT.has(last.slice(dot + 1).toLowerCase());
+}

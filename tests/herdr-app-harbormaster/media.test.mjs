@@ -39,6 +39,6 @@ test("a file named two ways is copied from the other machine once", async () => 
 
 test("openable: web pages and local absolute paths only, never file:, smb: or a custom scheme", async () => {
   const { openable } = await import("../../herdr-app/mods/harbormaster/media.js");
-  for (const ok of ["https://github.com/o/r/pull/1", "http://localhost:3000", "/home/me/run/proof/a.png", "C:\\runs\\a.png"]) assert.equal(openable(ok), true, ok);
-  for (const no of ["file:///etc/passwd", "smb://h/s", "x-app://run", "javascript:alert(1)", "", null, undefined]) assert.equal(openable(no), false, String(no));
+  for (const ok of ["https://github.com/o/r/pull/1", "http://localhost:3000", "/home/me/run/proof/a.png", "C:\\runs\\a.png", "/home/me/run/shared/proof", "/home/me/run/proof.md", "/a/b/demo.MP4"]) assert.equal(openable(ok), true, ok);
+  for (const no of ["file:///etc/passwd", "smb://h/s", "x-app://run", "javascript:alert(1)", "/tmp/x.desktop", "/a/run/x.sh", "/a/../b.md", "C:\\a\\x.exe", "/a/.hidden", "",null, undefined]) assert.equal(openable(no), false, String(no));
 });
