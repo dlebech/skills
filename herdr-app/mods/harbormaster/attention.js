@@ -11,6 +11,7 @@
 import { needsYou, needReason } from "./live.js";
 import { stepComments, commentsText, hasComments } from "./comments.js";
 import { plural, andList } from "./words.js";
+import { planOpen } from "./tasks.js";
 
 // No new progress line, no change in the run's agents and no new terminal output for this
 // long, and the run has stalled.
@@ -71,14 +72,9 @@ const NEEDS_LABELS = new Set(["changes requested", "approved — merge", "review
 const AFTER_PLAN = new Set(["review proof → merge", "request review"]);
 const rank = (label) => LABELS.indexOf(label);
 
-// Whether a run still has planned tasks to do: not finished, and fewer tasks done than planned
-// (data.js taskCounts, whose rule for a done task this repeats: attention.js cannot import data.js).
-export function planOpen(run) {
-  if (!run || run.phase === "finished") return false;
-  const tasks = run.tasks ?? [];
-  const done = tasks.length ? tasks.filter((k) => /^(merged|done|finished|complete)/.test(k.state ?? "")).length : run.merged ?? 0;
-  return Math.max(run.planned ?? 0, tasks.length) > done;
-}
+// Whether the run's next step is held back by its open plan (tasks.js planOpen): a self-flow PR
+// is not the user's to review or merge yet. The one check every view that words the step shares.
+export const heldByPlan = (run, next) => Boolean(next) && AFTER_PLAN.has(next.label) && planOpen(run);
 
 export const isOpenPr = (pr) => pr?.state === "OPEN" || pr?.state === "DRAFT";
 const isShut = (pr) => pr?.state === "MERGED" || pr?.state === "CLOSED";
@@ -366,7 +362,7 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
   const step = stepOf(run, { prs, stages, since, ages });
-  const base = { cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), working: Boolean(working), askedPrs: askedPrs ?? new Set() };
+  const base = { held: false, cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), working: Boolean(working), askedPrs: askedPrs ?? new Set() };
   const out = (group, extra) => {
     const r = { ...base, ...extra, group };
     const anchors = r.reasons.map((x) => x.since).filter(Boolean);
@@ -395,6 +391,7 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   // PRs whose comments are being handled leave the step while the others wait on you (nextStepAsking).
   const { next, partial } = nextStepAsking(prs, flow, askedPrs);
   base.next = next;
+  base.held = heldByPlan(run, next);
   // Only an un-asked PR with something to address (comments, or changes requested) pulls a
   // working run into Needs you: a plain approval can wait until the run stops.
   const urgent = partial && (next.label === "changes requested" || hasComments(next.comments));
@@ -414,7 +411,7 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   if ((!working || urgent) && gate.state !== "running") {
     const settled = Math.max(run.updated ?? 0, ci.finishedAt ?? 0) || null;
     if (!working && ci.state === "red") reasons.push({ key: "red-ci", text: `red CI on #${ci.pr.number}`, since: ci.finishedAt ?? settled });
-    if (next && NEEDS_LABELS.has(next.label) && !(AFTER_PLAN.has(next.label) && planOpen(run))) {
+    if (next && NEEDS_LABELS.has(next.label) && !heldByPlan(run, next)) {
       const reviewed = next.label === "changes requested" || next.label === "approved — merge" ? next.pr.reviewedAt ?? null : null;
       // `short`: without the comment count, for the narrow sidebar (crewrows.js rowLead).
       const opts = { red: ci.state === "red", failed: Boolean(proofFailed) };

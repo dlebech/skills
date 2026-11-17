@@ -213,11 +213,18 @@ export const doLine = (items) => (items?.length ? `Do: ${items[0].line}` : null)
 // action and every other reason's buttons are plain, so none reads as an answer to it.
 export const isPrimary = (x, i, j, underQuestion = false) => !underQuestion && (x.primary ?? (i === 0 && j === 0));
 
-// The Details fold's label, naming what is inside: "Details: question, evidence, risk". The
-// options are only listed there (as their whole text) when `options`; a free-form question with
-// nothing else says "Details: the question".
-export function detailsLabel(sections, options = false) {
+// What the Details fold holds, as the words it is labelled with, or [] when nothing is behind it:
+// each section the question has ("question" for the untitled text and the Question section) and,
+// when an option says more than its button's label, "what each option does". `options`: the
+// question's options ({label, text}).
+export function detailsParts(sections, options = []) {
   const named = (sections ?? []).map((x) => (x.label || "question").toLowerCase());
-  const parts = [...new Set([...(named.length ? named : ["question"]), ...(options ? ["what each option does"] : [])])];
-  return `Details: ${parts.join(", ")}`;
+  const more = (options ?? []).some((o) => o.text && o.text !== o.label);
+  return [...new Set([...named, ...(more ? ["what each option does"] : [])])];
+}
+
+// The fold's label, "Details: question, evidence, risk", or null when there is nothing to fold.
+export function detailsLabel(sections, options = []) {
+  const parts = detailsParts(sections, options);
+  return parts.length ? `Details: ${parts.join(", ")}` : null;
 }

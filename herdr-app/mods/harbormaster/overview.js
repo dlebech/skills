@@ -708,7 +708,7 @@ function needBox(view, t, r, f, ctx, where) {
     .tooltip(open ? "Hide the question's details" : "The whole question, what each option does, the evidence and the risk")
     .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); cx.notify(); })
     .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.muted))
-    .child(div().truncate().child(detailsLabel(sections, it.options.length > 0)))
+    .child(div().truncate().child(detailsLabel(sections, it.options)))
     .child(div().flex_none().text_color(t.dim).child(it.since ? `asked ${ago(it.since)}` : ""));
   // A section's text whole, as paragraphs (question.js), under its small label.
   const part = (label, text, color) => v_flex().gap(2)
@@ -719,7 +719,7 @@ function needBox(view, t, r, f, ctx, where) {
     .children(it.options.map((o, i) => div().text_size(11.5).text_color(t.muted)
       .child(`${i === it.recommended ? "★ " : ""}${o.label}${o.text && o.text !== o.label ? `: ${plain(o.text)}` : ""}`)));
   const tone = { Recommended: t.accent, Risk: t.blocked };
-  const details = open && v_flex().id(`qdetail-${where}-${r.key}`).gap(8).pt(4)
+  const details = open && detailsLabel(sections, it.options) && v_flex().id(`qdetail-${where}-${r.key}`).gap(8).pt(4)
     // Clicks in here never fall through to the card's open-the-orchestrator.
     .on_click((_e, cx) => cx.stop_propagation())
     .children(sections.filter((x) => !x.label || x.label === "Question").map((x) => part(x.label, x.text)))
@@ -742,7 +742,7 @@ function needBox(view, t, r, f, ctx, where) {
     .when(Boolean(answers), (el) => el.child(div().pt(2).child(answers)))
     .when(Boolean(a.input), (el) => el.child(a.input))
     .when(Boolean(a.note), (el) => el.child(a.note))
-    .child(fold)
+    .when(Boolean(detailsLabel(sections, it.options)), (el) => el.child(fold))
     .when(Boolean(details), (el) => el.child(details))
     .when(others.length > 0, (el) => el.child(v_flex().id(`qalso-${where}-${r.key}`).gap(6).mt(4).pt(8).border_t(1).border_color(t.border)
       .child(div().text_size(11).font_semibold().text_color(t.muted).child("Also needs you"))
