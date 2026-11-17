@@ -1,9 +1,15 @@
 // Live facts from herdr-core (terminals, agents, panes) and the few actions the views take.
 
+import { isWake } from "./wake.js";
 import { exec, terminals, agents, panes, spaces, run, window, focused } from "herdr";
 
 // The terminal and agent lists every helper below reads, taken once per render.
-export const facts = () => ({ terminals: terminals(), agents: agents() });
+// A detached wake-up send (wake.js) is neither a terminal nor an agent of the crew.
+export const facts = () => {
+  const ts = terminals().filter((t) => !isWake(t));
+  const gone = new Set(terminals().filter(isWake).map((t) => t.address));
+  return { terminals: ts, agents: agents().filter((a) => !gone.has(a.address)) };
+};
 
 // One status rule for any agent: its agent status, else its terminal's ("error" means
 // blocked), else idle. Values: working, blocked, done, idle.
