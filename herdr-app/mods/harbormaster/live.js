@@ -1,9 +1,16 @@
 // Live facts from herdr-core (terminals, agents, panes) and the few actions the views take.
 
+import { isWake } from "./wake.js";
+import { openable } from "./media.js";
 import { exec, terminals, agents, panes, spaces, run, window, focused } from "herdr";
 
 // The terminal and agent lists every helper below reads, taken once per render.
-export const facts = () => ({ terminals: terminals(), agents: agents() });
+// A detached wake-up send (wake.js) is neither a terminal nor an agent of the crew.
+export const facts = () => {
+  const ts = terminals().filter((t) => !isWake(t));
+  const gone = new Set(terminals().filter(isWake).map((t) => t.address));
+  return { terminals: ts, agents: agents().filter((a) => !gone.has(a.address)) };
+};
 
 // One status rule for any agent: its agent status, else its terminal's ("error" means
 // blocked), else idle. Values: working, blocked, done, idle.
@@ -15,9 +22,15 @@ export function agentStatus(term, ctx) {
 // An agent's status exactly as reported, or null when it reports none: unlike agentStatus
 // it does not call an unknown status idle, for what must only happen to an idle agent.
 export function exactStatus(address, ctx) {
-  if (!address) return null;
-  const s = ctx.agents.find((a) => a.address === address)?.status ?? ctx.terminals.find((t) => t.address === address)?.status ?? null;
+  const s = reportedStatus(address, ctx);
   return s === "error" ? "blocked" : s;
+}
+
+// The status as reported, `error` included: hc delivers a send to a terminal in error, and
+// only refuses one that is blocked on a dialog.
+export function reportedStatus(address, ctx) {
+  if (!address) return null;
+  return ctx.agents.find((a) => a.address === address)?.status ?? ctx.terminals.find((t) => t.address === address)?.status ?? null;
 }
 
 // Whether the orchestrator is lost: its terminal is live but only a shell runs in it
@@ -250,6 +263,8 @@ export function replyToCaptain(address, decision, text) {
 }
 
 export function openUrl(url) {
+  // A second line of defence: hand the system opener only a web page or a local path, never file:, smb: or a custom scheme.
+  if (!openable(url)) { console.log(`harbormaster: not opening ${String(url).slice(0, 80)}`); return; }
   const platform = window()?.platform;
   const cmd = platform === "macos" ? "open" : platform === "windows" ? "explorer" : "xdg-open";
   exec(cmd, [url]).catch(() => {});

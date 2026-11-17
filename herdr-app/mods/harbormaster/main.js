@@ -12,7 +12,8 @@
 import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
 import { props, theme, nextCommand, checking, openOverlay, closeOverlay, shared, setShared } from "herdr";
-import { loadRuns, cachedRuns, refreshPrs, isClosed, newestFirst } from "./data.js";
+import { expireNote } from "./note.js";
+import { loadRuns, cachedRuns, refreshPrs, isClosed, isParked, newestFirst } from "./data.js";
 import { facts, crewAddresses } from "./live.js";
 import { loadContexts } from "./context.js";
 import { hotSignature, sampleVersion } from "./resources.js";
@@ -21,15 +22,21 @@ import { viewer, startCopies } from "./viewer.js";
 import { harbor, rail, paneHeader } from "./harbor.js";
 import { statsView } from "./stats.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
+import { observeTelling } from "./telling.js";
+import { parseCommand, runNamed } from "./commands.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
 const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"]);
 
 // A brief popup of one run's pane, for taking a screenshot of it with `herdr-app shot` without
 // switching the user's space or tab. Commands sent with `herdr-app do 'harbormaster.<command>'`:
-//   show-run:<branch | run dir | orchestrator terminal>   open it (no name: the newest unclosed run); one at a time
+//   show-run:<branch | run dir | orchestrator terminal>   open it (no name: the newest unclosed run); one at a time;
+//                                                         "… details" / "… proof" unfold its question / its Proof list
 //   show-stats[:<branch | run dir>]                         open the Stats view (a run: focused on it)
+//   show-overview, show-crew                               open the runs overview, or the Crew block
 //   close-popup                                            close it
+//   open-run:key=<run key>                                 a toast's click (telling.js) for a run whose
+//                                                         orchestrator is gone: its card, kept open until closed
 // Every shown Harbormaster copy hears a command, so the popup's id and time are in shared state and
 // a copy that sees the same command opened a moment ago leaves it alone (and one that lost a race closes its own).
 // The popup's own copy doesn't listen, so a Harbormaster copy that isn't the popup (the Crew block or the overview) must be shown. A popup nobody closed goes
@@ -46,22 +53,25 @@ function closePopup() {
 
 function expirePopup() {
   const cur = shared(POPUP);
-  if (cur && Date.now() - cur.at > POPUP_LIMIT) closePopup();
+  if (cur && !cur.keep && Date.now() - cur.at > POPUP_LIMIT) closePopup();
 }
 
-function showPopup(view, arg) {
+function showPopup(view, arg, keep = false) {
   const cur = shared(POPUP);
   if (cur && cur.arg === arg && Date.now() - cur.at < 2000) return; // another copy just did
   const pick = view.runs.filter((r) => !r.away);
-  const r = arg ? view.runs.find((x) => [x.branch, x.dir, x.key, x.localTerminal].includes(arg))
+  // "<run> details" opens it with its question's Details unfolded, "<run> proof" with its Proof
+  // list open and its first pending row unfolded, for a shot without a click.
+  const [, name, details] = /^(.*?)(?:(?:^|\s+)(details|proof))?$/.exec(arg) ?? [null, arg, null];
+  const r = name ? runNamed(view.runs, name)
     : [...pick].sort(newestFirst)[0];
   if (!r) { console.log(`harbormaster.show-run: no run matches "${arg}"`); return; }
   closePopup();
-  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) });
+  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: details ? { ...runProps(r), [details]: true } : runProps(r) });
   // Another copy opened one for this same command first: keep theirs, so none is left untracked.
   const won = shared(POPUP);
   if (won && won.arg === arg && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }
-  setShared(POPUP, { id, at: Date.now(), arg });
+  setShared(POPUP, { id, at: Date.now(), arg, ...(keep ? { keep } : {}) });
 }
 
 // The Stats view as the same brief popup, wide enough for its columns.
@@ -76,15 +86,16 @@ function showStats(view, arg) {
   setShared(POPUP, { id, at: Date.now(), arg: key });
 }
 
-// The runs overview as the same brief popup, for screenshots of its cards.
-function showOverview() {
+// The runs overview (role "cards") or the Crew block (role "crew", sidebar-narrow) as the
+// same brief popup, for screenshots of their cards.
+function showView(key, role, width, height) {
   const cur = shared(POPUP);
-  if (cur && cur.arg === "overview" && Date.now() - cur.at < 2000) return;
+  if (cur && cur.arg === key && Date.now() - cur.at < 2000) return;
   closePopup();
-  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 900, props: { role: "cards" } });
+  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width, height, props: { role } });
   const won = shared(POPUP);
-  if (won && won.arg === "overview" && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }
-  setShared(POPUP, { id, at: Date.now(), arg: "overview" });
+  if (won && won.arg === key && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }
+  setShared(POPUP, { id, at: Date.now(), arg: key });
 }
 
 const sameItems = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
@@ -94,11 +105,13 @@ async function listen(view, cx) {
     const c = String(await nextCommand());
     // A throw here would end the loop and this copy would never hear a command again.
     try {
-      const [, name, arg] = /^([\w-]+)[:\s]*(.*)$/s.exec(c.trim()) ?? [];
-      if (name === "show-run") showPopup(view, arg?.trim() ?? "");
-      else if (name === "show-stats") showStats(view, arg?.trim() ?? "");
-      else if (name === "show-overview") showOverview();
+      const { name, arg } = parseCommand(c);
+      if (name === "show-run") showPopup(view, arg);
+      else if (name === "show-stats") showStats(view, arg);
+      else if (name === "show-overview") showView("overview", "cards", 560, 900);
+      else if (name === "show-crew") showView("crew", "crew", 360, 640);
       else if (name === "close-popup") closePopup();
+      else if (name === "open-run") showPopup(view, arg, true);
       cx.notify();
     } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }
   }
@@ -121,7 +134,7 @@ export default class Harbormaster extends View {
     this.reply.on("submit", (_e, cx) => submitReply(this, cx));
     if (!DATA_ROLES.has(role)) return;
     // The popup's own copy doesn't listen: a command that closed or replaced the popup would end it.
-    if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
+    if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards" || role === "crew") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
     this.refresh(cx);
     cx.timer.every(5000, (cx) => this.refresh(cx));
     // The harbor's scuttle target: data, not frames; .transition does the moving.
@@ -171,7 +184,8 @@ export default class Harbormaster extends View {
   }
 
   refresh(cx) {
-    if (this.expireBusy()) cx.notify();
+    // A note past its time goes with the same refresh, so no timer is needed for it.
+    if (this.expireBusy() | expireNote(this)) cx.notify();
     expirePopup();
     cx.spawn(async (cx) => {
       const runs = await this.load(cx);
@@ -180,9 +194,16 @@ export default class Harbormaster extends View {
         const contexts = await loadContexts(crewAddresses(facts()));
         if (JSON.stringify(contexts) !== JSON.stringify(this.contexts)) { this.contexts = contexts; cx.notify(); }
       }
-      // PRs land in shared state, which re-renders every copy by itself.
       const ctx = facts();
-      for (const r of runs) await refreshPrs(r, isClosed(r, ctx)).catch(() => {});
+      // Toasts and the decisions seen: from the copies that poll for the whole window only (the
+      // Crew block, the overview, the sea layout's harbor; the store's claim keeps it to one toast).
+      const role = props()?.role;
+      if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) {
+        try { observeTelling(runs, ctx); } catch (e) { console.log(`harbormaster: telling failed: ${e?.message ?? e}`); }
+      }
+      // PRs land in shared state, which re-renders every copy by itself. A parked run's PRs are
+      // read as rarely as a closed run's: nobody works on them, they only show what they wait on.
+      for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});
     });
   }
 

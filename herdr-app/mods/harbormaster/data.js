@@ -20,14 +20,24 @@ import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, proveRequest, withAcceptance, resultLine } from "./proof.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
-import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
+import { taskTone, taskCounts } from "./tasks.js";
+export { taskTone, taskCounts };
+import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
+import { blockingRequest, blockingPending, ciRequest } from "./blocking.js";
+import { changesRequest, changesPending } from "./changes.js";
+import { commentsArgs, commentSummary, commentsRequest, commentsRequestAll, pendingComments } from "./comments.js";
+import { observeRuns, recordCi } from "./tracking.js";
+import { detachedSend } from "./wake.js";
+import { exactStatus, reportedStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f", GS = "\u001d";
 
 // The first lines of inbox messages that answer no question: level requests ("set autonomy to
-// L2") and asks to prove ("prove t23 to T2: …"). Kept equal to answer_messages in
-// skills/herdr-app-captain/scripts/lib.sh.
-const NOT_ANSWERS = "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: )";
+// L2"), asks to prove ("prove t23 to T2: …"), asks what is blocking ("what is blocking? …") and
+// asks to address review comments ("address comments on <PR url>: ask") and asks for changes
+// ("changes asked from Harbormaster: …").
+// Kept equal to answer_messages in skills/herdr-app-captain/scripts/lib.sh.
+const NOT_ANSWERS = "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?|address comments on |changes asked from Harbormaster: )";
 
 // One sh script per machine: the captain's decisions, then every run, its files
 // separated by \x1f, runs by \x1e; then, after a \x1d, the process snapshot.
@@ -46,20 +56,24 @@ const SCRIPT = [
   '  [ -e "$d/question.md" ] && { stat -c %Y "$d/question.md" 2>/dev/null || stat -f %m "$d/question.md" 2>/dev/null; }; printf \'\\037\'',
   '  [ -e "$d/parked" ] && { printf +; head -c 400 "$d/parked"; }; printf \'\\037\'',
   '  [ -e "$d/closed" ] && { printf +; head -c 400 "$d/closed"; }; printf \'\\037\'',
-  // Unhandled messages, but for level requests and asks to prove (below), which the tags and the
-  // Proof rows show instead: one must not make a queued question read as answered.
+  // Unhandled messages, but for level requests, asks to prove, asks what is blocking and asks to address comments (below),
+  // which the tags, the Proof rows and "asked…" show instead: one must not make a queued question read as answered.
   `  n=0; for m in "$d"/inbox/*.message; do [ -e "$m" ] && ! head -n 1 "$m" | grep -qE '${NOT_ANSWERS}' && n=$((n+1)); done; printf "%s\\037" "$n"`,
   // proof.md (a "+" before it when there is one, "!" when it was cut at 64 kB), then the names of the files in shared/proof/, capped.
   '  [ -e "$d/proof.md" ] && { [ "$(wc -c < "$d/proof.md")" -gt 64000 ] && printf \'!\' || printf +; head -c 64000 "$d/proof.md"; }; printf \'\\037\'',
   '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
   // decisions.md: the last 60 lines of its own decisions and the user's, capped.
   '  grep -a -E "^- \\[(decided|user)\\] " "$d/decisions.md" 2>/dev/null | tail -n 60 | tail -c 20000; printf \'\\037\'',
-  // Level requests (levels.js) and asks to prove (proof.js) in the inbox's unhandled messages,
+  // Level requests (levels.js), asks to prove (proof.js), asks what is blocking (blocking.js) and
+  // asks to address comments (comments.js) in the inbox's unhandled messages,
   // oldest first: what is pending. Only a message's first line, so an answer's free text that
   // reads like one is not one.
   `  for m in "$d"/inbox/*.message; do [ -e "$m" ] && head -n 1 "$m"; done | grep -a -E '${NOT_ANSWERS}' | tail -c 8000; printf '\\037'`,
   // The user's acceptances of proof as it is (Accept on a Proof row), capped.
   '  head -c 20000 "$d/proof-accepted.json" 2>/dev/null; printf \'\\037\'',
+  // shared/'s Markdown file names, capped, for a finished run's Needs-you box: needaction.js
+  // runReports picks the run's reports among them (one rule, so the two never drift apart).
+  '  ls "$d/shared" 2>/dev/null | grep -iE "\\.md$" | head -200; printf \'\\037\'',
   // The run's CPU and memory totals so far (resources.js adds each sample to them).
   '  head -c 1000000 "$d/.resources.json" 2>/dev/null',
   "done",
@@ -207,7 +221,7 @@ function parse(machine, stdout) {
 }
 
 function parseRun(machine, chunk) {
-  const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile, requests, acceptedFile] = chunk.split(US);
+  const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile, requests, acceptedFile, reportNames] = chunk.split(US);
   const orch = json(orchFile) ?? {};
   const status = json(statusFile) ?? {};
   const tasks = tasksOf(plan);
@@ -263,6 +277,12 @@ function parseRun(machine, chunk) {
     ask: parseQuestion(question),
     askedAt: Number(asked?.trim()) * 1000 || null,
     unhandled: Number(inbox?.trim() || 0),
+    // An ask what is blocking (blocking.js) still unread in the inbox.
+    blockingAsked: blockingPending(requests),
+    // An Ask for changes (changes.js) still unread: the run is not ready to merge until it is handled.
+    changesAsked: changesPending(requests),
+    // The PRs an Address comments (comments.js) is still unread for, by URL.
+    commentsAsked: pendingComments(requests),
     tasks,
     // The run's proof: its tier, proof.md's results by task id, and the file names in shared/proof/.
     proof: {
@@ -273,6 +293,8 @@ function parseRun(machine, chunk) {
       accepted: parseAccepted(acceptedFile),
       asks: pendingProofs(requests),
     },
+    // shared/'s Markdown files (names, as ls sorts them); needaction.js runReports picks its reports.
+    reports: (reportNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
     // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
     prefix: /^Prefix:\s*`?([\w-]+)/m.exec(plan ?? "")?.[1]?.toLowerCase() ?? null,
   };
@@ -312,15 +334,16 @@ export const isBudgetQuestion = (it) => it.kind === "budget" || /^Over the token
 
 // A budget item for the queue, for a run over budget with no question.md (the orchestrator
 // is gone, or has not asked yet): the same three options, recommended the way the
-// orchestrator's own question is: Continue when most tasks are merged, else Compact.
+// orchestrator's own question is: Continue when most tasks are done, else Compact.
 function budgetItem(r, tokenText) {
-  const mostlyDone = r.planned > 0 && (r.merged ?? 0) / r.planned >= 0.5;
+  const { done, planned } = taskCounts(r);
+  const mostlyDone = planned > 0 && done / planned >= 0.5;
   const top = r.tokens.byAgent.slice(0, 3).map((a) => `${a.name} ${tokenText(a.total)}`).join(", ");
   return {
     id: `need-${r.key}`, kind: "budget", title: `Over budget: ${tokenText(r.tokens.total)} of ${tokenText(r.budget)} tokens`,
     options: BUDGET_OPTIONS, recommended: mostlyDone ? 0 : 1,
-    why: mostlyDone ? "most tasks are merged" : "much work is left; a smaller context is cheaper",
-    evidence: `${tokenText(r.tokens.total)} used${r.planned ? `, ${r.merged ?? 0}/${r.planned} tasks done` : ""}${top ? `; largest: ${top}` : ""}`,
+    why: mostlyDone ? "most tasks are done" : "much work is left; a smaller context is cheaper",
+    evidence: `${tokenText(r.tokens.total)} used${planned ? `, ${done}/${planned} tasks done` : ""}${top ? `; largest: ${top}` : ""}`,
     risk: "Continue keeps spending; Stop parks the run until you resume it; Compact drops the orchestrator's context, which it re-reads from the run files.",
     blocks: "nothing is blocked: it is a soft budget", since: r.updated ?? r.started, run: r, answered: r.unhandled > 0,
   };
@@ -337,12 +360,31 @@ function marker(how, text) {
 // The cache is module state, so it outlives every copy. A read whose task is cancelled
 // (its view closed) never settles, so a read pending longer than STALE_READ is given up
 // and a new one started; the abandoned one, should it ever settle, is ignored.
-let cache = { at: 0, runs: [], decisions: [], errors: [], pending: null, pendingAt: 0 };
+let cache = { at: 0, runs: [], decisions: [], errors: [], failed: [], pending: null, pendingAt: 0 };
 const STALE_READ = 45000;
 let reads = 0;
 
 export function cachedRuns() {
   return cache;
+}
+
+// A run read older than this no longer counts as read: the polls have stopped answering.
+const FILES_MAX_AGE = 2 * 60000;
+
+// Whether the run's files are a fresh read in `c` (cachedRuns): not carried from an earlier
+// read of a machine that failed (carryRuns), its machine answered the last poll, and that poll
+// is recent.
+export function filesFresh(run, now = Date.now(), c = cache) {
+  return !run.stale && now - c.at < FILES_MAX_AGE && !(c.failed ?? []).includes(run.machine ?? null);
+}
+
+// The runs of machines that failed this read (`failed`: their names, null for this one), from
+// the last read, marked `stale: true`, so they still show, as "can't tell", instead of
+// vanishing; and their PR entries are kept, since refreshPrs forgets only runs not in the
+// cache. A run already marked stays the same object.
+export function carryRuns(prev, failed) {
+  const out = new Set(failed.map((m) => m ?? null));
+  return (prev ?? []).filter((r) => out.has(r.machine ?? null)).map((r) => (r.stale ? r : { ...r, stale: true }));
 }
 
 export function loadRuns() {
@@ -351,12 +393,17 @@ export function loadRuns() {
   const read = ++reads;
   cache.pendingAt = Date.now();
   cache.pending = (async () => {
-    const names = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
+    const all = machines();
+    const names = all.filter((m) => m.layout !== "unavailable").map((m) => m.name);
     if (!names.includes(null)) names.unshift(null);
+    // An unavailable (offline) machine is not asked, and counts as failed: its runs are carried.
+    const failed = all.filter((m) => m.layout === "unavailable" && m.name !== null).map((m) => m.name);
     const runs = [], decisions = [], errors = [], answered = new Set(), samples = [];
     await Promise.all(names.map(async (on) => {
       try {
         const out = await exec("sh", ["-c", SCRIPT], { on });
+        // A machine that could not be reached prints nothing and fails.
+        if (out.code !== 0 && !out.stdout.trim()) throw new Error((out.stderr || `exit ${out.code}`).trim());
         const [files, sample] = out.stdout.split(GS);
         decisions.push(...parseDecisions(on, files.split(RS)[0]));
         runs.push(...parse(on, files));
@@ -364,19 +411,26 @@ export function loadRuns() {
         answered.add(on ?? "");
       } catch (e) {
         errors.push(`${on ?? "this machine"}: ${e?.message ?? e}`);
+        failed.push(on);
       }
     }));
+    const fresh = [...runs];
+    runs.push(...carryRuns(cache.runs, failed));
     runs.sort((a, b) => (a.machine ?? "").localeCompare(b.machine ?? "") || a.dir.localeCompare(b.dir));
     decisions.sort((a, b) => (a.asked ?? 0) - (b.asked ?? 0));
     if (read !== reads) return cache;
-    cache = { at: Date.now(), runs, decisions, errors, pending: null, pendingAt: 0 };
+    // `failed`: the machines (null for this one) whose runs could not be read this time; their
+    // runs from the last read stay in `runs`, marked `stale` (carryRuns). Only the runs just
+    // read (`fresh`) are acted on below: nothing is done on a stale read.
+    cache = { at: Date.now(), runs, decisions, errors, failed, pending: null, pendingAt: 0 };
     const ctx = facts();
+    observeRuns(runs, ctx, answered, (r) => r.tasks.map((k) => shownStage(k, taskAgents(k, r, ctx))));
     for (const [on, sample] of samples) ingest(on, sample);
-    recordRuns(runs.filter((r) => !r.away && orchestratorState(r, ctx) !== "gone"), (r) => runTerminals(r, ctx), answered).catch(() => {});
-    for (const r of runs) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
-    for (const r of runs) if (r.machine && !r.away) nameTab(r);
+    recordRuns(fresh.filter((r) => !r.away && orchestratorState(r, ctx) !== "gone"), (r) => runTerminals(r, ctx), answered).catch(() => {});
+    for (const r of fresh) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
+    for (const r of fresh) if (r.machine && !r.away) nameTab(r);
     nameCaptainTab(ctx);
-    showWorktrees(runs, ctx, answered).catch(() => {});
+    showWorktrees(fresh, ctx, answered).catch(() => {});
     return cache;
   })().catch((e) => {
     if (read !== reads) return cache;
@@ -396,15 +450,6 @@ function runTerminals(r, ctx) {
 }
 
 // ---- tasks ----
-
-// A task's state word(s) → "done" | "working" | "blocked" | null (not started).
-export function taskTone(state) {
-  const s = state ?? "";
-  if (/^(merged|done|finished|complete)/.test(s)) return "done";
-  if (/block|fail|stuck/.test(s)) return "blocked";
-  if (/^(planned|todo|pending|queued|not started|waiting to start)/.test(s) || !s) return null;
-  return "working";
-}
 
 // Where a task is in its life cycle, from its state words: "planned" | "implement" |
 // "review" | "fix" | "done" | "blocked", or null for a state that names no stage
@@ -449,35 +494,40 @@ export function shownStage(task, agents) {
   return agents[0]?.stage ?? stage;
 }
 
-// How many tasks a run has merged and planned, from status.json, else plan.md.
-export function taskCounts(run) {
-  return {
-    merged: run.merged ?? run.tasks.filter((task) => task.state === "merged").length,
-    planned: Math.max(run.planned ?? 0, run.tasks.length),
-  };
+// taskCounts for a record (the stats view, the history line), so a run's row says what its card
+// said; nulls when neither plan.md nor status.json says anything. The record keeps the field's
+// old name, tasks_merged (run-files.md says what it counts since when).
+export function recordedCounts(run) {
+  if (!run.tasks?.length && run.merged == null && run.planned == null) return { done: null, planned: null };
+  return taskCounts(run);
 }
 
 // ---- pull requests (gh), cached in shared state so every copy and layout reuses them ----
 
-const PR_FIELDS = "number,title,state,isDraft,reviewDecision,reviews,author,statusCheckRollup,url,headRefName,body";
+// reviewRequests for "review from <name>"; headRefOid so each CI run is recorded once (tracking.js recordCi).
+export const PR_FIELDS = "number,title,state,isDraft,reviewDecision,reviews,reviewRequests,author,statusCheckRollup,url,headRefName,headRefOid,body,updatedAt";
 // Run key → when its refresh started. Like a run read, a refresh whose task is cancelled
 // never ends, so one older than PR_STALE no longer holds the run back.
 const prBusy = new Map();
 const PR_STALE = 5 * 60000;
 
-// A PR's state → a theme tone; the harbor maps the same tones to its own colors.
-export const PR_TONE = { OPEN: "working", DRAFT: "dim", MERGED: "done", CLOSED: "blocked" };
-const isOpen = (pr) => pr.state === "OPEN" || pr.state === "DRAFT";
+// A PR's state → a theme tone; the harbor maps the same tones to its own colors. An open PR is
+// muted: no colour means fine (see overview.js AMBER); what it waits on has a colour of its own.
+export const PR_TONE = { OPEN: "muted", DRAFT: "dim", MERGED: "done", CLOSED: "blocked" };
 
 function checks(rollup) {
   const c = { pass: 0, fail: 0, pending: 0 };
-  for (const x of rollup ?? []) {
-    const v = (x.conclusion || x.state || x.status || "").toUpperCase();
-    if (["SUCCESS", "NEUTRAL", "SKIPPED"].includes(v)) c.pass++;
-    else if (["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(v)) c.fail++;
-    else c.pending++;
-  }
+  for (const x of rollup ?? []) c[checkKind(x)]++;
   return c;
+}
+
+// A rollup's first failing check, {name, url}, for what a red CI's Needs-you line names and its
+// Open the failing check opens: a check run's name and details page, or a status's context and
+// target; null when none fails. url is null when GitHub gave none (the PR's checks tab then).
+export function firstFailing(rollup) {
+  const x = (rollup ?? []).find((c) => checkKind(c) === "fail");
+  if (!x) return null;
+  return { name: x.name || x.context || x.workflowName || null, url: x.detailsUrl || x.targetUrl || null };
 }
 
 // Each reviewer's standing review, as the GH mod reads it: a later comment doesn't
@@ -491,7 +541,10 @@ function standing(p) {
     by[who] = r.state;
   }
   const with_ = (state) => Object.keys(by).filter((who) => by[who] === state);
-  return { approvedBy: with_("APPROVED"), changesBy: with_("CHANGES_REQUESTED") };
+  // When the latest of those reviews came, for how long the run has waited on the user since.
+  const counted = (p.reviews ?? []).filter((r) => by[r.author?.login] && r.state !== "PENDING");
+  const times = counted.map((r) => Date.parse(r.submittedAt ?? "")).filter(Boolean);
+  return { approvedBy: with_("APPROVED"), changesBy: with_("CHANGES_REQUESTED"), reviewedAt: times.length ? Math.max(...times) : null };
 }
 
 // The first line of a PR body's `## Merge danger` section ("Two-way door — …"), or null.
@@ -506,8 +559,11 @@ export function mergeDanger(body) {
 // What the views need from `gh pr view --json` output. GitHub only sets reviewDecision
 // where the repo requires a review, so the review comes from the reviews themselves,
 // falling back to reviewDecision ("Review needed") when nobody has approved or objected.
-function prSummary(p, repo) {
-  const { approvedBy, changesBy } = standing(p);
+// `requested`: the reviewers asked and yet to answer (a user's login, a team's name);
+// GitHub drops one from reviewRequests once they review. `ci`: when its checks started and,
+// once none is pending, finished (attention.js ciTimes).
+export function prSummary(p, repo) {
+  const { approvedBy, changesBy, reviewedAt } = standing(p);
   return {
     number: p.number,
     title: p.title,
@@ -515,7 +571,14 @@ function prSummary(p, repo) {
     review: changesBy.length ? "CHANGES_REQUESTED" : approvedBy.length ? "APPROVED" : p.reviewDecision || null,
     approvedBy,
     changesBy,
+    reviewedAt,
+    requested: (p.reviewRequests ?? []).map((r) => r?.login ?? r?.name ?? r?.slug).filter(Boolean),
     checks: checks(p.statusCheckRollup),
+    failed: firstFailing(p.statusCheckRollup),
+    ci: ciTimes(p.statusCheckRollup),
+    sha: p.headRefOid ?? null,
+    // When anything on the PR last changed: its review comments are read again only then (withComments).
+    updatedAt: p.updatedAt ?? null,
     url: p.url,
     danger: mergeDanger(p.body),
     repo: repo ?? (/github\.com\/([^/]+\/[^/]+)\//.exec(p.url ?? "")?.[1] ?? null),
@@ -533,41 +596,104 @@ export function prsOf(run) {
   return shared("harbormaster.prs")?.[run.key]?.list ?? null;
 }
 
+// When each run's PRs were last read, {at, okAt} by run key. Module memory, not shared state:
+// it changes with every read, and a shared write redraws every Harbormaster copy, so
+// harbormaster.prs is written only when what a read found changes (prEntrySame). After a reload
+// it is empty until the first read, which comes at once, since the shared entry's own `at` is
+// then the time of its last change.
+const prReads = new Map();
+
+// The entry with the latest read times: the later of the shared entry's and module memory's.
+export function withReadTimes(entry, read) {
+  if (!entry) return null;
+  if (!read) return entry;
+  return { ...entry, at: Math.max(entry.at ?? 0, read.at ?? 0), okAt: Math.max(entry.okAt ?? 0, read.okAt ?? 0) || null };
+}
+
+// Whether a new read found what the stored entry holds: the same PRs, related PRs and errors.
+export const prEntrySame = (a, b) => Boolean(a && b) && JSON.stringify([a.list, a.related, a.error ?? null, a.relatedError ?? null])
+  === JSON.stringify([b.list, b.related, b.error ?? null, b.relatedError ?? null]);
+
+// The run's whole PR read, {at, okAt, error, list, related}, or null before the first: for
+// attention.js prRead, which needs to know whether the list can be trusted.
+export function prEntryOf(run) {
+  return withReadTimes(shared("harbormaster.prs")?.[run.key] ?? null, prReads.get(run.key));
+}
+
 // The run's related PRs: shown beside its issues, never counted as its own.
 export function relatedOf(run) {
   return shared("harbormaster.prs")?.[run.key]?.related ?? run.related.map((p) => unknownPr(p.url, p.repo));
 }
 
-// Refreshes a run's PRs when stale: every 60 s while the run is open, every 15 min once closed.
+// Refreshes a run's PRs when stale: every 60 s while the run is open, every 15 min once closed
+// or parked (`closed`).
+// A PR gh could not read keeps its last summary, marked `stale`, or is unknownPr; the
+// entry's `error` says why (null when every PR was read) and `okAt` is the last read
+// that got them all, so a failing gh shows as "can't tell" instead of old data passing as new.
 export async function refreshPrs(run, closed = false) {
-  const have = (shared("harbormaster.prs") ?? {})[run.key];
-  const ttl = closed ? 15 * 60000 : 60000;
+  const have = withReadTimes((shared("harbormaster.prs") ?? {})[run.key], prReads.get(run.key));
+  const ttl = prTtl(closed);
   if (Date.now() - (prBusy.get(run.key) ?? 0) < PR_STALE || (have && Date.now() - have.at < ttl)) return;
   const started = Date.now();
   prBusy.set(run.key, started);
   try {
-    const view = async (recorded) => {
+    let error = null;
+    const view = async (recorded, before, own = false) => {
       const out = [];
       for (const pr of recorded) {
         if (!pr.url) continue;
-        const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch(() => null);
+        const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
         const p = res?.code === 0 ? json(res.stdout) : null;
-        if (p) out.push(prSummary(p, pr.repo));
-        else out.push(unknownPr(pr.url, pr.repo));
+        if (p) { out.push(own ? await withComments(prSummary(p, pr.repo), run, before?.find((x) => x.url === pr.url)) : prSummary(p, pr.repo)); continue; }
+        error ??= `gh could not read ${pr.url}: ${(res?.stderr || res?.stdout || `exit ${res?.code}`).trim().split("\n")[0].slice(0, 200)}`;
+        const old = before?.find((x) => x.url === pr.url && x.state !== "UNKNOWN");
+        out.push(old ? { ...old, stale: true } : unknownPr(pr.url, pr.repo));
       }
       return out;
     };
-    const related = await view(run.related);
-    const list = await view(run.prs);
-    const next = { ...(shared("harbormaster.prs") ?? {}) };
-    next[run.key] = { at: Date.now(), list, related };
+    const related = await view(run.related, have?.related);
+    const relatedError = error;
+    error = null;
+    const list = await view(run.prs, have?.list, true);
+    const stored = shared("harbormaster.prs") ?? {};
+    const next = { ...stored };
+    const at = Date.now();
+    const entry = { at, okAt: error ? have?.okAt ?? null : at, error, relatedError, list, related };
+    prReads.set(run.key, { at, okAt: entry.okAt });
+    let changed = !prEntrySame(stored[run.key], entry);
+    if (changed) next[run.key] = entry;
     // Forget runs that are gone.
-    for (const key of Object.keys(next)) if (cache.runs.length && !cache.runs.some((r) => r.key === key)) delete next[key];
-    setShared("harbormaster.prs", next);
+    for (const key of Object.keys(next)) {
+      if (cache.runs.length && !cache.runs.some((r) => r.key === key)) { delete next[key]; prReads.delete(key); changed = true; }
+    }
+    if (changed) setShared("harbormaster.prs", next);
+    recordCi(list);
   } finally {
     if (prBusy.get(run.key) === started) prBusy.delete(run.key);
   }
 }
+
+// An approved or changes-requested open PR with its review comments read (comments.js
+// commentSummary) as `comments`; {error} when gh could not read them, so they show as unknown,
+// never as none. Other PRs are returned as they are. The answer is large (a busy PR's runs to
+// 140 kB), so `old` (the PR as last read) keeps its summary while the PR's updatedAt is the same,
+// and otherwise for COMMENTS_TTL; a failed read is tried again at the next refresh.
+export async function withComments(pr, run, old = null) {
+  if (pr.state !== "OPEN" && pr.state !== "DRAFT") return pr;
+  if (pr.review !== "APPROVED" && pr.review !== "CHANGES_REQUESTED") return pr;
+  const args = commentsArgs(pr.url);
+  if (!args) return pr;
+  // A summary stored before comments were classed (no `threads`) is read again once.
+  const prev = old?.url === pr.url && old.comments && !old.comments.error && old.comments.threads != null ? old.comments : null;
+  if (prev && ((pr.updatedAt && prev.updatedAt === pr.updatedAt) || Date.now() - (prev.at ?? 0) < COMMENTS_TTL)) return { ...pr, comments: prev };
+  const res = await exec("gh", args, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  const summary = res?.code === 0 ? commentSummary(json(res.stdout)) : null;
+  const error = summary ? null : (res?.code === 0 ? "gh gave no pull request" : (res?.stderr || res?.stdout || `exit ${res?.code}`).trim().split("\n")[0].slice(0, 200));
+  return { ...pr, comments: summary ? { ...summary, updatedAt: pr.updatedAt ?? null, at: Date.now() } : { error } };
+}
+
+// How often a PR whose updatedAt moved has its review comments read again, at most.
+export const COMMENTS_TTL = 5 * 60_000;
 
 // ---- totals ----
 
@@ -597,13 +723,16 @@ export const newestFirst = (a, b) => runTime(b) - runTime(a);
 // `live`: runs still working (not finished, not put away); `docked`: finished but still
 // open; `parked`: set aside for later; `shown`: live and docked, the runs the captain
 // keeps watching; `closed`: the rest.
-// The run, need-you and task counts are of `live` only: a finished run's tasks are done.
+// The run and task counts are of `live` only: a finished run's tasks are done. Who needs you
+// is attend.js needsYouNow, one rule for every view.
 export function stats(runs, ctx) {
   const live = runs.filter((r) => r.phase !== "finished" && !r.away);
   const docked = runs.filter((r) => r.phase === "finished" && !r.away && !isClosed(r, ctx));
   const parked = runs.filter(isParked);
   const shown = [...live, ...docked];
-  const open = shown.flatMap((r) => prsOf(r) ?? []).filter(isOpen);
+  const open = shown.flatMap((r) => prsOf(r) ?? []).filter(isOpenPr);
+  // Parked runs' open PRs, apart: the header says them beside the open ones ("+4 parked").
+  const parkedOpen = parked.map((r) => (prsOf(r) ?? []).filter(isOpenPr).length);
   const tasks = live.map(taskCounts);
   return {
     live,
@@ -611,10 +740,11 @@ export function stats(runs, ctx) {
     parked,
     shown,
     closed: runs.filter((r) => isClosed(r, ctx)),
-    need: live.filter((r) => needsYou(r, orchestratorState(r, ctx))),
     open,
+    parkedOpen: parkedOpen.reduce((n, x) => n + x, 0),
+    parkedWithOpen: parkedOpen.filter(Boolean).length,
     failing: open.filter((p) => p.checks?.fail).length,
-    merged: tasks.reduce((n, c) => n + c.merged, 0),
+    done: tasks.reduce((n, c) => n + c.done, 0),
     planned: tasks.reduce((n, c) => n + c.planned, 0),
     workers: shown.reduce((n, r) => n + workersOf(r.terminal, ctx).length, 0),
   };
@@ -628,9 +758,12 @@ export function stats(runs, ctx) {
 // An item: {id, kind: "run"|"decision"|"attention", title, options [{label, text}],
 // recommended (index or null), why, evidence, risk, blocks, since (ms or null), run,
 // decision, answered}. `answered` is set while a message waits in the run's inbox.
-export function decisionQueue(runs, decisions, ctx) {
+// `fresh(run)`: whether the run's files are a fresh read (filesFresh); a question read
+// from a stale read is under Can't tell, as everywhere else, so not queued here either.
+export function decisionQueue(runs, decisions, ctx, fresh = filesFresh) {
   const items = [];
   for (const r of runs) {
+    if (!fresh(r)) continue;
     const orch = orchestratorState(r, ctx);
     // Over budget without an open question: its own item, answered through the inbox. With a
     // question.md that question is the item (the orchestrator asked it), never both.
@@ -656,10 +789,20 @@ export function decisionQueue(runs, decisions, ctx) {
     items.push({
       id: `dec-${d.key}`, kind: "decision", title: d.question, options: d.options, recommended: d.recommended, why: d.why,
       evidence: d.evidence, risk: d.risk, blocks: d.blocks, since: d.asked, decision: d,
-      run: d.run ? runs.find((r) => r.dir === d.run && r.machine === d.machine) ?? null : null,
+      run: decisionRun(d, runs),
     });
   }
   return items.sort((a, b) => (a.since ?? Infinity) - (b.since ?? Infinity));
+}
+
+// The run a captain decision is about, or null. Its `run` is a directory on the decision's own
+// machine, or "<machine>:<directory>" for a run on another (as herdr-app-captain's runs.sh names
+// it); a directory is absolute, so a leading "/" is never a machine name.
+export function decisionRun(d, runs) {
+  if (!d.run) return null;
+  const m = /^([^/:][^:]*):(\/.*)$/.exec(d.run);
+  const [machine, dir] = m ? [m[1], m[2]] : [d.machine ?? null, d.run];
+  return runs.find((r) => r.dir === dir && (r.machine ?? null) === machine) ?? null;
 }
 
 // ---- putting runs away and bringing them back ----
@@ -692,10 +835,23 @@ async function writeInbox(run, source, text) {
 }
 
 // Tells the orchestrator to read an inbox message (see tellOrchestrator for what it resolves to).
+// The send is detached (see wake.js), so a person's unfinished draft in the orchestrator's tab
+// only delays it and never fails it. Detached, its own failures are no longer seen, so what
+// can be known now is checked first: `hc get` (quick, no draft hold) says whether the terminal
+// is there, and a refusal shows as an error as before. An orchestrator on a dialog (as the
+// window reports it) is not sent to at all, as hc would refuse it; the message waits in its
+// inbox. A dialog that opens while a wake is held drops that wake the same way, with no sign;
+// the orchestrator reads its inbox at its next step.
 async function wakeOrchestrator(run, file) {
-  const sent = await exec("hc", ["send", run.localTerminal, `Read and act on ${run.dir}/inbox/${file}.`], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
-  if (sent.code === 9) return { blocked: true };
-  if (sent.code !== 0) throw Object.assign(new Error(`the message is in its inbox, but its orchestrator could not be told: ${(sent.stderr || sent.stdout || "hc send failed").trim()}`), { inInbox: true });
+  const fail = (why) => Object.assign(new Error(`the message is in its inbox, but its orchestrator could not be told: ${why}`), { inInbox: true });
+  const hc = (args) => exec("hc", args, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  const got = await hc(["get", run.localTerminal]);
+  let live = got.code === 0;
+  if (live) try { live = JSON.parse(got.stdout).state === "live"; } catch { live = false; }
+  if (!live) throw fail((got.stderr || got.stdout || "its terminal is gone").trim());
+  if (reportedStatus(run.terminal, facts()) === "blocked") return { blocked: true };
+  const sent = await hc(detachedSend(run.localTerminal, `Read and act on ${run.dir}/inbox/${file}.`));
+  if (sent.code !== 0) throw fail((sent.stderr || sent.stdout || "hc run failed").trim());
   return { blocked: false };
 }
 
@@ -733,6 +889,39 @@ export function requestLevel(run, kind, level) {
 // while it is unhandled and the result line is the same.
 export function askProof(run, row) {
   return messageRun(run, "harbormaster-proof", proveRequest(row, run.proof?.tier?.tier ?? null));
+}
+
+// Asks the orchestrator of a stalled run what is blocking it (Ask what's blocking on its Crew row
+// or pane): an inbox message, "what is blocking? Harbormaster sees this run quiet for 34m (step:
+// …)", the way an ask to prove is sent. `quiet` and `step` are the texts the row shows.
+export function askBlocking(run, { quiet, step = null }) {
+  return messageRun(run, "harbormaster-blocking", blockingRequest({ quiet, step }));
+}
+
+// Asks the orchestrator to see to a red CI (Ask the orchestrator in a Needs-you box): the same
+// "what is blocking?" message, saying which PR and check failed (blocking.js ciRequest).
+export function askCi(run, { pr, check = null, url = null }) {
+  return messageRun(run, "harbormaster-blocking", ciRequest({ pr, check, url }));
+}
+
+// Asks the orchestrator for changes to a run that was ready to merge (Ask for changes in its
+// box): the user's words as an inbox message (changes.js), woken like the others. Throws without text.
+export function askChanges(run, text) {
+  const msg = changesRequest(text);
+  if (!msg) throw new Error("say what to change");
+  return messageRun(run, "harbormaster-changes", msg);
+}
+
+// Asks the orchestrator to address the review comments on one of its PRs (Address comments on
+// its card or pane): an inbox message, "address comments on <PR url>: ask|handle", then the
+// comments Harbormaster sees (comments.js commentsRequest), the way an ask what is blocking is sent.
+export function askComments(run, pr, mode) {
+  return messageRun(run, "harbormaster-comments", commentsRequest(pr, mode));
+}
+// The same for several PRs at once (Ask me about all / Handle all): one inbox message covering
+// them all, so the orchestrator is woken once and, for ask, writes one question.
+export function askCommentsAll(run, prs, mode) {
+  return messageRun(run, "harbormaster-comments", commentsRequestAll(prs, mode));
 }
 
 // proof-accepted.json in the run directory, which Harbormaster owns: read on the run's machine,
@@ -790,13 +979,14 @@ export async function compactRun(run, title, answer) {
   const ok = () => ["idle", "done"].includes(exactStatus(run.terminal, facts()));
   if (!ok()) throw new Error("not compacted: its orchestrator is not idle or done");
   const file = await writeInbox(run, "harbormaster", answerMessage(title, answer));
-  const sent = await exec("hc", ["send", run.localTerminal, "/compact"], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
-  if (sent.code === 9) throw new Error("not compacted: its orchestrator is blocked on a dialog; the answer is in its inbox");
+  // Detached like the wake (a held draft must not fail it). The dialog case was ruled out by the
+  // status check above, and the wait below outlasts the draft hold (60 s) before it goes on.
+  const sent = await exec("hc", detachedSend(run.localTerminal, "/compact"), { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
   if (sent.code !== 0) throw new Error(`could not send /compact (the answer is in its inbox): ${(sent.stderr || sent.stdout || "hc send failed").trim()}`);
-  // Compaction starts working, then ends: wait for working (up to 20 s; a very quick one may be
+  // Compaction starts working, then ends: wait for working (up to 70 s, longer than a held send; a very quick one may be
   // over before we look), then for idle or done again, for at most 10 minutes.
   const sleep = (s) => exec("sleep", [String(s)]).catch(() => {});
-  for (let i = 0; i < 10 && ok(); i++) await sleep(2);
+  for (let i = 0; i < 35 && ok(); i++) await sleep(2);
   for (let i = 0; i < 300 && !ok(); i++) await sleep(2);
   if (!ok()) throw new Error("compaction is still running after 10 minutes; the answer waits in its inbox");
   return wakeOrchestrator(run, file);

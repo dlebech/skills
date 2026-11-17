@@ -20,12 +20,12 @@ export function programIcon(program, size, color) {
 // The app's zoom. on_size_change reports unzoomed px while views draw in zoomed px.
 export const zoom = () => Number(settings()?.zoom) || 1;
 
-// "1 run", "2 runs"; pass the plural when it isn't word + "s".
 // A task's state as Harbormaster shows it: "merged" reads "done", since a task merges
 // into the run's integration branch, not into main, and "merged" suggests the latter.
 export const stateText = (state) => (state ?? "").replace(/^merged\b/, "done");
 
-export const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
+// "1 run", "2 runs"; pass the plural when it isn't word + "s". In words.js, for the pure rules too.
+export { plural } from "./words.js";
 
 export function ago(ms) {
   if (!ms) return "";

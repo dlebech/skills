@@ -34,12 +34,147 @@
 # The same default as herdr-app-orchestrator's scripts/init-run.sh.
 root=${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}
 
-# Prints each run's orchestrator.json path.
+# Prints each run's orchestrator.json path, under <root> or the given folder (a
+# machine's copy from read_machines).
 run_infos() {
   local info
-  for info in "$root"/*/*/orchestrator.json; do
+  for info in "${1:-$root}"/*/*/orchestrator.json; do
     [ -e "$info" ] && echo "$info"
   done
+}
+
+# Runs on other machines. hc ls names their terminals "<machine>/<address>", and the
+# captain names their run directories "<machine>:<directory>" (run_address), so one
+# argument carries both; a run on this machine is its plain directory, as always.
+
+# machines: "<name>\t<state>" for each machine in hc machine ls ("connected" when it
+# can be read). CAPTAIN_MACHINES, when set, replaces the list with its names (space
+# separated), all taken as connected; set it empty for this machine only, as tests do.
+# Fails when hc does not answer.
+machines() {
+  local m list
+  if [ -n "${CAPTAIN_MACHINES+set}" ]; then
+    for m in $CAPTAIN_MACHINES; do printf '%s\tconnected\n' "$m"; done
+    return 0
+  fi
+  list=$(hc machine ls --json 2>/dev/null) || return 1
+  jq -r '.machines[]? | "\(.name)\t\(.state // "unknown")"' <<<"$list"
+}
+
+# What read_machines reads on each machine, in one sh script: its runs root, then
+# each run file the captain's scripts read, as \036<path under the root>\037<text>.
+# Only what they use: plan.md's Status line, the first line of each unhandled inbox
+# message, and the rest capped. The root defaults there as here (init-run.sh's default).
+REMOTE_RUNS_SCRIPT='root="${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}"
+printf "%s" "$root"
+cd "$root" 2>/dev/null || exit 0
+for f in */*/orchestrator.json; do
+  [ -e "$f" ] || continue
+  d=${f%/orchestrator.json}
+  for x in orchestrator.json status.json parked closed; do
+    [ -e "$d/$x" ] && { printf "\036%s\037" "$d/$x"; head -c 60000 "$d/$x"; }
+  done
+  [ -e "$d/plan.md" ] && { printf "\036%s\037" "$d/plan.md"; head -n 1 "$d/plan.md"; }
+  [ -e "$d/question.md" ] && { printf "\036%s\037" "$d/question.md"; head -c 4000 "$d/question.md"; }
+  for m in "$d"/inbox/*.message; do
+    [ -e "$m" ] && { printf "\036%s\037" "$m"; head -n 1 "$m"; }
+  done
+done
+exit 0'
+
+# read_machines <dest>: reads the runs of every connected machine, one hc exec each and
+# all at once, as Harbormaster does, into <dest>/<machine>/, a copy laid out like a runs
+# root with only what the captain's scripts read (REMOTE_RUNS_SCRIPT), so they read it
+# as they read this machine's. Prints "<machine>\t<its root>" for each machine read, and
+# "<machine>\t!<why>" for each that could not be (not connected, or hc exec failed).
+# Fails, printing nothing, when hc machine ls does not answer.
+read_machines() {
+  local dest=$1 list name state why
+  list=$(machines) || return 1
+  while IFS=$'\t' read -r name state; do
+    [ -n "$name" ] || continue
+    if [ "$state" != connected ]; then
+      printf '%s\t!%s\n' "$name" "$state" >"$dest/$name.result"
+      continue
+    fi
+    (
+      # CAPTAIN_MACHINES_ROOT, for tests, is the runs root to read on every machine instead.
+      if hc exec --on "$name" --timeout 30 ${CAPTAIN_MACHINES_ROOT:+--env "HERDR_ORCHESTRATION_ROOT=$CAPTAIN_MACHINES_ROOT"} \
+        sh -c "$REMOTE_RUNS_SCRIPT" >"$dest/$name.out" 2>"$dest/$name.err"; then
+        unpack_runs "$dest/$name" <"$dest/$name.out" >"$dest/$name.result.tmp"
+        printf '%s\t%s\n' "$name" "$(cat "$dest/$name.result.tmp")" >"$dest/$name.result"
+      else
+        # hc's own errors are JSON; anything else is shown as it is.
+        why=$(jq -r '.error.message // empty' "$dest/$name.err" 2>/dev/null) || why=
+        [ -n "$why" ] || why=$(tr '\n\t' '  ' <"$dest/$name.err" | sed 's/ *$//' | cut -c1-200)
+        printf '%s\t!%s\n' "$name" "${why:-hc exec failed}" >"$dest/$name.result"
+      fi
+    ) &
+  done <<<"$list"
+  wait
+  while IFS=$'\t' read -r name state; do
+    [ -z "$name" ] || cat "$dest/$name.result"
+  done <<<"$list"
+}
+
+# run_sources <dest>: where to read runs, one source per line,
+# "<machine>\x1f<folder to read>\x1f<root there>": this machine's root first (no machine),
+# then each other machine's copy under <dest> (read_machines). A machine that could not
+# be read is "<machine>\x1f!<why>". Fails, after this machine's line, when hc machine ls
+# does not answer.
+run_sources() {
+  local list m there
+  printf '\x1f%s\x1f%s\n' "$root" "$root"
+  list=$(read_machines "$1") || return 1
+  while IFS=$'\t' read -r m there; do
+    [ -z "$m" ] || case $there in
+      !*) printf '%s\x1f%s\n' "$m" "$there" ;;
+      *) printf '%s\x1f%s\x1f%s\n' "$m" "$1/$m" "$there" ;;
+    esac
+  done <<<"$list"
+}
+
+# unpack_runs <dir>: writes REMOTE_RUNS_SCRIPT's output (on stdin) out as files under
+# <dir>, and prints the machine's root.
+unpack_runs() {
+  local root_there rec path
+  mkdir -p "$1"
+  IFS= read -r -d $'\036' root_there
+  while IFS= read -r -d $'\036' rec || [ -n "$rec" ]; do
+    path=${rec%%$'\037'*}
+    # Only <folder>/<branch>/<file> and .../inbox/<file>, as the script writes them.
+    case /$path/ in */../* | */./* | //*) continue ;; esac
+    mkdir -p "$1/${path%/*}"
+    printf '%s' "${rec#*$'\037'}" >"$1/$path"
+  done
+  printf '%s' "$root_there"
+}
+
+# run_address <machine> <directory>: how the captain names a run: its directory on this
+# machine, "<machine>:<directory>" on another.
+run_address() {
+  if [ -n "$1" ]; then printf '%s:%s\n' "$1" "$2"; else printf '%s\n' "$2"; fi
+}
+
+# split_address <run address>: sets run_machine (empty for this machine) and run_dir.
+split_address() {
+  run_machine= run_dir=$1
+  case $1 in
+    /*) ;;
+    *:/*)
+      run_machine=${1%%:*}
+      case $run_machine in */*) run_machine= ;; *) run_dir=${1#*:} ;; esac ;;
+  esac
+}
+
+# on_machine <machine> <sh script> [args]: runs the script with sh on that machine
+# (hc exec --on), or here when <machine> is empty; stdin goes to it either way.
+on_machine() {
+  local m=$1 script=$2
+  shift 2
+  if [ -z "$m" ]; then sh -c "$script" sh "$@"
+  else hc exec --on "$m" -i sh -c "$script" sh "$@"
+  fi
 }
 
 # run_facts <orchestrator.json>: branch, folder, terminal and tab id, separated by
@@ -93,13 +228,16 @@ unhandled_messages() {
 
 # answer_messages <run-dir>: the unhandled inbox messages that may answer a question, one
 # path per line: all but level requests ("set autonomy to L2", "set proof tier to T3" as
-# their first line, from Harbormaster's level tags) and asks to prove ("prove t23 to T2: …",
-# from its Proof rows; run-files.md), which answer nothing. Harbormaster's data.js
+# their first line, from Harbormaster's level tags), asks to prove ("prove t23 to T2: …",
+# from its Proof rows), asks what is blocking ("what is blocking? …", from a stalled run's
+# Crew row or pane) and asks to address review comments ("address comments on <PR url>: ask",
+# from a run's card or pane; run-files.md) and asks for changes ("changes asked from Harbormaster: …",
+# from a ready run's box), which answer nothing. Harbormaster's data.js
 # (NOT_ANSWERS) uses the same pattern.
 answer_messages() {
   local f
   unhandled_messages "$1" | while IFS= read -r f; do
-    head -n 1 "$f" | grep -qE '^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: )' || echo "$f"
+    head -n 1 "$f" | grep -qE '^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\?|address comments on |changes asked from Harbormaster: )' || echo "$f"
   done
 }
 
@@ -123,11 +261,14 @@ away_state() {
   fi
 }
 
-# mark_run <run-dir> parked|closed: writes the marker, "<time>\t<plan status>",
-# atomically. Harbormaster's data.js writes the same line on its own.
+# mark_run <run address> parked|closed: writes the marker, "<time>\t<plan status>",
+# atomically, on the run's machine. Harbormaster's data.js writes the same line on its own.
 mark_run() {
-  { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d '\n'; printf '\t'; plan_status "$1"; } >"$1/.$2.tmp" &&
-    mv "$1/.$2.tmp" "$1/$2"
+  local run_machine run_dir
+  split_address "$1"
+  case $2 in parked | closed) ;; *) echo "mark_run: parked or closed, not '$2'" >&2; return 2 ;; esac
+  on_machine "$run_machine" '{ date -u +%Y-%m-%dT%H:%M:%SZ | tr -d "\n"; printf "\t"; head -1 "$1/plan.md" 2>/dev/null | sed "s/^Status: *//"; } >"$1/.$2.tmp" &&
+    mv "$1/.$2.tmp" "$1/$2"' "$run_dir" "$2" </dev/null
 }
 
 # integration_spaces <folder> <branch>: the id of each space that shows one of the

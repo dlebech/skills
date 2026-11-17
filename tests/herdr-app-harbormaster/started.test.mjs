@@ -1,25 +1,15 @@
-// The start date on a run's Crew card (context.js startedText, startedTip).
+// The start date in a run's Crew card tooltip (context.js startedTip) and its age line.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { startedText, startedTip } from "../../herdr-app/mods/harbormaster/context.js";
+import { startedTip } from "../../herdr-app/mods/harbormaster/context.js";
 
 const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime();
 const now = at(2026, 11, 16, 15, 30);
 
-test("today shows only the time", () => {
-  assert.equal(startedText(at(2026, 11, 16, 9, 4), now), "09:04");
-});
-test("an earlier day this year shows the date", () => {
-  assert.equal(startedText(at(2026, 11, 14, 18, 20), now), "14 Nov");
-});
-test("another year adds the year", () => {
-  assert.equal(startedText(at(2025, 12, 31, 23, 59), now), "31 Dec 2025");
-});
 test("the tooltip has the full date and time", () => {
   assert.equal(startedTip(at(2026, 11, 14, 18, 20)), "Started 14 Nov 2026, 18:20");
 });
 test("no start shows nothing", () => {
-  assert.equal(startedText(null, now), "");
   assert.equal(startedTip(null), "");
 });
 
