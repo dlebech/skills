@@ -4,7 +4,7 @@
 import { prEntryOf, taskAgents, shownStage, isClosed, isParked, filesFresh } from "./data.js";
 import { orchestratorState, orchestratorsOf, agentStatus, workersOf, needReason } from "./live.js";
 import { assess, prRead, reviewFlow, stalled, ciState } from "./attention.js";
-import { proofTasks, proofCounts, gatheringStage, proofSig, proofRead, proofClean } from "./proof.js";
+import { proofRowsOf, proofCounts, gatheringStage, proofSig, proofRead, proofClean } from "./proof.js";
 import { proofSeenSig } from "./proofseen.js";
 import { stepSince, stepAges, lastActivity, ciUsualOf, reviewFlows } from "./tracking.js";
 import { needLine, needsRun } from "./crewrows.js";
@@ -31,6 +31,7 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
     flow: reviewFlow(run, reviewFlows()),
     stages,
     proofFailed: proofFailed(run, stages),
+    changesAsked: Boolean(run.changesAsked),
     // Read and clean: the ready-to-merge state (attention.js assess) needs both.
     ...proofReadState(run, stages),
     since: stepSince(run),
@@ -50,12 +51,7 @@ export function proofStateOf(run, stages = []) {
   const under = run.tasks.map((_, i) => (gatheringStage(stages[i]) ? 1 : 0)).join("");
   const seen = proofSeenOf.get(run);
   if (seen?.under === under) return seen.state;
-  const gathering = (id) => {
-    const i = run.tasks.findIndex((x) => x.id === id);
-    return i >= 0 && under[i] === "1";
-  };
-  const finished = run.phase === "finished" || Boolean(run.away);
-  const rows = proofTasks(run.tasks, run.proof.md, run.proof.files, { accepted: run.proof.accepted, gathering, finished });
+  const rows = proofRowsOf(run, stages);
   const c = proofCounts(rows);
   const state = { failed: c.fail > 0, clean: proofClean(c), sig: proofSig(rows) };
   proofSeenOf.set(run, { under, state });

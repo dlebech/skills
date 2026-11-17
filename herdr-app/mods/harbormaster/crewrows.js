@@ -52,13 +52,16 @@ export function cantWhy(a) {
 //   Done: the label ("merged — close run · 2 PRs"), or "closed".
 // `narrow` (the sidebar): a label without its comment count ("approved · 2 PRs · 1h25m"), so
 // the age survives the truncation; the hover, the pill and the need box keep the count.
+// A run that is ready to merge and waits on nothing else: green, the one good-news row in Needs you.
+export const readyAlone = (a) => Boolean(a?.ready) && a.reasons.length === 1;
+
 export function rowLead(a, now = Date.now(), { narrow = false } = {}) {
   const step = stepText(a.step, now) || null;
   if (a.group === "needs") {
     const why = a.reasons.map((r) => (narrow && r.short) || r.text).join(" · ");
     const waited = !onlyStalled(a) && a.waitSince ? ageText(now - a.waitSince) : null;
     // A run that is ready to merge reads in the pass colour: it is the user's to merge, but it is good news.
-    return { lead: waited ? `${why} · ${waited}` : why, rest: a.stall ? a.step?.text || null : null, tone: a.ready && a.reasons.length === 1 ? "pass" : onlyStalled(a) ? "amber" : "blocked" };
+    return { lead: waited ? `${why} · ${waited}` : why, rest: a.stall ? a.step?.text || null : null, tone: readyAlone(a) ? "pass" : onlyStalled(a) ? "amber" : "blocked" };
   }
   if (a.group === "done") return { lead: a.next ? nextStepText(a.next) : "closed", rest: null, tone: "muted" };
   if (a.group === "cant" || a.cantTell) return { lead: `can't tell: ${cantWhy(a)}`, rest: null, tone: "dim" };
@@ -67,11 +70,12 @@ export function rowLead(a, now = Date.now(), { narrow = false } = {}) {
 }
 
 // A row's edge colour name, one meaning each: red ("blocked") for Needs you, you must act;
+// green ("pass") for a run ready to merge: everything is done, the merge is yours;
 // amber when it has only stalled, look soon; "review" (cyan) for Waiting on others; done's
 // colour for Done; grey for Can't tell. Working is "neutral", whether its agents work, CI runs
 // or it is briefly idle: fine needs no colour, and the row's spinner says it works.
 export function rowEdge(a) {
-  if (a.group === "needs") return onlyStalled(a) ? "amber" : "blocked";
+  if (a.group === "needs") return readyAlone(a) ? "pass" : onlyStalled(a) ? "amber" : "blocked";
   if (a.group === "done") return "done";
   if (a.group === "cant" || a.cantTell) return "dim";
   if (a.group === "waiting") return "review";

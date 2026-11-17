@@ -24,7 +24,7 @@ import { taskTone, taskCounts } from "./tasks.js";
 export { taskTone, taskCounts };
 import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
 import { blockingRequest, blockingPending, ciRequest } from "./blocking.js";
-import { changesRequest } from "./changes.js";
+import { changesRequest, changesPending } from "./changes.js";
 import { commentsArgs, commentSummary, commentsRequest, commentsRequestAll, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { detachedSend } from "./wake.js";
@@ -279,6 +279,8 @@ function parseRun(machine, chunk) {
     unhandled: Number(inbox?.trim() || 0),
     // An ask what is blocking (blocking.js) still unread in the inbox.
     blockingAsked: blockingPending(requests),
+    // An Ask for changes (changes.js) still unread: the run is not ready to merge until it is handled.
+    changesAsked: changesPending(requests),
     // The PRs an Address comments (comments.js) is still unread for, by URL.
     commentsAsked: pendingComments(requests),
     tasks,

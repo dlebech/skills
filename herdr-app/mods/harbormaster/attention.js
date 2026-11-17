@@ -11,7 +11,7 @@
 import { needsYou, needReason } from "./live.js";
 import { stepComments, commentsText, hasComments } from "./comments.js";
 import { plural, andList } from "./words.js";
-import { planOpen } from "./tasks.js";
+import { planOpen, taskCounts } from "./tasks.js";
 
 // No new progress line, no change in the run's agents and no new terminal output for this
 // long, and the run has stalled.
@@ -153,14 +153,15 @@ export function nextStepAsking(prs, flow, asked) {
 //   red       CI is red on the run: "review proof", no "→ merge" (needaction.js says the same)
 //   failed    a proof task failed: "proof failed", never "→ merge" (the box says to read it first)
 //   ready     the run is ready to merge (assess's `ready`): "ready to merge"
+//   changes   an Ask for changes is still unread (assess's `changesAsked`): "changes asked…"
 //   plan      the run's plan is still open (tasks.js planOpen): an approval reads "approved · plan open",
 //             never "→ merge", since the run's own tasks come before the merge
 // A self-flow draft reads "review proof → ready": it is marked ready before it is merged.
-export function nextStepText(step, { comments = true, red = false, failed = false, plan = false, ready = false } = {}) {
+export function nextStepText(step, { comments = true, red = false, failed = false, plan = false, ready = false, changes = false } = {}) {
   if (!step) return "";
   const said = commentsText(step.comments);
   const label = step.label === "review from" ? `review from ${step.who.join(", ") || "a reviewer"}`
-    : step.label === "review proof → merge" ? (ready ? "ready to merge" : failed ? "proof failed" : red ? "review proof" : step.draft ? "review proof → ready" : step.label)
+    : step.label === "review proof → merge" ? (changes ? "changes asked…" : ready ? "ready to merge" : failed ? "proof failed" : red ? "review proof" : step.draft ? "review proof → ready" : step.label)
     : said && step.label === "approved — merge" ? (comments ? `approved · ${said}` : "approved")
     : plan && step.label === "approved — merge" ? "approved · plan open"
     : said && comments ? `${step.label} · ${said}`
@@ -171,7 +172,7 @@ export function nextStepText(step, { comments = true, red = false, failed = fals
 // nextStepText for an assessed run (assess), with what it knows beside the step: red CI and a
 // failed proof. One rule for the views that word the step outside assess (parkedLabel, toasts).
 export const stepTextOf = (att, opts = {}) => nextStepText(att?.next, {
-  red: Boolean(att?.reasons?.some((r) => r.key === "red-ci")), failed: Boolean(att?.proofFailed), plan: Boolean(att?.planOpen), ready: Boolean(att?.ready), ...opts,
+  red: Boolean(att?.reasons?.some((r) => r.key === "red-ci")), failed: Boolean(att?.proofFailed), plan: Boolean(att?.planOpen), ready: Boolean(att?.ready), changes: Boolean(att?.changesAsked), ...opts,
 });
 
 
@@ -367,11 +368,11 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 // run closed); working, ci-running, idle in Working (idle: briefly quiet, not
 // stalled yet); waiting-for in Waiting on others; cant-tell in Can't tell. A Needs you run
 // may still have cantTell: a question read from its files, its PRs unreadable.
-export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, proofFailed = false, proofRead = false, proofClean = false, askedPrs = null, now = Date.now() } = {}) {
+export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, proofFailed = false, proofRead = false, proofClean = false, changesAsked = false, askedPrs = null, now = Date.now() } = {}) {
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
   const step = stepOf(run, { prs, stages, since, ages });
-  const base = { held: false, planOpen: false, cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), proofRead: Boolean(proofRead), ready: false, working: Boolean(working), askedPrs: askedPrs ?? new Set() };
+  const base = { held: false, planOpen: false, cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), proofRead: Boolean(proofRead), changesAsked: Boolean(changesAsked), tasksShort: false, ready: false, working: Boolean(working), askedPrs: askedPrs ?? new Set() };
   const out = (group, extra) => {
     const r = { ...base, ...extra, group };
     const anchors = r.reasons.map((x) => x.since).filter(Boolean);
@@ -427,9 +428,13 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
       // `short`: without the comment count, for the narrow sidebar (crewrows.js rowLead).
       // Ready to merge: a self-flow PR whose proof was read and passes in full, with green (or no)
       // checks, no draft to mark ready first, and nothing else the run waits on you for.
+      // Every listed task done too (a finished run's plan is never "open", planOpen), and no ask for
+      // changes still unread: the orchestrator is about to work on it.
+      const tc = taskCounts(run);
+      base.tasksShort = tc.planned > 0 && tc.done < tc.planned;
       base.ready = next.label === "review proof → merge" && proofRead && proofClean && !proofFailed && !next.draft && !reasons.length
-        && (ci.state === "green" || ci.state === null);
-      const opts = { red: ci.state === "red", failed: Boolean(proofFailed), plan: base.planOpen, ready: base.ready };
+        && !base.tasksShort && !changesAsked && (ci.state === "green" || ci.state === null);
+      const opts = { red: ci.state === "red", failed: Boolean(proofFailed), plan: base.planOpen, ready: base.ready, changes: base.changesAsked && next.label === "review proof → merge" };
       reasons.push({ key: next.label, text: nextStepText(next, opts), short: nextStepText(next, { ...opts, comments: false }), since: reviewed ?? settled });
     }
   }

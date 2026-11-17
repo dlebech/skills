@@ -8,6 +8,10 @@
 
 export const CHANGES = /^changes asked from Harbormaster: /;
 
+// Whether an "Ask for changes" message is among the first lines of the run's unhandled inbox
+// messages (data.js reads them with the level requests): the run is being changed, not ready.
+export const changesPending = (lines) => (lines ?? "").split("\n").some((l) => CHANGES.test(l.trim()));
+
 // The message for the user's `text` (one line or several), or null for an empty one.
 export function changesRequest(text) {
   const t = String(text ?? "").trim();

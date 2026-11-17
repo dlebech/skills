@@ -8,7 +8,7 @@ import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, wo
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
-import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, segmentLook, proofCounts, proofRowParts, needsLook, resultLine, resultPill, pendingLine, gatheringStage, proofSig, proofGaps } from "./proof.js";
+import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, segmentLook, proofCounts, proofRowParts, needsLook, resultLine, resultPill, pendingLine, gatheringStage, proofSig, proofGaps, proofRowsOf } from "./proof.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
@@ -297,7 +297,7 @@ function opaque(c, bg = null) {
 }
 // The selected Crew row's fill: the accent faintly over the sidebar, on any edge colour.
 const SELECTED = (t) => opaque(`${opaque(t.accent)}40`, t.chrome);
-const edgeColor = (t, edge) => opaque(edge === "amber" ? AMBER(t) : edge === "review" ? t.ansi6 ?? t.accent : edge === "neutral" ? t.border : t[edge] ?? t.border, t.chrome);
+const edgeColor = (t, edge) => opaque(edge === "amber" ? AMBER(t) : edge === "pass" ? PASS(t) : edge === "review" ? t.ansi6 ?? t.accent : edge === "neutral" ? t.border : t[edge] ?? t.border, t.chrome);
 
 // ---- ask what's blocking, the review flow, close all merged ----
 
@@ -682,7 +682,7 @@ function needLines(view, t, r, f, items, where, underQuestion = false) {
     // A ready run: a headline and what is done, in the pass colour (needaction.js readyItem).
     const head = it.ready
       ? v_flex().id(`needt-${where}-${r.key}-${i}`).gap(1)
-        .child(div().text_size(14).font_semibold().text_color(PASS(t)).child(`✓ ${it.headline}`))
+        .child(div().text_size(14).font_semibold().text_color(PASS(t)).child(it.headline))
         .child(div().text_size(12).text_color(PASS(t)).child(oneLine(it.detail, 220)))
       : div().id(`needt-${where}-${r.key}-${i}`).text_size(12).text_color(t.foreground).when(Boolean(it.tip), (el) => el.tooltip(it.tip)).child(oneLine(it.line, 220));
     return v_flex().id(`needl-${where}-${r.key}-${i}`).gap(4)
@@ -727,7 +727,7 @@ function needBox(view, t, r, f, ctx, where) {
     const first = items[0].actions[0];
     const link = first?.kind === "focus" && first.address === r.terminal ? null : orchLink(t, r, f, `need-orch-${where}-${r.key}`);
     return box.child(v_flex().flex_1().min_w(0).gap(6)
-      .child(div().text_size(11).font_semibold().text_color(tint).child(ready ? "Ready" : "Needs you"))
+      .when(!ready, (el) => el.child(div().text_size(11).font_semibold().text_color(tint).child("Needs you")))
       .children(needLines(view, t, r, f, items, where))
       .when(ready && view.replying === changesId(r), (el) => el.child(v_flex().gap(4)
         .child(Input.new(view.reply))
@@ -970,11 +970,7 @@ const isFinished = (r) => r.phase === "finished" || Boolean(r.away);
 // in review, fixing: by `stages` when given, else plan.md's states), never while blocked or done;
 // a task proof.md has but plan.md doesn't counts as done.
 function proofRows(r, stages = null) {
-  const gathering = (id) => {
-    const i = r.tasks.findIndex((x) => x.id === id);
-    return i >= 0 && gatheringStage(stages?.[i]?.stage ?? taskStage(r.tasks[i].state));
-  };
-  const rows = proofTasks(r.tasks, r.proof.md, r.proof.files, { accepted: r.proof.accepted, asks: r.proof.asks, gathering, finished: isFinished(r) });
+  const rows = proofRowsOf(r, r.tasks.map((x, i) => stages?.[i]?.stage ?? taskStage(x.state)));
   for (const k of rows) {
     const key = `${r.key}:${k.id}`, s = said.get(key);
     if (!s) continue;

@@ -268,6 +268,18 @@ export function proofCounts(rows) {
   };
 }
 
+// A run's proof rows as every view builds them (the need box, the pane, the ready check in
+// attend.js): proofTasks() with the user's acceptances and asks, a task still under way pending.
+// `stages`: each task's stage name ("implement", "done"…) in plan.md's order, or null for none.
+export function proofRowsOf(run, stages = null) {
+  const gathering = (id) => {
+    const i = run.tasks.findIndex((x) => x.id === id);
+    return i >= 0 && gatheringStage(stages?.[i]);
+  };
+  const finished = run.phase === "finished" || Boolean(run.away);
+  return proofTasks(run.tasks, run.proof?.md ?? null, run.proof?.files ?? null, { accepted: run.proof?.accepted, asks: run.proof?.asks, gathering, finished });
+}
+
 // ---- the proof was read ----
 // "Read" is remembered per run (harbormaster.proofSeen, proofseen.js) as a signature of the proof
 // as shown: each scoped task's id, result line and files. Any change to what proof.md says, or to
@@ -290,7 +302,7 @@ export const proofClean = (c) => c.total > 0 && c.fail === 0 && c.partial === 0 
 // proof is clean. `c` is proofCounts().
 export function proofGaps(c) {
   if (proofClean(c)) return null;
-  const parts = [`${c.pass + c.accepted}/${c.total} pass`, c.partial && `${c.partial} partial`, c.unchecked && `${c.unchecked} not checked`,
+  const parts = [`${c.pass}/${c.total} pass${c.accepted ? ` · ${c.accepted} accepted` : ""}`, c.partial && `${c.partial} partial`, c.unchecked && `${c.unchecked} not checked`,
     c.pending && `${c.pending} pending`, c.unscoped && `${c.unscoped} not scoped`].filter(Boolean);
   return parts.join(", ");
 }

@@ -11,11 +11,12 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assess } from "../../herdr-app/mods/harbormaster/attention.js";
 import { needActions, isPrimary } from "../../herdr-app/mods/harbormaster/needaction.js";
-import { rowLead, badgeOf } from "../../herdr-app/mods/harbormaster/crewrows.js";
+import { rowLead, rowEdge, badgeOf } from "../../herdr-app/mods/harbormaster/crewrows.js";
 import { parkedLabel, toastParts } from "../../herdr-app/mods/harbormaster/tell.js";
-import { proofTasks, proofCounts, proofSig, proofRead, proofClean, proofGaps, parseProofMd } from "../../herdr-app/mods/harbormaster/proof.js";
+import { proofTasks, proofCounts, proofSig, proofRead, proofClean, proofGaps, parseProofMd, proofRowsOf } from "../../herdr-app/mods/harbormaster/proof.js";
 import { nextProofSeen } from "../../herdr-app/mods/harbormaster/proofseen.js";
-import { changesRequest, CHANGES } from "../../herdr-app/mods/harbormaster/changes.js";
+import { proofStateOf } from "../../herdr-app/mods/harbormaster/attend.js";
+import { changesRequest, changesPending, CHANGES } from "../../herdr-app/mods/harbormaster/changes.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MIN = 60000;
@@ -145,6 +146,7 @@ test("agreement: the Crew lead, the pill, the toast and the parked label all say
   const lead = rowLead(a, now);
   assert.equal(lead.lead.split(" · ")[0], "ready to merge");
   assert.equal(lead.tone, "pass");
+  assert.equal(rowEdge(a), "pass");
   const badge = badgeOf(a, true);
   assert.equal(badge.label, "ready to merge");
   assert.equal(badge.ready, true);
@@ -156,6 +158,7 @@ test("agreement: the Crew lead, the pill, the toast and the parked label all say
   assert.equal(badgeOf(un, true).label, "review proof → merge");
   assert.equal(badgeOf(un, true).ready, undefined);
   assert.equal(rowLead(un, now).tone, "blocked");
+  assert.equal(rowEdge(un), "blocked");
   assert.equal(rowLead(un, now).lead.split(" · ")[0], "review proof → merge");
 });
 
@@ -187,4 +190,50 @@ test("the proofSeen store forgets gone runs, keeps a down machine's", () => {
   assert.deepEqual(nextProofSeen(store, runs, { failed: ["m1"] }), { ":/r/a": "s1", "m1:/r/c": "s3" });
   const same = { ":/r/a": "s1" };
   assert.equal(nextProofSeen(same, runs), same);
+});
+
+test("accepted rows are said as accepted, in the ready line and in the gaps", () => {
+  const list = [pr()];
+  const [it] = needActions(at(run(), list), ctxFor(run(), list, { proof: { tier: 1, pass: 1, total: 2, fail: 0, accepted: 1, gaps: null } }));
+  assert.equal(it.detail, "All 2 tasks done · proof 1/2 pass · 1 accepted · checks green");
+  const c = proofCounts(rowsOf(md("partial — x"), { accepted: { t2: { result: "partial — x" } } }));
+  assert.equal(c.accepted, 1);
+  const open = proofCounts(rowsOf(md("partial — x")));
+  assert.equal(proofGaps({ ...open, accepted: 1 }), "1/2 pass · 1 accepted, 1 partial");
+});
+
+test("a listed task not done keeps a finished run from being ready, and the line says so", () => {
+  const list = [pr()];
+  const r = run({ tasks: [done("t1"), { id: "t2", name: "t2", state: "planned" }] });
+  const a = at(r, list);
+  assert.equal(a.ready, false);
+  assert.equal(a.tasksShort, true);
+  const [it] = needActions(a, ctxFor(r, list, { proof: { tier: 1, pass: 2, total: 2, fail: 0, accepted: 0, gaps: null } }));
+  assert.equal(it.line, "Proof read · 1/2 tasks done — finish or drop the rest before merging #44");
+  assert.deepEqual(it.actions.map((x) => x.label), ["Merge #44 on GitHub", "Proof"]);
+});
+
+test("an unread Ask for changes: not ready, Merge plain, pill and Crew lead say changes asked", () => {
+  const list = [pr()];
+  const a = at(run({ changesAsked: true }), list, { changesAsked: true });
+  assert.equal(a.ready, false);
+  assert.equal(rowLead(a, now).lead.split(" · ")[0], "changes asked…");
+  assert.equal(badgeOf(a, true).label, "changes asked…");
+  const [it] = needActions(a, ctxFor(run(), list));
+  assert.match(it.line, /^Changes asked… its orchestrator plans them/);
+  assert.deepEqual(it.actions.map((x, j) => isPrimary(x, 0, j)), [false, false]);
+  assert.equal(changesPending("set autonomy to L2\nchanges asked from Harbormaster: tweak"), true);
+  assert.equal(changesPending("what is blocking? x"), false);
+});
+
+test("the sig written when the proof is opened is the sig the ready check reads", () => {
+  const r = run({ proof: { tier: null, md: md(), files: [], accepted: {} } });
+  const stages = ["done", "done"];
+  const written = proofSig(proofRowsOf(r, stages));
+  const state = proofStateOf(r, stages);
+  assert.equal(state.sig, written);
+  assert.equal(state.clean, true);
+  // With it stored, the run is ready; without it, not.
+  assert.equal(at(r, [pr()], { proofRead: proofRead(written, state.sig), proofClean: state.clean }).ready, true);
+  assert.equal(at(r, [pr()], { proofRead: proofRead(null, state.sig), proofClean: state.clean }).ready, false);
 });

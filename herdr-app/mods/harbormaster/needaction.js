@@ -100,7 +100,7 @@ function readyItem(a, ctx, prs) {
   const tasks = taskCounts(run ?? {});
   const checks = ciState(ctx.prs ?? []).state === "green" ? "checks green" : "no checks";
   const detail = [tasks.planned > 0 ? `All ${plural(tasks.done, "task")} done` : null,
-    proof ? `proof ${(proof.pass ?? 0) + (proof.accepted ?? 0)}/${proof.total} pass` : null, checks].filter(Boolean).join(" · ");
+    proof ? `proof ${proof.pass ?? 0}/${proof.total} pass${proof.accepted ? ` · ${proof.accepted} accepted` : ""}` : null, checks].filter(Boolean).join(" · ");
   return { key: "review proof → merge", ready: true, headline: "Ready to merge", detail,
     line: `Ready to merge ${prsText(prs)}: ${detail}`,
     actions: [...mergePrs(prs), { kind: "proof", label: "Proof", primary: false }, { kind: "changes", label: "Ask for changes", primary: false }] };
@@ -187,10 +187,19 @@ function reasonItem(r, a, ctx) {
       // Ready to merge: the proof was read and passes, the checks are green, nothing else waits on
       // you. A headline in the pass colour, the merge link as the main button (see readyItem).
       if (a.ready) return readyItem(a, ctx, same);
+      // Changes were asked and not yet picked up: the orchestrator is about to work on it, so
+      // merging now would merge what the user just asked to change. Merge is there, but plain.
+      if (a.changesAsked && !red && !draft) {
+        return { line: `Changes asked… its orchestrator plans them; merge ${prsText(same)} once they are done`,
+          actions: [...mergePrs(same).map((x) => ({ ...x, primary: false })), { kind: "proof", label: "Proof", primary: false }] };
+      }
       // The proof was read but is not clean: say what stands in the way; the merge link stays the
       // main button, Proof a plain one, the user decides (accept the row, ask to prove it, or merge).
-      if (a.proofRead && proof?.gaps && !red && !draft) {
-        return { line: `Proof read · ${proof.gaps} — accept it or ask to prove it before merging ${prsText(same)}`,
+      if (a.proofRead && (proof?.gaps || a.tasksShort) && !red && !draft) {
+        const tc = taskCounts(run ?? {});
+        const gaps = [a.tasksShort ? `${tc.done}/${tc.planned} tasks done` : null, proof?.gaps].filter(Boolean).join(", ");
+        const todo = proof?.gaps ? "accept it or ask to prove it" : "finish or drop the rest";
+        return { line: `Proof read · ${gaps} — ${todo} before merging ${prsText(same)}`,
           actions: [...mergePrs(same), { kind: "proof", label: "Proof", primary: false }] };
       }
       return { line: p ? `Read the proof (${p})${merge(prsText(same))}` : `Review ${prsText(same)}${merge(it)}`,
