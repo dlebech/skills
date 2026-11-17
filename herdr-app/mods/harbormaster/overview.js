@@ -829,7 +829,7 @@ const metaLine = (t, r, meta) => {
     .child(div().truncate().child(meta.slice(at + tok.length)));
 };
 // A card's edge: red when it needs you, else its pill's colour; a muted pill (running) has none.
-const runEdge = (t, f) => (f.need ? t.blocked : f.badge.tone === "muted" ? t.border : t[f.badge.tone] ?? t.border);
+const runEdge = (t, f) => (f.badge.ready ? PASS(t) : f.need ? t.blocked : f.badge.tone === "muted" ? t.border : t[f.badge.tone] ?? t.border);
 const relatedTip = (p) => [p.number ? p.title : null, prStateText(p), p.url].filter(Boolean).join(" · ");
 
 function card(view, t, r, ctx, compact = false) {
