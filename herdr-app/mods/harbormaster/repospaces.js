@@ -2,8 +2,7 @@
 // same idea as skills/herdr-app-captain/scripts/repo-spaces.sh, from the window's own spaces,
 // plus the clones found beside them (a review can open a space for one). A space counts when its
 // first tab's first pane (else its folder) is in a repository's own checkout (a "primary" space);
-// linked worktrees belong to runs and are left out. Which repository a folder is: spacegroups.js,
-// as the Spaces picker has it.
+// linked worktrees belong to runs and are left out. Which repository a folder is: spacegroups.js (whereOf, repoOf).
 
 import { exec, spaces, panes } from "herdr";
 import { whereOf, repoOf } from "./spacegroups.js";
