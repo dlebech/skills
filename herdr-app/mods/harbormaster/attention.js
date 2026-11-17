@@ -9,7 +9,7 @@
 // files still counts: that file was read, whatever happened to the PR read.
 
 import { needsYou, needReason } from "./live.js";
-import { stepComments, commentsText } from "./comments.js";
+import { stepComments, commentsText, hasComments } from "./comments.js";
 import { plural, andList } from "./words.js";
 
 // No new progress line, no change in the run's agents and no new terminal output for this
@@ -124,10 +124,12 @@ export function nextStep(prs, flow) {
 // step (every PR asked, or none, or the rest wait on something else).
 export function nextStepAsking(prs, flow, asked) {
   const full = nextStep(prs, flow);
-  if (!full || !asked?.size || !COMMENT_LABELS.has(full.label)) return { next: full, partial: false };
-  const done = full.prs.filter((p) => asked.has(p.url));
-  if (!done.length || done.length === full.prs.length) return { next: full, partial: false };
-  const left = nextStep((prs ?? []).filter((p) => !asked.has(p.url)), flow);
+  if (!full || !asked?.size) return { next: full, partial: false };
+  // The asked PRs on an approval or a change request, whichever step tops the run's.
+  const done = (prs ?? []).filter((p) => asked.has(p.url) && COMMENT_LABELS.has(prStep(p, flow)?.label));
+  const rest = (prs ?? []).filter((p) => !done.includes(p));
+  if (!done.length || !rest.length) return { next: full, partial: false };
+  const left = nextStep(rest, flow);
   if (!left || !COMMENT_LABELS.has(left.label)) return { next: full, partial: false };
   return { next: { ...left, asked: done }, partial: true };
 }
@@ -352,7 +354,7 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
   const step = stepOf(run, { prs, stages, since, ages });
-  const base = { cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed) };
+  const base = { cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), working: Boolean(working), askedPrs: askedPrs ?? new Set() };
   const out = (group, extra) => {
     const r = { ...base, ...extra, group };
     const anchors = r.reasons.map((x) => x.since).filter(Boolean);
@@ -381,6 +383,9 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   // PRs whose comments are being handled leave the step while the others wait on you (nextStepAsking).
   const { next, partial } = nextStepAsking(prs, flow, askedPrs);
   base.next = next;
+  // Only an un-asked PR with something to address (comments, or changes requested) pulls a
+  // working run into Needs you: a plain approval can wait until the run stops.
+  const urgent = partial && (next.label === "changes requested" || hasComments(next.comments));
   // Done: a finished run with every PR merged or closed, and nothing still at work or asking.
   // A running run between PRs is not done, however idle it looks.
   if (run.phase === "finished" && prs.length && prs.every(isShut) && !working && !reasons.length) return out("done", { next });
@@ -392,7 +397,9 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
   // PR grounds only once nothing works on the run any more and CI is not running: while it
   // works, it is the run's turn, not the user's. The exception: PRs of an approval or change
   // request nobody was asked about, while the others' comments are being handled (`partial`).
-  if ((!working || partial) && ci.state !== "running") {
+  // While the asked PRs' CI runs (the orchestrator pushed its fix), the others still wait on you.
+  const gate = partial ? ciState(next.prs) : ci;
+  if ((!working || urgent) && gate.state !== "running") {
     const settled = Math.max(run.updated ?? 0, ci.finishedAt ?? 0) || null;
     if (!working && ci.state === "red") reasons.push({ key: "red-ci", text: `red CI on #${ci.pr.number}`, since: ci.finishedAt ?? settled });
     if (next && NEEDS_LABELS.has(next.label)) {

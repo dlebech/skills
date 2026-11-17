@@ -398,7 +398,7 @@ function commentsAction(view, t, r, att, id) {
     const what = `Address ${commentsText(p.comments)}${p.comments.count > 0 && b ? ` (+${b} from bots)` : ""}${prs.length > 1 || p.number ? ` on #${p.number}` : ""}`;
     const label = div().id(`cmt-${id}-${i}-label`).flex_none().text_size(11.5).text_color(t.muted)
       .tooltip(commentLines([p], 20).join("\n")).child(what);
-    if (addressAsked(r, p)) return h_flex().gap(8).items_center().child(label).child(askedNote(t, `cmt-${id}-${i}`));
+    if (addressAsked(r, p, att)) return h_flex().gap(8).items_center().child(label).child(askedNote(t, `cmt-${id}-${i}`));
     return h_flex().gap(6).items_center().child(label)
       .child(actionButton(t, `cmt-${id}-${i}-ask`, "Ask me", modeTip(r, "ask"), addressSend(view, r, p, "ask"), first === "ask"))
       .child(actionButton(t, `cmt-${id}-${i}-handle`, "Handle them", modeTip(r, "handle"), addressSend(view, r, p, "handle"), first === "handle"));
@@ -406,10 +406,11 @@ function commentsAction(view, t, r, att, id) {
   return v_flex().gap(4).children(rows);
 }
 
-// Whether a PR's Address comments was asked and nothing has moved since (comments.js commentsAsked),
-// dropping a click from here whose PR's comments have moved on.
-function addressAsked(r, p) {
-  return commentsAsked(r, p, askedStore()[p.url]);
+// Whether a PR's Address comments was asked and is still being handled (comments.js askedEntry).
+// The run's assessment (`att`) has the PRs asked about, judged with whether the run is working
+// (a moving comment list under a working orchestrator is its own doing); without one, the store.
+function addressAsked(r, p, att = null) {
+  return att?.askedPrs ? att.askedPrs.has(p.url) : commentsAsked(r, p, askedStore()[p.url]);
 }
 const askedNote = (t, id) => div().id(id).flex_none().text_size(11).text_color(t.muted)
   .tooltip("Asked its orchestrator to address these comments; waiting for its open comments to change").child("asked…");
@@ -610,12 +611,12 @@ function needButton(view, t, r, f, x, id, where, primary) {
   switch (x.kind) {
     case "open": return actionButton(t, id, x.label, x.url, () => openUrl(x.url), primary);
     // Ask me and Handle them share one "asked…" once either was clicked.
-    case "address": return addressAsked(r, x.pr) ? (x.mode === "ask" ? askedNote(t, id) : null)
+    case "address": return addressAsked(r, x.pr, f.att) ? (x.mode === "ask" ? askedNote(t, id) : null)
       : actionButton(t, id, x.label, modeTip(r, x.mode), addressSend(view, r, x.pr, x.mode), primary);
     // Asked and being handled: its row says so, with Open beside.
     case "asked": return askedNote(t, id);
-    case "address-all": return addressAsked(r, x.prs[0]) && x.prs.every((p) => addressAsked(r, p)) ? null
-      : actionButton(t, id, x.label, `${modeTip(r, x.mode)} For each of the ${x.prs.length} PRs.`, addressSendAll(view, r, x.prs.filter((p) => !addressAsked(r, p)), x.mode), primary);
+    case "address-all": return x.prs.every((p) => addressAsked(r, p, f.att)) ? null
+      : actionButton(t, id, x.label, `${modeTip(r, x.mode)} For each of the ${x.prs.length} PRs.`, addressSendAll(view, r, x.prs.filter((p) => !addressAsked(r, p, f.att)), x.mode), primary);
     case "focus": return actionButton(t, id, x.label, "Show its terminal", () => focusAgent(x.address), primary);
     case "ask-ci": return ciAction(view, t, r, x, id);
     case "ask-blocking": return blockingAction(view, t, r, f.att, id);

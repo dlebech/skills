@@ -78,5 +78,7 @@ export function observeTelling(runs, ctx, now = Date.now()) {
   if (nextS !== seen) setShared(SEEN_KEY, nextS);
   observeToasts(runs, ctx, failed, now);
   // Asks for Address comments that no longer hold go from their store (asked.js).
-  pruneAsked(runs.flatMap((r) => (r.stale ? [] : prsOf(r) ?? [])));
+  const live = runs.filter((r) => !r.stale);
+  const busy = new Set(live.filter((r) => attentionOf(r, ctx, now).working).flatMap((r) => (prsOf(r) ?? []).map((p) => p.url)));
+  pruneAsked(live.flatMap((r) => prsOf(r) ?? []), busy);
 }

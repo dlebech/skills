@@ -8,7 +8,7 @@ import { assess, nextStepText } from "../../herdr-app/mods/harbormaster/attentio
 import { needActions } from "../../herdr-app/mods/harbormaster/needaction.js";
 import { rowLead, badgeOf } from "../../herdr-app/mods/harbormaster/crewrows.js";
 import { toastParts, parkedLabel } from "../../herdr-app/mods/harbormaster/tell.js";
-import { askedEntry, askedUrls, markAsked, unmarkAsked, prunedAsked, offersAll, askAllLabel, ASKED_KEEP_MS } from "../../herdr-app/mods/harbormaster/comments.js";
+import { commentSummary, commentsSig, askedAmong, askedEntry, askedUrls, markAsked, unmarkAsked, prunedAsked, offersAll, askAllLabel, ASKED_KEEP_MS } from "../../herdr-app/mods/harbormaster/comments.js";
 
 const MIN = 60000;
 const now = Date.parse("2026-11-17T12:00:00Z");
@@ -63,17 +63,91 @@ test("nobody asked and working: Working, as before", () => {
   assert.equal(at(run(), list()).group, "working");
 });
 
-test("#1799's comments change after the ask: it counts again", () => {
+test("#1799's comments change while the run works: still asked, the run stays in Needs you over #1372", () => {
   const l = list();
   const store = markAsked({}, run(), [l[0]], now);
-  assert.ok(askedEntry(store, l[0], now));
-  const moved = [pr(1799, 3), l[1]];
+  const moved = [pr(1799, 1), l[1]];
   assert.ok(!askedEntry(store, moved[0], now));
-  const a = at(run(), moved, { askedPrs: askedUrls(store, moved, now) });
-  // Neither is asked now: working, no reason.
-  assert.equal(a.group, "working");
-  // The stale entry is pruned.
-  assert.deepEqual(prunedAsked(store, moved, now), {});
+  assert.ok(askedEntry(store, moved[0], now, true));
+  const a = at(run(), moved, { askedPrs: askedUrls(store, moved, now, true) });
+  assert.equal(a.group, "needs");
+  assert.deepEqual(a.next.prs.map((p) => p.number), [1372]);
+  assert.deepEqual(a.next.asked.map((p) => p.number), [1799]);
+  // The prune keeps it while the run works.
+  assert.equal(prunedAsked(store, moved, now, new Set([moved[0].url])), store);
+});
+
+test("#1799's comments change and the run is idle: the ask ends and it is offered again", () => {
+  const l = list();
+  const store = markAsked({}, run(), [l[0]], now);
+  const moved = [pr(1799, 1), l[1]];
+  assert.ok(!askedEntry(store, moved[0], now, false));
+  assert.deepEqual(prunedAsked(store, moved, now, new Set()), {});
+  const [it] = box(run(), moved, { working: false, orch: "idle", askedPrs: askedUrls(store, moved, now, false) });
+  assert.ok(it.actions.some((x) => x.kind === "address" && x.pr.number === 1799));
+  assert.ok(!it.actions.some((x) => x.kind === "asked"));
+});
+
+test("#1799 asked with its CI running after the fix is pushed: the run stays in Needs you over #1372", () => {
+  const l = [pr(1799, 2, { checks: { pass: 1, fail: 0, pending: 2 } }), pr(1372, 9)];
+  const a = at(run(), l, { askedPrs: asking(l[0].url) });
+  assert.equal(a.group, "needs");
+  assert.deepEqual(a.next.prs.map((p) => p.number), [1372]);
+  // Nobody asked, CI running, working: Working as before.
+  assert.equal(at(run(), l).group, "working");
+  // CI running on the un-asked PR keeps the run out of Needs you.
+  const other = [pr(1799, 2), pr(1372, 9, { checks: { pass: 1, fail: 0, pending: 1 } })];
+  assert.equal(at(run(), other, { askedPrs: asking(other[0].url) }).group, "working");
+});
+
+test("a merely approved PR with no comments does not pull a working run into Needs you", () => {
+  const l = [pr(1799, 2), pr(1372, 0, { comments: cm(0, []) })];
+  assert.equal(at(run(), l, { askedPrs: asking(l[0].url) }).group, "working");
+  // Once it stops working, it shows as before: merge #1372, with #1799 asked.
+  const a = at(run(), l, { askedPrs: asking(l[0].url), working: false, orch: "idle" });
+  assert.equal(a.group, "needs");
+  assert.deepEqual(a.next.prs.map((p) => p.number), [1372]);
+  // Changes requested on the un-asked PR does pull it in.
+  const changes = [pr(1799, 2), pr(1372, 0, { review: "CHANGES_REQUESTED", approvedBy: [], changesBy: ["anna"], comments: cm(0, []) })];
+  assert.equal(at(run(), changes, { askedPrs: asking(changes[0].url) }).group, "needs");
+});
+
+// What gh gives for a PR's comments (comments.js COMMENTS_QUERY): threads as [{id, bot, last}].
+const graph = (threads) => ({ data: { repository: { pullRequest: { author: { login: "dlebech" },
+  reviewThreads: { nodes: threads.map((t) => ({ id: t.id, isResolved: false, path: "a.php", line: 1,
+    first: { nodes: [{ author: { __typename: t.bot ? "Bot" : "User", login: t.bot ? "coderabbitai" : "mfalkenbrink" }, authorAssociation: t.bot ? "NONE" : "MEMBER", body: `Fix ${t.id}`, url: `u-${t.id}` }] },
+    last: { nodes: [{ body: t.reply ? "🤖 AI: done" : `Fix ${t.id}` }] } })) },
+  reviews: { nodes: [] }, comments: { nodes: [] } } } } });
+const sigOf = (threads) => commentsSig(null, { comments: commentSummary(graph(threads)) });
+
+test("an AI reply changes the sig, for a person's thread and for a bot's", () => {
+  assert.notEqual(sigOf([{ id: "T1" }]), sigOf([{ id: "T1", reply: true }]));
+  // A bot's only thread: ids and the people count stay the same, the class and the bot total move.
+  assert.notEqual(sigOf([{ id: "B1", bot: true }]), sigOf([{ id: "B1", bot: true, reply: true }]));
+  // The same read twice is the same sig.
+  assert.equal(sigOf([{ id: "T1" }, { id: "B1", bot: true }]), sigOf([{ id: "T1" }, { id: "B1", bot: true }]));
+});
+
+test("a bot-only ask ends once the orchestrator is idle and its thread is answered", () => {
+  const mk = (threads) => ({ ...pr(1799, 0), comments: commentSummary(graph(threads)) });
+  const before = mk([{ id: "B1", bot: true }]), after = mk([{ id: "B1", bot: true, reply: true }]);
+  const store = markAsked({}, run(), [before], now);
+  assert.ok(askedEntry(store, before, now));
+  assert.ok(!askedEntry(store, after, now));
+  assert.deepEqual(prunedAsked(store, [after], now), {});
+});
+
+test("the asks of the store and the run's unread asks together drive the step", () => {
+  const l = list();
+  const store = markAsked({}, run(), [l[0]], now);
+  // From the store only (the message was read), and from the unread message only (a fresh copy).
+  assert.deepEqual([...askedAmong(store, run(), l, now, true)], [l[0].url]);
+  assert.deepEqual([...askedAmong({}, run({ commentsAsked: [l[0].url] }), l, now, true)], [l[0].url]);
+  assert.deepEqual([...askedAmong(store, run({ commentsAsked: [l[1].url] }), l, now, true)].sort(), [l[0].url, l[1].url].sort());
+  const a = at(run(), l, { askedPrs: askedAmong(store, run(), l, now, true) });
+  assert.equal(a.group, "needs");
+  assert.deepEqual(a.next.asked.map((p) => p.number), [1799]);
+  assert.ok(a.askedPrs.has(l[0].url) && a.working === true);
 });
 
 test("with both un-asked, not working: both rows with buttons and Handle all after them", () => {

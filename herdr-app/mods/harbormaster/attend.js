@@ -33,7 +33,7 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
     since: stepSince(run),
     ages: stepAges(run),
     filesOk: filesFresh(run, now),
-    askedPrs: askedPrsOf(run, prs, now),
+    askedPrs: askedPrsOf(run, prs, now, working),
   });
 }
 

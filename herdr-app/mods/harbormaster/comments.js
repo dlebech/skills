@@ -271,7 +271,9 @@ export const pendingComments = (lines) => (lines ?? "").split("\n").map((l) => C
 // changes (or while its message is unread). Not the run's status line: the orchestrator updates it
 // as soon as it reads the ask, long before the threads are answered, and dropping "asked…" then
 // would invite a second, duplicate ask while it works on the first.
-export const commentsSig = (run, pr) => `${(pr?.comments?.items ?? []).map((x) => x.thread ?? x.url ?? x.text).join("\n")}\n${pr?.comments?.count ?? ""}`;
+// Each item's class counts, so an answered thread (an AI reply moves it from "thread" or a bot's
+// to "answered") changes it even when the ids and counts do not; so does the bots' total.
+export const commentsSig = (run, pr) => `${(pr?.comments?.items ?? []).map((x) => `${x.kind ?? ""}:${x.thread ?? x.url ?? x.text}`).join("\n")}\n${pr?.comments?.count ?? ""}\n${botCount(pr?.comments?.bots)}`;
 
 // Whether a PR's Address comments shows "asked…": its message is unread (run.commentsAsked has
 // its URL), or it was asked from here (`asked`: {sig} at the click) and nothing has moved since.
@@ -284,14 +286,19 @@ export const commentsAsked = (run, pr, asked = null) => (run?.commentsAsked ?? [
 
 export const ASKED_KEEP_MS = 7 * 24 * 3600 * 1000;
 
-// Whether `store` holds a live ask for the PR: not older than a week, its comments unmoved.
-export const askedEntry = (store, pr, now = Date.now()) => {
+// Whether `store` holds a live ask for the PR: not older than a week and, unless the run is still
+// at work (`working`: its orchestrator is handling the comments, so they change under it), with
+// its comments unmoved.
+export const askedEntry = (store, pr, now = Date.now(), working = false) => {
   const e = store?.[pr?.url];
-  return Boolean(e) && now - (e.at ?? 0) <= ASKED_KEEP_MS && e.sig === commentsSig(null, pr);
+  return Boolean(e) && now - (e.at ?? 0) <= ASKED_KEEP_MS && (working || e.sig === commentsSig(null, pr));
 };
 
 // The URLs among `prs` with a live ask in `store`.
-export const askedUrls = (store, prs, now = Date.now()) => new Set((prs ?? []).filter((p) => p?.url && askedEntry(store, p, now)).map((p) => p.url));
+export const askedUrls = (store, prs, now = Date.now(), working = false) => new Set((prs ?? []).filter((p) => p?.url && askedEntry(store, p, now, working)).map((p) => p.url));
+
+// The PRs of a run asked about: its live asks in `store` and its unread asks (`run.commentsAsked`).
+export const askedAmong = (store, run, prs, now = Date.now(), working = false) => new Set([...askedUrls(store, prs, now, working), ...(run?.commentsAsked ?? [])]);
 
 // `store` with each of `prs` marked asked now (a new object; the click of Ask me / Handle them,
 // or of the ones for all).
@@ -308,9 +315,10 @@ export function unmarkAsked(store, url) {
 }
 
 // `store` without what no longer holds: asks older than a week, and asks for a PR now merged or
-// closed or whose open comments moved (the PR's comments unread are not "moved"). `prs` are the
-// PRs as read. The same object when nothing goes, so the caller writes only on a change.
-export function prunedAsked(store, prs, now = Date.now()) {
+// closed, or whose open comments moved once its run stopped working (the PR's comments unread
+// are not "moved"; `busy`: a Set of the URLs of PRs whose run is working, kept while it does).
+// `prs` are the PRs as read. The same object when nothing goes, so the caller writes only on a change.
+export function prunedAsked(store, prs, now = Date.now(), busy = new Set()) {
   if (!store) return store;
   const byUrl = new Map((prs ?? []).filter((p) => p?.url).map((p) => [p.url, p]));
   const keep = Object.entries(store).filter(([url, e]) => {
@@ -318,7 +326,7 @@ export function prunedAsked(store, prs, now = Date.now()) {
     const p = byUrl.get(url);
     if (!p) return true;
     if (p.state === "MERGED" || p.state === "CLOSED") return false;
-    if (!p.comments || commentsUnknown(p.comments)) return true;
+    if (!p.comments || commentsUnknown(p.comments) || busy.has(url)) return true;
     return e.sig === commentsSig(null, p);
   });
   return keep.length === Object.keys(store).length ? store : Object.fromEntries(keep);
