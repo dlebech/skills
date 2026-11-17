@@ -200,7 +200,23 @@ a finished run means proving its done tasks to the new tier, which sets the run 
 Until `status.json` or `plan.md` shows the level, while the message is unhandled, the tag reads
 `T3 requested…`. A level request does not count as an answer to an open `question.md`. Neither
 does an ask to prove (`prove <task> to T<n>: …`, see [Accepting proof](#accepting-proof-or-asking-for-it)),
-an ask what is blocking or an ask to address review comments (below).
+an ask what is blocking, an ask to address review comments or an ask for changes (below).
+
+### Asking for changes
+
+A run that is ready to merge (every task done, its proof read and passing, checks green) shows a
+green **Ready to merge** box in Harbormaster, with **Ask for changes** beside the merge button. It
+opens a text field; the user's words go into the inbox (source `harbormaster-changes`, woken like an
+answer), the first line being:
+
+```
+changes asked from Harbormaster: <what the user wrote>
+```
+
+The orchestrator treats it as the user's instruction (section 6 of the skill): it sets the status
+back to `running`, plans the work as tasks (`plan.md`, each with its Proof line), logs a `- [user]`
+line in `decisions.md`, runs them as usual and finishes again, so the proof is read anew. It renames
+the message `.handled`. Like a level request, it answers no open `question.md`.
 
 ### Asking what is blocking
 

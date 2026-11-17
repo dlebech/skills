@@ -231,12 +231,13 @@ unhandled_messages() {
 # their first line, from Harbormaster's level tags), asks to prove ("prove t23 to T2: …",
 # from its Proof rows), asks what is blocking ("what is blocking? …", from a stalled run's
 # Crew row or pane) and asks to address review comments ("address comments on <PR url>: ask",
-# from a run's card or pane; run-files.md), which answer nothing. Harbormaster's data.js
+# from a run's card or pane; run-files.md) and asks for changes ("changes asked from Harbormaster: …",
+# from a ready run's box), which answer nothing. Harbormaster's data.js
 # (NOT_ANSWERS) uses the same pattern.
 answer_messages() {
   local f
   unhandled_messages "$1" | while IFS= read -r f; do
-    head -n 1 "$f" | grep -qE '^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\?|address comments on )' || echo "$f"
+    head -n 1 "$f" | grep -qE '^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\?|address comments on |changes asked from Harbormaster: )' || echo "$f"
   done
 }
 

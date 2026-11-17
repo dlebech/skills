@@ -47,6 +47,9 @@
 #   asks-and-pr   finished plan (2/2), open self-flow PR dlebech/wapi-beatbox#1 with proof, and a
 #                 question.md                                            -> a question box with "Also needs you" under it
 #   plan-open     running, 1/3 tasks done, the same open PR                -> Working: no "review proof → merge" until the plan is done
+#   ready-run     finished, fake-two/api#60 (one green check), proof T1 2/2 pass -> review proof → merge;
+#                 once its proof is read: the green "Ready to merge" box (t23)
+#   partial-run   the same with t2 partial (#61)                         -> read: "Proof read · 1/2 pass, 1 partial …"
 # For an approval over two PRs with comments (t17), fake PRs through fake-gh.sh (installed as
 # <scratch>/bin/gh, first on the app's PATH; it answers only owner "fake-two", the real gh the rest):
 #   two-prs       running, folder "snevagten" (peer), fake-two/api#1799 (2 comments) and fake-two/web#1372 (9; one PR per repo in status.json),
@@ -212,6 +215,14 @@ Q
   cp "$S/runs/skills/asks-question/question.md" "$S/runs/skills/asks-and-pr/question.md"
   mkrun plan-open running feat "Plan open" "${day}T09:10:00Z" 1/3 merged implementing --progress "t2 implementing" \
     --pr dlebech/wapi-beatbox https://github.com/dlebech/wapi-beatbox/pull/1
+  # Ready to merge (t23): a self-flow PR with one green check, a finished plan and a proof that
+  # passes in full (ready-run), or with one task partial (partial-run). Their proofs start unread.
+  mkrun ready-run finished feat "Ready run" "${day}T08:30:00Z" 2/2 merged merged --progress "PR up with proof" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/60
+  printf '# Proof: ready-run\nTier: T1\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\n\n## t2 polish\nTier: T1\nChecked: tests\nResult: pass — 9 tests\n' >"$S/runs/skills/ready-run/proof.md"
+  mkrun partial-run finished feat "Partial run" "${day}T08:40:00Z" 2/2 merged merged --progress "PR up with proof" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/61
+  printf '# Proof: partial-run\nTier: T1\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\n\n## t2 polish\nTier: T1\nChecked: tests\nResult: partial — one case not run\n' >"$S/runs/skills/partial-run/proof.md"
 }
 
 case $cmd in
