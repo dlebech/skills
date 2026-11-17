@@ -28,6 +28,7 @@
 
 import { exec, shared, setShared } from "herdr";
 import { STALL_MS, stepSig, trackSince, trackParts, stepParts, usualCi } from "./attention.js";
+import { clockNow, sleptThrough, awakeSince, machineWoke } from "./sleep.js";
 import { workersOf, exactStatus, orchestratorState } from "./live.js";
 
 const STEPS_KEY = "harbormaster.steps";
@@ -105,7 +106,25 @@ const activity = new Map();
 export function lastActivity(run) {
   const a = activity.get(run.key)?.since ?? null;
   const s = stepSince(run);
-  return a || s ? Math.max(a ?? 0, s ?? 0) : null;
+  if (!a && !s) return null;
+  // Looked at on every call, so a wake shows at once, before the next poll has finished.
+  noteSleep();
+  return awakeSince(Math.max(a ?? 0, s ?? 0), Math.max(wokeAt ?? 0, machineWokeAt.get(run.machine ?? "") ?? 0) || null);
+}
+
+// When this machine last woke from sleep, the clocks as last looked at, and for each other
+// machine when it woke (machineWokeAt) and when a poll first missed it (unseenSince).
+let wokeAt = null;
+let looked = null;
+const machineWokeAt = new Map();
+const unseenSince = new Map();
+
+// Looks at the clocks and records a sleep since the last look.
+function noteSleep() {
+  const cur = clockNow();
+  wokeAt = sleptThrough(looked, cur) ?? wokeAt;
+  looked = cur;
+  return cur.wall;
 }
 
 // How often to read a quiet run's screens: every minute as it nears a stall, every 5 minutes
@@ -131,7 +150,19 @@ async function probe(run, ctx, entry) {
 // After each run read (data.js loadRuns): updates the step anchors and the agents' activity,
 // and reads the screens of runs about to stall. `stagesOf(run)`: its tasks' shown stages.
 export function observeRuns(runs, ctx, answered, stagesOf = () => []) {
-  const now = Date.now();
+  const now = noteSleep();
+  // A machine that did not answer is unseen from the first poll that missed it; when it
+  // answers again after long enough, it has woken.
+  for (const r of runs) {
+    const m = r.machine ?? "";
+    if (r.stale && !answered.has(m)) { if (!unseenSince.has(m)) unseenSince.set(m, now); }
+  }
+  for (const m of [...unseenSince.keys()]) {
+    if (!answered.has(m)) continue;
+    const w = machineWoke(unseenSince.get(m), now);
+    if (w) machineWokeAt.set(m, w);
+    unseenSince.delete(m);
+  }
   const steps = shared(STEPS_KEY) ?? {};
   const next = nextSteps(steps, runs, answered, now, stagesOf);
   if (next !== steps) setShared(STEPS_KEY, next);
