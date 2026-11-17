@@ -84,11 +84,13 @@ function addressPrs(prs, run, asked = []) {
 // The reports about a whole run among shared/'s file names (or paths), the final one first:
 // report.md, final-report.md, review*.md (a review run's) and the like. A task's own report
 // (t3-report.md, t11-review-1.md) is never one: a run leaves one per task, and the orchestrator
-// gives its final report in its terminal.
+// gives its final report in its terminal. Nor is a template or a brief (review-template.md, the
+// instructions an orchestrator gives its reviewers): they only look like reports by name.
 const TASK_FILE = /^t\d+[-_.]/i;
+const NOT_A_REPORT = /template|brief/i;
 export function runReports(paths) {
   const base = (p) => p.split("/").pop();
-  return (paths ?? []).filter((p) => { const b = base(p); return /\.md$/i.test(b) && !TASK_FILE.test(b) && (/report/i.test(b) || /^review/i.test(b)); })
+  return (paths ?? []).filter((p) => { const b = base(p); return /\.md$/i.test(b) && !TASK_FILE.test(b) && !NOT_A_REPORT.test(b) && (/report/i.test(b) || /^review/i.test(b)); })
     .sort((x, y) => Number(/final/i.test(base(y))) - Number(/final/i.test(base(x))));
 }
 

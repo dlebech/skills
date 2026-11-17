@@ -136,6 +136,13 @@ test("runReports keeps the run's own reports, the final one first, never a task'
   assert.deepEqual(runReports(undefined), []);
 });
 
+test("runReports never offers a template, a brief or a task's findings, but keeps a review run's drafts and reports", () => {
+  assert.deepEqual(runReports(["shared/review-template.md", "shared/review-brief.md", "shared/Report-Template.md", "shared/t2-brief.md"]), []);
+  assert.deepEqual(runReports(["shared/rev-x-t1-findings.md", "shared/final-review.md"]), []);
+  assert.deepEqual(runReports(["shared/review-template.md", "shared/review-t2.md", "shared/report.md", "shared/review-drafts.md", "shared/rev-x-t1-findings.md", "shared/review-brief.md"]),
+    ["shared/review-t2.md", "shared/report.md", "shared/review-drafts.md"]);
+});
+
 test("a gone orchestrator says to resume, park or close, with Resume", () => {
   const [it] = items(run(), [], { orch: "gone" });
   assert.equal(it.key, "gone");
