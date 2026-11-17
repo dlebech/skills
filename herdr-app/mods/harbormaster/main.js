@@ -17,7 +17,8 @@ import { loadRuns, cachedRuns, refreshPrs, isClosed, isParked, newestFirst } fro
 import { facts, crewAddresses } from "./live.js";
 import { loadContexts } from "./context.js";
 import { hotSignature, sampleVersion } from "./resources.js";
-import { cards, crew, runPane, submitReply, runProps } from "./overview.js";
+import { cards, runPane, submitReply, runProps } from "./overview.js";
+import { crew } from "./crew.js";
 import { viewer, startCopies } from "./viewer.js";
 import { harbor, rail, paneHeader } from "./harbor.js";
 import { statsView } from "./stats.js";

@@ -1,6 +1,6 @@
 // How the Crew block shows each orchestrator's attention (attention.js assess): its group
 // (Needs you, Working, Waiting on others, Can't tell, Done), its place in it, the words that lead its detail line,
-// their colour, and its hover. Pure, so the tests drive it; overview.js crew() draws it.
+// their colour, and its hover. Pure, so the tests drive it; crew.js draws it.
 
 import { byWait, nextStepText, stepText, ageText, reviewWaitText, FINISHED_LABEL } from "./attention.js";
 import { commentLines, commentsText, hasComments } from "./comments.js";
