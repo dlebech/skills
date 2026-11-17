@@ -20,7 +20,7 @@ import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telli
 import { askedStore, markPrsAsked, unmarkPrAsked } from "./asked.js";
 import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, crewEntries, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
-import { commentsAsked, defaultMode, commentLines, hasComments, botCount } from "./comments.js";
+import { commentsAsked, defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
 import { needActions, doLine, ownAddressRows } from "./needaction.js";
 
@@ -394,8 +394,8 @@ function commentsAction(view, t, r, att, id) {
   if (!prs.length) return null;
   const first = defaultMode(r.autonomy);
   const rows = prs.map((p, i) => {
-    const n = p.comments.count, b = botCount(p.comments.bots);
-    const what = `Address ${n} comment${n === 1 ? "" : "s"}${b ? ` (+${b} from bots)` : ""}${prs.length > 1 || p.number ? ` on #${p.number}` : ""}`;
+    const b = botCount(p.comments.bots);
+    const what = `Address ${commentsText(p.comments)}${p.comments.count > 0 && b ? ` (+${b} from bots)` : ""}${prs.length > 1 || p.number ? ` on #${p.number}` : ""}`;
     const label = div().id(`cmt-${id}-${i}-label`).flex_none().text_size(11.5).text_color(t.muted)
       .tooltip(commentLines([p], 20).join("\n")).child(what);
     if (addressAsked(r, p)) return h_flex().gap(8).items_center().child(label).child(askedNote(t, `cmt-${id}-${i}`));
