@@ -7,6 +7,7 @@ import { assess, prRead, reviewFlow, stalled, ciState } from "./attention.js";
 import { proofTasks, proofCounts, gatheringStage } from "./proof.js";
 import { stepSince, stepAges, lastActivity, ciUsualOf, reviewFlows } from "./tracking.js";
 import { needLine, needsRun } from "./crewrows.js";
+import { askedPrsOf } from "./asked.js";
 
 // Whether a run's files are a fresh read: data.js filesFresh, here where it has always been.
 export { filesFresh };
@@ -32,6 +33,7 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
     since: stepSince(run),
     ages: stepAges(run),
     filesOk: filesFresh(run, now),
+    askedPrs: askedPrsOf(run, prs, now, working),
   });
 }
 
