@@ -11,16 +11,6 @@ npx skills add dlebech/skills
 npx skills add dlebech/skills --all -g
 ```
 
-The `herdr-app-*` skills also want Herdr's own `herdr-core` skill, which steers agents to `hc` rather than the older `herdr`:
-
-```sh
-npx skills add https://github.com/herdrdev/herdr-core --skill herdr-core
-```
-
-To see your runs at a glance in the Herdr app, install Harbormaster with `herdr-app/install.sh` (see [docs/herdr-app-harbormaster.md](docs/herdr-app-harbormaster.md)). It adds a Crew block that shows the captain and every orchestrator, grouped into what needs you, what is working, what waits on a reviewer and done (and can't tell when a run can't be read), with each run's next step (`approved — merge`, `review from anna`) or current step and that step's own age, one meaning per colour (red: act, amber: look soon, cyan: a reviewer, none: fine), a Needs-you box that says what to do (`Merge #42 · approved by anna 1h ago`, `CI failed on #42: lint`) with the buttons that do it, a way to ask a stalled run what's blocking it, review comments counted on approved PRs (`approved · 3 comments`) with one click to have the orchestrator ask you about them or handle them, close every merged run at once and set each project's review flow (peer or self), a toast when a run starts needing you (off with one click), decisions counted as new since you last looked, parked runs saying what their PRs wait on, and the agents outside any run, a runs overview with PRs, checks, one queue of everything waiting on you, with one-click answers (a run's open question can be read in full and answered from its card or pane too), each run's proof tier and evidence (with screenshot thumbnails that open in a viewer), how many tokens each run and its agents used against an optional soft budget (crossing it asks you to continue, compact or stop), a stats view of where the time, tokens, CPU and memory go per run, task and agent, across open and past runs, and three layouts: `harbormaster-main`, `harbormaster-needs` (a test layout that opens the Crew with the Needs-you box) and the nautical `harbormaster-sea`. Orchestrators also label their terminals with `run.status`, `run.type`, `run.topic`, `progress` and `run.prs`, and keep a `status.json` in each run directory, so you can shape Harbormaster further by asking an agent in the app, for example:
-
-> In the harbormaster mod's Crew block, put a ✓ before each orchestrator whose `run.status` label is `finished`.
-
 ## Skills
 
 | Skill | What it does |
@@ -33,6 +23,18 @@ To see your runs at a glance in the Herdr app, install Harbormaster with `herdr-
 | [`pr-humanize`](skills/pr-humanize/SKILL.md) | Rewrites a PR description into a short "For humans" section and a detailed "For AI" section, keeping `## Evidence` and `## Merge danger` as they are. Works with GitHub (`gh`), GitLab (`glab`), or plain git (prints the text to paste). Invoke manually with `/pr-humanize [PR number]`. |
 | [`pr-squash`](skills/pr-squash/SKILL.md) | Squash-merges a PR with a short commit message written for the main branch's log, instead of the concatenated branch commits or the PR description. Invoke manually with `/pr-squash [PR number]`. |
 | [`proving`](skills/proving/SKILL.md) | Captures proof that a change works for a tier T0–T3 (test suite, test output, screenshots, demo video), writes `proof.md` and the PR's `## Evidence` section, and never commits the proof. Works inside an orchestrator run or on its own. Invoke manually with `/proving [tier] [what to prove]`. |
+
+## Herdr app
+
+The `herdr-app-*` skills also want Herdr's own `herdr-core` skill, which steers agents to `hc` rather than the older `herdr`:
+
+```sh
+npx skills add https://github.com/herdrdev/herdr-core --skill herdr-core
+```
+
+To see your runs at a glance in the Herdr app, install Harbormaster with `herdr-app/install.sh` (see [docs/herdr-app-harbormaster.md](docs/herdr-app-harbormaster.md)). It adds a Crew block that shows the captain and every orchestrator, grouped into what needs you, what is working, what waits on a reviewer and done (and can't tell when a run can't be read), with each run's next step (`approved — merge`, `review from anna`) or current step and that step's own age, one meaning per colour (red: act, amber: look soon, cyan: a reviewer, none: fine), a Needs-you box that says what to do (`Merge #42 · approved by anna 1h ago`, `CI failed on #42: lint`) with the buttons that do it, a way to ask a stalled run what's blocking it, review comments counted on approved PRs (`approved · 3 comments`) with one click to have the orchestrator ask you about them or handle them, close every merged run at once and set each project's review flow (peer or self), a toast when a run starts needing you (off with one click), decisions counted as new since you last looked, parked runs saying what their PRs wait on, and the agents outside any run, a runs overview with PRs, checks, one queue of everything waiting on you, with one-click answers (a run's open question can be read in full and answered from its card or pane too), each run's proof tier and evidence (with screenshot thumbnails that open in a viewer), how many tokens each run and its agents used against an optional soft budget (crossing it asks you to continue, compact or stop), a stats view of where the time, tokens, CPU and memory go per run, task and agent, across open and past runs, and three layouts: `harbormaster-main`, `harbormaster-needs` (a test layout that opens the Crew with the Needs-you box) and the nautical `harbormaster-sea`. Orchestrators also label their terminals with `run.status`, `run.type`, `run.topic`, `progress` and `run.prs`, and keep a `status.json` in each run directory, so you can shape Harbormaster further by asking an agent in the app, for example:
+
+> In the harbormaster mod's Crew block, put a ✓ before each orchestrator whose `run.status` label is `finished`.
 
 ## Tests
 
