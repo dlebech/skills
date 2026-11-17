@@ -6,8 +6,8 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { CATEGORIES, cachedTiming, durationText } from "./timing.js";
 import { resourcesOf, resourceSnapshot, otherProcesses, memText, HOT } from "./resources.js";
-import { summaryOf, mergeRuns, acrossRuns, liveGroups, cachedHistory, catTotal, addCats, isRunProp,
-  liveTable, groupProcesses, hottest, hottestText, timeSplit, recentRuns, RECENT, QUIET_CPU } from "./statsdata.js";
+import { summaryOf, mergeRuns, acrossRuns, liveGroups, createSteady, cachedHistory, catTotal, addCats, isRunProp,
+  liveTable, groupProcesses, hottest, hottestText, timeSplit, recentRuns, QUIET_CPU } from "./statsdata.js";
 import { facts, orchestratorsOf, workersOf, captainOf } from "./live.js";
 import { props } from "herdr";
 import { tokenText, tokenShort, tokenHeadline, tokenDetail } from "./context.js";
@@ -275,7 +275,7 @@ function agentRow(t, id, a) {
     .child(figure(t, COL.mem, a.cpu_s == null ? "" : mbText(a.peak_rss_mb), t.muted));
 }
 
-// The newest RECENT runs are rows; the rest behind "+ N older runs", so the list stays short
+// Every open run and the newest RECENT others are rows; the rest behind "+ N older runs", so the list stays short
 // and drawing stays bounded as the history grows.
 function runsSection(view, t, runs) {
   const reading = runs.filter((s) => !s.timed).length;
@@ -284,10 +284,10 @@ function runsSection(view, t, runs) {
     v_flex().gap(1)
       .when(runs.length > 0, (el) => el.child(runHeader(t)))
       .children(rows.map((s) => runRow(view, t, s)))
-      .when(older > 0 || (view.statsAll && runs.length > RECENT), (el) => el.child(div().id("runs-more").px(8).h(26).flex().items_center()
+      .when(older > 0 || (view.statsAll && runs.length > recentRuns(runs).rows.length), (el) => el.child(div().id("runs-more").px(8).h(26).flex().items_center()
         .text_size(BODY).text_color(t.muted).cursor_pointer().hover((st) => st.text_color(t.foreground))
         .on_click((_e, cx) => { view.statsAll = !view.statsAll; cx.notify(); })
-        .child(older > 0 ? `+ ${plural(older, "older run")}` : `Show the newest ${RECENT} only`)))
+        .child(older > 0 ? `+ ${plural(older, "older run")}` : "Show recent only")))
       .when(runs.length === 0, (el) => el.child(div().px(2).text_size(BODY).text_color(t.dim).child("No runs yet."))));
 }
 
@@ -295,9 +295,16 @@ function runsSection(view, t, runs) {
 
 // The live figures, worked out once per draw: the groups as liveGroups gives them, the table's
 // shape, the processes outside the agents, the totals and the hottest agent.
+// Held between draws, so the table's order, figures and busy/quiet split stay steady.
+const steady = createSteady();
+
 function liveData() {
   const ctx = facts();
-  const snap = resourceSnapshot();
+  const raw = resourceSnapshot();
+  // Until a machine is rated its CPU is 0, which would seed the averages and the order: no steadying yet.
+  const calm = Object.values(raw.machines ?? {}).some((m) => m.rated) ? steady : null;
+  if (calm) calm.begin(raw.at);
+  const snap = calm ? calm.snapshot(raw) : raw;
   const nameOf = (address) => ctx.terminals.find((x) => x.address === address)?.name || address;
   const crews = [];
   const cap = captainOf(ctx).terminal;
@@ -307,12 +314,12 @@ function liveData() {
       members: workersOf(o.address, ctx).map((w) => ({ address: w.address, name: w.name })) });
   }
   const names = Object.fromEntries(Object.keys(snap.terminals ?? {}).map((a) => [a, nameOf(a)]));
-  const groups = liveGroups(crews, snap, names);
-  const procs = groupProcesses(otherProcesses());
-  const hot = hottest(groups);
+  const groups = liveGroups(crews, snap, names, calm);
+  const procs = groupProcesses(calm ? calm.others(otherProcesses()) : otherProcesses(), calm);
+  const hot = hottest(groups, calm);
   const topOther = procs.busy[0];
   return {
-    snap, groups, table: liveTable(groups), procs, hot,
+    snap, groups, table: liveTable(groups, calm), procs, hot,
     rated: Object.values(snap.machines ?? {}).some((m) => m.rated),
     cpu: groups.reduce((n, g) => n + g.cpu, 0), rssKb: groups.reduce((n, g) => n + g.rssKb, 0),
     // Something outside the agents busier than the hottest of them is named too.

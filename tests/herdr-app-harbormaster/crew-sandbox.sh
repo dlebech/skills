@@ -25,6 +25,8 @@
 #   unreadable-pr finished, PR in a repo that does not exist (gh fails)   -> Everything else, can't tell
 #   quiet-run     running, "t2 implementing", no PR, nothing moves       -> idle, then stalled
 #                 ("quiet Nm", Needs you, Ask) 30 minutes after the app started (module memory)
+#                 To shoot it amber, `up` early and keep quiet-run listed (its clock is the app's memory, so a
+#                 run that is hidden or a restarted app starts over); hide the others with role= meanwhile.
 #   busy-run      running, both tasks implementing, its orchestrator reporting working (OSC 7501),
 #                 status.json dated 75 minutes back                      -> Working, spinner, "t1 implementing 1h15m · +1 task"
 #   review-wait   finished, folder "snevagten" (peer), cli/cli#14846 with a reviewer requested
@@ -50,6 +52,7 @@
 #   plan-open     running, 1/3 tasks done, the same open PR                -> Working: no "review proof → merge" until the plan is done
 #   ready-run     finished, fake-two/api#60 (one green check), proof T1 2/2 pass -> review proof → merge;
 #                 once its proof is read: the green "Ready to merge" box (t23)
+#   ci-stalled    running, fake-two/api#70 with a check running 45 min (usual 10, from ci-base's #62-64) -> amber "quiet"-like stall, at once
 #   partial-run   the same with t2 partial (#61)                         -> read: "Proof read · 1/2 pass, 1 partial …"
 # For an approval over two PRs with comments (t17), fake PRs through fake-gh.sh (installed as
 # <scratch>/bin/gh, first on the app's PATH; it answers only owner "fake-two", the real gh the rest):
@@ -63,7 +66,8 @@
 #
 # Needs xvfb-run, ImageMagick's import (root only), jq, gh, python3 and libXtst. The window lands
 # at screen offset (162, 90) on the 1600x1000 screen; add that to a shot's coordinates for click.
-# Env: CREW_SESSION (default harbormaster-crew-sandbox), CREW_DISPLAY (default 97).
+# Env: CREW_SESSION (default harbormaster-crew-sandbox), CREW_DISPLAY (default 97), CREW_LAYOUT (main, the default,
+# or needs: the harbormaster-needs layout that install.sh made in the sandbox).
 set -euo pipefail
 
 [ $# -ge 2 ] || { sed -n '2,35p' "$0" >&2; exit 2; }
@@ -144,6 +148,14 @@ make_runs() {
     --pr dlebech/no-such-repo-nyo https://github.com/dlebech/no-such-repo-nyo/pull/1
   mkrun quiet-run running feat "Quiet run" "${day}T10:30:00Z" 1/2 merged implementing --progress "t2 implementing"
   ORCH_STATE=working mkrun busy-run running feat "Busy run" "${day}T07:00:00Z" 0/2 implementing implementing --progress "both tasks under way"
+  # busy-run's workers, for its run pane's Agents list: two implementers (shells reporting a status, so no
+  # agent icon is shown here: Herdr does not detect an agent from a name) and, nested under the first, a build (plain shell) and a php server; a node helper under the second.
+  local busy w1 w2; busy=$(jq -r .terminal "$S/runs/skills/busy-run/orchestrator.json")
+  w1=$(hc run --json --bg --no-notify --parent "$busy" --name impl-x-t1 --cwd "$S" sh -c "printf '\\033]7501;state=working\\007'; exec sleep infinity" | jq -r '.terminal // .address')
+  w2=$(hc run --json --bg --no-notify --parent "$busy" --name impl-x-t2 --cwd "$S" sh -c "printf '\\033]7501;state=idle\\007'; exec sleep infinity" | jq -r '.terminal // .address')
+  hc run --bg --no-notify --parent "$w1" --name x-t1-build --cwd "$S" sh -c 'echo build; exec sleep infinity' >/dev/null
+  hc run --bg --no-notify --parent "$w1" --name x-t1-serve --cwd "$S" php -r 'sleep(100000);' >/dev/null
+  hc run --bg --no-notify --parent "$w2" --name x-t2-helper --cwd "$S" node -e 'setInterval(()=>{},1e6)' >/dev/null
   # Dated back, so the first sight of its tasks (seeded by status.json's updated) shows an age.
   local sj=$S/runs/skills/busy-run/status.json
   jq --arg u "$(date -u -d '75 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" '.updated = $u' "$sj" >"$sj.tmp" && mv "$sj.tmp" "$sj"
@@ -224,6 +236,12 @@ Q
   mkrun ready-run finished feat "Ready run" "${day}T08:30:00Z" 2/2 merged merged --progress "PR up with proof" \
     --pr fake-two/api https://github.com/fake-two/api/pull/60
   printf '# Proof: ready-run\nTier: T1\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\n\n## t2 polish\nTier: T1\nChecked: tests\nResult: pass — 9 tests\n' >"$S/runs/skills/ready-run/proof.md"
+  # A stalled run, amber at once: its PR's check has run 45 min against a usual 10 (the CI rule
+  # needs no wait; the quiet rule's clock is module memory). ci-base gives fake-two/api its 3 samples.
+  mkrun ci-base finished feat "CI base" "${day}T08:50:00Z" 2/2 merged merged --progress "PRs up" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/62 --pr fake-two/api https://github.com/fake-two/api/pull/63 --pr fake-two/api https://github.com/fake-two/api/pull/64
+  mkrun ci-stalled running feat "CI stalled" "${day}T07:20:00Z" 1/2 merged implementing --progress "waiting on CI" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/70
   mkrun partial-run finished feat "Partial run" "${day}T08:40:00Z" 2/2 merged merged --progress "PR up with proof" \
     --pr fake-two/api https://github.com/fake-two/api/pull/61
   printf '# Proof: partial-run\nTier: T1\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\n\n## t2 polish\nTier: T1\nChecked: tests\nResult: partial — one case not run\n' >"$S/runs/skills/partial-run/proof.md"
@@ -251,7 +269,8 @@ case $cmd in
         cp -r "$HOME/.config/herdr-app/mods/$m" "$S/home/mods/"
     done
     "$repo/herdr-app/install.sh" >/dev/null
-    herdr-app do layout.switch '{"name":"harbormaster-main"}' >/dev/null
+    # install.sh above made harbormaster-needs in the sandbox's own home; CREW_LAYOUT=needs shows that one.
+    herdr-app do layout.switch "{\"name\":\"harbormaster-${CREW_LAYOUT:-main}\"}" >/dev/null
     make_runs
     sleep 2
     # The first-run welcome frame: close it with its ×.

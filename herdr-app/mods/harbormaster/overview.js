@@ -4,7 +4,7 @@ import { div, svg } from "gpui-kit";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
 import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCommentsAll, askCi, askChanges } from "./data.js";
-import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
+import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, programOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
@@ -20,7 +20,7 @@ import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
 import { markProofSeen } from "./proofseen.js";
 import { askedStore, markPrsAsked, unmarkPrAsked } from "./asked.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, crewEntries, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText } from "./crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText, workerTree } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
 import { commentsAsked, defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
@@ -745,7 +745,8 @@ function needBox(view, t, r, f, ctx, where) {
     const first = items[0].actions[0];
     const link = first?.kind === "focus" && first.address === r.terminal ? null : orchLink(t, r, f, `need-orch-${where}-${r.key}`);
     return box.child(v_flex().flex_1().min_w(0).gap(6)
-      .when(!ready, (el) => el.child(div().text_size(11).font_semibold().text_color(tint).child("Needs you")))
+      // The sidebar's box sits under the red "Needs you · N" heading already; a second label is a line spent on nothing.
+      .when(!ready && where !== "sidebar", (el) => el.child(div().text_size(11).font_semibold().text_color(tint).child("Needs you")))
       .children(needLines(view, t, r, f, items, where))
       .when(ready && view.replying === changesId(r), (el) => el.child(v_flex().gap(4)
         .child(Input.new(view.reply))
@@ -1339,16 +1340,31 @@ function issueRow(t, url) {
     .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).child(shortRef(url)));
 }
 
+// The connectors before a nested worker, drawn as lines (as Herdr's Agents list does) so they join
+// across the 4px gap between rows: a cell per level, 20px wide, its vertical under the parent's
+// icon centre (7px in), bending at mid-height into an arm that reaches the child's icon.
+const TREE_CELL = 20, ROW_H = 24, ROW_GAP = 4;
+function treeLines(t, { depth, last, guides }) {
+  if (depth === 0) return [];
+  const cell = () => div().relative().flex_none().w(TREE_CELL).h(ROW_H);
+  const vertical = (h) => div().absolute().left(7).top(-ROW_GAP).h(h).w(1).bg(t.dim);
+  const through = guides.map((more) => (more ? cell().child(vertical(ROW_H + ROW_GAP)) : cell()));
+  const elbow = cell().child(vertical(last ? ROW_H / 2 + ROW_GAP : ROW_H + ROW_GAP))
+    .child(div().absolute().left(7).top(ROW_H / 2).w(TREE_CELL - 8).h(1).bg(t.dim));
+  return [...through, elbow];
+}
+
 // One of the run's agents: its name, the task it works on and that task's stage, when
 // its name says (impl-<prefix>-<task>); a helper it started (a dev server) indented below it.
-function workerRow(t, w, ctx, work, nested) {
+function workerRow(t, w, ctx, work, line) {
+  const nested = line.depth > 0;
   const status = agentStatus(w, ctx);
   const color = work?.stage ? STAGE[work.stage].color(t) : null;
   return h_flex().id(`wk-${w.address}`).gap(8).items_center().h(24).px(8).rounded(6).cursor_pointer()
-    .when(nested, (el) => el.pl(28))
     .hover((s) => s.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); focusAgent(w.address); })
     .tooltip(work?.task.about ? `${w.name ?? w.address}: ${work.task.about}` : "Show this agent")
-    .child(div().flex_none().text_size(nested ? 11 : 13).child(CRAB))
+    .children(treeLines(t, line))
+    .child(programIcon(programOf(w, ctx), 14, nested ? t.muted : t.foreground))
     .child(div().flex_none().text_size(12).text_color(nested ? t.muted : t.foreground).child(w.name ?? w.address))
     .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim)
       .child(work ? [work.task.id, work.task.name].filter(Boolean).join(" ") : ""))
@@ -1395,7 +1411,7 @@ function runDetail(view, t, r, ctx) {
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
     .when(r.decided.length > 0, (el) => el.child(decisionsSection(view, t, r)))
     .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
-      .children(workers.map((w) => workerRow(t, w, ctx, workOf.get(w.address), w.parent !== r.terminal)))))
+      .children(workerTree(workers, r.terminal).map((line) => workerRow(t, line.w, ctx, workOf.get(line.w.address), line)))))
     .when(Boolean(r.tokens), (el) => el.child(tokensSection(view, t, r)))
     .child(actionRow(view, t, r, orch, closed, counts));
 }
@@ -1831,6 +1847,9 @@ export function runPane(view, t, p) {
       .children(noteRows(view, t, false)));
 }
 
+// A Needs-you row's hover in the needs box, where a click opens the run there instead of its orchestrator.
+const OPEN_HERE = "Click to open it here";
+
 // The Crew block: the captain and every orchestrator as cards, from their role labels,
 // then "Adrift": every other agent that isn't one of their workers.
 // Sits above Herdr's own Agents list in the harbormaster-main layout, so that list stays stock.
@@ -1900,7 +1919,7 @@ export function crew(view, t) {
       usage: liveUsage(cap.terminal.address), whose: "The captain and its commands",
     }));
   }
-  const orchRow = ({ term, r, state, a }) => {
+  const orchRow = ({ term, r, state, a }, onOpen = null) => {
     const labels = term.labels ?? {};
     const crewOf = workersOf(term.address, ctx);
     const status = runStatus(agentStatus(term, ctx), crewOf, a, ctx);
@@ -1922,13 +1941,13 @@ export function crew(view, t) {
         const run = r ?? { key: term.address, type: labels["run.type"] || null, autonomy: /^L[0-2]$/.test(labels["run.autonomy"]) ? labels["run.autonomy"] : "L0" };
         return { type: runTypeTag(t, run, `crew-${term.address}`), tags: levelTags(view, t, run, `crew-${term.address}`, true) };
       })(),
-      title: name.title, tip: [name.tip, startedTip(r?.started), r ? newDecisionsNote(r) : null].filter(Boolean).join("\n") || null,
+      title: name.title, tip: [name.tip, startedTip(r?.started), r ? newDecisionsNote(r) : null, onOpen ? OPEN_HERE : null].filter(Boolean).join("\n") || null,
       tone, status, address: term.address, crabs: state === "finished" ? 0 : workers, run: r,
       // Badged on its own, like any agent: a run's agents together pass 2 GB while nothing is busy.
       usage: liveUsage(term.address), whose: "The orchestrator and its commands",
       more: usageLine("The whole run, with its agents", treeUsage([term.address, ...crewOf.map((w) => w.address)])),
       // Clicking a run's orchestrator also opens that run's card beside it, while it's there.
-      open: () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(term.address, runProps(r)) : focusAgent(term.address)),
+      open: onOpen ?? (() => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(term.address, runProps(r)) : focusAgent(term.address))),
       edge: edgeColor(t, edge),
       // A stalled run: Ask what's blocking, or "asked…" while that waits.
       action: blockingAction(view, t, r, a, `crew-${term.address}`, true),
@@ -1936,18 +1955,19 @@ export function crew(view, t) {
   };
   // A run that needs you with no orchestrator to focus (gone, or its machine did not answer):
   // its row opens the run's card as a popup, where Resume is.
-  const runRow = ({ r, a }) => {
+  const runRow = ({ r, a }, onOpen = null) => {
     const { lead, tone } = rowLead(a, now, { narrow });
     const name = runName(r.branch, r.topic);
-    const open = () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) });
+    const card = () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) });
+    const open = onOpen ?? card;
     return row({
       id: `crew-run-${r.key}`, detail: lead, detailTip: rowTip(a, now).join("\n"),
       // No level tags: with no orchestrator, nobody would act on a level request, and the narrow
       // sidebar keeps "orchestrator gone" beside Resume.
       type: runTypeTag(t, r, `crew-run-${r.key}`),
-      title: name.title, tip: [name.tip, startedTip(r.started), "No orchestrator: click for its card"].filter(Boolean).join("\n"),
+      title: name.title, tip: [name.tip, startedTip(r.started), onOpen ? OPEN_HERE : "No orchestrator: click for its card"].filter(Boolean).join("\n"),
       tone, status: "gone", address: null, run: r, open, edge: edgeColor(t, rowEdge(a)),
-      action: actionButton(t, `crew-run-${r.key}-open`, "Resume", "Open its card: Resume there starts a new orchestrator that picks the run up", () => open()),
+      action: actionButton(t, `crew-run-${r.key}-open`, "Resume", "Open its card: Resume there starts a new orchestrator that picks the run up", () => card()),
     });
   };
   // Needs you, Working, Waiting on others, Can't tell and Done, each longest wait first; Done
@@ -1969,6 +1989,11 @@ export function crew(view, t) {
       // Close all merged: Done's own action, shown folded or not.
       .when(g.key === "done" && Boolean(closing.button), (el) => el.child(closing.button));
   };
+  // needs: "box" (the needs-you layout): the first Needs-you run is drawn open as its need box,
+  // the others stay compact rows whose click opens them instead of focusing.
+  const boxed = props()?.needs === "box";
+  const expanded = boxed ? expandedNeed(groups.needs, view.needsOpen) : null;
+  const pick = (x) => (_e, cx) => { view.needsOpen = needKey(x); cx.notify(); };
   for (const g of GROUPS) {
     const list = groups[g.key];
     const count = g.key === "needs" ? needs : list.length;
@@ -1983,7 +2008,18 @@ export function crew(view, t) {
     const capNote = g.key === "needs" ? captainNeedNote(asks) : null;
     if (capNote) rows.push(div().id("crew-needs-captain").flex_none().px(4).min_w(0).truncate().text_size(10.5).text_color(t.dim).child(capNote));
     if (g.key === "done" && closing.confirm) rows.push(closing.confirm);
-    if (!g.folded || isOpen(view, `crew-${g.key}`)) rows.push(...list.map((x) => (x.term ? orchRow(x) : runRow(x))));
+    if (g.key === "needs" && boxed) {
+      // Each entry in its own place (longest wait first); the open one keeps its compact row as
+      // the box's head, so the box says whose it is, with the need box attached under it. Only
+      // entries the box can draw open on click; an orchestrator without a run directory keeps
+      // its focus click, where its dialog is answered.
+      for (const x of list) {
+        const draw = (o) => (x.term ? orchRow(x, o) : runRow(x, o));
+        if (x !== expanded) { rows.push(draw(canExpand(x) ? pick(x) : null)); continue; }
+        rows.push(v_flex().id("crew-needs-box").flex_none().min_w(0).gap(2).child(draw(null))
+          .child(needBox(view, t, x.r, runFacts(x.r, ctx), ctx, "sidebar")));
+      }
+    } else if (!g.folded || isOpen(view, `crew-${g.key}`)) rows.push(...list.map((x) => (x.term ? orchRow(x) : runRow(x))));
   }
   // Adrift: agents outside the crew, on any machine.
   const drifters = adrift([cap.terminal?.address, ...orchestrators.map((o) => o.term.address)], ctx);

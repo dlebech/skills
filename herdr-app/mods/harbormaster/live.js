@@ -62,6 +62,10 @@ export function workersOf(address, ctx) {
   return kids.flatMap((t) => [t, ...workersOf(t.address, ctx)]);
 }
 
+// What runs in a terminal, for its icon: the agent's program, else the terminal's or its pane's.
+export const programOf = (term, ctx) =>
+  ctx.agents.find((a) => a.address === term.address)?.program ?? term.program ?? panes().find((p) => p.terminal === term.address)?.program;
+
 // Agents adrift: every agent that is none of `roots` (addresses) or their workers.
 export function adrift(roots, ctx) {
   const crew = new Set(roots.filter(Boolean).flatMap((a) => [a, ...workersOf(a, ctx).map((w) => w.address)]));
