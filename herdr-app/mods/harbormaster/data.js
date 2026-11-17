@@ -27,7 +27,7 @@ import { blockingRequest, blockingPending, ciRequest } from "./blocking.js";
 import { commentsArgs, commentSummary, commentsRequest, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { detachedSend } from "./wake.js";
-import { exactStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
+import { exactStatus, reportedStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f", GS = "\u001d";
 
@@ -832,13 +832,23 @@ async function writeInbox(run, source, text) {
 
 // Tells the orchestrator to read an inbox message (see tellOrchestrator for what it resolves to).
 // The send is detached (see wake.js), so a person's unfinished draft in the orchestrator's tab
-// only delays it and never fails it; only hc refusing to start it does. It no longer learns
-// from hc's exit code 9 that the orchestrator is on a dialog, so that is read from the window.
+// only delays it and never fails it. Detached, its own failures are no longer seen, so what
+// can be known now is checked first: `hc get` (quick, no draft hold) says whether the terminal
+// is there, and a refusal shows as an error as before. An orchestrator on a dialog (as the
+// window reports it) is not sent to at all, as hc would refuse it; the message waits in its
+// inbox. A dialog that opens while a wake is held drops that wake the same way, with no sign;
+// the orchestrator reads its inbox at its next step.
 async function wakeOrchestrator(run, file) {
-  const blocked = exactStatus(run.terminal, facts()) === "blocked";
-  const sent = await exec("hc", detachedSend(run.localTerminal, `Read and act on ${run.dir}/inbox/${file}.`), { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
-  if (sent.code !== 0) throw Object.assign(new Error(`the message is in its inbox, but its orchestrator could not be told: ${(sent.stderr || sent.stdout || "hc run failed").trim()}`), { inInbox: true });
-  return { blocked };
+  const fail = (why) => Object.assign(new Error(`the message is in its inbox, but its orchestrator could not be told: ${why}`), { inInbox: true });
+  const hc = (args) => exec("hc", args, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  const got = await hc(["get", run.localTerminal]);
+  let live = got.code === 0;
+  if (live) try { live = JSON.parse(got.stdout).state === "live"; } catch { live = false; }
+  if (!live) throw fail((got.stderr || got.stdout || "its terminal is gone").trim());
+  if (reportedStatus(run.terminal, facts()) === "blocked") return { blocked: true };
+  const sent = await hc(detachedSend(run.localTerminal, `Read and act on ${run.dir}/inbox/${file}.`));
+  if (sent.code !== 0) throw fail((sent.stderr || sent.stdout || "hc run failed").trim());
+  return { blocked: false };
 }
 
 // Removes a captain decision from .captain-decisions.json on its machine, atomically, once
@@ -952,16 +962,14 @@ export async function compactRun(run, title, answer) {
   const ok = () => ["idle", "done"].includes(exactStatus(run.terminal, facts()));
   if (!ok()) throw new Error("not compacted: its orchestrator is not idle or done");
   const file = await writeInbox(run, "harbormaster", answerMessage(title, answer));
-  // Sent in step, not detached: we only go on to wait for the compaction once /compact is in,
-  // and a refusal (a dialog, exit code 9) must stop us. The orchestrator is idle, so no one is
-  // typing at it, and a held send only matters if someone starts to: then it fails as before.
-  const sent = await exec("hc", ["send", run.localTerminal, "/compact"], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
-  if (sent.code === 9) throw new Error("not compacted: its orchestrator is blocked on a dialog; the answer is in its inbox");
+  // Detached like the wake (a held draft must not fail it). The dialog case was ruled out by the
+  // status check above, and the wait below outlasts the draft hold (60 s) before it goes on.
+  const sent = await exec("hc", detachedSend(run.localTerminal, "/compact"), { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
   if (sent.code !== 0) throw new Error(`could not send /compact (the answer is in its inbox): ${(sent.stderr || sent.stdout || "hc send failed").trim()}`);
-  // Compaction starts working, then ends: wait for working (up to 20 s; a very quick one may be
+  // Compaction starts working, then ends: wait for working (up to 70 s, longer than a held send; a very quick one may be
   // over before we look), then for idle or done again, for at most 10 minutes.
   const sleep = (s) => exec("sleep", [String(s)]).catch(() => {});
-  for (let i = 0; i < 10 && ok(); i++) await sleep(2);
+  for (let i = 0; i < 35 && ok(); i++) await sleep(2);
   for (let i = 0; i < 300 && !ok(); i++) await sleep(2);
   if (!ok()) throw new Error("compaction is still running after 10 minutes; the answer waits in its inbox");
   return wakeOrchestrator(run, file);

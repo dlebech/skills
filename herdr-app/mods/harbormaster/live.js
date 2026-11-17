@@ -21,9 +21,15 @@ export function agentStatus(term, ctx) {
 // An agent's status exactly as reported, or null when it reports none: unlike agentStatus
 // it does not call an unknown status idle, for what must only happen to an idle agent.
 export function exactStatus(address, ctx) {
-  if (!address) return null;
-  const s = ctx.agents.find((a) => a.address === address)?.status ?? ctx.terminals.find((t) => t.address === address)?.status ?? null;
+  const s = reportedStatus(address, ctx);
   return s === "error" ? "blocked" : s;
+}
+
+// The status as reported, `error` included: hc delivers a send to a terminal in error, and
+// only refuses one that is blocked on a dialog.
+export function reportedStatus(address, ctx) {
+  if (!address) return null;
+  return ctx.agents.find((a) => a.address === address)?.status ?? ctx.terminals.find((t) => t.address === address)?.status ?? null;
 }
 
 // Whether the orchestrator is lost: its terminal is live but only a shell runs in it

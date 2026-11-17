@@ -35,25 +35,48 @@ test("a wake terminal and its agent are left out of the facts, so they are not a
   } finally { delete globalThis.__herdrTerminals; delete globalThis.__herdrAgents; }
 });
 
-// answerRun runs the wake through exec: write the inbox (sh), then `hc run` (detached).
-const runOf = { dir: "/r", machine: null, terminal: "t1", localTerminal: "t1", key: "k" };
-const withExec = async (hcResult, fn) => {
+// A run on another machine: the window's address (m1/t7) differs from hc's own on that machine (t7).
+const runOf = { dir: "/r", machine: "m1", terminal: "m1/t7", localTerminal: "t7", key: "k" };
+// Models real hc on m1: `get` fails (exit 3) for a terminal that is gone, `run` starts anything.
+const withHc = async ({ state = "live", status = "idle", gone = false } = {}, fn) => {
   const calls = [];
-  globalThis.__herdrExec = async (cmd, args) => { calls.push([cmd, args]); return cmd === "hc" ? hcResult : { code: 0, stdout: "", stderr: "" }; };
-  globalThis.__herdrTerminals = [{ address: "t1", state: "live", labels: { role: "orchestrator" } }];
-  globalThis.__herdrAgents = [{ address: "t1", status: "idle" }];
-  try { return [await fn(), calls]; } finally { delete globalThis.__herdrExec; delete globalThis.__herdrTerminals; delete globalThis.__herdrAgents; }
+  globalThis.__herdrExec = async (cmd, args, opts) => {
+    calls.push({ cmd, args, on: opts?.on });
+    if (cmd !== "hc") return { code: 0, stdout: "", stderr: "" };
+    if (args[0] === "get") return gone ? { code: 3, stdout: "", stderr: 'no terminal "t7"' } : { code: 0, stdout: JSON.stringify({ state }), stderr: "" };
+    return { code: 0, stdout: "{}", stderr: "" };
+  };
+  globalThis.__herdrTerminals = [{ address: "m1/t7", state: "live", labels: { role: "orchestrator" } }];
+  globalThis.__herdrAgents = [{ address: "m1/t7", status }];
+  try { return [await fn(), calls.filter((c) => c.cmd === "hc")]; } finally { delete globalThis.__herdrExec; delete globalThis.__herdrTerminals; delete globalThis.__herdrAgents; }
 };
 
-test("answering wakes through a detached hc run, never a plain hc send", async () => {
-  const [res, calls] = await withExec({ code: 0, stdout: "", stderr: "" }, () => answerRun(runOf, "Q", "Written"));
+test("answering checks the terminal, then wakes through a detached hc run on its machine", async () => {
+  const [res, hc] = await withHc({}, () => answerRun(runOf, "Q", "Written"));
   assert.equal(res.blocked, false);
-  const hc = calls.filter(([c]) => c === "hc");
-  assert.equal(hc.length, 1);
-  assert.equal(hc[0][1][0], "run");
-  assert.ok(hc[0][1].includes("--bg"));
+  assert.deepEqual(hc.map((c) => c.args[0]), ["get", "run"]);
+  assert.ok(hc.every((c) => c.on === "m1"));
+  assert.deepEqual(hc[0].args, ["get", "t7"]);
+  assert.ok(hc[1].args.includes("--bg"));
+  assert.deepEqual(hc[1].args.slice(-4, -1), ["hc", "send", "t7"]);
 });
-test("hc refusing to start the send still shows as an error, the message being in the inbox", async () => {
-  await assert.rejects(withExec({ code: 1, stdout: "", stderr: "no such terminal" }, () => answerRun(runOf, "Q", "Written")),
-    (e) => e.inInbox === true && /could not be told: no such terminal/.test(e.message));
+test("a terminal that is gone shows as an error and nothing is started", async () => {
+  const [err, hc] = await withHc({ gone: true }, () => answerRun(runOf, "Q", "Written").catch((e) => e));
+  assert.equal(err.inInbox, true);
+  assert.match(err.message, /could not be told: no terminal/);
+  assert.deepEqual(hc.map((c) => c.args[0]), ["get"]);
+});
+test("a terminal that is not live shows as an error", async () => {
+  const [err] = await withHc({ state: "finished" }, () => answerRun(runOf, "Q", "Written").catch((e) => e));
+  assert.equal(err.inInbox, true);
+});
+test("an orchestrator on a dialog is reported blocked and no wake is started", async () => {
+  const [res, hc] = await withHc({ status: "blocked" }, () => answerRun(runOf, "Q", "Written"));
+  assert.equal(res.blocked, true);
+  assert.deepEqual(hc.map((c) => c.args[0]), ["get"]);
+});
+test("an orchestrator in error is not blocked: hc delivers to it", async () => {
+  const [res, hc] = await withHc({ status: "error" }, () => answerRun(runOf, "Q", "Written"));
+  assert.equal(res.blocked, false);
+  assert.deepEqual(hc.map((c) => c.args[0]), ["get", "run"]);
 });
