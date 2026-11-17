@@ -42,10 +42,10 @@ const checksUrl = (pr) => (/^https:\/\//i.test(pr?.failed?.url ?? "") ? pr.faile
 // the cleanup of a finished run.
 const ORDER = ["question", "gone", "red-ci", "changes requested", "approved — merge", "review proof → merge", "request review", "stalled", "finished"];
 
-// "T2 · 5/10 pass · 1 fail" from {tier, pass, total, fail}, or null with no proof to read.
+// "T2 · 5/10 proven · 1 fail" from {tier, pass, total, fail}, or null with no proof to read.
 export function proofText(proof) {
   if (!proof) return null;
-  const parts = [proof.tier != null ? `T${proof.tier}` : null, proof.total ? `${proof.pass ?? 0}/${proof.total} pass` : null,
+  const parts = [proof.tier != null ? `T${proof.tier}` : null, proof.total ? `${proof.pass ?? 0}/${proof.total} proven` : null,
     proof.fail ? `${proof.fail} fail` : null].filter(Boolean);
   return parts.length ? parts.join(" · ") : null;
 }
@@ -101,7 +101,7 @@ function readyItem(a, ctx, prs) {
   const tasks = taskCounts(run ?? {});
   const checks = ciState(ctx.prs ?? []).state === "green" ? "checks green" : "no checks";
   const detail = [tasks.planned > 0 ? `All ${plural(tasks.done, "task")} done` : null,
-    proof ? `proof ${proof.pass ?? 0}/${proof.total} pass${proof.accepted ? ` · ${proof.accepted} accepted` : ""}` : null, checks].filter(Boolean).join(" · ");
+    proof ? `proof ${proof.pass ?? 0}/${proof.total} proven${proof.accepted ? ` · ${proof.accepted} accepted` : ""}` : null, checks].filter(Boolean).join(" · ");
   return { key: "review proof → merge", ready: true, headline: "Ready to merge", detail,
     line: `Ready to merge ${prsText(prs)}: ${detail}`,
     actions: [...mergePrs(prs), { kind: "proof", label: "Proof", primary: false }, { kind: "changes", label: "Ask for changes", primary: false }] };
@@ -290,6 +290,6 @@ export function primaryOf(items) {
   return { i, j: j >= 0 ? j : acts.findIndex(can) };
 }
 
-// Whether the box's items ask for a merge: an approved PR ("approved — merge") or a run that is
-// ready to merge. Its unfolded box then shows the run's claims worth a look (claims.js claimsAsk).
-export const isMergeAsk = (items) => (items ?? []).some((it) => it.key === "approved — merge" || it.ready === true);
+// Whether the box's items ask for a merge: an approved PR ("approved — merge"), a proof to read
+// before the merge ("review proof → merge") or a run that is ready to merge. Its unfolded box then shows the run's claims worth a look (claims.js claimsAsk).
+export const isMergeAsk = (items) => (items ?? []).some((it) => it.key === "approved — merge" || it.key === "review proof → merge" || it.ready === true);

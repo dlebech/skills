@@ -1,10 +1,10 @@
 // Review requests: the open PRs where the user's review is asked, from
 // `gh search prs --review-requested=@me`, polled every few minutes and cached. Each says
-// whether the repository is open here (so a review can start in its space) and whether a live
+// whether the repository is here (an open space, or a clone found beside one: a review can start in it) and whether a live
 // run is already reviewing it. Failing quietly: no GitHub shows as "can't reach GitHub".
 
 import { exec } from "herdr";
-import { repoSpaces } from "./repospaces.js";
+import { knownRepos } from "./repospaces.js";
 
 export const FIELDS = "number,title,url,author,updatedAt,repository";
 export const POLL_MS = 3 * 60000;
@@ -36,10 +36,12 @@ export function runReviewing(runs, url) {
   return r?.dir ?? null;
 }
 
-// The open space whose repository's origin is owner/repo.
+// Where owner/repo can be reviewed: an open space whose repository's origin it is (before a
+// clone found beside them, which has no space yet: `space` is null and a review opens one).
 export const localCheckout = (repos, repo) => {
-  const r = repos.find((x) => x.origin === String(repo).toLowerCase());
-  return r ? { space: r.space, root: r.root } : null;
+  const want = String(repo).toLowerCase();
+  const r = repos.find((x) => x.origin === want && x.space) ?? repos.find((x) => x.origin === want);
+  return r ? { space: r.space ?? null, root: r.root, name: r.name } : null;
 };
 
 // The requests with where they can be reviewed: pure over what the poll found.
@@ -59,7 +61,7 @@ export function poller(args, parse, { partial = false } = {}) {
     cache.loading = true;
     try {
       const res = await exec("gh", args, { timeout: 20000 });
-      const repos = await repoSpaces().catch(() => cache.repos);
+      const repos = await knownRepos().catch(() => cache.repos);
       const list = res.code === 0 || partial ? parse(res.stdout) : null;
       cache = list ? { at: Date.now(), list, repos, error: null, loading: false } : fail({ repos });
     } catch {

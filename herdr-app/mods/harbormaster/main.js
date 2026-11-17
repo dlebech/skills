@@ -2,7 +2,7 @@
 // props().role picks the view:
 //   (none) / "cards"  the runs overview: totals, what's waiting on you, the captain, run cards with progress, tasks, PRs
 //   "run"             one run's card (props().dir and .terminal name it), pinned beside its orchestrator
-//   "crew"            the captain, orchestrators and agents adrift, above Herdr's own Agents list
+//   "crew"            the sidebar: header, Needs-you box, Next for you, runs as one-line rows, agents adrift
 //   "viewer"          a proof screenshot, opened as an overlay by a click on a thumbnail (viewer.js)
 //   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
 //   "newrun"          the + New run dialog (newrun.js), an overlay
@@ -94,11 +94,11 @@ function showStats(view, arg) {
 
 // The runs overview (role "cards") or the Crew block (role "crew", sidebar-narrow) as the
 // same brief popup, for screenshots of their cards.
-function showView(key, role, width, height) {
+function showView(key, role, width, height, extra = {}) {
   const cur = shared(POPUP);
   if (cur && cur.arg === key && Date.now() - cur.at < 2000) return;
   closePopup();
-  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width, height, props: { role } });
+  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width, height, props: { role, ...extra } });
   const won = shared(POPUP);
   if (won && won.arg === key && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }
   setShared(POPUP, { id, at: Date.now(), arg: key });
@@ -115,7 +115,7 @@ async function listen(view, cx) {
       if (name === "show-run") showPopup(view, arg);
       else if (name === "show-stats") showStats(view, arg);
       else if (name === "show-overview") showView("overview", "cards", 560, 900);
-      else if (name === "show-crew") showView("crew", "crew", 360, 640);
+      else if (name === "show-crew") showView("crew", "crew", 360, 640, { needs: "box" });
       else if (name === "new-run") openNewRun(newRunArgs(arg));
       else if (name === "close-popup") closePopup();
       else if (name === "open-run") showPopup(view, arg, true);

@@ -85,7 +85,7 @@ if ! jq -e "$calm" "$main" >/dev/null; then
   rm -f "$tmp"
 fi
 
-# 4. ctrl-shift-h opens and closes the overview as a popup, unless that key is taken
+# 3. ctrl-shift-h opens and closes the overview as a popup, unless that key is taken
 #    in any section (a layout's or mod's own binding wins over global). keys.json holds
 #    every key, so without one there is nothing safe to add to.
 keys="$home/keys.json"
@@ -103,7 +103,7 @@ else
   echo "bound ctrl-shift-h to open and close the overview"
 fi
 
-# 5. Check the mod.
+# 4. Check the mod.
 herdr-app check "$home/mods/harbormaster"
 
 cat <<'EOF'

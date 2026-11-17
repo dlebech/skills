@@ -68,11 +68,13 @@ test("a Next for you row names its PR by repository name and number", () => {
   assert.equal(prRef("app", 7), "app#7");
 });
 
-test("a merge ask is an approved PR or a run ready to merge; its unfolded box shows the claims", () => {
+test("a merge ask is an approved PR, a proof to read before merging or a run ready to merge; its unfolded box shows the claims", () => {
   assert.equal(isMergeAsk([item("red-ci", []), item("approved — merge", [])]), true);
   assert.equal(isMergeAsk([{ ...item("review proof → merge", []), ready: true }]), true);
-  // Reading the proof first, a red CI or a question: not a merge ask yet.
-  assert.equal(isMergeAsk([item("review proof → merge", []), item("red-ci", [])]), false);
+  // Reading the proof before the merge is a merge ask too: that is where the claims matter.
+  assert.equal(isMergeAsk([item("review proof → merge", []), item("red-ci", [])]), true);
+  // A red CI or a question alone: not a merge ask.
+  assert.equal(isMergeAsk([item("red-ci", []), item("question", [])]), false);
   assert.equal(isMergeAsk([]), false);
   assert.equal(isMergeAsk(null), false);
 });

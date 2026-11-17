@@ -123,7 +123,7 @@ const stageText = (task, stage) => (stage ? STAGE[stage].label : stateText(task.
 
 // Each task's stage and live agents, in plan.md's order. A done task shows none: they
 // are leftovers, or another round's ("final review" and "final review 2" share an id).
-const stagesOf = (r, ctx) => r.tasks.map((task) => {
+export const stagesOf = (r, ctx) => r.tasks.map((task) => {
   const agents = taskAgents(task, r, ctx);
   const stage = shownStage(task, agents);
   return { agents: stage === "done" ? [] : agents, stage };

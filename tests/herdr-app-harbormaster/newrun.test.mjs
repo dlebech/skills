@@ -7,7 +7,7 @@ import {
 } from "../../herdr-app/mods/harbormaster/startrun.js";
 import { newRunArgs } from "../../herdr-app/mods/harbormaster/commands.js";
 import { parseReviewRequests, runReviewing, withContext } from "../../herdr-app/mods/harbormaster/reviews.js";
-import { ownerRepo, repoFromRevParse } from "../../herdr-app/mods/harbormaster/repospaces.js";
+import { ownerRepo, spaceIdFor } from "../../herdr-app/mods/harbormaster/repospaces.js";
 
 test("the default profile line, and reading an edited one back", () => {
   assert.equal(profileText(DEFAULT_PROFILE), "implementer=sonnet reviewer=opus specialist=opus autonomy=L1");
@@ -99,15 +99,17 @@ test("a request knows its local checkout and the live run reviewing it", () => {
   assert.equal(ownerRepo("git@github.com:dlebech/skills.git"), "dlebech/skills");
   assert.equal(ownerRepo("https://github.com/DLebech/Skills/"), "dlebech/skills");
   assert.equal(ownerRepo("https://gitlab.com/a/b"), null);
-  assert.deepEqual(repoFromRevParse("/home/d/skills/.git\n/home/d/skills\n"), { root: "/home/d/skills", kind: "primary" });
-  assert.equal(repoFromRevParse("/home/d/skills/.git\n/home/d/wt/x\n").kind, "worktree");
+  assert.equal(spaceIdFor("My_Repo.js"), "sp-my-repo-js");
   const repos = [{ space: "sp-1", name: "skills", root: "/home/d/skills", origin: "dlebech/skills" }];
   const runs = [{ dir: "/runs/skills/pr-9", issues: [], related: [{ url: "https://github.com/acme/api/pull/9" }] }];
   const [a, b] = withContext(parseReviewRequests(GH), repos, runs);
   assert.equal(a.local, null);
   assert.equal(a.run, "/runs/skills/pr-9");
-  assert.deepEqual(b.local, { space: "sp-1", root: "/home/d/skills" });
+  assert.deepEqual(b.local, { space: "sp-1", root: "/home/d/skills", name: "skills" });
   assert.equal(b.run, null);
+  // A clone found beside the open spaces counts too (no space yet: a review opens one); an open space wins.
+  const cloned = withContext(parseReviewRequests(GH), [{ space: null, name: "api", root: "/home/d/api", origin: "acme/api" }, ...repos], []);
+  assert.deepEqual(cloned[0].local, { space: null, root: "/home/d/api", name: "api" });
   assert.equal(runReviewing([{ dir: "/x", issues: ["https://github.com/acme/api/pull/9/"], related: [] }], "https://github.com/acme/api/pull/9"), "/x");
 });
 

@@ -94,8 +94,8 @@ test("the ready box: a headline, what is done, a Merge button per PR (primary), 
   const [it] = needActions(at(run(), list), ctxFor(run(), list));
   assert.equal(it.ready, true);
   assert.equal(it.headline, "Ready to merge");
-  assert.equal(it.detail, "All 2 tasks done · proof 2/2 pass · checks green");
-  assert.equal(it.line, "Ready to merge #44: All 2 tasks done · proof 2/2 pass · checks green");
+  assert.equal(it.detail, "All 2 tasks done · proof 2/2 proven · checks green");
+  assert.equal(it.line, "Ready to merge #44: All 2 tasks done · proof 2/2 proven · checks green");
   assert.deepEqual(it.actions.map((a) => [a.kind, a.label]), [["open", "Merge #44 on GitHub"], ["proof", "Proof"], ["changes", "Ask for changes"]]);
   assert.equal(it.actions[0].url, list[0].url);
   assert.deepEqual(it.actions.map((a, j) => isPrimary(a, 0, j)), [true, false, false]);
@@ -116,23 +116,23 @@ test("an unread proof keeps today's box: Read the proof, Proof first", () => {
   const a = at(run(), list, { proofRead: false });
   const [it] = needActions(a, ctxFor(run(), list));
   assert.equal(it.ready, undefined);
-  assert.equal(it.line, "Read the proof (T1 · 2/2 pass), then merge #44");
+  assert.equal(it.line, "Read the proof (T1 · 2/2 proven), then merge #44");
   assert.deepEqual(it.actions.map((x) => x.label), ["Proof", "Open #44"]);
 });
 
 test("a read proof that is not clean says what stands in the way, the merge link still the main button", () => {
   const list = [pr()];
   const a = at(run(), list, { proofClean: false });
-  const [it] = needActions(a, ctxFor(run(), list, { proof: { tier: 1, pass: 1, total: 2, fail: 0, accepted: 0, gaps: "1/2 pass, 1 partial" } }));
+  const [it] = needActions(a, ctxFor(run(), list, { proof: { tier: 1, pass: 1, total: 2, fail: 0, accepted: 0, gaps: "1/2 proven, 1 partial" } }));
   assert.equal(it.ready, undefined);
-  assert.equal(it.line, "Proof read · 1/2 pass, 1 partial — accept it or ask to prove it before merging #44");
+  assert.equal(it.line, "Proof read · 1/2 proven, 1 partial — accept it or ask to prove it before merging #44");
   assert.deepEqual(it.actions.map((x) => x.label), ["Merge #44 on GitHub", "Proof"]);
   assert.deepEqual(it.actions.map((x, j) => isPrimary(x, 0, j)), [true, false]);
 });
 
 test("a failing proof, red CI and a draft keep their own wording", () => {
   const list = [pr()];
-  const failed = needActions(at(run(), list, { proofFailed: true, proofClean: false }), ctxFor(run(), list, { proof: { tier: 1, pass: 1, total: 2, fail: 1, failed: "t2 b", gaps: "1/2 pass" } }))[0];
+  const failed = needActions(at(run(), list, { proofFailed: true, proofClean: false }), ctxFor(run(), list, { proof: { tier: 1, pass: 1, total: 2, fail: 1, failed: "t2 b", gaps: "1/2 proven" } }))[0];
   assert.match(failed.line, /^Proof: t2 b failed — read it before merging #44$/);
   assert.equal(failed.actions[0].label, "Proof");
   const red = [pr({ checks: { pass: 1, fail: 1, pending: 0 } })];
@@ -197,7 +197,7 @@ test("the proofSeen store forgets gone runs, keeps a down machine's", () => {
 test("accepted rows are said as accepted, in the ready line and in the gaps", () => {
   const list = [pr()];
   const [it] = needActions(at(run(), list), ctxFor(run(), list, { proof: { tier: 1, pass: 1, total: 2, fail: 0, accepted: 1, gaps: null } }));
-  assert.equal(it.detail, "All 2 tasks done · proof 1/2 pass · 1 accepted · checks green");
+  assert.equal(it.detail, "All 2 tasks done · proof 1/2 proven · 1 accepted · checks green");
   const c = claimCounts(rowsOf(md("partial — x"), { accepted: { C2: { result: "partial — x" } } }));
   assert.equal(c.accepted, 1);
 });

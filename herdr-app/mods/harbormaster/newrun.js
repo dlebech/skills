@@ -8,7 +8,7 @@
 import { div } from "gpui-kit";
 import { InputState, Input, v_flex, h_flex } from "gpui-base";
 import { exec, focused, openOverlay, closeOverlay, props, notify, readTextFile, writeTextFile } from "herdr";
-import { repoSpaces } from "./repospaces.js";
+import { repoSpaces, knownRepos, spaceIdFor } from "./repospaces.js";
 import {
   KINDS, DRAFTS, profileText, parseProfile, profileFor, buildPrompt, inputProblem, runAgentName, startArgs,
   startOutcome, parsePrefs, draftsFor, remember, markReviewStarted, clearReviewStarted,
@@ -42,8 +42,14 @@ const findScript = async () => {
   return r?.code === 0 ? r.stdout : null;
 };
 
-// Starts the run: {ok, address} or {ok: false, error, started?}. `repo` is a repoSpaces() entry.
-export async function launch({ repo, kind, input, profile, drafts }) {
+// Starts the run: {ok, address} or {ok: false, error, started?}; it never throws. `repo` is a
+// repoSpaces() entry, or a clone's ({space: null}: start-agent.sh then opens its space).
+export async function launch(args) {
+  try { return await launchRun(args); }
+  catch (e) { return { ok: false, error: `Could not start it: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}` }; }
+}
+
+async function launchRun({ repo, kind, input, profile, drafts }) {
   const problem = inputProblem(kind, input);
   if (problem) return { ok: false, error: problem };
   if (!repo) return { ok: false, error: "Open the repository in a space first, then start the run there" };
@@ -51,9 +57,11 @@ export async function launch({ repo, kind, input, profile, drafts }) {
   if (!script) return { ok: false, error: "The orchestrator skill is not installed: npx skills add dlebech/skills --skill herdr-app-orchestrator" };
   const name = runAgentName(repo.name, kind, input);
   const taskFile = `${await rootDir()}/.newrun-${name}.txt`;
+  // A fresh machine may have no runs root yet (the captain, which makes it, is optional).
+  await sh('mkdir -p "$(dirname "$1")"', [taskFile]);
   await writeTextFile(taskFile, buildPrompt({ kind, input, profile, drafts }) + "\n", null);
   // start-agent.sh waits for the agent to take its task, up to two minutes.
-  const res = await exec("bash", [script, ...startArgs({ name, cwd: repo.root, taskFile, spaceId: repo.space })], { timeout: 150000 }).catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
+  const res = await exec("bash", [script, ...startArgs({ name, cwd: repo.root, taskFile, spaceId: repo.space ?? spaceIdFor(repo.name) })], { timeout: 150000 }).catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
   await sh('rm -f "$1"', [taskFile]).catch(() => {});
   const out = startOutcome(res.code, res.stdout, res.stderr);
   if (out.ok || out.started) {
@@ -84,13 +92,26 @@ export async function startReview({ repo, pr, url = null }) {
   } finally { starting.delete(id); }
 }
 
+// The repository to review in: its open space, else the clone as given (`repo.root`), whose
+// space start-agent.sh opens (as herdr-app-captain's Start a run does for a repository with none).
+async function reviewRepo(root, repo) {
+  const open = (await repoSpaces().catch(() => [])).find((r) => r.root === root || (repo?.space && r.space === repo.space));
+  if (open || !root) return open ?? null;
+  const clone = (await knownRepos().catch(() => [])).find((r) => r.root === root);
+  return clone ?? { space: null, name: root.split("/").pop(), root, origin: null };
+}
+
 async function reviewNow(root, repo, pr) {
-  const found = (await repoSpaces().catch(() => [])).find((r) => r.root === root || r.space === repo?.space);
-  const prefs = await loadPrefs();
-  const out = await launch({
-    repo: found, kind: "review", input: String(pr),
-    profile: profileFor("review", prefs.profile), drafts: draftsFor(prefs, found?.root),
-  });
+  let out;
+  let found = null;
+  try {
+    found = await reviewRepo(root, repo);
+    const prefs = await loadPrefs();
+    out = await launch({
+      repo: found, kind: "review", input: String(pr),
+      profile: profileFor("review", prefs.profile), drafts: draftsFor(prefs, found?.root),
+    });
+  } catch (e) { out = { ok: false, error: String(e?.message ?? e).split("\n")[0].slice(0, 160) }; }
   try {
     notify(out.ok ? { title: "Review started", body: `${found.name}: PR ${pr} in a new tab`, level: "success", timeout: 6000 }
       : { title: "Review not started", body: out.error, level: "warning" });
@@ -150,8 +171,10 @@ async function start(view, cx) {
   const problem = bad.length ? `Not understood: ${bad.join(" ")}` : inputProblem(nr.kind, nr.text.value());
   if (problem) { nr.error = problem; nr.hint = true; cx.notify(); return; }
   nr.busy = true; nr.error = null; nr.hint = false; cx.notify();
-  const out = await launch({ repo: nr.repo, kind: nr.kind, input: nr.text.value(), profile, drafts: nr.drafts });
-  nr.busy = false;
+  let out;
+  try { out = await launch({ repo: nr.repo, kind: nr.kind, input: nr.text.value(), profile, drafts: nr.drafts }); }
+  catch (e) { out = { ok: false, error: String(e?.message ?? e) }; }
+  finally { nr.busy = false; }
   // Started: the new tab is the confirmation. Not quite (the trust prompt, a dialog): say where, calmly.
   if (out.ok) { try { closeOverlay(props().overlay); } catch { /* closed */ } return; }
   nr.error = out.error;

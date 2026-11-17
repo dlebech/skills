@@ -262,8 +262,8 @@ export function proofState(run, stages = null, finished = Boolean(run?.phase ===
 
 // ---- the merge ask ----
 
-// What the Needs-you box's merge item ("review proof → merge") shows of a run's claims, for a
-// later task to render (the box's merge item; nothing renders it yet):
+// What the Needs-you box's merge item ("review proof → merge") shows of a run's claims (crew.js
+// boxClaims keeps the worth-a-look rows of it):
 //   { worthALook: [≤ 3 rows], more: n, checks: "Checks ✓ …" | null, verdict: claimsVerdict() }
 // The rows are the claims worth a look first (failed, partial, below their bar, unproven), then
 // proven ones that have a thumbnail to show, in plan order within each; `more` is how many claims
