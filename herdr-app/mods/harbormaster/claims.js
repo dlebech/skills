@@ -215,10 +215,14 @@ export function checksLine(md) {
 // an old run shows nothing.
 export function reviewedLine(md, gap = null, { finished = false, claims = false } = {}) {
   const all = md?.reviewed ?? [];
-  const last = [...all].reverse().find((x) => /final/i.test(x.what)) ?? all.at(-1);
+  // Only whole-branch reviews measure the gap: a task review's sha sits on the task branch, which a squash never makes an ancestor.
+  const last = [...all].reverse().find((x) => /final/i.test(x.what));
+  const tasks = all.length;
+  if (!last && tasks) return { text: "not reviewed (branch)", tone: "dim", tip: `No final review recorded; ${tasks} task ${tasks === 1 ? "review" : "reviews"}`, since: 0 };
   if (!last) return finished && claims ? { text: "not reviewed", tone: "dim", tip: "proof.md has no Reviewed line", since: 0 } : null;
   const g = gap && last.sha.startsWith(gap.sha) || gap && gap.sha?.startsWith(last.sha) ? gap : null;
   const at = last.sha.slice(0, 7), tip = `Reviewed: ${at} ${last.what}${last.result ? ` — ${last.result}` : ""}`;
+  if (g && g.same === null) return { text: `Reviewed at ${at}`, tone: "dim", tip: `${tip}\nCould not compare with the branch`, since: 0 };
   if (!g || g.same || !(g.count > 0)) return { text: `Reviewed · ${last.what || "review"} at ${at}`, tone: "dim", tip, since: 0 };
   return { text: `Reviewed at ${at} · ${g.count} ${g.count === 1 ? "commit" : "commits"} since, not reviewed`, tone: "amber", tip, since: g.count };
 }

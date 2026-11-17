@@ -115,7 +115,7 @@ async function listen(view, cx) {
       if (name === "show-run") showPopup(view, arg);
       else if (name === "show-stats") showStats(view, arg);
       else if (name === "show-overview") showView("overview", "cards", 560, 900);
-      else if (name === "show-crew") showView("crew", "crew", 360, 640, { needs: "box" });
+      else if (name === "show-crew") showView("crew", "crew", 360, 640);
       else if (name === "new-run") openNewRun(newRunArgs(arg));
       else if (name === "close-popup") closePopup();
       else if (name === "open-run") showPopup(view, arg, true);
@@ -213,9 +213,9 @@ export default class Harbormaster extends View {
       // PRs land in shared state, which re-renders every copy by itself. A parked run's PRs are
       // read as rarely as a closed run's: nobody works on them, they only show what they wait on.
       for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});
-      // The commits since each run's last review: module memory, so a change re-renders by hand.
+      // The commits since each run's last review (not for closed runs: their line is never shown): module memory, so a change re-renders by hand.
       let moved = false;
-      for (const r of runs) moved = (await refreshReviewed(r, isClosed(r, ctx) || isParked(r)).catch(() => false)) || moved;
+      for (const r of runs) if (!isClosed(r, ctx)) moved = (await refreshReviewed(r, isClosed(r, ctx) || isParked(r)).catch(() => false)) || moved;
       if (moved) cx.notify();
     });
   }

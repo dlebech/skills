@@ -4,10 +4,10 @@ import { div, svg } from "gpui-kit";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
 import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCommentsAll, askCi, askChanges } from "./data.js";
-import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, programOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
-import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
+import { facts, exactStatus, orchestratorState, agentStatus, workersOf, captainOf, programOf, captainPane, paneBeside, togglePin, needReason, focusAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
+import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
-import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
+import { liveUsage, hotText, memText } from "./resources.js";
 import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, worthALook, hasClaims, proofState, withSaid } from "./claims.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
@@ -20,11 +20,11 @@ import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
 import { markProofSeen } from "./proofseen.js";
 import { askedStore, markPrsAsked, unmarkPrAsked } from "./asked.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText, workerTree } from "./crewrows.js";
+import { rowEdge, badgeOf, needLine, closableDone, needCount, needRunsOf, runlessNeeds, watchingText, workerTree } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
 import { commentsAsked, defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
-import { needActions, doLine, ownAddressRows, isPrimary, detailsLabel } from "./needaction.js";
+import { needActions, ownAddressRows, isPrimary, detailsLabel } from "./needaction.js";
 
 // How each runPhase() reads on a card. Running is muted, not the working colour: colour means
 // something to look at (see AMBER), and the run's spinning dot already says it works.
@@ -74,7 +74,6 @@ export const withUsage = (t, id, u, whose, more = null) => (el) => {
     .bg(t.working + "22").text_color(t.working).tooltip(tip).child(text));
 };
 
-export const usageLine = (label, u) => (u ? `${label}: ${Math.round(u.cpu)}% · ${memText(u.rssKb)}` : null);
 
 // A working agent's status is a ring spun natively, like Herdr's own Agents list (spin(900)). The Agents
 // list already redraws the window while any agent works, so the ring rides on those frames: measured in a

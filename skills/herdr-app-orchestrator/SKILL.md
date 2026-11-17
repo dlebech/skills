@@ -2,7 +2,7 @@
 name: herdr-app-orchestrator
 description: "Manually orchestrate a larger implementation with hidden hc agents in git worktrees, role-specific agent kinds and models, independent reviews per task or of the whole branch, and an integration branch per repository that is the only PR branch, across one repository or several, such as a frontend and a backend. For the Herdr app (herdr-core, `hc`), not the older Herdr TUI. The work comes from the current session, a description, a plan file, or one or more GitHub issues (and chosen sub-issues)."
 disable-model-invocation: true
-argument-hint: "[what to build, a path to a plan/spec, or issues like #185 #190; defaults to this session's discussion] [start with #dependency] [sub-issues=ask|all|none] [agent=<kind>] [model=<model>] [implementer/reviewer/specialist overrides] [merge=squash|merge] [push-task-branches=yes|no] [draft-pr=ask|yes|no] [task-review=yes|no] [final-review=ask|yes|no] [review-rounds=<n>] [grunt=<kind>] [grunt-model=<model>] [type=feat|fix|rev|expl] [branch=<name>]"
+argument-hint: "[what to build, a path to a plan/spec, or issues like #185 #190; defaults to this session's discussion] [start with #dependency] [sub-issues=ask|all|none] [agent=<kind>] [model=<model>] [implementer/reviewer/specialist overrides] [merge=squash|merge] [push-task-branches=yes|no] [draft-pr=ask|yes|no] [task-review=yes|no] [final-review=ask|yes|no] [review-rounds=<n>] [close-issues=sub|all|none] [grunt=<kind>] [grunt-model=<model>] [type=feat|fix|rev|expl] [branch=<name>]"
 compatibility: Requires git, jq, the Herdr app, and herdr-core (`hc`). Issues and PRs require the GitHub CLI.
 metadata:
   required-skills: "herdr-core"

@@ -395,7 +395,6 @@ const smallButton = (t, id, label, tip, onClick, off = false) => h_flex().id(id)
 function nextAction(m, it, id) {
   const { t } = m;
   if (it.kind === "review") {
-    if (it.run) return div().flex_none().text_size(11).text_color(t.dim).child("reviewing");
     // Started from here and its run not seen yet (newrun.js reviewStarting): never a second Review.
     if (reviewStarting(it.url)) return div().flex_none().text_size(11).text_color(t.dim).tooltip("Its review run is starting; it shows as reviewing once its run files name the PR").child("starting…");
     if (!it.local) return null;
@@ -411,7 +410,7 @@ function nextRow(m, it, i) {
   const { t } = m;
   const id = `crew-next-${i}`;
   const action = nextAction(m, it, id);
-  const far = it.kind === "review" && !it.local && !it.run ? "No clone of this repository found next to your open spaces: open a space for it to review with one click" : null;
+  const far = it.kind === "review" && !it.local ? "No clone of this repository found next to your open spaces: open a space for it to review with one click" : null;
   return h_flex().id(id).flex_none().gap(8).px(PAD).py(3).rounded(6).items_center().cursor_pointer().hover((st) => st.bg(t.hover))
     .tooltip([`${it.repo}#${it.number}: ${it.title}`, it.url, far].filter(Boolean).join("\n"))
     .on_click(() => openUrl(it.url))

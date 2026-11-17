@@ -50,7 +50,11 @@ export async function repoSpaces() {
 
 // The space id start-agent.sh makes Herdr open for a repository with none ("sp-<name>": letters,
 // digits and "-"; as herdr-app-captain's Start a run does).
-export const spaceIdFor = (name) => `sp-${String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "repo"}`;
+
+// The repository a folder is in (its toplevel), else the folder itself: the key drafts modes are remembered under.
+export async function repoRoot(folder) {
+  return (await inspect(folder).catch(() => null))?.root ?? folder;
+}
 
 // Clones found beside the open repositories: the repositories in the parent folders of the open
 // repository spaces' roots (one level down), that are not open themselves. [{space: null, name,
@@ -101,7 +105,7 @@ export async function openFolders() {
 
 // The `folder` of every run directory (<runs root>/<folder>/<branch>/orchestrator.json).
 export async function runFolders(root) {
-  const r = await sh('ls -t "$1"/*/*/orchestrator.json 2>/dev/null | while read -r f; do jq -r ".folder // empty" "$f" 2>/dev/null; done', [root]).catch(() => null);
+  const r = await sh('ls -t "$1"/*/*/orchestrator.json 2>/dev/null | head -n 40 | while read -r f; do jq -r ".folder // empty" "$f" 2>/dev/null; done', [root]).catch(() => null);
   return String(r?.stdout ?? "").split("\n").filter((l) => l.startsWith("/"));
 }
 

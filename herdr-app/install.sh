@@ -63,7 +63,7 @@ if [ ! -f "$main" ]; then
   for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$main" ] && break; sleep 0.5; done
   [ -f "$main" ] || die "layout.clone did not create layouts/harbormaster-main.json"
 fi
-# Calm means a Crew block with needs: "box". Once main has one, it is the user's file:
+# Calm means a Crew block with needs: "box" (only this marker: crew.js draws the calm Crew whatever the prop). Once main has one, it is the user's file:
 # nothing is redone (their resizing, a moved picker, an Agents block they added back stay).
 calm='[.. | objects | select(.content.mod? == "harbormaster" and .content.props.role? == "crew" and .content.props.needs? == "box")] | length > 0'
 if ! jq -e "$calm" "$main" >/dev/null; then

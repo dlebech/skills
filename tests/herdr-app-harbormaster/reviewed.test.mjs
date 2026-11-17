@@ -50,3 +50,17 @@ test("the verdict counts commits since the review; the merge ask carries the lin
   assert.ok(ask.verdict.parts.some((p) => p.text === "2 commits not reviewed" && p.tone === "amber"));
   assert.equal(claimsVerdict(ask.worthALook, { reviewed: null }).parts.some((p) => /not reviewed/.test(p.text)), false);
 });
+
+test("task reviews alone never measure the gap: dim 'not reviewed (branch)', the count in the hover", () => {
+  const m = md("Reviewed: a1b2c3d task t1 — ok\nReviewed: b2c3d4e task t2 — ok");
+  const l = reviewedLine(m, { sha: "b2c3d4e", count: 7, same: false });
+  assert.deepEqual([l.text, l.tone, l.since], ["not reviewed (branch)", "dim", 0]);
+  assert.match(l.tip, /2 task reviews/);
+});
+
+test("a gap git could not read is unknown, not current", () => {
+  const m = md("Reviewed: 4ad8528 final review — fixed");
+  const l = reviewedLine(m, { sha: "4ad8528", count: 0, same: null });
+  assert.deepEqual([l.text, l.tone, l.since], ["Reviewed at 4ad8528", "dim", 0]);
+  assert.match(l.tip, /could not compare with the branch/i);
+});

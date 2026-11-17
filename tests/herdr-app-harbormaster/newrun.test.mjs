@@ -7,7 +7,7 @@ import {
 } from "../../herdr-app/mods/harbormaster/startrun.js";
 import { newRunArgs } from "../../herdr-app/mods/harbormaster/commands.js";
 import { parseReviewRequests, runReviewing, withContext } from "../../herdr-app/mods/harbormaster/reviews.js";
-import { ownerRepo, spaceIdFor } from "../../herdr-app/mods/harbormaster/repospaces.js";
+import { ownerRepo } from "../../herdr-app/mods/harbormaster/repospaces.js";
 
 test("the default profile line, and reading an edited one back", () => {
   assert.equal(profileText(DEFAULT_PROFILE), "implementer=sonnet reviewer=opus specialist=opus autonomy=L1");
@@ -99,7 +99,6 @@ test("a request knows its local checkout and the live run reviewing it", () => {
   assert.equal(ownerRepo("git@github.com:dlebech/skills.git"), "dlebech/skills");
   assert.equal(ownerRepo("https://github.com/DLebech/Skills/"), "dlebech/skills");
   assert.equal(ownerRepo("https://gitlab.com/a/b"), null);
-  assert.equal(spaceIdFor("My_Repo.js"), "sp-my-repo-js");
   const repos = [{ space: "sp-1", name: "skills", root: "/home/d/skills", origin: "dlebech/skills" }];
   const runs = [{ dir: "/runs/skills/pr-9", issues: [], related: [{ url: "https://github.com/acme/api/pull/9" }] }];
   const [a, b] = withContext(parseReviewRequests(GH), repos, runs);

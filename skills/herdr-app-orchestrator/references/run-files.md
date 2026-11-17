@@ -133,7 +133,7 @@ any other word (`Checks: pending — CI`, still running). `Reviewed: <short sha>
 (`Reviewed: 3def855 task t9b — 3 must-fix fixed`) is repeatable and says what was reviewed at which
 commit; the latest final (whole-branch) review is the one Harbormaster reports, as `Reviewed · final
 review at 4ad8528`, or amber `Reviewed at 4ad8528 · 5 commits since, not reviewed` once the integration
-branch has moved on (its tree differing). A finished run with claims and no `Reviewed:` line shows a
+branch has moved on (its tree differing). Task reviews never measure that gap (their sha is on the task branch); with only task lines the line is a dim `not reviewed (branch)`. When git cannot compare, it is a dim `Reviewed at 4ad8528`, never `Reviewed ·`. A finished run with claims and no `Reviewed:` line shows a
 dim `not reviewed`; an old run shows nothing. `## C1: …` and `## C1. …` are C1 too.
 
 `Ran:` (one line per test, lint or build run, repeatable) records the commit a run was made against, so

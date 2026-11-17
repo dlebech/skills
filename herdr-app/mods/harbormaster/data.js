@@ -1009,7 +1009,7 @@ const SINCE = [
   'for r in "$folder" "$folder"/*/; do',
   '  [ -e "$r/.git" ] || continue',
   '  git -C "$r" rev-parse -q --verify "$branch^{commit}" >/dev/null || continue',
-  '  git -C "$r" rev-parse -q --verify "$sha^{commit}" >/dev/null || { echo "?"; exit 0; }',
+  '  git -C "$r" rev-parse -q --verify "$sha^{commit}" >/dev/null || continue',
   '  n=$(git -C "$r" rev-list --count "$sha..$branch") || { echo "?"; exit 0; }',
   '  if git -C "$r" diff --quiet "$sha" "$branch"; then echo "$n 1"; else echo "$n 0"; fi',
   '  exit 0',
@@ -1022,11 +1022,11 @@ const reviewBusy = new Map();
 const REVIEW_TTL = 15_000, REVIEW_TTL_DONE = 5 * 60_000;
 
 // Reads the commits since the run's last Reviewed sha when stale (every 15 s while open, 5 min once
-// finished); one cheap git call with a timeout. Unreadable: no gap shown (the line reads as current).
+// finished); one cheap git call with a timeout. Unreadable: same is null (shown dim as unknown, never as current).
 // True when what the line shows changed.
 export async function refreshReviewed(run, done = false) {
   const all = run.proof?.md?.reviewed ?? [];
-  const last = [...all].reverse().find((x) => /final/i.test(x.what)) ?? all.at(-1);
+  const last = [...all].reverse().find((x) => /final/i.test(x.what)); // task shas are not on the branch (claims.js reviewedLine)
   if (!last || !run.folder) { reviewGaps.delete(run.key); return false; }
   const have = reviewGaps.get(run.key);
   if (Date.now() - (reviewBusy.get(run.key) ?? 0) < 30_000) return false;
@@ -1036,7 +1036,7 @@ export async function refreshReviewed(run, done = false) {
   try {
     const out = await exec("sh", ["-c", SINCE, "sh", run.folder, run.branch, last.sha], { on: run.machine, timeout: 8000 }).catch(() => null);
     const m = out?.code === 0 ? /^(\d+) ([01])$/.exec(out.stdout.trim()) : null;
-    const next = { sha: last.sha, count: m ? Number(m[1]) : 0, same: m ? m[2] === "1" : true, at: Date.now() };
+    const next = { sha: last.sha, count: m ? Number(m[1]) : 0, same: m ? m[2] === "1" : null, at: Date.now() };
     reviewGaps.set(run.key, next);
     run.reviewedGap = next;
     return !have || have.sha !== next.sha || have.count !== next.count || have.same !== next.same;

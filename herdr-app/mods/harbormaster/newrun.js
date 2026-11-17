@@ -8,7 +8,7 @@
 import { div } from "gpui-kit";
 import { InputState, Input, v_flex, h_flex } from "gpui-base";
 import { exec, focused, openOverlay, closeOverlay, props, notify, readTextFile, writeTextFile, spaces, home, checking } from "herdr";
-import { repoSpaces, knownRepos, spaceIdFor, openFolders, runFolders, scanFolders, isFolder } from "./repospaces.js";
+import { repoSpaces, knownRepos, repoRoot, openFolders, runFolders, scanFolders, isFolder } from "./repospaces.js";
 import { recentFolders, listFolders, matchFolders, literalFolder, tilde, base, newSpaceId } from "./folders.js";
 import {
   KINDS, DRAFTS, profileText, parseProfile, profileFor, buildPrompt, inputProblem, runAgentName, startArgs,
@@ -63,12 +63,13 @@ async function launchRun({ repo, kind, input, profile, drafts }) {
   await sh('mkdir -p "$(dirname "$1")"', [taskFile]);
   await writeTextFile(taskFile, buildPrompt({ kind, input, profile, drafts }) + "\n", null);
   // start-agent.sh waits for the agent to take its task, up to two minutes.
-  const res = await exec("bash", [script, ...startArgs({ name, cwd: repo.root, taskFile, spaceId: repo.space ?? repo.spaceId ?? spaceIdFor(repo.name) })], { timeout: 150000 }).catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
+  const res = await exec("bash", [script, ...startArgs({ name, cwd: repo.root, taskFile, spaceId: repo.space ?? repo.spaceId ?? newSpaceId(repo.root, spaces()) })], { timeout: 150000 }).catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
   await sh('rm -f "$1"', [taskFile]).catch(() => {});
   const out = startOutcome(res.code, res.stdout, res.stderr);
   if (out.ok || out.started) {
     // Remembered once it started, so a typo'd start leaves the last good profile alone.
-    await updatePrefs((prefs) => remember(prefs, { kind, profile, repo: repo.root, drafts })).catch(() => {});
+    const key = await repoRoot(repo.root);
+    await updatePrefs((prefs) => remember(prefs, { kind, profile, repo: key, drafts })).catch(() => {});
   }
   return out;
 }
@@ -143,7 +144,7 @@ export function initNewRun(view, cx) {
   nr.text.set_value(String(p.input ?? ""));
   nr.text.on("submit", (_e, cx) => start(view, cx));
   nr.profile.on("submit", (_e, cx) => start(view, cx));
-  nr.where.on("submit", (_e, cx) => (nr.open && shownList(nr).length ? choose(view, shownList(nr)[nr.sel], cx) : start(view, cx)));
+  nr.where.on("submit", (_e, cx) => (nr.open && shownList(nr).length ? choose(view, shownList(nr)[nr.sel], cx) : start(view, cx, true)));
   nr.where.on("change", (_e, cx) => typed(view, cx));
   nr.where.on("focus", (_e, cx) => openList(view, cx));
   nr.text.focus();
@@ -157,7 +158,7 @@ export function initNewRun(view, cx) {
     nr.entries = listFolders({ spaces: spaceEntries, recents: recentFolders(prefs.folders, runs) });
     const pick = chooseFolder(nr.entries, p.repo);
     if (pick) setFolder(view, pick);
-    nr.drafts = draftsFor(prefs, nr.folder?.folder);
+    nr.drafts = draftsFor(prefs, draftKey(nr));
     setProfile(nr);
     cx.notify();
     // The folders typed text may find: scanned once the lists are known, cheap and cached.
@@ -182,7 +183,12 @@ function setFolder(view, entry) {
   nr.shown = tilde(entry.folder, nr.home);
   nr.where.set_value(nr.shown);
   nr.drafts = draftsFor(nr.prefs, entry.folder);
+  // Drafts are remembered per repository root, not per folder: refine once git has said which.
+  nr.root = null;
+  repoRoot(entry.folder).then((root) => { if (nr.folder === entry) { nr.root = root; nr.drafts = draftsFor(nr.prefs, root); } }).catch(() => {});
 }
+
+const draftKey = (nr) => nr.root ?? nr.folder?.folder;
 
 function choose(view, entry, cx) {
   const nr = view.nr;
@@ -234,19 +240,20 @@ function setProfile(nr) {
 }
 
 // What Start runs in, or null: the chosen folder; a typed text that names a listed folder exactly
-// (its path, ~ path or name); or, with the list open, the row highlighted. Never a guess.
-export function target(nr) {
+// (its path, ~ path or name); or, when Enter was pressed in the folder input with the list open, the row
+// highlighted. Never a guess: Enter in another field does not take a row the user never picked.
+export function target(nr, fromList = false) {
   const text = nr.where.value().trim();
   if (text === nr.shown) return nr.folder;
   if (!text) return null;
   const exact = nr.entries.find((e) => !e.machine && (e.folder === text || tilde(e.folder, nr.home) === text || (e.name === text && e.space)));
-  return exact ?? (nr.open ? shownList(nr)[nr.sel] ?? null : null);
+  return exact ?? (fromList && nr.open ? shownList(nr)[nr.sel] ?? null : null);
 }
 
-async function start(view, cx) {
+async function start(view, cx, fromList = false) {
   const nr = view.nr;
   if (nr.busy) return;
-  let pick = target(nr);
+  let pick = target(nr, fromList);
   if (pick && pick !== nr.folder) setFolder(view, pick);
   // A space opened meanwhile counts; and a new space's id must not be another folder's.
   const open = spaces();
@@ -327,7 +334,7 @@ export function newRunView(view, t) {
     .child(div().text_size(15).font_semibold().text_color(t.foreground).child("New run"))
     .child(field(t, "Folder", div().when(nr.open, (e) => e.key_context("HarborFolderList").on_action("harbormaster-folder-list-close", (_e, cx) => { nr.open = false; cx.notify(); })).on_key_down(keys).on_mouse_down("left", (_e, cx) => openList(view, cx)).child(framed(t, nr.where)), list || note || null))
     .child(field(t, "What", h_flex().gap(6).children(KINDS.map((k) => pill(t, `nr-k-${k.id}`, k.label, nr.kind === k.id,
-      (cx) => { nr.kind = k.id; setProfile(nr); nr.drafts = draftsFor(nr.prefs, nr.folder?.folder); set({}, cx); })))))
+      (cx) => { nr.kind = k.id; setProfile(nr); nr.drafts = draftsFor(nr.prefs, draftKey(nr)); set({}, cx); })))))
     .child(field(t, kind.hint, framed(t, nr.text), div().text_size(11).text_color(t.dim).child(kind.example)))
     .child(field(t, "Profile", framed(t, nr.profile)))
     .children([drafts].filter(Boolean))
