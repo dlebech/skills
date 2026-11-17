@@ -36,6 +36,8 @@
 # For the Needs-you box's lines and buttons (t11), read-only gh views of real PRs:
 #   approved-merge  finished, folder "snevagten" (peer), snevagten/snelogin#1308 and #1372,
 #                   approved by a colleague                               -> approved — merge
+#   approved-plan-open  running, folder "snevagten" (peer), 1/2 tasks done, fake-two/api#44 (approved, no comments)
+#                       -> Needs you "approved · plan open", the box: "merge once the plan is done (1/2 tasks)"
 #   red-ci        finished, cli/cli#14927 (a public PR with a failing check) -> red CI, then
 #                 review proof → merge
 #   review-proof  finished, dlebech/wapi-beatbox#1, proof.md T2 1/2 pass  -> review proof → merge
@@ -166,6 +168,8 @@ make_runs() {
     --pr fake-two/api https://github.com/fake-two/api/pull/1799 --pr fake-two/web https://github.com/fake-two/web/pull/1372
   RUN_FOLDER=$S/work/snevagten mkrun approved-merge finished feat "Approved merge" "${day}T07:00:00Z" 2/2 merged merged --progress "PRs approved" \
     --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1308 --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1372
+  RUN_FOLDER=$S/work/snevagten mkrun approved-plan-open running feat "Approved plan open" "${day}T07:10:00Z" 1/2 merged planned --progress "PR approved, t2 still to do" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/44
   mkrun red-ci finished fix "Red CI" "${day}T07:30:00Z" 2/2 merged merged --progress "PR up, CI red" \
     --pr cli/cli https://github.com/cli/cli/pull/14927
   mkrun review-proof finished feat "Review proof" "${day}T08:00:00Z" 2/2 merged merged --progress "PR up with proof" \
