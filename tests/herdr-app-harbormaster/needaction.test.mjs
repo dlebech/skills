@@ -42,9 +42,9 @@ test("approved — merge names the PRs, who approved and when, with an Open butt
 });
 
 test("approved with open comments says to address them, then merge", () => {
-  const comments = { count: 3, bots: {}, items: [] };
+  const comments = { count: 2, threads: 1, notes: 1, bots: {}, items: [] };
   const [it] = items(run(), [pr({ approvedBy: ["anna"], review: "APPROVED", comments })], { flow: "peer" });
-  assert.equal(it.line, "Approved by anna with 3 comments on #42: address them, then merge");
+  assert.equal(it.line, "Approved by anna with 1 thread, 1 note on #42: address them, then merge");
   assert.deepEqual(kinds(it), ["open"]);
 });
 
@@ -78,8 +78,8 @@ test("request review says why: a draft, or nobody requested", () => {
 });
 
 test("changes requested names who asked, with their comments, and opens the PR", () => {
-  const [it] = items(run(), [pr({ changesBy: ["anna"], review: "CHANGES_REQUESTED", reviewedAt: ago(30), comments: { count: 2, bots: {}, items: [] } })], { flow: "peer" });
-  assert.equal(it.line, "anna asked for changes on #42 · 2 comments · 30m ago");
+  const [it] = items(run(), [pr({ changesBy: ["anna"], review: "CHANGES_REQUESTED", reviewedAt: ago(30), comments: { count: 2, threads: 1, notes: 1, bots: {}, items: [] } })], { flow: "peer" });
+  assert.equal(it.line, "anna asked for changes on #42 · 1 thread, 1 note · 30m ago");
   assert.deepEqual(kinds(it), ["open"]);
   // An unknown reviewer (GitHub's own decision only) is "A reviewer".
   const [anon] = items(run(), [pr({ review: "CHANGES_REQUESTED" })], { flow: "peer" });
@@ -209,12 +209,12 @@ test("the red-CI ask is a what-is-blocking message naming the PR, the check and 
 // ---- t15: the box carries Address comments, a failed proof is never merged past ----
 
 const here = (o = {}) => run({ localTerminal: "w/orch", ...o });
-const said = (count) => ({ count, bots: {}, items: [] });
+const said = (count, notes = 0) => ({ count, threads: count - notes, notes, bots: {}, items: [] });
 
 test("approved with comments: the box has Ask me and Handle them, the autonomy's default first-class, then Open, and the age", () => {
-  const p = pr({ approvedBy: ["anna"], review: "APPROVED", reviewedAt: ago(85), comments: said(3) });
+  const p = pr({ approvedBy: ["anna"], review: "APPROVED", reviewedAt: ago(85), comments: said(3, 1) });
   const [it] = items(here(), [p], { flow: "peer" });
-  assert.equal(it.line, "Approved by anna 1h25m ago with 3 comments on #42: address them, then merge");
+  assert.equal(it.line, "Approved by anna 1h25m ago with 2 threads, 1 note on #42: address them, then merge");
   assert.deepEqual(it.actions.map((a) => [a.kind, a.label, a.primary ?? null]),
     [["address", "Ask me", true], ["address", "Handle them", false], ["open", "Open #42", null]]);
   assert.deepEqual(it.actions.slice(0, 2).map((a) => [a.mode, a.pr]), [["ask", p], ["handle", p]]);
@@ -228,7 +228,7 @@ test("with several PRs each one's buttons carry the PR they are about; one witho
     pr({ number: 1372, url: "https://github.com/o/skills/pull/1372", approvedBy: ["anna"], review: "APPROVED", comments: said(0) })];
   const [it] = items(here(), list, { flow: "peer" });
   assert.deepEqual(it.actions.map((a) => [a.label, a.row]), [
-    ["Ask me", "#42 · 15 comments"], ["Handle them", "#42 · 15 comments"], ["Open #42", "#42 · 15 comments"], ["Open #1372", "#1372"],
+    ["Ask me", "#42 · 15 threads"], ["Handle them", "#42 · 15 threads"], ["Open #42", "#42 · 15 threads"], ["Open #1372", "#1372"],
   ]);
 });
 

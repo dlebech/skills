@@ -3,7 +3,7 @@
 // their colour, and its hover. Pure, so the tests drive it; overview.js crew() draws it.
 
 import { byWait, nextStepText, stepText, ageText, reviewWaitText, FINISHED_LABEL } from "./attention.js";
-import { commentLines, hasComments } from "./comments.js";
+import { commentLines, commentsText, hasComments } from "./comments.js";
 
 // The groups, in the order the Crew shows them: what you must act on, what is at work, what
 // waits on someone else (a reviewer), what can't be read (grey, so it is never mixed into
@@ -100,7 +100,7 @@ export function reviewCommentLines(next) {
   const c = next?.comments;
   if (!c || (!hasComments(c) && !c.unknown)) return [];
   const head = c.unknown && !hasComments(c) ? "Review comments: could not be read"
-    : `Review comments (${c.count || "bots only"}${c.unknown ? ", some could not be read" : ""}):`;
+    : `Review comments (${commentsText({ ...c, unknown: false }) ?? "unknown"}${c.unknown ? ", some could not be read" : ""}):`;
   return [head, ...commentLines(c.prs).map((l) => `  ${l}`)];
 }
 

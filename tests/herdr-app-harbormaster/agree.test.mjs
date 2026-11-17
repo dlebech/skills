@@ -112,12 +112,12 @@ test("a question run's pill names its PR step, not the question (its box shows t
 });
 
 test("the narrow sidebar's lead leaves out the comment count so the age survives; the pill keeps it", () => {
-  const comments = { count: 24, bots: {}, items: [] };
-  const list = [pr({ review: "APPROVED", approvedBy: ["m"], reviewedAt: ago(85), comments }), pr({ number: 43, url: "u2", review: "APPROVED", approvedBy: ["m"], reviewedAt: ago(80), comments: { count: 0, bots: {}, items: [] } })];
+  const comments = { count: 24, threads: 23, notes: 1, bots: {}, items: [] };
+  const list = [pr({ review: "APPROVED", approvedBy: ["m"], reviewedAt: ago(85), comments }), pr({ number: 43, url: "u2", review: "APPROVED", approvedBy: ["m"], reviewedAt: ago(80), comments: { count: 0, threads: 0, notes: 0, bots: {}, items: [] } })];
   const a = at(run({ folder: "/p/snevagten" }), list, { flow: "peer" });
-  assert.equal(rowLead(a, now).lead, "approved · 24 comments · 2 PRs · 1h25m");
+  assert.equal(rowLead(a, now).lead, "approved · 23 threads, 1 note · 2 PRs · 1h25m");
   assert.equal(rowLead(a, now, { narrow: true }).lead, "approved · 2 PRs · 1h25m");
-  assert.equal(badgeOf(a, true).label, "approved · 24 comments · 2 PRs");
+  assert.equal(badgeOf(a, true).label, "approved · 23 threads, 1 note · 2 PRs");
   assert.equal(nextStepText(a.next, { comments: false }), "approved · 2 PRs");
 });
 
