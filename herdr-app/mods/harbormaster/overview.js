@@ -11,6 +11,7 @@ import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
 import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, segmentLook, proofCounts, proofRowParts, needsLook, resultLine, resultPill, pendingLine, gatheringStage, proofSig, proofGaps, proofRowsOf } from "./proof.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
+import { setNote, noteText } from "./note.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf, needsYouNow as needsYouOf, runlessOrchs } from "./attend.js";
 import { stepText, quietText, flowState, flowSetting, runDot } from "./attention.js";
@@ -210,6 +211,23 @@ function confirmText(r, action, counts) {
   return `Resume ${r.branch}? A new orchestrator starts in ${r.repo}${r.machine ? ` on ${r.machine}` : ""}, restarting unfinished tasks.`;
 }
 
+// The action note and error lines, each with a small × that dismisses it now. A note also goes by
+// itself (note.js); an error stays until dismissed, since it needs reading.
+function noteRows(view, t, fixed) {
+  const line = (id, text, color, clear) => {
+    const row = h_flex().id(id).w_full().px(4).gap(6).items_start().text_size(11).text_color(color);
+    if (fixed) row.flex_none().pt(4);
+    return row.child(div().flex_1().min_w(0).child(text))
+      .child(div().id(`${id}-x`).flex_none().cursor_pointer().px(3).text_size(14).text_color(t.dim).hover((s) => s.text_color(t.foreground)).tooltip("Dismiss")
+        .on_click((_e, cx) => { cx.stop_propagation(); clear(); cx.notify(); }).child("×"));
+  };
+  const note = noteText(view);
+  return [
+    note ? line("action-note", note, t.muted, () => { view.actionNote = null; }) : null,
+    view.actionError ? line("action-error", view.actionError, t.blocked, () => { view.actionError = null; }) : null,
+  ].filter(Boolean);
+}
+
 function actionButton(t, id, label, tip, onClick, primary = false) {
   const b = div().id(id).flex_none().px(9).h(22).rounded(5).flex().items_center().text_size(11.5).font_medium()
     .bg(primary ? t.accent : t.raised).text_color(primary ? t.background : t.muted);
@@ -266,7 +284,7 @@ function confirmBlock(view, t, r, orch, counts, asking, id) {
         if (asking === "delete") await deleteRun(r);
         else {
           const note = await putAway(r, asking === "park" ? "parked" : "closed", orch);
-          if (note) view.actionNote = `${r.branch}: ${note}`;
+          if (note) setNote(view, `${r.branch}: ${note}`);
         }
       } catch (e) { view.actionError = `${r.branch}: ${e?.message ?? e}`; }
       done();
@@ -328,8 +346,8 @@ function blockingAction(view, t, r, att, id, short = false) {
       cx.spawn(async (cx) => {
         try {
           const out = await askBlocking(r, { quiet, step });
-          if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
-          else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
+          if (out?.waits) setNote(view, `${r.branch}: the ask waits in its inbox until the run is resumed`);
+          else if (out?.blocked) setNote(view, `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`);
         } catch (e) {
           // Written but not woken: the ask is in the inbox, so it stays asked.
           if (!e?.inInbox) blockAsked.delete(r.key);
@@ -363,8 +381,8 @@ function ciAction(view, t, r, action, id) {
       cx.spawn(async (cx) => {
         try {
           const out = await askCi(r, { pr: pr?.number ?? null, check: action.check, url });
-          if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
-          else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
+          if (out?.waits) setNote(view, `${r.branch}: the ask waits in its inbox until the run is resumed`);
+          else if (out?.blocked) setNote(view, `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`);
         } catch (e) {
           if (!e?.inInbox) blockAsked.delete(r.key);
           view.actionError = `${r.branch}: ${e?.message ?? e}`;
@@ -434,8 +452,8 @@ const addressSendAll = (view, r, prs, mode) => (cx) => {
   cx.spawn(async (cx) => {
     try {
       const out = await askCommentsAll(r, prs, mode);
-      if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
-      else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
+      if (out?.waits) setNote(view, `${r.branch}: the ask waits in its inbox until the run is resumed`);
+      else if (out?.blocked) setNote(view, `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`);
     } catch (e) {
       // Written but not woken: the ask is in the inbox, so it stays asked.
       if (!e?.inInbox) for (const p of prs) unmarkPrAsked(p.url);
@@ -496,7 +514,7 @@ function closeAll(view, runs, ctx, cx) {
     }
     if (view.busy[CLOSE_ALL_KEY]?.at === at) delete view.busy[CLOSE_ALL_KEY];
     const done = runs.length - failed.length;
-    view.actionNote = [done ? `Closing ${plural(done, "merged run")}: their orchestrators clean up and close their tabs.` : null, ...notes].filter(Boolean).join("\n") || null;
+    setNote(view, [done ? `Closing ${plural(done, "merged run")}: their orchestrators clean up and close their tabs.` : null, ...notes].filter(Boolean).join("\n") || null);
     if (failed.length) view.actionError = `${failed.length} not closed: ${failed.join("; ")}`;
     view.redraw = true;
     try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
@@ -1489,9 +1507,9 @@ function sendChanges(view, key, text, cx) {
   cx.spawn(async (cx) => {
     try {
       const out = await askChanges(run, text);
-      if (out?.waits) view.actionNote = `${run.branch}: the changes wait in its inbox until the run is resumed`;
-      else if (out?.blocked) view.actionNote = `${run.branch}: its orchestrator is blocked on a dialog; it reads the changes once that is answered`;
-      else view.actionNote = `${run.branch}: changes sent to its orchestrator`;
+      if (out?.waits) setNote(view, `${run.branch}: the changes wait in its inbox until the run is resumed`);
+      else if (out?.blocked) setNote(view, `${run.branch}: its orchestrator is blocked on a dialog; it reads the changes once that is answered`);
+      else setNote(view, `${run.branch}: changes sent to its orchestrator`);
     } catch (e) { view.actionError = `${run.branch}: ${e?.message ?? e}`; }
     view.redraw = true;
     try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
@@ -1702,7 +1720,7 @@ function closedHeader(view, t, closed) {
       try { failed = await deleteRuns(runs); } catch (e) { failed = runs.map((run) => ({ run, error: e?.message ?? String(e) })); }
       for (const key of [BULK_KEY, ...runs.map((r) => r.key)]) if (view.busy[key]?.at === at) delete view.busy[key];
       const done = runs.length - failed.length;
-      if (done) view.actionNote = `Deleted ${plural(done, "closed run")}.`;
+      if (done) setNote(view, `Deleted ${plural(done, "closed run")}.`);
       if (failed.length) view.actionError = `${failed.length} not deleted: ${failed.map((f) => `${f.run.branch}${f.run.machine ? ` on ${f.run.machine}` : ""} (${f.error})`).join("; ")}`;
       view.redraw = true;
       try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
@@ -1754,8 +1772,7 @@ export function cards(view, t, runs, errors, decisions = []) {
       .children(sorted(s.parked).map((r) => card(view, t, r, ctx, true)))
       .when(closed.length > 0, (el) => el.child(closedHeader(view, t, closed)))
       .when(Boolean(view.showDone), (el) => el.children(closed.map((r) => card(view, t, r, ctx, true))))
-      .when(Boolean(view.actionNote), (el) => el.child(div().px(4).text_size(11).text_color(t.muted).child(view.actionNote)))
-      .when(Boolean(view.actionError), (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(view.actionError)))
+      .children(noteRows(view, t, false))
       .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n")))));
 }
 
@@ -1811,8 +1828,7 @@ export function runPane(view, t, p) {
           .child("This run is no longer in the harbor. Pin its card again from the overview or the Crew block.")
           .child(actionButton(t, "close-pane", "Close this pane", null, () => closeOwnPane()))
         : div().p(12).text_size(12).text_color(t.dim).child("Reading the run…"))
-      .when(Boolean(view.actionNote), (el) => el.child(div().px(4).text_size(11).text_color(t.muted).child(view.actionNote)))
-      .when(Boolean(view.actionError), (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(view.actionError))));
+      .children(noteRows(view, t, false)));
 }
 
 // The Crew block: the captain and every orchestrator as cards, from their role labels,
@@ -1986,6 +2002,5 @@ export function crew(view, t) {
       .children(rows)
       .when(drifters.length > 0, (el) => el.child(div().flex_none().px(4).pt(6).text_size(10.5).font_semibold().text_color(t.dim).child(`Adrift · ${drifters.length}`)))
       .children(drifters.map(stray))
-      .when(Boolean(view.actionNote), (el) => el.child(div().flex_none().px(4).pt(4).text_size(11).text_color(t.muted).child(view.actionNote)))
-      .when(Boolean(view.actionError), (el) => el.child(div().flex_none().px(4).pt(4).text_size(11).text_color(t.blocked).child(view.actionError))));
+      .children(noteRows(view, t, true)));
 }
