@@ -395,7 +395,7 @@ function commentsAction(view, t, r, att, id) {
   const first = defaultMode(r.autonomy);
   const rows = prs.map((p, i) => {
     const b = botCount(p.comments.bots);
-    const what = `Address ${commentsText({ count: p.comments.count, threads: p.comments.threads, notes: p.comments.notes, bots: {} }) ?? `${b} bot comments`}${p.comments.count > 0 && b ? ` (+${b} from bots)` : ""}${prs.length > 1 || p.number ? ` on #${p.number}` : ""}`;
+    const what = `Address ${commentsText(p.comments)}${p.comments.count > 0 && b ? ` (+${b} from bots)` : ""}${prs.length > 1 || p.number ? ` on #${p.number}` : ""}`;
     const label = div().id(`cmt-${id}-${i}-label`).flex_none().text_size(11.5).text_color(t.muted)
       .tooltip(commentLines([p], 20).join("\n")).child(what);
     if (addressAsked(r, p)) return h_flex().gap(8).items_center().child(label).child(askedNote(t, `cmt-${id}-${i}`));

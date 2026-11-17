@@ -698,7 +698,8 @@ export async function withComments(pr, run, old = null) {
   if (pr.review !== "APPROVED" && pr.review !== "CHANGES_REQUESTED") return pr;
   const args = commentsArgs(pr.url);
   if (!args) return pr;
-  const prev = old?.url === pr.url && old.comments && !old.comments.error ? old.comments : null;
+  // A summary stored before comments were classed (no `threads`) is read again once.
+  const prev = old?.url === pr.url && old.comments && !old.comments.error && old.comments.threads != null ? old.comments : null;
   if (prev && ((pr.updatedAt && prev.updatedAt === pr.updatedAt) || Date.now() - (prev.at ?? 0) < COMMENTS_TTL)) return { ...pr, comments: prev };
   const res = await exec("gh", args, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
   const summary = res?.code === 0 ? commentSummary(json(res.stdout)) : null;

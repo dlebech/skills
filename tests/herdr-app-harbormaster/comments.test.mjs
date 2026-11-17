@@ -21,11 +21,10 @@ const URL = "https://github.com/o/api/pull/1799";
 // A gh graphql answer, as COMMENTS_QUERY asks for it. Everyone is a member unless said otherwise;
 // coderabbitai is a Bot.
 const by = (login) => ({ __typename: login === "coderabbitai" ? "Bot" : "User", login });
-// `rid` names the review a thread was submitted with (its first comment's pullRequestReview).
-const thread = (id, who, body, { rid, ...extra } = {}) => ({ id, isResolved: false, path: "app/X.php", line: 42, originalLine: 40,
-  first: { nodes: [{ author: by(who), authorAssociation: who === "coderabbitai" ? "NONE" : "MEMBER", body, url: `${URL}#discussion_${id}`, pullRequestReview: rid ? { id: rid } : null }] }, last: { nodes: [{ body }] }, ...extra });
+const thread = (id, who, body, extra = {}) => ({ id, isResolved: false, path: "app/X.php", line: 42, originalLine: 40,
+  first: { nodes: [{ author: by(who), authorAssociation: who === "coderabbitai" ? "NONE" : "MEMBER", body, url: `${URL}#discussion_${id}` }] }, last: { nodes: [{ body }] }, ...extra });
 const review = (who, state, body, submittedAt = "2026-11-16T21:39:31Z", extra = {}) =>
-  ({ id: `R-${who}-${state}`, state, body, url: `${URL}#pullrequestreview-${who}`, submittedAt, authorAssociation: "MEMBER", author: by(who), ...extra });
+  ({ state, comments: { totalCount: 0 }, body, url: `${URL}#pullrequestreview-${who}`, submittedAt, authorAssociation: "MEMBER", author: by(who), ...extra });
 const answer = (threads, reviews = [], comments = []) => ({ data: { repository: { pullRequest: {
   author: { login: "me" }, reviewThreads: { nodes: threads }, reviews: { nodes: reviews }, comments: { nodes: comments } } } } });
 
@@ -61,13 +60,12 @@ test("counted: unresolved threads by others and reviewers' review text; not reso
 test("a review submitted with threads is a summary, not counted (the #1372 shape)", () => {
   // Nine threads by the reviewer (one answered), two CodeRabbit threads, and an approval, the
   // review those threads came with, whose text sums them up: 8 threads, +2 from coderabbitai.
-  const rid = "R-mfalkenbrink-APPROVED";
   const s = commentSummary(answer([
-    ...Array.from({ length: 8 }, (_, i) => thread(`M${i}`, "mfalkenbrink", `**S${i + 1}. point**`, { rid })),
-    thread("M8", "mfalkenbrink", "S9", { rid, last: { nodes: [{ body: `${AI_PREFIX} leaving as is: out of scope` }] } }),
+    ...Array.from({ length: 8 }, (_, i) => thread(`M${i}`, "mfalkenbrink", `**S${i + 1}. point**`)),
+    thread("M8", "mfalkenbrink", "S9", { last: { nodes: [{ body: `${AI_PREFIX} leaving as is: out of scope` }] } }),
     thread("C1", "coderabbitai", "**Guard the index.**"),
     thread("C2", "coderabbitai", "**Clamp the zoom.**"),
-  ], [review("mfalkenbrink", "APPROVED", "#1 og #2 bør kigges på før merge")]));
+  ], [review("mfalkenbrink", "APPROVED", "#1 og #2 bør kigges på før merge", undefined, { comments: { totalCount: 9 } })]));
   assert.deepEqual([s.count, s.threads, s.notes, s.answered, s.summaries], [8, 8, 0, 1, 1]);
   assert.deepEqual(s.bots, { coderabbitai: 2 });
   assert.deepEqual(s.items.at(-1), { kind: "summary", who: "mfalkenbrink", text: "#1 og #2 bør kigges på før merge", where: null, thread: null, url: `${URL}#pullrequestreview-mfalkenbrink` });
@@ -97,18 +95,51 @@ test("a review submitted with threads is a summary, not counted (the #1372 shape
 test("the #1799 shape: every thread resolved, a standalone COMMENTED review is the one note, the approval a summary", () => {
   // Fifteen resolved threads, all submitted with the approval; the earlier COMMENTED review has
   // none of its own and holds findings no thread has. Resolved threads appear nowhere.
-  const rid = "R-mfalkenbrink-APPROVED";
   const s = commentSummary(answer(
-    Array.from({ length: 15 }, (_, i) => thread(`M${i}`, "mfalkenbrink", `point ${i}`, { rid, isResolved: true, last: { nodes: [{ body: `${AI_PREFIX} Fixed in 6268` }] } })),
-    [review("mfalkenbrink", "COMMENTED", "S3: de betalte rute-POST'er har ingen throttle", "2026-11-16T21:38:14Z"),
-      review("mfalkenbrink", "APPROVED", "Godkendt. Ingen blokerende fejl")]));
+    Array.from({ length: 15 }, (_, i) => thread(`M${i}`, "mfalkenbrink", `point ${i}`, { isResolved: true, last: { nodes: [{ body: `${AI_PREFIX} Fixed in 6268` }] } })),
+    [review("mfalkenbrink", "COMMENTED", "S3: de betalte rute-POST'er har ingen throttle", "2026-11-16T21:38:14Z", { comments: { totalCount: 0 } }),
+      review("mfalkenbrink", "APPROVED", "Godkendt. Ingen blokerende fejl", undefined, { comments: { totalCount: 15 } })]));
   assert.deepEqual([s.count, s.threads, s.notes, s.answered, s.summaries, s.bots], [1, 0, 1, 0, 1, {}]);
   assert.deepEqual(s.items.map((x) => x.kind), ["note", "summary"]);
   const p = { number: 1799, url: URL, state: "OPEN", review: "APPROVED", approvedBy: ["mfalkenbrink"], changesBy: [], requested: [], comments: s };
   assert.equal(nextStepText(nextStep([p], "peer")), "approved · 1 review note");
   // The note, answered by a 🤖 AI: PR comment after it, stops counting and is listed as answered.
-  const done = commentSummary(answer([], [review("mfalkenbrink", "COMMENTED", "S3: ingen throttle", "2026-11-16T21:38:14Z")], [{ body: `${AI_PREFIX} answered each point`, createdAt: "2026-11-16T22:00:00Z" }]));
+  const done = commentSummary(answer([], [review("mfalkenbrink", "COMMENTED", "S3: the paid route POSTs have no throttle", "2026-11-16T21:38:14Z")], [{ body: `${AI_PREFIX} answered each point`, createdAt: "2026-11-16T22:00:00Z" }]));
   assert.deepEqual([done.count, done.answered, done.items[0].kind], [0, 1, "answered"]);
+});
+
+test("a re-review's body is a summary when the review has comments, even replies in older threads", () => {
+  // The reviewer replied "still not fixed" inside an existing thread (part of this review) and
+  // submitted it with the body "see threads": one concern, one thread, no note.
+  const s = commentSummary(answer([thread("T1", "anna", "**Fix this**")],
+    [review("anna", "CHANGES_REQUESTED", "Still not fixed, see the threads for the details", undefined, { comments: { totalCount: 1 } })]));
+  assert.deepEqual([s.count, s.threads, s.notes, s.summaries], [1, 1, 0, 1]);
+});
+
+test("a bare acknowledgement is a summary; a longer or listed body is a note", () => {
+  const notes = (body) => commentSummary(answer([], [review("anna", "APPROVED", body)])).notes;
+  for (const ack of ["LGTM 👍", "👍", "Looks good", "Approved", "Approved.\n"]) assert.equal(notes(ack), 0, ack);
+  for (const real of ["Looks good, but add a migration first", "LGTM\nAlso: rename the helper", "- rename it", "1. fix it", "```x```"]) assert.equal(notes(real), 1, real);
+});
+
+test("a summary stored before comments were classed is read again, even with the same updatedAt", async () => {
+  let calls = 0;
+  globalThis.__herdrExec = async () => { calls++; return { code: 0, stdout: JSON.stringify(answer([thread("T1", "anna", "rename")])), stderr: "" }; };
+  try {
+    const pr = { url: URL, state: "OPEN", review: "APPROVED", updatedAt: "2026-11-16T10:00:00Z" };
+    const old = { ...pr, comments: { count: 2, bots: {}, answered: 0, items: [{ kind: "review" }], updatedAt: pr.updatedAt, at: Date.now() } };
+    const read = await withComments(pr, {}, old);
+    assert.equal(calls, 1);
+    assert.equal(read.comments.threads, 1);
+    // Classed, it is kept as before.
+    await withComments(pr, {}, read);
+    assert.equal(calls, 1);
+  } finally { delete globalThis.__herdrExec; }
+});
+
+test("the message tells the orchestrator to read the summaries too, and not to resolve", () => {
+  for (const mode of ["ask", "handle"]) assert.match(commentsRequest({ url: URL, number: 1, comments: { count: 0, items: [] } }, mode), /threads, notes and summaries \(a point a review summary makes that no thread covers is answered in that `🤖 AI:` PR comment, as for a note; summaries are not counted\)/);
+  assert.match(commentsRequest({ url: URL, number: 1, comments: { count: 0, bots: { coderabbitai: 1 }, items: [] } }, "ask"), /counts no people's comments \(\+1 from coderabbitai\)/);
 });
 
 test("the count says what it counts: threads, review notes, both, or bots only", () => {
@@ -233,7 +264,7 @@ test("an approved run with comments is in Needs you with the label, its hover sa
   const a = assess(run, { orch: "idle", pr: { list: [pr(1799, "APPROVED", some(2), { reviewedAt: 5000 })], readable: true }, flow: "peer", now });
   assert.equal(a.group, "needs");
   assert.deepEqual(a.reasons.map((r) => [r.key, r.text]), [["approved — merge", "approved · 2 threads"]]);
-  assert.deepEqual(badgeOf(a, true), { label: "approved · 2 threads", tone: "blocked", tip: "Review comments (2):\n  Open threads:\n    anna on a.ts:1: point 1\n    anna on a.ts:2: point 2" });
+  assert.deepEqual(badgeOf(a, true), { label: "approved · 2 threads", tone: "blocked", tip: "Review comments (2 threads):\n  Open threads:\n    anna on a.ts:1: point 1\n    anna on a.ts:2: point 2" });
   assert.ok(rowTip(a, now).includes("    anna on a.ts:2: point 2"));
   // Unknown comments: still Needs you on the approval (that was read), the hover says why.
   const u = assess(run, { orch: "idle", pr: { list: [pr(1799, "APPROVED", { error: "HTTP 502" })], readable: true }, flow: "peer", now });
