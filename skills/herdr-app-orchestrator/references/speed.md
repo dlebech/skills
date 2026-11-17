@@ -26,14 +26,13 @@ syntax or type checks of the files they touched. The full suite runs once on the
 branch, after the last task is merged and before the final review or PR, plus CI. A red full run
 becomes a fix task. Put this in `common.md`'s definition of "done".
 
-## 3. No separate review for T0 tasks
+## 3. No separate review for T0 or small tasks
 
-A task gets no task review only when the plan explicitly marks it `Proof: T0` and you judge it
-wording, docs or config with no change in behaviour. T0 is also the default tier, so the run's
-default or a missing `Proof:` line never skips a review. After its `done` report, verify it as in section 3 step 7 and merge. The final review
-covers it. With `final-review=no`, a run that merged T0 tasks without a task review still gets
-a final review of the branch (`task-review=no` already turns it on); skipping it means asking
-the user, once, at the start (`final-review=no` is honoured only after that answer). Record the choice in `decisions.md`.
+A task gets no task review when the plan marks it `Proof: T0` and you judge it wording, docs or config with no change in behaviour. T0 is also the default tier, so the run's default or a missing `Proof:` line never skips a review.
+
+A small task may also skip its task review when the run's final review is on: under about 50 changed lines in one subsystem, or docs and wording only. Mark it in `plan.md` as `Review: no (small)`.
+
+Either way, verify the `done` report as in section 3 step 7 and merge; the final review covers it. With `final-review=no`, a run that merged such tasks without a task review still gets a final review of the branch (`task-review=no` already turns it on); skipping it means asking the user, once, at the start (`final-review=no` is honoured only after that answer). Record the choice in `decisions.md`.
 
 ## 4. Grunt agents: cheaper models for watching commands
 

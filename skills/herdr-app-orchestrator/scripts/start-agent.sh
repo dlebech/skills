@@ -3,7 +3,7 @@
 #
 # Usage: start-agent.sh --name NAME --cwd DIR --kind KIND --task-file FILE
 #          [--model MODEL] [--shared DIR] [--arg ARG]... [--label K=V]...
-#          [--no-parent] [--accept-trust]
+#          [--no-parent] [--accept-trust] [--allow RULE]... [--print-settings]
 #
 # Claude Code gets its task on the command line, as its initial prompt: hc send
 # pastes, and Claude Code wraps a long paste in <pasted_content>, so a task such as
@@ -20,6 +20,10 @@
 #   --shared   claude only: allow reading and writing this absolute directory
 #              without a permission prompt. Claude is also allowed `hc send`, so
 #              it can report; other kinds have no such restriction
+#   --allow    claude only: one more permission rule for its `permissions.allow`,
+#              repeatable, e.g. --allow 'Bash(git add:*)'. Other kinds ignore it
+#              (with one warning)
+#   --print-settings   claude only: print the --settings JSON and exit, starting nothing
 #   --arg      one extra argument for the agent, repeatable, e.g. --arg --auto
 #   --no-parent        an independent agent, not this terminal's child (a run's
 #              orchestrator, which must outlive the captain that started it)
@@ -42,7 +46,7 @@
 set -uo pipefail
 
 name= cwd= kind= task_file= model= shared= accept_trust= prompt_arg= ready_wait=${START_AGENT_WAIT:-120}
-extra=() labels=() parent=()
+extra=() labels=() parent=() allow=() print_settings=
 while [ $# -gt 0 ]; do
   case $1 in
     --name) name=$2; shift 2 ;;
@@ -55,6 +59,8 @@ while [ $# -gt 0 ]; do
     --label) labels+=(--label "$2"); shift 2 ;;
     --no-parent) parent=(--no-parent); shift ;;
     --accept-trust) accept_trust=1; shift ;;
+    --allow) allow+=("$2"); shift 2 ;;
+    --print-settings) print_settings=1; shift ;;
     *) echo "start-agent.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -65,14 +71,18 @@ fi
 [ -r "$task_file" ] || { echo "cannot read $task_file" >&2; exit 2; }
 task=$(cat "$task_file")
 
+[ "$kind" = claude ] || [ ${#allow[@]} -eq 0 ] ||
+  echo "start-agent.sh: --allow is ignored for kind $kind" >&2
 case $kind in
   claude)
     argv=(claude ${model:+--model "$model"})
     # In --settings, since --add-dir and --allowedTools take every argument after them.
     # additionalDirectories only brings a folder into reach; writing still prompts.
-    settings=$(jq -cn --arg dir "$shared" '{permissions: (if $dir == "" then {allow: ["Bash(hc send:*)"]}
+    extra_allow=$(printf '%s\n' ${allow[@]+"${allow[@]}"} | jq -R . | jq -sc 'map(select(. != ""))')
+    settings=$(jq -cn --arg dir "$shared" --argjson more "$extra_allow" '{permissions: (if $dir == "" then {allow: (["Bash(hc send:*)"] + $more)}
       else {additionalDirectories: [$dir],
-        allow: ["Bash(hc send:*)", "Read(/\($dir)/**)", "Edit(/\($dir)/**)", "Write(/\($dir)/**)"]} end)}')
+        allow: (["Bash(hc send:*)", "Read(/\($dir)/**)", "Edit(/\($dir)/**)", "Write(/\($dir)/**)"] + $more)} end)}')
+    [ -z "$print_settings" ] || { echo "$settings"; exit 0; }
     argv+=(--settings "$settings")
     prompt_arg=1 ;;
   pi) argv=(pi ${model:+--model "$model"}) ;;

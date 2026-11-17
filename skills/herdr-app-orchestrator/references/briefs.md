@@ -8,7 +8,9 @@ Read this before you write the run's `common.md`, a task brief, or the review te
   - when the assigned work is completely finished, including any background jobs it started, run `hc send <your-address> "done: <agent-name>: <one-line result>"`, then end the turn;
   - to ask you something, write the question with its context and options to `shared/<agent-name>-question.md`, run `hc send <your-address> "question: <agent-name>: <that path>"`, then end the turn and wait for the answer; never use an interactive question dialog, even when a skill would;
   - if the work cannot be completed, run `hc send <your-address> "failed: <agent-name>: <reason>"`;
+  - never wait on a real clock longer than a few seconds (a 30-minute stall clock, say): fake or backdate the state instead;
   - long results go in a file in `shared/`, and the message gives its path. Do not start other agents.
+- `--allow` rules: start agents with `start-agent.sh --allow '<rule>'` (claude kind, repeatable) for what `common.md`'s checks need, so they never stop at a prompt: the test command (`Bash(npm test:*)`), a check such as `Bash(herdr-app check:*)`, a sandbox script (`Bash(tests/x/sandbox.sh:*)`), and git on the agent's own branch (`Bash(git add:*)`, `Bash(git commit:*)`, `Bash(git push:*)`). Derive them from those checks, not from a fixed list.
 - one brief per task: scope, acceptance criteria, what other agents are doing in parallel and which files to avoid, decisions already made, and how to measure success. Where quality is measurable (evals, benchmarks), say how to measure before and after and what counts as not regressing.
 - one review template.
 
