@@ -5,6 +5,7 @@
 //   "crew"            the captain, orchestrators and agents adrift, above Herdr's own Agents list
 //   "viewer"          a proof screenshot, opened as an overlay by a click on a thumbnail (viewer.js)
 //   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
+//   "newrun"          the + New run dialog (newrun.js), an overlay
 //   "stats"           where the time goes, tokens, CPU and memory: per run, task and agent, live, and past runs
 // Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute;
 // the crew and the overview also read each crew agent's context size (context.js).
@@ -24,7 +25,8 @@ import { harbor, rail, paneHeader } from "./harbor.js";
 import { statsView } from "./stats.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
 import { observeTelling } from "./telling.js";
-import { parseCommand, runNamed } from "./commands.js";
+import { parseCommand, runNamed, newRunArgs } from "./commands.js";
+import { openNewRun, initNewRun, newRunView } from "./newrun.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
 const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"]);
@@ -35,6 +37,7 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"
 //                                                         "… details" / "… proof" unfold its question / its Proof list
 //   show-stats[:<branch | run dir>]                         open the Stats view (a run: focused on it)
 //   show-overview, show-crew                               open the runs overview, or the Crew block
+//   new-run[:repo=<name or folder> kind=<issue|review|describe> input=<text>]   the + New run dialog (a key binding's command)
 //   close-popup                                            close it
 //   open-run:key=<run key>                                 a toast's click (telling.js) for a run whose
 //                                                         orchestrator is gone: its card, kept open until closed
@@ -111,6 +114,7 @@ async function listen(view, cx) {
       else if (name === "show-stats") showStats(view, arg);
       else if (name === "show-overview") showView("overview", "cards", 560, 900);
       else if (name === "show-crew") showView("crew", "crew", 360, 640);
+      else if (name === "new-run") openNewRun(newRunArgs(arg));
       else if (name === "close-popup") closePopup();
       else if (name === "open-run") showPopup(view, arg, true);
       cx.notify();
@@ -133,6 +137,7 @@ export default class Harbormaster extends View {
     this.redraw = false; // an action ended in a task that could not redraw this view
     this.reply = InputState.new({ placeholder: "Your answer…" });
     this.reply.on("submit", (_e, cx) => submitReply(this, cx));
+    if (role === "newrun") { initNewRun(this, cx); return; }
     if (!DATA_ROLES.has(role)) return;
     // The popup's own copy doesn't listen: a command that closed or replaced the popup would end it.
     if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards" || role === "crew") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
@@ -225,6 +230,7 @@ export default class Harbormaster extends View {
       case "harbor-rail": return rail(this);
       case "harbor-pane": return paneHeader(p);
       case "stats": return statsView(this, t);
+      case "newrun": return newRunView(this, t);
       default: return cards(this, t, this.runs, this.errors, this.decisions);
     }
   }

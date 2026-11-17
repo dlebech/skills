@@ -18,3 +18,17 @@ export function runNamed(runs, name) {
   if (name.startsWith("key=")) return runs.find((x) => x.key === name.slice(4));
   return runs.find((x) => [x.branch, x.dir, x.key, x.localTerminal].includes(name));
 }
+
+// "repo=skills kind=review input=123" → {repo, kind, input}; keys in any order, input= takes the rest
+// (so it may hold spaces and other key=value text).
+export function newRunArgs(arg) {
+  const out = {};
+  let rest = String(arg).trim();
+  for (let m; (m = /^(repo|kind|input)=(.*)$/s.exec(rest));) {
+    if (m[1] === "input") { out.input = m[2]; break; }
+    const [, v = "", tail = ""] = /^(\S*)\s*(.*)$/s.exec(m[2]);
+    if (v) out[m[1]] = v;
+    rest = tail;
+  }
+  return out;
+}

@@ -353,6 +353,12 @@ herdr-app do 'harbormaster.close-popup'
 `show-run` replaces it) and closes itself after a minute if nobody closes it. The commands reach a shown
 Harbormaster that isn't the dialog itself (the Crew block of `harbormaster-main`, or the open overview); with none on screen they do nothing. The dialog is a centered one, not a pointer popup, which has nowhere to appear without a pointer.
 
+## Start a run
+
+`harbormaster.new-run` opens the **New run** dialog (bind it to a key; `harbormaster.new-run:repo=skills kind=review input=123` fills it in). Pick the repository (the focused space's by default, or any open repository space), what to start (issue numbers or URLs, a PR to review, or a description), and edit the profile line (`implementer=sonnet reviewer=opus specialist=opus autonomy=L1`, prefilled with the last one you used). For a review, choose where its comments go: shown as drafts in Herdr (the default), a pending GitHub review only you see, or posted directly (never remembered as a repository's default). Start opens the orchestrator as a new tab in that repository's own space, the way the captain's "Start a run" does (`start-agent.sh --no-parent`, `role=orchestrator`), without the captain and without switching your view. If the skill is missing or Claude Code asks to trust the folder, the dialog says so and what to do. The last profile and each repository's drafts mode are kept in `.newrun.json` in the runs folder.
+
+Review requests (`reviews.js`) come from `gh search prs --review-requested=@me --state=open`, read every few minutes; each knows whether its repository is open here (a one-click review starts in that space with the remembered settings) and whether a live run already reviews it.
+
 ## Parked, resumed, and closed runs
 
 An orchestrator sets `finished` once its work is done, its PRs are up and their CI is green. The run stays open: in every view, in the captain's `runs.sh`, and on the captain's watch. It is **closed** once its orchestrator's terminal is gone, which is when you close its tab.
