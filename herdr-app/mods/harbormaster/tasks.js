@@ -41,3 +41,16 @@ export function planOpen(run) {
   const { done, planned } = taskCounts(run);
   return planned > done;
 }
+
+// Where a task is in its life cycle, from its state words: "planned" | "implement" |
+// "review" | "fix" | "done" | "blocked", or null for a state that names no stage
+// ("validating"). Agrees with taskTone on done, blocked and not started.
+export function taskStage(state) {
+  const tone = taskTone(state);
+  if (tone === "done" || tone === "blocked") return tone;
+  if (!tone) return "planned";
+  if (/\bfix/.test(state)) return "fix";
+  if (/review/.test(state)) return "review";
+  if (/implement|in progress|working|started|coding|building/.test(state)) return "implement";
+  return null;
+}

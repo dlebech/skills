@@ -16,4 +16,6 @@ console.log(JSON.stringify(TIER_TEXT));')
 if [ "$want" != "$got" ]; then
   echo "FAIL: tier texts differ" >&2; echo "SKILL.md: $want" >&2; echo "levels.js: $got" >&2; exit 1
 fi
-echo "pass: 4 tier texts match (SKILL.md = levels.js)"
+# T3 asks for a demo only where one can be recorded (#47): a mod or a CLI may have none.
+case "$got" in *"a guided demo where one can be recorded"*) ;; *) echo "FAIL: T3 text must end with 'a guided demo where one can be recorded'" >&2; exit 1;; esac
+echo "pass: 4 tier texts match (SKILL.md = levels.js), T3 says where one can be recorded"

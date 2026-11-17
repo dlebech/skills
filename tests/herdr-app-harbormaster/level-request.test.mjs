@@ -52,7 +52,7 @@ test("a level request goes to the inbox, shows as pending, and clears when handl
     assert.equal(files.length, 1);
     assert.match(files[0], /^\d{8}T\d{6}Z-\d{3}-harbormaster-level\.message$/);
     const text = readFileSync(join(dir, "inbox", files[0]), "utf8");
-    assert.match(text, /^set proof tier to T2\nAsked from Harbormaster \(was T1\): every task is proved with .*\.\n$/);
+    assert.match(text, /^set proof tier to T2\nAsked from Harbormaster \(was T1\): every claim is proved with .*\.\n$/);
     if (process.env.HM_KEEP_INBOX) copyFileSync(join(dir, "inbox", files[0]), process.env.HM_KEEP_INBOX);
 
     r = await read(dir);

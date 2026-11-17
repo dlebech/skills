@@ -4,7 +4,8 @@
 import { prEntryOf, taskAgents, shownStage, isClosed, isParked, filesFresh } from "./data.js";
 import { orchestratorState, orchestratorsOf, agentStatus, workersOf, needReason } from "./live.js";
 import { assess, prRead, reviewFlow, stalled, ciState } from "./attention.js";
-import { proofRowsOf, proofCounts, gatheringStage, proofSig, proofRead, proofClean } from "./proof.js";
+import { gatheringStage, proofRead } from "./proof.js";
+import { proofState } from "./claims.js";
 import { proofSeenSig } from "./proofseen.js";
 import { stepSince, stepAges, lastActivity, ciUsualOf, reviewFlows } from "./tracking.js";
 import { needLine, needsRun } from "./crewrows.js";
@@ -41,27 +42,24 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
   });
 }
 
-// A run's proof as the box counts it (overview.js needItemsOf: proof.js's rows, a task still
-// under way pending): whether a task failed, whether every task passes, and the signature the
-// user's reading is kept against. Kept per run read (a new read is a new object) and which tasks
-// are still under way, since every poll and the harbor's animation ask again and proof.md can be long.
+// A run's proof as the box counts it (claims.js proofState: by its claims, or an old run by its
+// checks line): whether a claim failed, whether it is clean, and the signature the user's reading
+// is kept against. Kept per run read (a new read is a new object) and which tasks are still under
+// way, since every poll and the harbor's animation ask again and proof.md can be long.
 const proofSeenOf = new WeakMap();
 export function proofStateOf(run, stages = []) {
-  if (!run.proof?.md) return { failed: false, clean: false, sig: "" };
   const under = run.tasks.map((_, i) => (gatheringStage(stages[i]) ? 1 : 0)).join("");
   const seen = proofSeenOf.get(run);
   if (seen?.under === under) return seen.state;
-  const rows = proofRowsOf(run, stages);
-  const c = proofCounts(rows);
-  const state = { failed: c.fail > 0, clean: proofClean(c), sig: proofSig(rows) };
+  const state = proofState(run, stages.length ? stages : null);
   proofSeenOf.set(run, { under, state });
   return state;
 }
 
-// Whether a proof task failed, so the pill and the Crew never say merge over it.
+// Whether a claim (or an old run's checks) failed, so the pill and the Crew never say merge over it.
 export const proofFailed = (run, stages = []) => proofStateOf(run, stages).failed;
 
-// assess()'s proofRead (the user opened this proof as it is now) and proofClean (every task passes).
+// assess()'s proofRead (the user opened this proof as it is now) and proofClean (every claim proven or accepted).
 function proofReadState(run, stages) {
   const { clean, sig } = proofStateOf(run, stages);
   return { proofClean: clean, proofRead: proofRead(proofSeenSig(run), sig) };

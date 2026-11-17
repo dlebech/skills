@@ -8,16 +8,16 @@ Capture evidence that a change works, at the depth a tier asks for, so a reviewe
 
 ## 1. Pick the target and tier
 
-`$ARGUMENTS` is free text: a tier (`T0`–`T3`), optionally `run=<run-directory>` (the orchestrator passes it), and what to prove (a task, a branch, a PR). Default tier `T0`; default target the current branch. In an orchestrator run, take the tier from the task's `Proof:` line in `plan.md`.
+`$ARGUMENTS` is free text: a tier (`T0`–`T3`), optionally `run=<run-directory>` (the orchestrator passes it), and what to prove (a task, a branch, a PR). Default tier `T0`; default target the current branch. In an orchestrator run, take the tier from the task's `Proof:` line in `plan.md`, and find the claims the task serves in its `## Claims` (`C1 <claim> — AC 3 — tasks t1, t3 — bar T3`): each claim's bar is its own `bar`, else the run's `Proof tier:`.
 
 | Tier | Proved with |
 | --- | --- |
 | T0 | passing tests (CI, or the repo's local suite) |
 | T1 | passing tests and their output for the changed behaviour |
 | T2 | passing tests, their output for the changed behaviour, and screenshots or a recording |
-| T3 | passing tests, their output for the changed behaviour, screenshots or a recording, and a guided demo |
+| T3 | passing tests, their output for the changed behaviour, screenshots or a recording, and a guided demo where one can be recorded |
 
-Each row stands alone and is cumulative. Harbormaster shows these texts on hover over a tier tag, as a definition ("Proof tier T2 — proved with …"): they are copied into `herdr-app/mods/harbormaster/levels.js` (`TIER_TEXT`), and `tests/herdr-app-harbormaster/tiers.sh` and `levels.test.mjs` fail when the two differ, so change both together.
+Each row stands alone and is cumulative. As a claim's bar, T2 asks for a screenshot (a clip will do) and T3 for a clip. Harbormaster shows these texts on hover over a tier tag, as a definition ("Proof tier T2 — proved with …"): they are copied into `herdr-app/mods/harbormaster/levels.js` (`TIER_TEXT`), and `tests/herdr-app-harbormaster/tiers.sh` and `levels.test.mjs` fail when the two differ, so change both together.
 
 ## 2. Find where proof goes
 
@@ -39,32 +39,36 @@ A missing tool is never a silent skip: note it in one line in `proof.md` (`T2 sc
 
 ## 4. Write proof.md
 
-One section per task (or one for a plain branch), in this shape. Update the section rather than adding a second one, and set the top `Tier:` to the highest tier of its tasks. Write the `Checks:` line too: `green` or `red`, then what ran (CI or the local suite); Harbormaster shows it in the verdict line.
+In a run whose plan has `## Claims`, proof.md has one section per claim: update the `## C<n>` section of each claim the task serves (add it if it isn't there yet), never a second one. Write the evidence that shows the claim itself, what the user can now do, not just that something ran. Set the top `Tier:` to the run's tier and write the `Checks:` line: `green` or `red`, then what ran on the whole branch (suite, build, lint, CI); Harbormaster shows it as one line under the claims.
 
 ```markdown
 # Proof: <branch>
 Tier: T2
-Checks: green — <what ran>
+Checks: green — 1497 tests, build, lint, CI
 
-## <task id> <task name>
-Tier: T1
-Checked: <what was checked>
+## C1 Drag a card to reorder the list
 Result: pass | fail | partial | pending — <one line>
-Files: shared/proof/<file>, shared/proof/<file>
+Shot: shared/proof/t1-drag.png
+Test: reorder moves the card — pass
+Clip: shared/proof/t3-reorder.mp4
 Ran: <short sha> <command> — <result>
 ```
 
+`Shot:` (a screenshot; comma-separated paths are fine), `Test: <name> — pass|fail` (one test by name) and `Clip:` (a recording, for flows) are repeatable. A claim's result is `pass` only when its evidence meets its bar (a `Shot:` or `Clip:` at T2, a `Clip:` at T3); below it, Harbormaster reads "needs a screenshot" or "needs a clip".
+
+Without claims (a plain branch, or an old run), write one section per task (or one for the branch) instead: `## <task id> <task name>`, then `Tier:`, `Checked: <what was checked>`, `Result:`, `Files: <comma-separated paths>` and `Ran:` lines.
+
 Record every test, lint or build run as a `Ran:` line with the sha it ran against (`git rev-parse --short HEAD`, clean tree); the result is `pass` or `fail: <one line>`. Reuse a line only when its sha is HEAD, or `git diff --quiet <sha> HEAD` (same tree), the tree is clean, and the result starts with `pass`; otherwise rerun.
 
-Use `pending — <why>` only while the task's proof is still being gathered elsewhere (a later task takes its screenshots: `pending — waiting for t4`), and replace it with the real result once it is in; Harbormaster shows a pending task as nothing for the user to do yet.
+Use `pending — <why>` only while the claim's proof is still being gathered elsewhere (a later task takes its screenshots: `pending — waiting for t4`), and replace it with the real result once it is in; Harbormaster shows a pending claim as nothing for the user to do yet.
 
-`Files:` is comma-separated paths only; put notes in `Checked:`. Use `##` only for task sections.
+Paths go on their own lines; put notes in the `Result:` line. Use `##` only for claim (or task) sections.
 
-A `proof-accepted.json` beside `proof.md` records the tasks whose proof the user accepted as it is (from Harbormaster); leave it alone. An acceptance lapses by itself once a task's `Result:` line changes.
+A `proof-accepted.json` beside `proof.md` records the claims the user accepted as they are (from Harbormaster); leave it alone. An acceptance lapses by itself once a claim's `Result:` line changes.
 
 ## 5. The PR's Evidence section
 
-Write `## Evidence` from `proof.md` (its `Checked:` and `Ran:` lines) for a reviewer of the PR. It cites only what they can see or rerun:
+Write `## Evidence` from `proof.md` for a reviewer of the PR, using the same claims: one line per claim (`C1 Drag a card to reorder the list — proven: <what was seen, or the tests by name>`), then the checks line. It cites only what they can see or rerun:
 
 - the checks: CI (linked or named), and the test, lint and build commands they can run, with counts and the commit (say when there is no CI);
 - how to see the change themselves, when that is possible: a command, a sandbox, the URL of a preview deploy, steps in the app;

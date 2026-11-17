@@ -356,7 +356,7 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 //   filesOk   false when the run's files are a stale read (its machine did not answer)
 //   closed    data.js isClosed: a finished run whose tab the user closed waits on nothing
 //   proofFailed  a proof task failed (attend.js): the review-proof step reads "proof failed"
-//   proofRead, proofClean  the user opened the proof as it is now; every task of it passes (attend.js):
+//   proofRead, proofClean  the user opened the proof as it is now; every claim is proven or accepted (attend.js):
 //             together with green or no checks and nothing else needing the user, the run is `ready`
 //   now
 // Returns {group: "needs" | "working" | "waiting" | "cant" | "done", cantTell, why, held (the plan holds

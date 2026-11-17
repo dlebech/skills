@@ -1,5 +1,5 @@
 // Whether the user has read a run's proof: {[run key]: signature} in harbormaster.proofSeen, the
-// signature being proof.js proofSig of the proof as shown when they opened it (the Proof button
+// signature being claims.js proofState's sig of the proof as shown when they opened it (the Proof button
 // of the need box, or the Proof section unfolded in a pane). A changed proof is a new signature,
 // so it reads as unread. Kept apart from telling.js, which imports attend.js, which reads this.
 

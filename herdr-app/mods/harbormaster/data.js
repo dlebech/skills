@@ -17,10 +17,13 @@ import { parseDecidedLines } from "./decided.js";
 import { levelRequest, pendingLevels } from "./levels.js";
 import { tokenText } from "./context.js";
 import { dropCacheArgs } from "./media.js";
-import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, proveRequest, withAcceptance, resultLine } from "./proof.js";
+import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, withAcceptance } from "./proof.js";
+import { parsePlanClaims, claimProveRequest, claimResultLine } from "./claims.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
-import { taskTone, taskCounts } from "./tasks.js";
+import { taskTone, taskCounts, taskStage } from "./tasks.js";
+// taskStage moved to tasks.js (claims.js reads it without herdr); still exported from here.
+export { taskStage };
 export { taskTone, taskCounts };
 import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
 import { blockingRequest, blockingPending, ciRequest } from "./blocking.js";
@@ -284,9 +287,11 @@ function parseRun(machine, chunk) {
     // The PRs an Address comments (comments.js) is still unread for, by URL.
     commentsAsked: pendingComments(requests),
     tasks,
-    // The run's proof: its tier, proof.md's results by task id, and the file names in shared/proof/.
+    // The run's proof: its tier, its claims (plan.md's `## Claims`; [] for an old run), proof.md's
+    // results by claim and task id, and the file names in shared/proof/.
     proof: {
       tier,
+      claims: parsePlanClaims(plan),
       md: /^[+!]/.test(proofFile ?? "") ? { ...parseProofMd(proofFile.slice(1)), cut: proofFile[0] === "!" } : null,
       files: (proofNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
       // Tasks the user accepted as they are (proof-accepted.json), and asks to prove still unread.
@@ -451,18 +456,6 @@ function runTerminals(r, ctx) {
 
 // ---- tasks ----
 
-// Where a task is in its life cycle, from its state words: "planned" | "implement" |
-// "review" | "fix" | "done" | "blocked", or null for a state that names no stage
-// ("validating"). Agrees with taskTone on done, blocked and not started.
-export function taskStage(state) {
-  const tone = taskTone(state);
-  if (tone === "done" || tone === "blocked") return tone;
-  if (!tone) return "planned";
-  if (/\bfix/.test(state)) return "fix";
-  if (/review/.test(state)) return "review";
-  if (/implement|in progress|working|started|coding|building/.test(state)) return "implement";
-  return null;
-}
 
 // The stage an agent works on, from its role in its name: impl-, rev-, fix-, grunt-.
 const ROLE_STAGE = { impl: "implement", rev: "review", fix: "fix", grunt: "implement" };
@@ -884,11 +877,11 @@ export function requestLevel(run, kind, level) {
   return messageRun(run, "harbormaster-level", levelRequest(kind, level, { from, finished: run.phase === "finished" }));
 }
 
-// Asks the orchestrator to finish one task's proof (a Proof row's Ask to prove): an inbox message,
-// "prove t23 to T2: <the result line>", the way a level request is sent. The row reads "asked…"
+// Asks the orchestrator to prove one claim (a Claims row's Ask to prove): an inbox message,
+// "prove C2 to T2: <the result line>", the way a level request is sent. The row reads "asked…"
 // while it is unhandled and the result line is the same.
 export function askProof(run, row) {
-  return messageRun(run, "harbormaster-proof", proveRequest(row, run.proof?.tier?.tier ?? null));
+  return messageRun(run, "harbormaster-proof", claimProveRequest(row));
 }
 
 // Asks the orchestrator of a stalled run what is blocking it (Ask what's blocking on its Crew row
@@ -960,9 +953,9 @@ async function changeAccepted(run, id, entry) {
   throw new Error("proof-accepted.json is being changed elsewhere; try again");
 }
 
-// Accepts a task's proof as it is (a Proof row's Accept), for its current result line only;
-// works with the orchestrator gone, since nothing but this file changes.
-export const acceptProof = (run, row) => changeAccepted(run, row.id, { at: new Date().toISOString(), result: resultLine(row) });
+// Accepts a claim as it is (a Claims row's Accept), for its current result line only; works
+// with the orchestrator gone, since nothing but this file changes.
+export const acceptProof = (run, row) => changeAccepted(run, row.id, { at: new Date().toISOString(), result: claimResultLine(row) });
 // Takes an acceptance back (Unaccept): the row needs a look again.
 export const unacceptProof = (run, row) => changeAccepted(run, row.id, null);
 

@@ -1,5 +1,5 @@
 // t23: after the proof is read, a run that is ready says so and leads to the merge. The proof's
-// signature and read state (proof.js), the ready rule (attention.js assess), the box (needaction.js),
+// signature and read state (claims.js, proof.js), the ready rule (attention.js assess), the box (needaction.js),
 // the views agreeing (Crew lead, pill, toast, parked label) and the Ask for changes message.
 // Run: node --import ./loader.mjs --test t23.test.mjs
 import { test } from "node:test";
@@ -13,7 +13,8 @@ import { assess } from "../../herdr-app/mods/harbormaster/attention.js";
 import { needActions, isPrimary } from "../../herdr-app/mods/harbormaster/needaction.js";
 import { rowLead, rowEdge, badgeOf } from "../../herdr-app/mods/harbormaster/crewrows.js";
 import { parkedLabel, toastParts } from "../../herdr-app/mods/harbormaster/tell.js";
-import { proofTasks, proofCounts, proofSig, proofRead, proofClean, proofGaps, parseProofMd, proofRowsOf } from "../../herdr-app/mods/harbormaster/proof.js";
+import { proofRead, parseProofMd } from "../../herdr-app/mods/harbormaster/proof.js";
+import { claimRows, claimCounts, claimsClean, claimsGaps, claimsSig, parsePlanClaims, proofState } from "../../herdr-app/mods/harbormaster/claims.js";
 import { nextProofSeen } from "../../herdr-app/mods/harbormaster/proofseen.js";
 import { proofStateOf } from "../../herdr-app/mods/harbormaster/attend.js";
 import { changesRequest, changesPending, CHANGES } from "../../herdr-app/mods/harbormaster/changes.js";
@@ -35,34 +36,35 @@ const pr = (o = {}) => ({
 const read = (list) => ({ list, readable: true, why: null });
 const at = (r, list, o = {}) => assess(r, { orch: "idle", working: false, pr: read(list), now, proofRead: true, proofClean: true, ...o });
 
-const md = (second = "pass — fine") => parseProofMd(`Tier: T1\n\n## t1 a\nResult: pass — tests\n\n## t2 b\nResult: ${second}\n`);
-const rowsOf = (m, extra = {}) => proofTasks([done("t1"), done("t2")], m, null, extra);
+const md = (second = "pass — fine") => parseProofMd(`Tier: T1\n\n## C1 a\nResult: pass — tests\n\n## C2 b\nResult: ${second}\n`);
+const CLAIMS = parsePlanClaims("## Claims\nC1 a — tasks t1\nC2 b — tasks t2\n");
+const proofOf = (m, extra = {}) => ({ tier: { tier: 1 }, claims: CLAIMS, md: m, files: [], accepted: {}, asks: new Map(), ...extra });
+const rowsOf = (m, extra = {}) => claimRows(proofOf(m, extra), { tasks: [done("t1"), done("t2")] });
 
 test("a proof's signature changes with a result or a file, and 'read' needs the same signature", () => {
-  const a = proofSig(rowsOf(md()));
-  assert.equal(a, proofSig(rowsOf(md())));
-  assert.notEqual(a, proofSig(rowsOf(md("partial — one shot missing"))));
+  const a = claimsSig(rowsOf(md()));
+  assert.equal(a, claimsSig(rowsOf(md())));
+  assert.notEqual(a, claimsSig(rowsOf(md("partial — one shot missing"))));
   assert.equal(proofRead(a, a), true);
   assert.equal(proofRead(null, a), false);
-  assert.equal(proofRead(a, proofSig(rowsOf(md("partial — x")))), false);
+  assert.equal(proofRead(a, claimsSig(rowsOf(md("partial — x")))), false);
   // No proof is never read.
   assert.equal(proofRead("", ""), false);
   // Accepting a row does not change what was read.
   const partial = md("partial — x");
   const line = rowsOf(partial)[1];
-  assert.equal(proofSig(rowsOf(partial)), proofSig(rowsOf(partial, { accepted: { t2: { result: "partial — x" } } })));
+  assert.equal(claimsSig(rowsOf(partial)), claimsSig(rowsOf(partial, { accepted: { C2: { result: "partial — x" } } })));
   assert.ok(line);
 });
 
-test("proofClean: every task passes (or was accepted); gaps say what is missing", () => {
-  assert.equal(proofClean(proofCounts(rowsOf(md()))), true);
-  const partial = proofCounts(rowsOf(md("partial — x")));
-  assert.equal(proofClean(partial), false);
-  assert.equal(proofGaps(partial), "1/2 pass, 1 partial");
-  assert.equal(proofClean(proofCounts(rowsOf(md("partial — x"), { accepted: { t2: { result: "partial — x" } } }))), true);
-  assert.equal(proofGaps(proofCounts(rowsOf(md()))), null);
-  assert.equal(proofClean(proofCounts([])), false);
-  assert.equal(proofGaps(proofCounts(rowsOf(md("pending — still going")))), "1/2 pass, 1 pending");
+test("clean: every claim proven (or accepted); gaps say what is missing", () => {
+  assert.equal(claimsClean(claimCounts(rowsOf(md()))), true);
+  const partial = rowsOf(md("partial — x"));
+  assert.equal(claimsClean(claimCounts(partial)), false);
+  assert.equal(claimsGaps(partial), "1 of 2 proven, not yet: b");
+  assert.equal(claimsClean(claimCounts(rowsOf(md("partial — x"), { accepted: { C2: { result: "partial — x" } } }))), true);
+  assert.equal(claimsGaps(rowsOf(md())), null);
+  assert.equal(claimsClean(claimCounts([])), false);
 });
 
 test("a run is ready only with every condition: step, proof read and clean, green or no checks, nothing else open", () => {
@@ -196,10 +198,8 @@ test("accepted rows are said as accepted, in the ready line and in the gaps", ()
   const list = [pr()];
   const [it] = needActions(at(run(), list), ctxFor(run(), list, { proof: { tier: 1, pass: 1, total: 2, fail: 0, accepted: 1, gaps: null } }));
   assert.equal(it.detail, "All 2 tasks done · proof 1/2 pass · 1 accepted · checks green");
-  const c = proofCounts(rowsOf(md("partial — x"), { accepted: { t2: { result: "partial — x" } } }));
+  const c = claimCounts(rowsOf(md("partial — x"), { accepted: { C2: { result: "partial — x" } } }));
   assert.equal(c.accepted, 1);
-  const open = proofCounts(rowsOf(md("partial — x")));
-  assert.equal(proofGaps({ ...open, accepted: 1 }), "1/2 pass · 1 accepted, 1 partial");
 });
 
 test("a listed task not done keeps a finished run from being ready, and the line says so", () => {
@@ -227,13 +227,22 @@ test("an unread Ask for changes: not ready, Merge plain, pill and Crew lead say 
 });
 
 test("the sig written when the proof is opened is the sig the ready check reads", () => {
-  const r = run({ proof: { tier: null, md: md(), files: [], accepted: {} } });
+  const r = run({ proof: proofOf(md()) });
   const stages = ["done", "done"];
-  const written = proofSig(proofRowsOf(r, stages));
+  const written = proofState(r, stages).sig;
+  assert.equal(written, claimsSig(rowsOf(md())));
   const state = proofStateOf(r, stages);
   assert.equal(state.sig, written);
   assert.equal(state.clean, true);
   // With it stored, the run is ready; without it, not.
   assert.equal(at(r, [pr()], { proofRead: proofRead(written, state.sig), proofClean: state.clean }).ready, true);
   assert.equal(at(r, [pr()], { proofRead: proofRead(null, state.sig), proofClean: state.clean }).ready, false);
+});
+
+test("an old run (no claims) is judged by its checks line alone: green is clean, red failed", () => {
+  const old = (checks) => run({ proof: { tier: null, claims: [], md: parseProofMd(`${checks}## t1 a\nResult: fail — x\n`), files: [], accepted: {} } });
+  assert.deepEqual(proofStateOf(old("Checks: green — 12 tests\n"), ["done", "done"]), { failed: false, clean: true, sig: "checks|green|12 tests" });
+  assert.deepEqual(proofStateOf(old("Checks: red — lint\n"), ["done", "done"]), { failed: true, clean: false, sig: "checks|red|lint" });
+  // Nothing to read: never ready by its proof.
+  assert.deepEqual(proofStateOf(old(""), ["done", "done"]), { failed: false, clean: false, sig: "" });
 });

@@ -12,7 +12,8 @@ import { proofFailed } from "../../herdr-app/mods/harbormaster/attend.js";
 import { summaryOf } from "../../herdr-app/mods/harbormaster/statsdata.js";
 import { buildLine } from "../../herdr-app/mods/harbormaster/history.js";
 import { taskCounts, stats } from "../../herdr-app/mods/harbormaster/data.js";
-import { segmentLook, parseProofMd } from "../../herdr-app/mods/harbormaster/proof.js";
+import { parseProofMd } from "../../herdr-app/mods/harbormaster/proof.js";
+import { parsePlanClaims } from "../../herdr-app/mods/harbormaster/claims.js";
 import { parseQuestion } from "../../herdr-app/mods/harbormaster/question.js";
 
 const MIN = 60000;
@@ -70,12 +71,16 @@ test("toasts word the step as the pill does: red CI, a draft", () => {
 });
 
 test("a failing proof: no view says merge, as the box says to read it first", () => {
-  const md = parseProofMd("Tier: T1\n\n## t1 core\nResult: pass — tests\n\n## t2 polish\nResult: fail — the shot is blank\n");
+  const md = parseProofMd("Tier: T1\n\n## C1 core\nResult: pass — tests\n\n## C2 polish\nResult: fail — the shot is blank\n");
+  const claims = parsePlanClaims("## Claims\nC1 core — tasks t1\nC2 polish — tasks t2\n");
   const tasks = [{ id: "t1", name: "core", state: "done" }, { id: "t2", name: "polish", state: "done" }];
-  const failing = run({ tasks, proof: { md, files: null, accepted: {} } });
+  const failing = run({ tasks, proof: { md, claims, files: null, accepted: {} } });
   assert.equal(proofFailed(failing), true);
   // Accepted, it is not a fail; under way again, a fail still is (as the box counts it).
-  assert.equal(proofFailed({ ...failing, proof: { md, files: null, accepted: { t2: { result: "fail — the shot is blank" } } } }), false);
+  assert.equal(proofFailed({ ...failing, proof: { md, claims, files: null, accepted: { C2: { result: "fail — the shot is blank" } } } }), false);
+  // An old run (no claims) fails only on red checks.
+  assert.equal(proofFailed(run({ tasks, proof: { md, claims: [], files: null, accepted: {} } })), false);
+  assert.equal(proofFailed(run({ tasks, proof: { md: parseProofMd("Checks: red — lint\n"), claims: [], files: null, accepted: {} } })), true);
   assert.equal(proofFailed({ ...failing, phase: "running", tasks: [tasks[0], { ...tasks[1], state: "implementing" }] }, ["done", "implementing"]), true);
   assert.equal(proofFailed(run({ tasks })), false);
   const a = at(run(), [pr()], { proofFailed: true });
@@ -160,15 +165,6 @@ test("failing checks are red on a live run, dim on a parked one", () => {
   const p = [pr({ checks: red })];
   assert.deepEqual(prFacts(p).find((x) => /failing/.test(x.text ?? "")).tone, "blocked");
   assert.deepEqual(prFacts(p, { away: true }).find((x) => /failing/.test(x.text ?? "")).tone, "dim");
-});
-
-test("the task strip: amber only for proof wanting a look, done keeps its colour with a pass mark", () => {
-  assert.deepEqual(segmentLook(null), { color: "stage", mark: null });
-  assert.deepEqual(segmentLook("pass"), { color: "stage", mark: "pass" });
-  assert.deepEqual(segmentLook("accepted"), { color: "stage", mark: "pass" });
-  assert.deepEqual(segmentLook("fail"), { color: "blocked", mark: null });
-  assert.deepEqual(segmentLook("partial"), { color: "amber", mark: null });
-  assert.deepEqual(segmentLook("unchecked"), { color: "amber", mark: null });
 });
 
 test("## Recommended may give its option's number with a comma", () => {

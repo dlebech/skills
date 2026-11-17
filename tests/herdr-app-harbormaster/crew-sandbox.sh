@@ -44,7 +44,11 @@
 #   red-ci        finished, cli/cli#14927 (a public PR with a failing check) -> red CI, then
 #                 review proof → merge
 #   review-proof  finished, dlebech/wapi-beatbox#1, proof.md T2 1/2 pass  -> review proof → merge
-#   no-shot       finished, no PR, proof T2: t2 "pass" with only a .txt  -> its Proof pill "no screenshot", amber
+#   no-shot       finished, no PR, an old run's proof.md (task sections, no claims) with a Checks line
+#                                                                         -> its pane's Claims section is just the checks line
+#   claims-run    running, t1 merged, t2 implementing; plan.md's ## Claims (4, tier T2, C4 bar T3) and
+#                 proof.md's C1 proven (2 shots, 2 tests), C2 a pass without a shot, C4 failed, C3 still
+#                 being proved                                           -> Claims "1 of 4 proven · not yet: …" (#47)
 #   report-run    finished, no PR, shared/final-report.md (+ t1-report.md) -> finished — read and close
 #   asks-question running, question.md with Options, Recommended and Blocks -> a question box
 #   asks-and-pr   finished plan (2/2), open self-flow PR dlebech/wapi-beatbox#1 with proof, and a
@@ -199,6 +203,15 @@ make_runs() {
   mkrun no-shot finished feat "No shot" "${day}T07:30:00Z" 2/2 merged merged --progress "proof written"
   printf '# Proof: no-shot\nTier: T2\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\nFiles: shared/proof/t1.txt\n\n## t2 polish\nTier: T2\nChecked: the hover card, by screenshot\nResult: pass — it looks right\nFiles: shared/proof/t2.txt\n' >"$S/runs/skills/no-shot/proof.md"
   mkdir -p "$S/runs/skills/no-shot/shared/proof" && echo ok >"$S/runs/skills/no-shot/shared/proof/t1.txt" && echo ok >"$S/runs/skills/no-shot/shared/proof/t2.txt"
+  sed -i '2a Checks: green — 120 tests, lint' "$S/runs/skills/no-shot/proof.md"
+  # Proof as claims (#47): claims written at plan time, filled in as tasks merge.
+  local cr=$S/runs/skills/claims-run
+  mkrun claims-run running feat "Claims run" "${day}T09:00:00Z" 1/2 merged implementing --progress "t2 implementing"
+  printf '\nProof tier: T2\n\n## Claims\n- C1 Drag a card to reorder the list — AC 3 — tasks t1\n- C2 The new order is saved across restarts — AC 4 — tasks t1\n- C3 Undo puts the card back — AC 5 — tasks t2\n- C4 A guided tour of reordering — AC 6 — tasks t1 — bar T3\n' >>"$cr/plan.md"
+  mkdir -p "$cr/shared/proof"
+  convert -size 640x400 xc:'#22324a' -fill '#e8eef7' -pointsize 34 -annotate +40+200 'Card dragged to row 2' "$cr/shared/proof/t1-drag.png"
+  convert -size 640x400 xc:'#2a3d2f' -fill '#e8f7ea' -pointsize 34 -annotate +40+200 'Dropped: order 2, 1, 3' "$cr/shared/proof/t1-drop.png"
+  printf '# Proof: claims-run\nTier: T2\nChecks: green — 1497 tests, build, lint, CI\n\n## C1 Drag a card to reorder the list\nResult: pass — dragging moves the card\nShot: shared/proof/t1-drag.png, shared/proof/t1-drop.png\nTest: reorder moves the card — pass\nTest: reorder keeps focus — pass\n\n## C2 The new order is saved across restarts\nResult: pass — 2 tests\nTest: order persists — pass\nTest: order survives a reload — pass\n\n## C4 A guided tour of reordering\nResult: fail — the tour stops at step 2\nTest: tour reaches the end — fail\n' >"$cr/proof.md"
   mkrun report-run finished rev "Report run" "${day}T05:00:00Z" 2/2 merged merged --progress "review written"
   printf '# Review report\n\nAll good.\n' >"$S/runs/skills/report-run/shared/final-report.md"
   printf '# t1 report\n\nA task'"'"'s own report: never the run'"'"'s.\n' >"$S/runs/skills/report-run/shared/t1-report.md"

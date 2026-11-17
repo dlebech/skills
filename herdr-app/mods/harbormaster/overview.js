@@ -8,7 +8,7 @@ import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, wo
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
-import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, segmentLook, proofCounts, proofRowParts, needsLook, resultLine, resultPill, pendingLine, gatheringStage, proofSig, proofGaps, proofRowsOf } from "./proof.js";
+import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, worthALook, hasClaims, proofState, withSaid } from "./claims.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { setNote, noteText } from "./note.js";
@@ -135,41 +135,16 @@ function stageSummary(stages) {
     .filter(([, n]) => n > 0).map(([s, n]) => `${n} ${STAGE[s].label.toLowerCase()}`).join(" · ");
 }
 
-// Each of r.tasks' proof on the tasks bar, in plan.md's order: {tone, text} (proof.js
-// proofTone), or null while proof has nothing to say. All null for a run without proof.
-// `stages` is stagesOf()'s, for whether a task is done: only a done task can be "not checked".
-function taskProof(r, stages) {
-  const none = r.tasks.map(() => null);
-  if (!hasProof(r)) return none;
-  const rows = proofRows(r, stages);
-  const finished = isFinished(r);
-  return none.map((_, i) => {
-    const tone = proofTone(rows[i], finished, taskDone(r, stages, i));
-    return tone ? { tone, text: proofToneText(tone, rows[i]) } : null;
-  });
-}
-// Whether r.tasks[i] is done: by its stage (stagesOf()), else its plan.md state.
-function taskDone(r, stages, i) {
-  const stage = stages?.[i]?.stage;
-  return stage ? stage === "done" : taskTone(r.tasks[i].state) === "done";
-}
-// One segment per planned task, hover for its name, stage and proof, and how many are done
-// and under way below it; only for runs that plan at least one. Its stage colours it; a proof
-// that failed turns it red, one that wants a look (partial, no screenshot or, once the run is
-// finished, not checked) amber, and a passed one keeps done's colour with a green underline
-// (proof.js segmentLook). The one task bar: the Proof section has none of its own.
+// One segment per planned task, coloured by its stage, hover for its name and stage, and how
+// many are done and under way below it; only for runs that plan at least one. Proof is told by
+// claims (the Claims section), not per task.
 function taskStrip(t, r, counts, stages, names = true) {
-  const proof = taskProof(r, stages);
   return v_flex().gap(5)
     .child(h_flex().gap(3).h(6).children(Array.from({ length: counts.planned }, (_, i) => {
       const task = r.tasks[i];
-      const p = proof[i] ?? null;
-      const look = segmentLook(p?.tone);
-      const color = look.color === "blocked" ? t.blocked : look.color === "amber" ? AMBER(t)
-        : task ? taskColor(t, task, stages[i].stage) : i < counts.done ? t.done : t.border;
+      const color = task ? taskColor(t, task, stages[i].stage) : i < counts.done ? t.done : t.border;
       return div().id(`seg-${r.key}-${i}`).flex_1().h_full().rounded(3).bg(color)
-        .when(look.mark === "pass", (el) => el.border_b(2).border_color(PASS(t)))
-        .when(Boolean(task), (el) => el.tooltip([[task.id, task.name].filter(Boolean).join(" "), stageText(task, stages[i].stage), p?.text].filter(Boolean).join(" · ")))
+        .when(Boolean(task), (el) => el.tooltip([[task.id, task.name].filter(Boolean).join(" "), stageText(task, stages[i].stage)].filter(Boolean).join(" · ")))
         // An agent is at it: a light edge, still (see statusDot for why not a pulse).
         .when(Boolean(task) && pulse(stages[i].stage, task), (el) => el.border(1).border_color(t.foreground + "88"));
     })))
@@ -618,15 +593,23 @@ function cardHeader(view, t, r, f, meta) {
 const badgeColor = (t, f) => (f.badge.ready ? PASS(t) : f.need ? "blocked" : f.badge.tone);
 
 // What a run needs you for (needaction.js needActions), with this render's attention: its
-// proof's pass count and its reports, for the lines that point at them.
+// proof and its reports, for the lines that point at them.
 export function needItemsOf(r, ctx, att = attOf(r, ctx)) {
   if (att?.group !== "needs") return [];
-  const rows = hasProof(r) ? proofRows(r, stagesOf(r, ctx)) : null;
-  const failed = rows?.find((k) => k.scoped && !k.accepted && !k.pending && k.result === "fail");
-  const c = rows ? proofCounts(rows) : null;
-  const proof = rows ? { tier: r.proof.tier?.tier ?? null, pass: c.pass, fail: c.fail, accepted: c.accepted, total: rows.filter((k) => k.scoped).length, gaps: proofGaps(c),
-    failed: failed ? [failed.id, failed.name].filter(Boolean).join(" ") : null } : null;
-  return needActions(att, { run: r, prs: prsOf(r) ?? [], now: Date.now(), proof, reports: (r.reports ?? []).map((n) => `shared/${n}`) });
+  return needActions(att, { run: r, prs: prsOf(r) ?? [], now: Date.now(), proof: needProof(r, stagesOf(r, ctx)), reports: (r.reports ?? []).map((n) => `shared/${n}`) });
+}
+
+// A run's proof in the shape needActions takes ({tier, pass, total, fail, failed, accepted,
+// gaps}): a claim proven is a pass, and the failed one is named by its words. An old run has only
+// its checks line: red is its one failure, else there is nothing to read (null).
+function needProof(r, stages) {
+  const tier = r.proof.tier?.tier ?? null;
+  if (!hasClaims(r)) return r.proof.md?.checks?.state === "red" ? { tier, pass: 0, total: 0, fail: 1, failed: "the checks", gaps: "checks red" } : null;
+  const rows = claimRowsOf(r, stages);
+  const c = claimCounts(rows);
+  const failed = rows.find((k) => k.state === "fail");
+  return { tier, pass: c.proven, fail: c.fail, accepted: c.accepted, total: c.total,
+    gaps: claimsGaps(rows, r.proof.md), failed: failed ? `${failed.id} ${failed.name}` : null };
 }
 
 // One of a need item's buttons (needaction.js action kinds). `where` is "card" or "pane": the
@@ -648,7 +631,7 @@ function needButton(view, t, r, f, x, id, where, primary) {
     case "report": return pathLink(t, r, id, x.path, x.label);
     case "close": return actionButton(t, id, x.label, ACTION.close.tip, confirm("close"), primary);
     case "resume": return actionButton(t, id, x.label, ACTION.resume.tip, confirm("resume"), primary);
-    case "proof": return actionButton(t, id, x.label, where === "pane" ? "Show the Proof section, its first row to look at unfolded" : "Open this run's pane with its Proof unfolded", (cx) => {
+    case "proof": return actionButton(t, id, x.label, where === "pane" ? "Show every claim, the first worth a look unfolded" : "Open this run's pane with its claims unfolded", (cx) => {
       // Opening it is reading it: the box then says what to do next (needaction.js).
       markProofRead(r);
       if (where !== "pane") {
@@ -656,8 +639,7 @@ function needButton(view, t, r, f, x, id, where, primary) {
         return;
       }
       view.folds ??= new Map(); view.folds.set(`pf-${r.key}`, true);
-      const rows = proofRows(r, stagesOf(r, facts()));
-      const k = rows.find((y) => needsLook(y, isFinished(r))) ?? rows.find((y) => y.pending) ?? rows[0];
+      const k = firstToOpen(r, stagesOf(r, facts()));
       if (k) { view.proofRows ??= new Set(); view.proofRows.add(`${r.key}-${k.id}`); }
       cx.notify();
     }, primary);
@@ -667,7 +649,13 @@ function needButton(view, t, r, f, x, id, where, primary) {
 }
 
 // Marks the run's proof, as it shows now, as read (proofseen.js).
-const markProofRead = (r) => markProofSeen(r, proofSig(proofRows(r, stagesOf(r, facts()))));
+const markProofRead = (r) => markProofSeen(r, proofState(r, stageNames(r, stagesOf(r, facts()))).sig);
+
+// The claim the Proof button unfolds: the first worth a look, else the first still being proved.
+const firstToOpen = (r, stages) => {
+  const rows = claimRowsOf(r, stages);
+  return rows.find(worthALook) ?? rows.find((k) => k.state === "pending") ?? null;
+};
 
 // Ask for changes on a ready run: opens the Reply field under the box; Enter writes the text to the
 // run's inbox as "changes asked from Harbormaster: …" and wakes the orchestrator (submitReply).
@@ -862,7 +850,7 @@ function card(view, t, r, ctx, compact = false) {
   const focus = () => orch !== "gone" && focusAgent(r.terminal);
   const facts = factsLine(t, r, prs, 12.5, f.att);
   // Not on a finished or put-away run's smaller card; a live card shows it even when narrow.
-  const proof = r.phase !== "finished" && !r.away ? proofSummary(t, r) : null;
+  const proof = r.phase !== "finished" && !r.away ? claimsSummary(t, r) : null;
   // A stalled run's Ask what's blocking is in its need box.
   const blocking = need ? null : blockingAction(view, t, r, f.att, `card-${r.key}`);
   const comments = addressRows(view, t, r, ctx, f, `card-${r.key}`);
@@ -878,7 +866,7 @@ function card(view, t, r, ctx, compact = false) {
     .when(Boolean(blocking), (el) => el.child(h_flex().child(blocking)))
     .when(Boolean(comments), (el) => el.child(comments))
     .when(Boolean(proof), (el) => el.child(h_flex().id(`proof-${r.key}`).flex_wrap().items_center().gap(6).px(2).text_size(11.5).when(Boolean(proof.tip), (e) => e.tooltip(proof.tip))
-      .child(div().flex_none().text_size(11).font_semibold().text_color(t.dim).child("Proof"))
+      .child(div().flex_none().text_size(11).font_semibold().text_color(t.dim).child("Claims"))
       .child(h_flex().flex_wrap().items_center().children(joined(t, proof.parts)))))
     .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts, f.stages)))
     .when(links.length > 0, (el) => el.child(h_flex().flex_wrap().gap(6).children(links)))
@@ -941,67 +929,32 @@ function factsLine(t, r, prs, size = 13, att = null) {
 const progressLine = (t, r, att = null) => div().text_size(11.5).text_color(t.muted)
   .child(att?.step?.text === r.progress && r.phase !== "finished" && !r.away ? stepText(att.step) : r.progress);
 
-// The proof verdict as coloured parts, from plan.md's Proof lines and proof.md:
-// "T2 · 20/20 pass · checks green", with failures red and what is missing amber. Null for a run
-// planned before proof lines existed. Merge danger is the PR's, not repeated here. Proof still
-// being gathered (proof.js isPending) is one dim "N pending", so it doesn't read as a problem.
-// `stages` is stagesOf()'s (null: by plan.md's states), for which tasks are done.
-function proofSummary(t, r, stages = null) {
-  const { tier, md } = r.proof;
-  if (!hasProof(r)) return null;
-  const rows = proofRows(r, stages);
-  const scoped = rows.filter((k) => k.scoped);
-  const { pass, fail, partial, pending, unchecked, missing, unscoped, accepted } = proofCounts(rows);
-  const finished = isFinished(r);
-  const checks = md?.checks?.state;
-  const parts = [
-    tier && { text: `T${tier.tier}` },
-    scoped.length > 0 && { text: `${pass}/${scoped.length} pass`, color: pass + accepted === scoped.length ? PASS(t) : null, bold: true },
-    accepted > 0 && { text: `${accepted} accepted`, color: t.muted },
-    pending > 0 && { text: `${pending} pending`, color: t.dim },
-    fail > 0 && { text: `${fail} fail`, color: t.blocked },
-    // A pass without a screenshot is one of the partials: one task, said once (proof.js proofVerdict does too).
-    partial > 0 && { text: `${partial} partial${missing > 0 ? ` (${missing} without a screenshot)` : ""}`, color: AMBER(t) },
-    partial === 0 && missing > 0 && { text: `${plural(missing, "task")} without a screenshot`, color: AMBER(t) },
-    unchecked > 0 && (pass + fail + partial + accepted + pending > 0 || md) && { text: `${unchecked} not checked`, color: finished ? AMBER(t) : t.dim },
-    unscoped > 0 && { text: `${unscoped} not scoped`, color: AMBER(t) },
-    md?.cut && { text: "proof.md cut", color: t.dim },
-    checks && { text: `checks ${checks}`, color: checks === "green" ? PASS(t) : checks === "red" ? t.blocked : t.dim },
-  ].filter(Boolean);
-  if (parts.length === 0) return null;
-  const tip = tier ? `${tierTip(tier.tier)}${unscoped ? `\n${plural(unscoped, "task")} not scoped` : ""}` : null;
-  return { parts, rows, scoped, finished, tip };
+// The claims verdict (claims.js claimsVerdict) as coloured parts, for the card and the Claims
+// section's fold line; an old run (no claims) has only its red checks, if any. Null when there is
+// nothing to say. `stages` is stagesOf()'s (null: by plan.md's states).
+function claimsSummary(t, r, stages = null) {
+  const color = { pass: PASS(t), fail: t.blocked, amber: AMBER(t), muted: t.muted, dim: t.dim };
+  const paint = (p) => ({ text: p.text, bold: p.bold, color: p.tone ? color[p.tone] : null });
+  if (!hasClaims(r)) {
+    const red = r.proof.md?.checks?.state === "red" ? checksLine(r.proof.md) : null;
+    return red ? { parts: [paint(red)], tip: red.tip } : null;
+  }
+  const rows = claimRowsOf(r, stages);
+  const v = claimsVerdict(rows, { tier: r.proof.tier?.tier, md: r.proof.md });
+  return { parts: v.parts.map(paint), rows, tip: v.tip || null };
 }
 
-// Whether the run has proof to show at all (a tier, proof.md or any task's Proof line).
-const hasProof = (r) => Boolean(proofVerdict({ tier: r.proof.tier, md: r.proof.md, tasks: r.tasks, danger: null, shotFiles: r.proof.files }));
-
-// What was clicked on a Proof row (Accept, Unaccept, Ask to prove) and not read back from the run's
-// files yet, by "<run key>:<task id>": {kind, line, at}. Shared by the pane and the card, so both
-// show it at once; each note goes once the files show it, or after 15 s.
+// What was clicked on a claim row (Accept, Unaccept, Ask to prove) and not read back from the
+// run's files yet (claims.js withSaid). Shared by the pane and the card, so both show it at once.
 const said = new Map();
-const SAID_FOR = 15000;
 
 const isFinished = (r) => r.phase === "finished" || Boolean(r.away);
 
-// The run's proof rows (proof.js proofTasks), with the user's acceptances and asks, and the clicks
-// the files don't show yet. A row is pending while its task is under way (planned, implementing,
-// in review, fixing: by `stages` when given, else plan.md's states), never while blocked or done;
-// a task proof.md has but plan.md doesn't counts as done.
-function proofRows(r, stages = null) {
-  const rows = proofRowsOf(r, r.tasks.map((x, i) => stages?.[i]?.stage ?? taskStage(x.state)));
-  for (const k of rows) {
-    const key = `${r.key}:${k.id}`, s = said.get(key);
-    if (!s) continue;
-    const shown = s.kind === "accept" ? r.proof.accepted?.[k.id]?.result === s.line
-      : s.kind === "unaccept" ? !r.proof.accepted?.[k.id] : r.proof.asks?.get(k.id) === s.line;
-    if (shown || Date.now() - s.at > SAID_FOR || resultLine(k) !== s.line) { said.delete(key); continue; }
-    if (s.kind === "accept") { k.accepted = { at: new Date(s.at).toISOString(), result: s.line }; k.asked = false; }
-    else if (s.kind === "unaccept") k.accepted = null;
-    else k.asked = true;
-  }
-  return rows;
-}
+// Each task's stage name from stagesOf()'s, or null for none (claims.js falls back to plan.md's states).
+const stageNames = (r, stages) => (stages ? r.tasks.map((_, i) => stages[i]?.stage ?? null) : null);
+
+// The run's claims (claims.js claimRows) with the clicks its files don't show yet.
+const claimRowsOf = (r, stages = null) => withSaid(claimRows(r.proof, r, stageNames(r, stages), isFinished(r)), said, r.key, r.proof);
 
 // ---- one run on its own, as the pane pinned beside its orchestrator ----
 
@@ -1048,17 +1001,8 @@ function prDetail(t, pr, i, related = false, away = false) {
 
 // ---- proof ----
 
-// The colour of a result pill (proof.js resultPill's tone).
-const PILL_COLOR = { pass: PASS, fail: (t) => t.blocked, partial: AMBER, amber: AMBER, dim: () => "dim", muted: () => "muted", other: (t) => t.border };
-const rowPill = (t, k, finished) => {
-  const p = resultPill(k, finished);
-  const el = pill(t, p.text, PILL_COLOR[p.tone](t));
-  return p.tip ? el.tooltip(p.tip) : el;
-};
-
-// A tier as a small tag, "T2"; `tip` says what it is.
-const tierTag = (t, id, tier, tip) => div().id(id).flex_none().text_size(10).font_semibold().px(5).rounded(4)
-  .bg(t.raised).text_color(t.muted).tooltip(tip).child(`T${tier}`);
+// The colour of a claim's pill (claims.js claimPill's tone).
+const PILL_COLOR = { pass: PASS, fail: (t) => t.blocked, amber: AMBER, dim: () => "dim", muted: () => "muted" };
 
 // ---- the run's level tags ----
 
@@ -1126,7 +1070,7 @@ function levelTag(view, t, r, kind, id, short = false) {
     .trigger(tag)
     .content(v_flex().w(320).p(6).gap(2).rounded(8).bg(t.popover ?? t.surface).border(1).border_color(t.border).shadow_lg().text_size(11.5)
       .child(div().px(6).pt(2).pb(4).text_size(11).font_semibold().text_color(t.dim)
-        .child(kind === "autonomy" ? "Autonomy: how much the orchestrator decides itself" : "Proof tier: what proves a task done"))
+        .child(kind === "autonomy" ? "Autonomy: how much the orchestrator decides itself" : "Proof tier: what proves a claim (its bar, unless it names its own)"))
       .children(levelChoices(kind, cur, pending).map(choice))
       .children(notes.filter(Boolean).map((n) => div().px(6).text_size(10.5).text_color(t.dim).child(n)))
       .child(div().px(6).pt(4).text_size(10.5).text_color(t.dim)
@@ -1236,41 +1180,39 @@ function tokensSection(view, t, r) {
     .when(open, (el) => el.children(byAgent.map(row)));
 }
 
-// The Proof section: the verdict as one fold line (the Tasks bar has each task's result in
-// colour, so there is no second bar here), then the rows that need a look
-// (failed, partial, missing a screenshot, not scoped, or not checked once the run is done, and
-// not accepted) without unfolding. Unfolding lists every task. A row shows its files as a count;
-// clicking it opens its result as one line in its status colour, its thumbnails, a "details"
-// fold (planned proof, what was checked, the files) and, unless it passed, Accept and Ask to
-// prove (or Unaccept). Not persisted.
-function proofSection(view, t, r, stages) {
-  const { md, files } = r.proof;
-  const s = proofSummary(t, r, stages);
-  const folder = () => pathLink(t, r, `pf-dir-${r.key}`, "shared/proof", `shared/proof/ · ${files.length >= 40 ? "40+ files" : plural(files.length, "file")}`);
-  // A run planned before proof lines existed: one quiet line, not a red row per task.
-  if (!s) {
-    return section(t, "Proof").child(div().px(2).text_size(11.5).text_color(t.dim).child("No proof planned"))
-      .when(files.length > 0, (el) => el.child(h_flex().px(2).pt(2).child(folder())));
+// The Claims section: what the run lets you do, each claim with the evidence that shows it.
+// The verdict is the fold line ("3 of 4 proven · not yet: Drag to reorder"); folded, only the
+// claims worth a look (failed, partial, below their bar, unproven) show under it; unfolded, every
+// claim in plan order. A row is its id, its words, its evidence (thumbnails that open the viewer,
+// a ▶ clip for the system player, "4 tests ✓" with their names on hover) and its pill; clicking
+// it adds what the pill doesn't say: the result's why, where the claim comes from (AC, tasks, bar)
+// and, unless it is proven or still being proved, Accept and Ask to prove (or Unaccept). Each fact
+// once: the status is the pill's alone. The whole-branch checks are one line under the claims
+// (dim while still running). An old run (no `## Claims` in plan.md) shows just that checks line.
+// Not persisted.
+function claimsSection(view, t, r, stages) {
+  const { md } = r.proof;
+  const checks = checksLine(md);
+  const checksRow = checks && div().id(`pf-checks-${r.key}`).px(2).truncate().text_size(11.5)
+    .text_color(checks.tone === "pass" ? PASS(t) : checks.tone === "fail" ? t.blocked : t.dim).tooltip(checks.tip).child(checks.text);
+  if (!hasClaims(r)) {
+    return section(t, "Claims").child(checksRow ?? div().px(2).text_size(11.5).text_color(t.dim).child("No claims: planned before claims"));
   }
+  const s = claimsSummary(t, r, stages);
+  const finished = isFinished(r);
   const key = `pf-${r.key}`, open = isOpen(view, key);
-  const TONE = { pass: PASS(t), fail: t.blocked, partial: AMBER(t), unchecked: AMBER(t), pending: t.muted, dim: t.dim };
-  // A task proof.md has but plan.md doesn't counts as done.
-  const doneOf = (k) => { const i = r.tasks.findIndex((x) => x.id === k.id); return i < 0 || taskDone(r, stages, i); };
   const row = (k) => {
     const id = `${r.key}-${k.id}`;
     const more = view.proofRows?.has(id);
-    const part = (p) => {
-      if (p.kind === "result") return div().text_size(12).text_color(TONE[p.tone]).child(p.text);
-      if (p.kind === "thumbs") return thumbs(view, t, r, k.id, p.files);
-      if (p.kind === "details") {
-        const dk = `pfd-${id}`;
-        return v_flex().gap(2)
-          .child(foldLine(view, t, dk, isOpen(view, dk) ? "Hide the details" : p.items.map((x) => x.label).join(", "), [{ text: "details", color: t.dim }]))
-          .when(isOpen(view, dk), (el) => el.children(p.items.map((x) => div().pl(19).text_size(11).text_color(t.dim).child(`${x.label}: ${x.text}`))));
-      }
-      return h_flex().gap(6).pt(2).items_center().children(p.actions.map((a) => proofAction(view, t, r, k, a)));
-    };
-    return v_flex().id(`pf-${id}`).gap(4).px(8).py(4).rounded(7).bg(t.raised + "88").cursor_pointer()
+    const p = claimPill(k, finished);
+    const failing = k.tests.filter((x) => !x.ok).length;
+    const tests = k.tests.length > 0 && div().id(`pf-tests-${id}`).flex_none().text_size(11)
+      // Red only when the pill doesn't already say fail.
+      .text_color(failing && k.state !== "fail" ? t.blocked : t.dim).tooltip(k.tests.map((x) => `${x.ok ? "✓" : "✗"} ${x.name}`).join("\n"))
+      .child(failing ? `${failing} of ${plural(k.tests.length, "test")} ✗` : `${plural(k.tests.length, "test")} ✓`);
+    const where = [k.ac && `AC ${k.ac}`, k.tasks.length > 0 && `tasks ${k.tasks.join(", ")}`, k.tier !== null && `bar T${k.tier}`].filter(Boolean).join(" · ");
+    const actions = claimActions(k);
+    return v_flex().id(`pf-${id}`).gap(4).px(8).py(5).rounded(7).bg(t.raised + "88").cursor_pointer()
       .hover((st) => st.bg(t.hover)).on_click((_e, cx) => {
         cx.stop_propagation();
         view.proofRows ??= new Set();
@@ -1278,42 +1220,45 @@ function proofSection(view, t, r, stages) {
         cx.notify();
       })
       .child(h_flex().gap(8).items_center()
-        .child(k.tier !== null ? tierTag(t, `pft-${id}`, k.tier, `${tierTip(k.tier)}\n${k.planned ? "Planned" : "Recorded in proof.md"}`) : div().flex_none().text_size(10).px(5).text_color(t.blocked).child("—"))
-        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).child(k.name ? `${k.id} ${k.name}` : k.id))
-        .when(k.files.length > 0 && !more, (e) => e.child(div().flex_none().text_size(11).text_color(t.dim).child(plural(k.files.length, "file"))))
-        .when(Boolean(k.accepted), (e) => e.child(div().id(`pfa-${id}`).flex_none().text_size(10.5).px(6).rounded(9).bg(t.raised).text_color(t.muted)
-          .tooltip(`You accepted this proof as it is${k.accepted.at ? ` ${ago(Date.parse(k.accepted.at))}` : ""}`).child("accepted")))
+        .child(div().flex_none().w(22).text_size(11).font_semibold().text_color(t.dim).child(k.id))
+        .child(div().flex_1().min_w(0).when(!more, (e) => e.truncate()).text_size(12).text_color(t.foreground).child(k.name))
+        .when(k.files.length > 0, (e) => e.child(thumbs(view, t, r, k.id, k.files)))
+        .when(Boolean(tests), (e) => e.child(tests))
         .when(k.asked && !more, (e) => e.child(div().flex_none().text_size(10.5).text_color(t.muted).child("asked…")))
-        .child(rowPill(t, k, s.finished)))
-      .when(more, (el) => el.children(proofRowParts(k, s.finished, doneOf(k)).map(part)));
+        .child(pill(t, p.text, PILL_COLOR[p.tone](t))))
+      .when(more, (el) => el
+        .when(Boolean(k.why), (e) => e.child(div().pl(30).text_size(11.5).text_color(t.muted).child(k.why)))
+        .when(Boolean(where), (e) => e.child(div().pl(30).text_size(11).text_color(t.dim).child(where)))
+        .when(Boolean(k.accepted), (e) => e.child(div().pl(30).text_size(11).text_color(t.dim)
+          .child(`You accepted it as it is${k.accepted.at ? ` ${ago(Date.parse(k.accepted.at))}` : ""}`)))
+        .when(actions.length > 0, (e) => e.child(h_flex().gap(6).pl(30).pt(2).items_center().children(actions.map((a) => proofAction(view, t, r, k, a))))));
   };
-  const shown = open ? s.rows : s.rows.filter((k) => needsLook(k, s.finished));
-  return section(t, "Proof")
-    .child(foldLine(view, t, key, `${s.tip ? `${s.tip}\n` : ""}${open ? "Show only the tasks that need a look" : `Show every task's proof (${s.rows.length})`}`, s.parts,
-      // Unfolding the Proof section is reading it.
-      () => markProofSeen(r, proofSig(s.rows))))
+  const shown = open ? s.rows : s.rows.filter(worthALook);
+  return section(t, "Claims")
+    .child(foldLine(view, t, key, `${s.tip ? `${s.tip}\n` : ""}${open ? "Show only the claims worth a look" : `Show every claim (${s.rows.length})`}`, s.parts,
+      // Unfolding the Claims section is reading it.
+      () => markProofRead(r)))
     .children(shown.map(row))
-    .when(open, (el) => el.child(h_flex().flex_wrap().gap(6).px(2).pt(2).items_center()
-      .when(Boolean(md), (e) => e.child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md")))
-      .when(files.length > 0, (e) => e.child(folder()))
-      .when(!md && files.length === 0, (e) => e.child(div().text_size(11).text_color(t.dim).child("No proof captured yet")))));
+    .when(Boolean(checksRow), (el) => el.child(checksRow))
+    .when(open && Boolean(md), (el) => el.child(h_flex().px(2).pt(2).child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md"))));
 }
 
-// A Proof row's button: Accept (Harbormaster records it in proof-accepted.json itself, so it works
-// with the orchestrator gone), Unaccept, Ask to prove (a "prove <task> to T<n>: …" message in the
+// A claim row's button: Accept (Harbormaster records it in proof-accepted.json itself, so it works
+// with the orchestrator gone), Unaccept, Ask to prove (a "prove C<n> to T<n>: …" message in the
 // run's inbox), or "asked…" while that waits. The click shows at once (`said`), before the next
 // read of the run's files.
 const PROOF_ACTION = {
-  accept: { label: "Accept", tip: "Accept this proof as it is: it stops needing a look, until its result changes" },
+  accept: { label: "Accept", tip: "Accept this claim as it is: it stops needing a look, until its result changes" },
   unaccept: { label: "Unaccept", tip: "Take the acceptance back: it needs a look again" },
-  ask: { label: "Ask to prove", tip: "Ask the orchestrator to finish this task's proof (a message in its inbox)" },
+  ask: { label: "Ask to prove", tip: "Ask the orchestrator to prove this claim to its bar (a message in its inbox)" },
 };
 function proofAction(view, t, r, k, a) {
   if (a === "asked") return div().id(`pfx-${r.key}-${k.id}`).text_size(11).text_color(t.muted).tooltip("Waiting for the orchestrator to prove it").child("asked…");
+  const line = claimResultLine(k);
   const { label, tip } = PROOF_ACTION[a];
   return actionButton(t, `pf${a}-${r.key}-${k.id}`, label, tip, (cx) => {
     const key = `${r.key}:${k.id}`;
-    said.set(key, { kind: a, line: resultLine(k), at: Date.now() });
+    said.set(key, { kind: a, line, at: Date.now() });
     view.actionError = null;
     cx.notify();
     cx.spawn(async (cx) => {
@@ -1406,7 +1351,7 @@ function runDetail(view, t, r, ctx) {
     .when(r.issues.length + related.length > 0, (el) => el.child(section(t, "Issues and related PRs")
       .children(r.issues.map((url) => issueRow(t, url)))
       .children(related.map((p, i) => prDetail(t, p, i, true, Boolean(r.away))))))
-    .when(r.tasks.length > 0 || r.proof.tier || r.proof.md || r.proof.files.length > 0, (el) => el.child(proofSection(view, t, r, stages)))
+    .when(hasClaims(r) || Boolean(r.proof.md?.checks), (el) => el.child(claimsSection(view, t, r, stages)))
     .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
     .when(r.decided.length > 0, (el) => el.child(decisionsSection(view, t, r)))
@@ -1828,11 +1773,10 @@ export function runPane(view, t, p) {
   const r = runOfProps(view.runs, p);
   // A popup opened with "details" (show-run) starts with the question's Details unfolded, once.
   if (p.details && r && !view.detailsShown) { view.folds ??= new Map(); view.folds.set(`q-${r.key}`, true); view.detailsShown = true; }
-  // One opened with "proof" starts with every Proof row listed and the first pending one (else the
-  // first) unfolded, once the run's proof has been read.
-  if (p.proof && r && !view.proofShown && hasProof(r)) {
-    const rows = proofRows(r, stagesOf(r, ctx));
-    const k = rows.find((x) => x.pending) ?? rows[0];
+  // One opened with "proof" starts with every claim listed and the first worth a look (else the
+  // first still being proved) unfolded, once the run's claims have been read.
+  if (p.proof && r && !view.proofShown && hasClaims(r)) {
+    const k = firstToOpen(r, stagesOf(r, ctx));
     view.folds ??= new Map(); view.folds.set(`pf-${r.key}`, true);
     if (k) { view.proofRows ??= new Set(); view.proofRows.add(`${r.key}-${k.id}`); }
     view.proofShown = true;
