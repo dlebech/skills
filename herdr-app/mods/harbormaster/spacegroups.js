@@ -1,7 +1,5 @@
-// Which repository each space belongs to and how the Spaces popup groups them (pure, so
-// tests can run it; spaces.js draws).
-
-const base = (p) => p.replace(/\/+$/, "").split("/").at(-1);
+// Where a space is and which repository that folder belongs to (pure, so tests can run it;
+// repospaces.js uses it for New run).
 
 // The folder a space is in now: its first tab's first pane, else the folder it was made in.
 export function whereOf(space, ps) {
@@ -19,22 +17,3 @@ export function repoOf(out) {
   const repo = common.endsWith("/.git") ? common.slice(0, -5) : common.replace(/\.git$/, "");
   return { repo, linked: common !== `${top}/.git` };
 }
-
-// Groups in the order their first space appears: [{ key, name, machine, repo, spaces: [{ space, linked }] }],
-// each repository's own spaces before its worktrees', non-repositories last under "Other".
-// `repos` maps a space id to repoOf(...) (absent while git is still being asked).
-export function groupSpaces(all, repos) {
-  const groups = [], byKey = new Map();
-  const group = (key, name, machine, repo) => {
-    if (!byKey.has(key)) { const g = { key, name, machine, repo, spaces: [] }; byKey.set(key, g); groups.push(g); }
-    return byKey.get(key);
-  };
-  for (const s of all) {
-    const r = repos[s.id], machine = s.machine ?? null;
-    if (r) group(`${machine}\n${r.repo}`, base(r.repo), machine, true).spaces.push({ space: s, linked: r.linked });
-    else group(`${machine}\n`, "Other", machine, false).spaces.push({ space: s, linked: false });
-  }
-  for (const g of groups) g.spaces.sort((a, b) => Number(a.linked) - Number(b.linked));
-  return [...groups.filter((g) => g.repo), ...groups.filter((g) => !g.repo)];
-}
-
