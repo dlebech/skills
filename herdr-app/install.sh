@@ -2,7 +2,8 @@
 # Installs Harbormaster into the Herdr app on this computer: the `harbormaster` mod,
 # the harbormaster-sea layout, harbormaster-main (Herdr's main layout with a Crew
 # block above its own, unchanged Agents list) and harbormaster-needs (a test layout made
-# from harbormaster-main: the Crew block opens with the Needs-you box, no Agents list),
+# from harbormaster-main: the Crew block opens with the Needs-you box, a one-row Spaces
+# picker at the bottom, no Agents list),
 # and binds ctrl-shift-h to open and close the overview. Run it from any terminal while
 # the Herdr app is open. Safe to run again: it updates the mod, the sea layout and
 # harbormaster-needs, and adds the Crew block and the key only if they are missing. It
@@ -73,27 +74,13 @@ jq -e '[.. | objects | select(.content.mod? == "harbormaster" and .content.props
 
 # 3. harbormaster-needs: the test layout for "Needs you first". It is regenerated from
 #    harbormaster-main on every install (so it follows changes the user makes to main;
-#    edits to this file itself are lost),
-#    and its root id "hn-root" is how a later install knows it is ours. Herdr's Agents
-#    block goes, the Crew block opens with the Needs-you box (needs: "box") and takes
-#    most of the sidebar, and Spaces sits below it, smaller.
+#    edits to this file itself are lost), and its root id "hn-root" is how a later install
+#    knows it is ours. Herdr's Agents block goes wherever it is in the tree, Herdr's Spaces
+#    block (the first, if there are several) becomes Harbormaster's one-row Spaces picker (a fixed height, at the bottom), and
+#    the Crew block opens with the Needs-you box (needs: "box") and takes all the height left.
 needs="$home/layouts/harbormaster-needs.json"
 tmp=$(mktemp)
-jq '
-  def is_crew: .content.mod? == "harbormaster" and .content.props.role? == "crew";
-  .id = "hn-root"
-  | walk(if type == "object" and (.children? | type) == "array" and any(.children[]; is_crew)
-         then .children |= (
-           map(select(.content.mod? != "agents"))
-           | map(if is_crew then (.content.props.needs = "box" | .size = {"weight": 2})
-                 elif .content.mod? == "spaces" then .size = {"weight": 0.7}
-                 else . end)
-           | (map(is_crew) | index(true)) as $c
-           | (map(.content.mod? == "spaces") | index(true)) as $s
-           | if $c != null and $s != null and $s < $c
-             then .[$s] as $sp | .[$c] as $cr | .[$s] = $cr | .[$c] = $sp
-             else . end)
-         else . end)' "$main" > "$tmp"
+jq -f "$here/needs-layout.jq" "$main" > "$tmp"
 # Without a Crew block in main there is nothing to build from: warn, as step 2 does, and
 # leave any existing harbormaster-needs alone.
 if ! jq -e '[.. | objects | select(.content.props.needs? == "box")] | length > 0' "$tmp" >/dev/null 2>&1; then

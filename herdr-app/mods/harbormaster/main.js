@@ -6,6 +6,7 @@
 //   "viewer"          a proof screenshot, opened as an overlay by a click on a thumbnail (viewer.js)
 //   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
 //   "newrun"          the + New run dialog (newrun.js), an overlay
+//   "spaces"          the Spaces picker row (spaces.js) and "spaces-list" its popup
 //   "stats"           where the time goes, tokens, CPU and memory: per run, task and agent, live, and past runs
 // Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute;
 // the crew and the overview also read each crew agent's context size (context.js).
@@ -23,6 +24,7 @@ import { crew } from "./crew.js";
 import { viewer, startCopies } from "./viewer.js";
 import { harbor, rail, paneHeader } from "./harbor.js";
 import { statsView } from "./stats.js";
+import { spacesRow, spacesList, startSpacesList } from "./spaces.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
 import { observeTelling } from "./telling.js";
 import { parseCommand, runNamed, newRunArgs } from "./commands.js";
@@ -138,6 +140,7 @@ export default class Harbormaster extends View {
     this.reply = InputState.new({ placeholder: "Your answer…" });
     this.reply.on("submit", (_e, cx) => submitReply(this, cx));
     if (role === "newrun") { initNewRun(this, cx); return; }
+    if (role === "spaces-list") startSpacesList(this, cx);
     if (!DATA_ROLES.has(role)) return;
     // The popup's own copy doesn't listen: a command that closed or replaced the popup would end it.
     if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards" || role === "crew") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
@@ -231,6 +234,8 @@ export default class Harbormaster extends View {
       case "harbor-pane": return paneHeader(p);
       case "stats": return statsView(this, t);
       case "newrun": return newRunView(this, t);
+      case "spaces": return spacesRow(t);
+      case "spaces-list": return spacesList(this, t);
       default: return cards(this, t, this.runs, this.errors, this.decisions);
     }
   }
