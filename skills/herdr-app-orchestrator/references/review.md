@@ -6,7 +6,7 @@ Read this only for a `review <PR>` run ([start.md](start.md#review-runs)). There
 
 1. Resolve the PR: `gh pr view <pr> --json number,title,url,author,headRefName,headRefOid,baseRefName,body,headRepository`. Note the head sha; if it changes before you post, say so in the question.
    Right away publish the PR so Harbormaster shows it is being reviewed: `set-status.sh <run-directory> --related <owner/repo> <pr url>`.
-2. Check out the PR head in a worktree, never in the user's checkout: `gh pr checkout` is not used. Fetch `refs/pull/<n>/head` and run `git worktree add --detach ~/.herdr/worktrees/<repo>/review-<n> <sha>`; if `review-<n>` already exists (an earlier or crashed run), remove it first (`git worktree remove --force`) and add it again. Remove it when the run closes.
+2. Check out the PR head in a worktree, never in the user's checkout: `gh pr checkout` is not used. Fetch `refs/pull/<n>/head` and run `git worktree add --detach ~/.herdr/worktrees/<repo>/review-pr-<n> <sha>`; if `review-pr-<n>` already exists (an earlier or crashed run), remove it first (`git worktree remove --force`) and add it again. Remove it when the run closes.
 3. Start the reviewer there (section 3's Starting an agent, name `rev-<prefix>`, reviewer profile, `shared/` access, no editing files). Tell it: the PR's title, description and base branch, to review the diff against the base, and to follow the repository's own conventions: its CONTRIBUTING, review guidelines and any code-review skill or command it exposes (use it). It reports only actionable correctness, regression, test, security and requirement findings, verified against the code, and writes them to `shared/review-drafts.md`, then sends its `done` report.
 4. Write the run's `review-drafts.md` from that file, one entry per comment, most severe first:
 
@@ -65,4 +65,4 @@ GitHub rejects the whole request (422) if one comment's line is outside the diff
 
 ## 3. Finish
 
-Report in one line (what was posted and where, or that nothing was), mark the run done, remove the review worktree and the reviewer agent, and close as in section 9.
+Report in one line (what was posted and where, or that nothing was), mark the run done, remove the review worktree and the reviewer agent, and close as in section 9, except that close.md's steps 3, 4 and 6 do not apply (no integration branch to push, no space, no task branches): remove only the review checkout and the agents.
