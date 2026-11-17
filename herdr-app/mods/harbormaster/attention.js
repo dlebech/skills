@@ -152,14 +152,15 @@ export function nextStepAsking(prs, flow, asked) {
 //             approval with comments still reads "approved", not "approved — merge"
 //   red       CI is red on the run: "review proof", no "→ merge" (needaction.js says the same)
 //   failed    a proof task failed: "proof failed", never "→ merge" (the box says to read it first)
+//   ready     the run is ready to merge (assess's `ready`): "ready to merge"
 //   plan      the run's plan is still open (tasks.js planOpen): an approval reads "approved · plan open",
 //             never "→ merge", since the run's own tasks come before the merge
 // A self-flow draft reads "review proof → ready": it is marked ready before it is merged.
-export function nextStepText(step, { comments = true, red = false, failed = false, plan = false } = {}) {
+export function nextStepText(step, { comments = true, red = false, failed = false, plan = false, ready = false } = {}) {
   if (!step) return "";
   const said = commentsText(step.comments);
   const label = step.label === "review from" ? `review from ${step.who.join(", ") || "a reviewer"}`
-    : step.label === "review proof → merge" ? (failed ? "proof failed" : red ? "review proof" : step.draft ? "review proof → ready" : step.label)
+    : step.label === "review proof → merge" ? (ready ? "ready to merge" : failed ? "proof failed" : red ? "review proof" : step.draft ? "review proof → ready" : step.label)
     : said && step.label === "approved — merge" ? (comments ? `approved · ${said}` : "approved")
     : plan && step.label === "approved — merge" ? "approved · plan open"
     : said && comments ? `${step.label} · ${said}`
@@ -170,7 +171,7 @@ export function nextStepText(step, { comments = true, red = false, failed = fals
 // nextStepText for an assessed run (assess), with what it knows beside the step: red CI and a
 // failed proof. One rule for the views that word the step outside assess (parkedLabel, toasts).
 export const stepTextOf = (att, opts = {}) => nextStepText(att?.next, {
-  red: Boolean(att?.reasons?.some((r) => r.key === "red-ci")), failed: Boolean(att?.proofFailed), plan: Boolean(att?.planOpen), ...opts,
+  red: Boolean(att?.reasons?.some((r) => r.key === "red-ci")), failed: Boolean(att?.proofFailed), plan: Boolean(att?.planOpen), ready: Boolean(att?.ready), ...opts,
 });
 
 
@@ -354,21 +355,23 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 //   filesOk   false when the run's files are a stale read (its machine did not answer)
 //   closed    data.js isClosed: a finished run whose tab the user closed waits on nothing
 //   proofFailed  a proof task failed (attend.js): the review-proof step reads "proof failed"
+//   proofRead, proofClean  the user opened the proof as it is now; every task of it passes (attend.js):
+//             together with green or no checks and nothing else needing the user, the run is `ready`
 //   now
 // Returns {group: "needs" | "working" | "waiting" | "cant" | "done", cantTell, why, held (the plan holds
 // the step back), planOpen (an approval whose plan is still open: told without "merge"), reasons: [{key, text, since}],
-// next (nextStep), step (stepOf), stall, proofFailed, waitSince (ms: the longest-waiting reason's anchor,
+// next (nextStep), step (stepOf), stall, proofFailed, proofRead, ready (ready to merge), waitSince (ms: the longest-waiting reason's anchor,
 // for sorting; oldest first)}. Reason keys: question, gone (an unfinished run whose
 // orchestrator is gone or lost: Resume is what it needs), stalled, red-ci, and the next-step
 // labels in Needs you, and finished (a finished run with no PR: its report is read and the
 // run closed); working, ci-running, idle in Working (idle: briefly quiet, not
 // stalled yet); waiting-for in Waiting on others; cant-tell in Can't tell. A Needs you run
 // may still have cantTell: a question read from its files, its PRs unreadable.
-export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, proofFailed = false, askedPrs = null, now = Date.now() } = {}) {
+export function assess(run, { orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, proofFailed = false, proofRead = false, proofClean = false, askedPrs = null, now = Date.now() } = {}) {
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
   const step = stepOf(run, { prs, stages, since, ages });
-  const base = { held: false, planOpen: false, cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), working: Boolean(working), askedPrs: askedPrs ?? new Set() };
+  const base = { held: false, planOpen: false, cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), proofRead: Boolean(proofRead), ready: false, working: Boolean(working), askedPrs: askedPrs ?? new Set() };
   const out = (group, extra) => {
     const r = { ...base, ...extra, group };
     const anchors = r.reasons.map((x) => x.since).filter(Boolean);
@@ -422,7 +425,11 @@ export function assess(run, { orch = null, working = false, pr = null, flow = "s
     if (next && NEEDS_LABELS.has(next.label) && !heldByPlan(run, next)) {
       const reviewed = next.label === "changes requested" || next.label === "approved — merge" ? next.pr.reviewedAt ?? null : null;
       // `short`: without the comment count, for the narrow sidebar (crewrows.js rowLead).
-      const opts = { red: ci.state === "red", failed: Boolean(proofFailed), plan: base.planOpen };
+      // Ready to merge: a self-flow PR whose proof was read and passes in full, with green (or no)
+      // checks, no draft to mark ready first, and nothing else the run waits on you for.
+      base.ready = next.label === "review proof → merge" && proofRead && proofClean && !proofFailed && !next.draft && !reasons.length
+        && (ci.state === "green" || ci.state === null);
+      const opts = { red: ci.state === "red", failed: Boolean(proofFailed), plan: base.planOpen, ready: base.ready };
       reasons.push({ key: next.label, text: nextStepText(next, opts), short: nextStepText(next, { ...opts, comments: false }), since: reviewed ?? settled });
     }
   }

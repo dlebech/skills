@@ -57,7 +57,8 @@ export function rowLead(a, now = Date.now(), { narrow = false } = {}) {
   if (a.group === "needs") {
     const why = a.reasons.map((r) => (narrow && r.short) || r.text).join(" · ");
     const waited = !onlyStalled(a) && a.waitSince ? ageText(now - a.waitSince) : null;
-    return { lead: waited ? `${why} · ${waited}` : why, rest: a.stall ? a.step?.text || null : null, tone: onlyStalled(a) ? "amber" : "blocked" };
+    // A run that is ready to merge reads in the pass colour: it is the user's to merge, but it is good news.
+    return { lead: waited ? `${why} · ${waited}` : why, rest: a.stall ? a.step?.text || null : null, tone: a.ready && a.reasons.length === 1 ? "pass" : onlyStalled(a) ? "amber" : "blocked" };
   }
   if (a.group === "done") return { lead: a.next ? nextStepText(a.next) : "closed", rest: null, tone: "muted" };
   if (a.group === "cant" || a.cantTell) return { lead: `can't tell: ${cantWhy(a)}`, rest: null, tone: "dim" };
@@ -122,7 +123,7 @@ export function badgeOf(a, finished = false) {
   // With review comments, a `tip` saying who said what.
   const tip = reviewCommentLines(a.next).join("\n");
   const label = pillReason(a)?.text ?? nextStepText(a.next);
-  return tone ? { label, tone, ...(tip ? { tip } : {}) } : null;
+  return tone ? { label, tone, ...(a.ready && a.group === "needs" ? { ready: true } : {}), ...(tip ? { tip } : {}) } : null;
 }
 
 // Why a run is in Needs you, in one line ("red CI on #42 · review proof → merge"), or null.

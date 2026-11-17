@@ -7,7 +7,7 @@
 // since most reasons are done elsewhere (on GitHub, in the proof, with Close).
 
 import { ageText, ciState } from "./attention.js";
-import { andList } from "./words.js";
+import { andList, plural } from "./words.js";
 import { taskCounts } from "./tasks.js";
 import { hasComments, commentsText, defaultMode, askAllLabel, offersAll } from "./comments.js";
 
@@ -26,6 +26,11 @@ export const MAX_OPEN = 3;
 // An Open button per PR with a URL: "Open #1799", "Open the PR" without a number.
 const openPrs = (prs) => prs.filter((p) => p?.url).slice(0, MAX_OPEN)
   .map((p) => ({ kind: "open", label: `Open ${numOf(p) ?? "the PR"}`, url: p.url }));
+
+// A Merge button per PR with a URL, the main button of a proof that was read: it opens the PR on
+// GitHub, where the user merges (Harbormaster never merges). `primary` stands it out.
+const mergePrs = (prs) => prs.filter((p) => p?.url).slice(0, MAX_OPEN)
+  .map((p) => ({ kind: "open", label: `Merge ${numOf(p) ?? "the PR"} on GitHub`, url: p.url, primary: true }));
 
 // The first failing check of a PR's statusCheckRollup as data.js keeps it ({name, url}), and
 // where its Open button goes: the check's own page, else the PR's checks tab.
@@ -86,12 +91,28 @@ export function runReports(paths) {
     .sort((x, y) => Number(/final/i.test(base(y))) - Number(/final/i.test(base(x))));
 }
 
+// The box of a run that is ready to merge: {key, ready, headline, detail, line, actions}. The
+// headline and detail read as done and good ("Ready to merge" / "All 6 tasks done · proof 6/6
+// pass · checks green"); `line` is the same in one line, for the Crew hover. Then one Merge
+// button per PR (primary), Proof (plain) and Ask for changes (plain).
+function readyItem(a, ctx, prs) {
+  const { run, proof } = ctx;
+  const tasks = taskCounts(run ?? {});
+  const checks = ciState(ctx.prs ?? []).state === "green" ? "checks green" : "no checks";
+  const detail = [tasks.planned > 0 ? `All ${plural(tasks.done, "task")} done` : null,
+    proof ? `proof ${(proof.pass ?? 0) + (proof.accepted ?? 0)}/${proof.total} pass` : null, checks].filter(Boolean).join(" · ");
+  return { key: "review proof → merge", ready: true, headline: "Ready to merge", detail,
+    line: `Ready to merge ${prsText(prs)}: ${detail}`,
+    actions: [...mergePrs(prs), { kind: "proof", label: "Proof", primary: false }, { kind: "changes", label: "Ask for changes", primary: false }] };
+}
+
 // One reason's {key, line, tip, actions}. Action kinds (overview.js clicks them):
 //   open {url}          opens a PR or check on GitHub
 //   address {pr, mode}  Address comments on a PR: Ask me ("ask") or Handle them ("handle")
 //   address-all {prs, mode}  the same for every PR in `prs` at once (Ask me about all, Handle all)
 //   asked {pr}          a PR whose comments were asked about: "asked…", no buttons
-//   proof               unfolds the run's proof
+//   proof               unfolds the run's proof (and marks it read, proofseen.js)
+//   changes             Ask for changes on a ready run: opens a field, its text goes to the inbox (changes.js)
 //   ask-ci {pr, check}  asks the orchestrator to see to the red CI (an inbox message)
 //   ask-blocking        a stalled run's Ask what's blocking
 //   report {path}       opens the run's report
@@ -163,6 +184,15 @@ function reasonItem(r, a, ctx) {
         return { line: `Proof: ${name} failed — read it${red ? "" : ` before ${draft ? "marking" : "merging"} ${prsText(same)}${draft ? " ready" : ""}`}`,
           actions: [{ kind: "proof", label: "Proof" }, ...openPrs(same)] };
       }
+      // Ready to merge: the proof was read and passes, the checks are green, nothing else waits on
+      // you. A headline in the pass colour, the merge link as the main button (see readyItem).
+      if (a.ready) return readyItem(a, ctx, same);
+      // The proof was read but is not clean: say what stands in the way; the merge link stays the
+      // main button, Proof a plain one, the user decides (accept the row, ask to prove it, or merge).
+      if (a.proofRead && proof?.gaps && !red && !draft) {
+        return { line: `Proof read · ${proof.gaps} — accept it or ask to prove it before merging ${prsText(same)}`,
+          actions: [...mergePrs(same), { kind: "proof", label: "Proof", primary: false }] };
+      }
       return { line: p ? `Read the proof (${p})${merge(prsText(same))}` : `Review ${prsText(same)}${merge(it)}`,
         actions: [...(p ? [{ kind: "proof", label: "Proof" }] : []), ...openPrs(same)] };
     }
@@ -193,7 +223,8 @@ function reasonItem(r, a, ctx) {
 //   prs      its PR summaries as read (data.js prSummary), for which PR's CI is red
 //   now
 //   proof    {tier, pass, total, fail, failed} of its proof, or null; `failed` names its first
-//            failing task ("t2 polish")
+//            failing task ("t2 polish"); `accepted` (rows the user accepted) and `gaps` (what stands
+//            between a clean proof and a merge, proof.js proofGaps) for a proof that was read
 //   reports  its report files in shared/, paths to open (runReports picks the run's own)
 //   blocked  {name, address} of the agent a dialog waits in, when known
 export function needActions(a, ctx = {}) {

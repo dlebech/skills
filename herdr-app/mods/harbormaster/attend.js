@@ -4,7 +4,8 @@
 import { prEntryOf, taskAgents, shownStage, isClosed, isParked, filesFresh } from "./data.js";
 import { orchestratorState, orchestratorsOf, agentStatus, workersOf, needReason } from "./live.js";
 import { assess, prRead, reviewFlow, stalled, ciState } from "./attention.js";
-import { proofTasks, proofCounts, gatheringStage } from "./proof.js";
+import { proofTasks, proofCounts, gatheringStage, proofSig, proofRead, proofClean } from "./proof.js";
+import { proofSeenSig } from "./proofseen.js";
 import { stepSince, stepAges, lastActivity, ciUsualOf, reviewFlows } from "./tracking.js";
 import { needLine, needsRun } from "./crewrows.js";
 import { askedPrsOf } from "./asked.js";
@@ -30,6 +31,8 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
     flow: reviewFlow(run, reviewFlows()),
     stages,
     proofFailed: proofFailed(run, stages),
+    // Read and clean: the ready-to-merge state (attention.js assess) needs both.
+    ...proofReadState(run, stages),
     since: stepSince(run),
     ages: stepAges(run),
     filesOk: filesFresh(run, now),
@@ -37,24 +40,35 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
   });
 }
 
-// Whether a proof task failed, counted as the box counts it (overview.js needItemsOf: proof.js's
-// rows, a task still under way pending), so the pill and the Crew never say merge over it.
-// Kept per run read (a new read is a new object) and which tasks are still under way, since
-// every poll and the harbor's animation ask again and proof.md can be long.
-const proofFailedSeen = new WeakMap();
-export function proofFailed(run, stages = []) {
-  if (!run.proof?.md) return false;
+// A run's proof as the box counts it (overview.js needItemsOf: proof.js's rows, a task still
+// under way pending): whether a task failed, whether every task passes, and the signature the
+// user's reading is kept against. Kept per run read (a new read is a new object) and which tasks
+// are still under way, since every poll and the harbor's animation ask again and proof.md can be long.
+const proofSeenOf = new WeakMap();
+export function proofStateOf(run, stages = []) {
+  if (!run.proof?.md) return { failed: false, clean: false, sig: "" };
   const under = run.tasks.map((_, i) => (gatheringStage(stages[i]) ? 1 : 0)).join("");
-  const seen = proofFailedSeen.get(run);
-  if (seen?.under === under) return seen.failed;
+  const seen = proofSeenOf.get(run);
+  if (seen?.under === under) return seen.state;
   const gathering = (id) => {
     const i = run.tasks.findIndex((x) => x.id === id);
     return i >= 0 && under[i] === "1";
   };
   const finished = run.phase === "finished" || Boolean(run.away);
-  const failed = proofCounts(proofTasks(run.tasks, run.proof.md, run.proof.files, { accepted: run.proof.accepted, gathering, finished })).fail > 0;
-  proofFailedSeen.set(run, { under, failed });
-  return failed;
+  const rows = proofTasks(run.tasks, run.proof.md, run.proof.files, { accepted: run.proof.accepted, gathering, finished });
+  const c = proofCounts(rows);
+  const state = { failed: c.fail > 0, clean: proofClean(c), sig: proofSig(rows) };
+  proofSeenOf.set(run, { under, state });
+  return state;
+}
+
+// Whether a proof task failed, so the pill and the Crew never say merge over it.
+export const proofFailed = (run, stages = []) => proofStateOf(run, stages).failed;
+
+// assess()'s proofRead (the user opened this proof as it is now) and proofClean (every task passes).
+function proofReadState(run, stages) {
+  const { clean, sig } = proofStateOf(run, stages);
+  return { proofClean: clean, proofRead: proofRead(proofSeenSig(run), sig) };
 }
 
 // The orchestrators without a run directory among `runs`, as the Crew judges them ({term, r:

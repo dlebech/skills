@@ -3,12 +3,12 @@
 import { div, svg } from "gpui-kit";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCommentsAll, askCi } from "./data.js";
+import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCommentsAll, askCi, askChanges } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
-import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, segmentLook, proofCounts, proofRowParts, needsLook, resultLine, resultPill, pendingLine, gatheringStage } from "./proof.js";
+import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, segmentLook, proofCounts, proofRowParts, needsLook, resultLine, resultPill, pendingLine, gatheringStage, proofSig, proofGaps } from "./proof.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
@@ -17,6 +17,7 @@ import { stepText, quietText, flowState, flowSetting, runDot } from "./attention
 import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } from "./tell.js";
 import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
+import { markProofSeen } from "./proofseen.js";
 import { askedStore, markPrsAsked, unmarkPrAsked } from "./asked.js";
 import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, crewEntries, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
@@ -591,9 +592,12 @@ function cardHeader(view, t, r, f, meta) {
     .child(statusDot(t, f.dot))
     .when(Boolean(f.parkedNext), (el) => el.child(div().id(`parked-next-${r.key}`).min_w(0).truncate().text_size(11).text_color(t.dim)
       .tooltip("What its pull requests wait on, and how long it has been parked. Parked runs stay out of Needs you.").child(f.parkedNext)))
-    .child(f.badge.tip ? div().id(`badge-${r.key}`).flex_none().tooltip(f.badge.tip).child(pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need))
-      : pill(t, f.badge.label, f.need ? "blocked" : f.badge.tone, f.need));
+    .child(f.badge.tip ? div().id(`badge-${r.key}`).flex_none().tooltip(f.badge.tip).child(pill(t, f.badge.label, badgeColor(t, f), f.need))
+      : pill(t, f.badge.label, badgeColor(t, f), f.need));
 }
+
+// A card's pill colour: red in Needs you, except a run that is ready to merge (green).
+const badgeColor = (t, f) => (f.badge.ready ? PASS(t) : f.need ? "blocked" : f.badge.tone);
 
 // What a run needs you for (needaction.js needActions), with this render's attention: its
 // proof's pass count and its reports, for the lines that point at them.
@@ -601,7 +605,8 @@ function needItemsOf(r, ctx, att = attOf(r, ctx)) {
   if (att?.group !== "needs") return [];
   const rows = hasProof(r) ? proofRows(r, stagesOf(r, ctx)) : null;
   const failed = rows?.find((k) => k.scoped && !k.accepted && !k.pending && k.result === "fail");
-  const proof = rows ? { tier: r.proof.tier?.tier ?? null, pass: proofCounts(rows).pass, fail: proofCounts(rows).fail, total: rows.filter((k) => k.scoped).length,
+  const c = rows ? proofCounts(rows) : null;
+  const proof = rows ? { tier: r.proof.tier?.tier ?? null, pass: c.pass, fail: c.fail, accepted: c.accepted, total: rows.filter((k) => k.scoped).length, gaps: proofGaps(c),
     failed: failed ? [failed.id, failed.name].filter(Boolean).join(" ") : null } : null;
   return needActions(att, { run: r, prs: prsOf(r) ?? [], now: Date.now(), proof, reports: (r.reports ?? []).map((n) => `shared/${n}`) });
 }
@@ -626,6 +631,8 @@ function needButton(view, t, r, f, x, id, where, primary) {
     case "close": return actionButton(t, id, x.label, ACTION.close.tip, confirm("close"), primary);
     case "resume": return actionButton(t, id, x.label, ACTION.resume.tip, confirm("resume"), primary);
     case "proof": return actionButton(t, id, x.label, where === "pane" ? "Show the Proof section, its first row to look at unfolded" : "Open this run's pane with its Proof unfolded", (cx) => {
+      // Opening it is reading it: the box then says what to do next (needaction.js).
+      markProofRead(r);
       if (where !== "pane") {
         openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: { ...runProps(r), proof: true } });
         return;
@@ -636,8 +643,28 @@ function needButton(view, t, r, f, x, id, where, primary) {
       if (k) { view.proofRows ??= new Set(); view.proofRows.add(`${r.key}-${k.id}`); }
       cx.notify();
     }, primary);
+    case "changes": return changesButton(view, t, r, id);
     default: return null;
   }
+}
+
+// Marks the run's proof, as it shows now, as read (proofseen.js).
+const markProofRead = (r) => markProofSeen(r, proofSig(proofRows(r, stagesOf(r, facts()))));
+
+// Ask for changes on a ready run: opens the Reply field under the box; Enter writes the text to the
+// run's inbox as "changes asked from Harbormaster: …" and wakes the orchestrator (submitReply).
+const changesId = (r) => `changes:${r.key}`;
+function changesButton(view, t, r, id) {
+  const open = view.replying === changesId(r);
+  const can = Boolean(r.dir && r.localTerminal && !r.away);
+  return actionButton(t, id, open ? "Cancel" : "Ask for changes",
+    can ? "Say what to change: a message in the run's inbox that wakes its orchestrator, which plans it as tasks and finishes again" : "Its orchestrator is not known here: open the run to ask",
+    can ? (cx) => {
+      view.replying = open ? null : changesId(r);
+      view.reply.set_value("");
+      if (!open) view.reply.focus();
+      cx.notify();
+    } : null);
 }
 
 // The need items as lines, each with its buttons; the first item's first button stands out, unless
@@ -652,8 +679,14 @@ function needLines(view, t, r, f, items, where, underQuestion = false) {
       if (!rows.length || rows[rows.length - 1].row !== b.row) rows.push({ row: b.row, els: [] });
       rows[rows.length - 1].els.push(b.el);
     }
+    // A ready run: a headline and what is done, in the pass colour (needaction.js readyItem).
+    const head = it.ready
+      ? v_flex().id(`needt-${where}-${r.key}-${i}`).gap(1)
+        .child(div().text_size(14).font_semibold().text_color(PASS(t)).child(`✓ ${it.headline}`))
+        .child(div().text_size(12).text_color(PASS(t)).child(oneLine(it.detail, 220)))
+      : div().id(`needt-${where}-${r.key}-${i}`).text_size(12).text_color(t.foreground).when(Boolean(it.tip), (el) => el.tooltip(it.tip)).child(oneLine(it.line, 220));
     return v_flex().id(`needl-${where}-${r.key}-${i}`).gap(4)
-      .child(div().id(`needt-${where}-${r.key}-${i}`).text_size(12).text_color(t.foreground).when(Boolean(it.tip), (el) => el.tooltip(it.tip)).child(oneLine(it.line, 220)))
+      .child(head)
       .children(rows.map((x) => h_flex().flex_wrap().gap(6).items_center()
         .when(Boolean(x.row), (el) => el.child(div().flex_none().min_w(0).pr(2).text_size(11).text_color(t.muted).child(x.row)))
         .children(x.els)));
@@ -680,10 +713,13 @@ function needBox(view, t, r, f, ctx, where) {
   const focus = (_e, cx) => { cx.stop_propagation(); if (f.orch !== "gone") focusAgent(r.terminal); };
   const it = r.ask ? decisionQueue([r], [], ctx).find((x) => x.kind === "run") : null;
   const all = needItemsOf(r, ctx, f.att);
-  const box = h_flex().id(`need-${where}-${r.key}`).gap(8).p(8).rounded(7).bg(t.blocked + "1c").items_start()
+  // A run that is ready to merge is the one thing here that is good news: green, "Ready", "✓".
+  const ready = !it && all.length === 1 && all[0].ready;
+  const tint = ready ? PASS(t) : t.blocked;
+  const box = h_flex().id(`need-${where}-${r.key}`).gap(8).p(8).rounded(7).bg(tint + "1c").items_start()
     // Clicks on its buttons and links stay in the box, never the card's open-the-orchestrator.
     .on_click((_e, cx) => cx.stop_propagation())
-    .child(div().flex_none().text_color(t.blocked).font_bold().child(r.question ? "?" : "!"));
+    .child(div().flex_none().text_color(tint).font_bold().child(r.question ? "?" : ready ? "✓" : "!"));
   if (!it) {
     // A question.md that did not parse into a title, or a reason the map has no line for: say it as is.
     const items = all.length ? all : [{ key: "other", line: (f.reason ?? "needs you").slice(0, 220), actions: [] }];
@@ -691,8 +727,11 @@ function needBox(view, t, r, f, ctx, where) {
     const first = items[0].actions[0];
     const link = first?.kind === "focus" && first.address === r.terminal ? null : orchLink(t, r, f, `need-orch-${where}-${r.key}`);
     return box.child(v_flex().flex_1().min_w(0).gap(6)
-      .child(div().text_size(11).font_semibold().text_color(t.blocked).child("Needs you"))
+      .child(div().text_size(11).font_semibold().text_color(tint).child(ready ? "Ready" : "Needs you"))
       .children(needLines(view, t, r, f, items, where))
+      .when(ready && view.replying === changesId(r), (el) => el.child(v_flex().gap(4)
+        .child(Input.new(view.reply))
+        .child(div().text_size(10.5).text_color(t.dim).child("What should change? Enter writes it to the run's inbox and tells its orchestrator"))))
       .children([boxConfirm(view, t, r, f, where)].filter(Boolean))
       .when(Boolean(link), (el) => el.child(h_flex().child(link))));
   }
@@ -959,11 +998,11 @@ const section = (t, title, ...rest) => v_flex().gap(4)
 // and a one-line summary in normal text; colour only on status words. Open state per key in
 // view.folds, closed by default and not persisted.
 const isOpen = (view, key) => Boolean(view.folds?.get(key));
-function foldLine(view, t, key, tip, items) {
+function foldLine(view, t, key, tip, items, onOpen = null) {
   const open = isOpen(view, key);
   return h_flex().id(`fold-${key}`).gap(6).px(2).items_center().min_w(0).rounded(4).cursor_pointer().text_size(11.5).text_color(t.foreground)
     .hover((s) => s.bg(t.hover)).tooltip(tip)
-    .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); cx.notify(); })
+    .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); if (!open) onOpen?.(); cx.notify(); })
     .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
     .child(h_flex().flex_1().min_w(0).flex_wrap().items_center().children(joined(t, items)));
 }
@@ -1235,7 +1274,9 @@ function proofSection(view, t, r, stages) {
   };
   const shown = open ? s.rows : s.rows.filter((k) => needsLook(k, s.finished));
   return section(t, "Proof")
-    .child(foldLine(view, t, key, `${s.tip ? `${s.tip}\n` : ""}${open ? "Show only the tasks that need a look" : `Show every task's proof (${s.rows.length})`}`, s.parts))
+    .child(foldLine(view, t, key, `${s.tip ? `${s.tip}\n` : ""}${open ? "Show only the tasks that need a look" : `Show every task's proof (${s.rows.length})`}`, s.parts,
+      // Unfolding the Proof section is reading it.
+      () => markProofSeen(r, proofSig(s.rows))))
     .children(shown.map(row))
     .when(open, (el) => el.child(h_flex().flex_wrap().gap(6).px(2).pt(2).items_center()
       .when(Boolean(md), (e) => e.child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md")))
@@ -1430,6 +1471,8 @@ function sendAnswer(view, it, text, cx, option = false) {
 // Sends the inline reply as the answer to the item being replied to.
 export function submitReply(view, cx) {
   const text = view.reply.value().trim();
+  // Ask for changes on a ready run (changesButton): its own message, not an answer.
+  if (view.replying?.startsWith("changes:")) return sendChanges(view, view.replying.slice(8), text, cx);
   // A need box's Reply answers the same item (question.js replyId).
   const id = replyItem(view.replying);
   const it = decisionQueue(view.runs, view.decisions, facts()).find((x) => x.id === id);
@@ -1437,6 +1480,27 @@ export function submitReply(view, cx) {
   view.reply.set_value("");
   view.replying = null;
   cx.notify();
+}
+
+// Writes the user's changes to the run's inbox (data.js askChanges); the field closes once it is written.
+function sendChanges(view, key, text, cx) {
+  const run = view.runs.find((x) => x.key === key);
+  if (!text || !run) return;
+  view.actionError = null;
+  view.reply.set_value("");
+  view.replying = null;
+  cx.notify();
+  cx.spawn(async (cx) => {
+    try {
+      const out = await askChanges(run, text);
+      if (out?.waits) view.actionNote = `${run.branch}: the changes wait in its inbox until the run is resumed`;
+      else if (out?.blocked) view.actionNote = `${run.branch}: its orchestrator is blocked on a dialog; it reads the changes once that is answered`;
+      else view.actionNote = `${run.branch}: changes sent to its orchestrator`;
+    } catch (e) { view.actionError = `${run.branch}: ${e?.message ?? e}`; }
+    view.redraw = true;
+    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+    try { await view.load(cx); } catch { /* the next refresh shows it */ }
+  }, { owner: null });
 }
 
 // A gone or lost orchestrator: an answer only waits in its inbox, and nothing is typed into its terminal.
@@ -1786,7 +1850,7 @@ export function crew(view, t) {
   const row = ({ id, mark = null, type = null, tags = [], title, tip = null, detail, tone, detailTip = null, status, address, edge, open = () => focusAgent(address), crabs = 0, run = null, usage = null, whose = "", more = null, action = null }) => {
     const hover = [title, tip, contextTip(view, address, run)].filter(Boolean).join("\n");
     const here = address != null && address === current;
-    const color = tone === "amber" ? AMBER(t) : t[tone] ?? t.dim;
+    const color = tone === "amber" ? AMBER(t) : tone === "pass" ? PASS(t) : t[tone] ?? t.dim;
     return h_flex().id(id).relative().overflow_hidden().flex_none().gap(8).py(6).pl(12).pr(8)
     // The selected row has a ring in the theme's accent, whatever its edge: the edge's own tint is
     // grey in Working, so a ring of it would not show. The ring is always there, clear when not

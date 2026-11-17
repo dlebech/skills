@@ -268,6 +268,33 @@ export function proofCounts(rows) {
   };
 }
 
+// ---- the proof was read ----
+// "Read" is remembered per run (harbormaster.proofSeen, proofseen.js) as a signature of the proof
+// as shown: each scoped task's id, result line and files. Any change to what proof.md says, or to
+// the shots, is a new signature, so a proof that moved since it was read reads as unread again.
+// Accepting a row changes none of it: the user had looked when they accepted.
+export function proofSig(rows) {
+  return (rows ?? []).filter((k) => k.scoped).map((k) => `${k.id}|${resultLine(k)}|${(k.files ?? []).join(",")}`).join("\n");
+}
+
+// Whether the proof with signature `sig` was read: `seen` is what was stored when the user last
+// opened it. No proof (an empty signature) is never read.
+export const proofRead = (seen, sig) => Boolean(sig) && seen === sig;
+
+// Every task of a proof passes (or was accepted by the user): proofCounts() over the rows, with
+// something to pass and nothing failing, partial, pending, not checked or not scoped.
+export const proofClean = (c) => c.total > 0 && c.fail === 0 && c.partial === 0 && c.pending === 0 && c.unchecked === 0 && c.unscoped === 0
+  && c.pass + c.accepted === c.total;
+
+// What stands between a read proof and a merge, in words: "5/6 pass, 1 partial", or null when the
+// proof is clean. `c` is proofCounts().
+export function proofGaps(c) {
+  if (proofClean(c)) return null;
+  const parts = [`${c.pass + c.accepted}/${c.total} pass`, c.partial && `${c.partial} partial`, c.unchecked && `${c.unchecked} not checked`,
+    c.pending && `${c.pending} pending`, c.unscoped && `${c.unscoped} not scoped`].filter(Boolean);
+  return parts.join(", ");
+}
+
 // The verdict line on top of the Proof section:
 // "Proof T2 · 6/8 pass · 2 pending · 1 partial (1 task without a screenshot) · checks green · two-way door".
 // {text, tone ("done" | "blocked" | "dim")}, or null when the run has no proof at all. `gathering` and

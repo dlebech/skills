@@ -24,6 +24,7 @@ import { taskTone, taskCounts } from "./tasks.js";
 export { taskTone, taskCounts };
 import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
 import { blockingRequest, blockingPending, ciRequest } from "./blocking.js";
+import { changesRequest } from "./changes.js";
 import { commentsArgs, commentSummary, commentsRequest, commentsRequestAll, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { detachedSend } from "./wake.js";
@@ -33,9 +34,10 @@ const RS = "\u001e", US = "\u001f", GS = "\u001d";
 
 // The first lines of inbox messages that answer no question: level requests ("set autonomy to
 // L2"), asks to prove ("prove t23 to T2: …"), asks what is blocking ("what is blocking? …") and
-// asks to address review comments ("address comments on <PR url>: ask").
+// asks to address review comments ("address comments on <PR url>: ask") and asks for changes
+// ("changes asked from Harbormaster: …").
 // Kept equal to answer_messages in skills/herdr-app-captain/scripts/lib.sh.
-const NOT_ANSWERS = "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?|address comments on )";
+const NOT_ANSWERS = "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?|address comments on |changes asked from Harbormaster: )";
 
 // One sh script per machine: the captain's decisions, then every run, its files
 // separated by \x1f, runs by \x1e; then, after a \x1d, the process snapshot.
@@ -898,6 +900,14 @@ export function askBlocking(run, { quiet, step = null }) {
 // "what is blocking?" message, saying which PR and check failed (blocking.js ciRequest).
 export function askCi(run, { pr, check = null, url = null }) {
   return messageRun(run, "harbormaster-blocking", ciRequest({ pr, check, url }));
+}
+
+// Asks the orchestrator for changes to a run that was ready to merge (Ask for changes in its
+// box): the user's words as an inbox message (changes.js), woken like the others. Throws without text.
+export function askChanges(run, text) {
+  const msg = changesRequest(text);
+  if (!msg) throw new Error("say what to change");
+  return messageRun(run, "harbormaster-changes", msg);
 }
 
 // Asks the orchestrator to address the review comments on one of its PRs (Address comments on
