@@ -80,6 +80,27 @@ export function startArgs({ name, cwd, taskFile, spaceId, kind = "claude" }) {
     "--label", "role=orchestrator", "--label", `herdr.space=${spaceId}`, "--label", `herdr.tab=tb-${name}`];
 }
 
+// ---- the captain, started from Harbormaster (newrun.js, dialog mode "captain") ----
+
+export const CAPTAIN_PROMPT = "/herdr-app-captain";
+
+// The live captain, if any: it is what Harbormaster's captain spot shows (live.js captainOf).
+const liveCaptain = (terminals) => (terminals ?? []).find((t) => t.state === "live" && t.labels?.role === "captain") ?? null;
+
+// Why no captain can be started now, or null. A second captain would answer the same decisions twice.
+export const captainProblem = (terminals) => (liveCaptain(terminals) ? "A captain is already running: open it from the captain link" : null);
+
+// "captain", or "captain-<n>" when a live terminal (not a captain, e.g. a leftover) already has that name:
+// start-agent.sh resumes a live name instead of starting anew.
+export function captainName(terminals) {
+  const taken = new Set((terminals ?? []).filter((t) => t.state === "live").flatMap((t) => [t.name, t.address?.split("/").pop()]));
+  if (!taken.has("captain")) return "captain";
+  for (let n = 2; ; n++) if (!taken.has(`captain-${n}`)) return `captain-${n}`;
+}
+
+// The captain's start-agent.sh arguments: as a run's, with role=captain, so it needs no parent and shows as the captain.
+export const captainArgs = ({ name, cwd, taskFile, spaceId }) => startArgs({ name, cwd, taskFile, spaceId }).map((a) => (a === "role=orchestrator" ? "role=captain" : a));
+
 // start-agent.sh's one line: "started t5", "trust t5", ... → what to tell the user.
 export function startOutcome(code, stdout, stderr) {
   const [word, address] = String(stdout).trim().split(/\s+/);
@@ -116,6 +137,7 @@ export const draftsFor = (prefs, repo) => (["herdr", "pending"].includes(prefs?.
 export function remember(prefs, { kind, profile, repo, drafts }) {
   const folders = [repo, ...(prefs?.folders ?? []).filter((f) => f !== repo)].slice(0, RECENT_MAX);
   const next = { profile: prefs?.profile ?? null, drafts: { ...(prefs?.drafts ?? {}) }, folders };
+  if (kind === "captain") return next; // only the folder is remembered
   if (kind === "review") { if (drafts !== "direct") next.drafts[repo] = drafts; }
   else next.profile = profile;
   return next;

@@ -14,7 +14,7 @@ import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, ex
 import { reviewError } from "./reviews.js";
 import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
-import { openNewRun, startReview, reviewStarting } from "./newrun.js";
+import { openNewRun, openStartCaptain, startReview, reviewStarting } from "./newrun.js";
 import { primaryOf, isMergeAsk } from "./needaction.js";
 import { claimsAsk, checksLine, reviewedLine, withSaid, claimActions } from "./claims.js";
 import {
@@ -119,30 +119,38 @@ const statusMsg = (term) => term?.report?.msg ?? (typeof term?.status === "objec
 // "captain ↗" at the header's right: red with a count while it has decisions for you, an eye
 // while it only watches, the spinner only while it really replies (crewrows.js captainMark).
 // Clicking does what the captain card did: focus it, with the overview beside it. No captain:
-// nothing, unless decisions still wait for one.
+// a compact "⚓+" pill, styled like "+ New run" (a longer label squeezes the title), that opens the Start captain dialog (a folder to
+// start it in); "⚓+ · 3" while decisions wait for one.
+function startCaptainLink(t, asks) {
+  return h_flex().id("crew-start-captain").flex_none().px(7).h(22).items_center().rounded(5).bg(t.raised)
+    .text_size(11.5).font_medium().text_color(asks ? t.blocked : t.muted).cursor_pointer()
+    .hover((st) => st.text_color(asks ? t.blocked : t.foreground).bg(t.hover))
+    .tooltip(`${asks ? `${plural(asks, "decision")} for you, and no captain running. ` : "No captain running. "}Start the captain in a folder of your choice`)
+    .on_click((_e, cx) => { cx.stop_propagation(); openStartCaptain(); })
+    .child(asks ? `⚓+ · ${asks}` : "⚓+");
+}
+
 function captainLink(m) {
   const { view, t, ctx, cap, asks } = m;
   const term = cap.terminal;
-  if (!term && !asks) return null;
-  const mark = term ? captainMark({ status: agentStatus(term, ctx), msg: statusMsg(term), watching: cap.watching }) : "idle";
+  if (!term) return startCaptainLink(t, asks);
+  const mark = captainMark({ status: agentStatus(term, ctx), msg: statusMsg(term), watching: cap.watching });
   const tone = asks ? t.blocked : t.muted;
   const icon = mark === "watching" ? svg("mods/harbormaster/eye.svg").size(12).flex_none().text_color(tone)
     : mark === "working" || mark === "blocked" ? statusDot(t, mark) : null;
   const state = { watching: `Watching: ${watchedText(stats(view.runs, ctx))}, idle until something needs it`, working: "Working", blocked: "Waiting on a prompt in its terminal",
     idle: cap.watching ? "Idle" : "Idle, not watching runs" }[mark];
-  const tip = term
-    ? [`The captain · ${state}`, asks ? `${plural(asks, "decision")} for you` : null, "Click to open it, with the overview beside it"].filter(Boolean).join("\n")
-    : `${plural(asks, "decision")} for you, and no captain running: start /herdr-app-captain to answer`;
+  const tip = [`The captain · ${state}`, asks ? `${plural(asks, "decision")} for you` : null, "Click to open it, with the overview beside it"].filter(Boolean).join("\n");
   return h_flex().id("crew-captain-link").flex_none().gap(5).items_center().px(6).h(22).rounded(5)
     .text_size(11.5).text_color(tone).tooltip(tip)
-    .when(Boolean(term), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover).text_color(asks ? t.blocked : t.foreground))
-      .on_click(() => focusWithPane(term.address)))
+    .cursor_pointer().hover((st) => st.bg(t.hover).text_color(asks ? t.blocked : t.foreground))
+    .on_click(() => focusWithPane(term.address))
     .when(Boolean(icon), (el) => el.child(icon))
     .child(asks ? `captain · ${asks} ↗` : "captain ↗");
 }
 
 // The sidebar's one header row.
-function harborHeader(m) {
+export function harborHeader(m) {
   const { t } = m;
   // The label gives way first (it ellipsizes), then the spacer: the captain link never clips.
   return h_flex().id("crew-header").flex_none().h(36).pl(PAD * 2).pr(PAD).gap(8).items_center().min_w(0).overflow_hidden()

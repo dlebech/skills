@@ -1,6 +1,7 @@
 // The serious views: the runs overview (totals, what's waiting on you, captain, run cards) and the Crew block.
 
 import { div, svg } from "gpui-kit";
+import { openStartCaptain } from "./newrun.js";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
 import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCommentsAll, askCi, askChanges } from "./data.js";
@@ -1394,11 +1395,13 @@ const runPin = (t, id, r, orch) => (cardBesideOrchestrator(r, orch) ? pinButton(
 // What the captain watches, from stats(): "watching 2 runs · 1 finished" (crewrows.js watchingText).
 export const watchedText = (s) => watchingText(s.live.length, s.docked.length);
 
-function captainStrip(view, t, ctx, s) {
+export function captainStrip(view, t, ctx, s) {
   const watched = watchedText(s);
   const cap = captainOf(ctx);
   if (!cap.terminal) return h_flex().flex_none().gap(8).p(10).rounded(10).border(1).border_color(t.border).text_size(12).text_color(t.dim)
-    .child(CAPTAIN).child("No captain running. Start one with /herdr-app-captain.");
+    .items_center().child(CAPTAIN).child(div().flex_1().child("No captain running."))
+    .child(div().id("start-captain").flex_none().px(10).h(24).rounded(6).flex().items_center().bg(t.raised).text_color(t.foreground).cursor_pointer()
+      .hover((st) => st.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); openStartCaptain(); }).child("Start captain"));
   return h_flex().id("captain").flex_none().gap(10).p(10).px(12).rounded(10).bg(t.accent + "18").border(1).border_color(t.accent + "55")
     .items_center().cursor_pointer().hover((s) => s.bg(t.accent + "26"))
     .on_click(() => focusAgent(cap.terminal.address))
@@ -1493,9 +1496,9 @@ function noAnswer(it) {
     return `${line ?? "This run needs you without a question"}. Nothing to answer here: click it to open its orchestrator`;
   }
   if (it.kind === "decision" && !captainOf(facts()).terminal) {
-    if (!it.run?.localTerminal) return "The captain isn't running and this decision names no run: start /herdr-app-captain to answer it";
+    if (!it.run?.localTerminal) return "The captain isn't running and this decision names no run: start the captain (Harbormaster's Start captain) to answer it";
     // Nobody reads a gone run's inbox, and this decision is about the run itself (resume, park or close).
-    if (runGone(it.run)) return "This run is gone and the captain isn't running: start /herdr-app-captain, or use the run's own Resume, Park or Close";
+    if (runGone(it.run)) return "This run is gone and the captain isn't running: start the captain from Harbormaster, or use the run's own Resume, Park or Close";
   }
   if (it.kind !== "decision" && !it.run?.localTerminal) return "This run's orchestrator isn't known: open the run to answer";
   return null;
