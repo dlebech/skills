@@ -235,12 +235,12 @@ into classes, so the number on the row always says what it counts:
 - **thread** (counted): a person's unresolved review thread whose last comment does not start
   `🤖 AI:`;
 - **review note** (counted): the text of a person's approving, change-requesting or commenting
-  review that holds findings of its own (it came with no inline threads), with no `🤖 AI:` comment
-  after it;
+  review that holds findings of its own (the review has no inline comments of its own, and is more
+  than a bare acknowledgement such as `LGTM 👍`), with no `🤖 AI:` comment after it;
 - **answered** (shown, not counted): a thread whose last comment starts `🤖 AI:`, or a review note
   with a `🤖 AI:` comment after it. These wait on the reviewer, who resolves them;
-- **summary** (shown, not counted): a review's text whose review also carries inline threads: it
-  sums them up;
+- **summary** (shown, not counted): a review's text whose review also carries inline comments
+  (replies in older threads included): it sums them up; a bare acknowledgement is one too;
 - **bots'** threads (unresolved, unanswered) are counted apart (`+2 from coderabbitai`).
 
 Resolved threads appear nowhere. Only the repository's owners, members and collaborators count, and
@@ -284,7 +284,9 @@ is not the user's.
   `🤖 AI: leaving as is: <why>`. A reply makes the thread *answered*, so the count goes down by
   replying alone and the label goes back to `approved — merge` once every thread and note is
   answered. A review note gets one PR conversation comment starting `🤖 AI:` that links the review
-  and answers each of its points. It reports in its progress line.
+  and answers each of its points. It reads the summaries too: a point a summary makes that no
+  thread covers is answered in that PR comment, as for a note (summaries are never counted). It
+  reports in its progress line.
 
 It never merges, never dismisses a review and leaves the reviewer's approval alone. It renames the
 message `.handled`. The `🤖 AI:` prefix tells the reviewer the reply is an agent's, and tells
