@@ -203,3 +203,26 @@ export function watchingText(live, docked) {
   const n = live + docked;
   return `watching ${n} run${n === 1 ? "" : "s"}${docked ? ` · ${docked} finished` : ""}`;
 }
+
+// A run's workers as Herdr's Agents list draws them: each parent followed by its children, with
+// how deep it hangs and the tree lines to draw. `guides` has one entry per ancestor level below
+// the top (true: that ancestor has later siblings, so a │ continues there); `last` says whether
+// the row itself closes its siblings (└ rather than ├). A worker whose parent is the run's
+// orchestrator, or isn't among the workers, stays at the top level.
+export function workerTree(workers, rootAddress) {
+  const here = new Set(workers.map((w) => w.address));
+  const parentOf = (w) => (w.parent !== rootAddress && here.has(w.parent) ? w.parent : null);
+  const out = [];
+  const add = (parent, guides) => {
+    const kids = workers.filter((w) => parentOf(w) === parent);
+    kids.forEach((w, i) => {
+      const last = i === kids.length - 1;
+      // Top-level rows draw no lines; their children hang one level in, with `guides` for the levels between.
+      const top = parent === null;
+      out.push({ w, depth: guides.length + (top ? 0 : 1), last, guides });
+      add(w.address, top ? [] : [...guides, !last]);
+    });
+  };
+  add(null, []);
+  return out;
+}

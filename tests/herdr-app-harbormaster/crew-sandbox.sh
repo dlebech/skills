@@ -147,6 +147,15 @@ make_runs() {
     --pr dlebech/no-such-repo-nyo https://github.com/dlebech/no-such-repo-nyo/pull/1
   mkrun quiet-run running feat "Quiet run" "${day}T10:30:00Z" 1/2 merged implementing --progress "t2 implementing"
   ORCH_STATE=working mkrun busy-run running feat "Busy run" "${day}T07:00:00Z" 0/2 implementing implementing --progress "both tasks under way"
+  # busy-run's workers, for its run pane's Agents list: two implementers (shells reporting a status; a
+  # "claude"-named binary does not make Herdr detect an agent, so no agent icon is shown here) and, nested under the first, a build (plain shell) and a php server; a node helper under the second.
+  local busy w1 w2; busy=$(jq -r .terminal "$S/runs/skills/busy-run/orchestrator.json")
+  mkdir -p "$S/fake-bin" && cp "$(readlink -f "$(command -v sh)")" "$S/fake-bin/claude"
+  w1=$(hc run --json --bg --no-notify --parent "$busy" --name impl-x-t1 --cwd "$S" sh -c "printf '\\033]7501;state=working\\007'; exec $S/fake-bin/claude -c \"exec sleep infinity\"" | jq -r '.terminal // .address')
+  w2=$(hc run --json --bg --no-notify --parent "$busy" --name impl-x-t2 --cwd "$S" sh -c "printf '\\033]7501;state=idle\\007'; exec $S/fake-bin/claude -c \"exec sleep infinity\"" | jq -r '.terminal // .address')
+  hc run --bg --no-notify --parent "$w1" --name x-t1-build --cwd "$S" sh -c 'echo build; exec sleep infinity' >/dev/null
+  hc run --bg --no-notify --parent "$w1" --name x-t1-serve --cwd "$S" php -r 'sleep(100000);' >/dev/null
+  hc run --bg --no-notify --parent "$w2" --name x-t2-helper --cwd "$S" node -e 'setInterval(()=>{},1e6)' >/dev/null
   # Dated back, so the first sight of its tasks (seeded by status.json's updated) shows an age.
   local sj=$S/runs/skills/busy-run/status.json
   jq --arg u "$(date -u -d '75 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" '.updated = $u' "$sj" >"$sj.tmp" && mv "$sj.tmp" "$sj"

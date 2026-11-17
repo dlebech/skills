@@ -4,7 +4,7 @@ import { div, svg } from "gpui-kit";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
 import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCommentsAll, askCi, askChanges } from "./data.js";
-import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
+import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, programOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
@@ -20,7 +20,7 @@ import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
 import { markProofSeen } from "./proofseen.js";
 import { askedStore, markPrsAsked, unmarkPrAsked } from "./asked.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText } from "./crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText, workerTree } from "./crewrows.js";
 import { blockingAsked, askSig } from "./blocking.js";
 import { commentsAsked, defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
@@ -1339,16 +1339,31 @@ function issueRow(t, url) {
     .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).child(shortRef(url)));
 }
 
+// The connectors before a nested worker, drawn as lines (as Herdr's Agents list does) so they join
+// across the 4px gap between rows: a cell per level, 20px wide, its vertical under the parent's
+// icon centre (7px in), bending at mid-height into an arm that reaches the child's icon.
+const TREE_CELL = 20, ROW_H = 24, ROW_GAP = 4;
+function treeLines(t, { depth, last, guides }) {
+  if (depth === 0) return [];
+  const cell = () => div().relative().flex_none().w(TREE_CELL).h(ROW_H);
+  const vertical = (h) => div().absolute().left(7).top(-ROW_GAP).h(h).w(1).bg(t.dim);
+  const through = guides.map((more) => (more ? cell().child(vertical(ROW_H + ROW_GAP)) : cell()));
+  const elbow = cell().child(vertical(last ? ROW_H / 2 + ROW_GAP : ROW_H + ROW_GAP))
+    .child(div().absolute().left(7).top(ROW_H / 2).w(TREE_CELL - 8).h(1).bg(t.dim));
+  return [...through, elbow];
+}
+
 // One of the run's agents: its name, the task it works on and that task's stage, when
 // its name says (impl-<prefix>-<task>); a helper it started (a dev server) indented below it.
-function workerRow(t, w, ctx, work, nested) {
+function workerRow(t, w, ctx, work, line) {
+  const nested = line.depth > 0;
   const status = agentStatus(w, ctx);
   const color = work?.stage ? STAGE[work.stage].color(t) : null;
   return h_flex().id(`wk-${w.address}`).gap(8).items_center().h(24).px(8).rounded(6).cursor_pointer()
-    .when(nested, (el) => el.pl(28))
     .hover((s) => s.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); focusAgent(w.address); })
     .tooltip(work?.task.about ? `${w.name ?? w.address}: ${work.task.about}` : "Show this agent")
-    .child(div().flex_none().text_size(nested ? 11 : 13).child(CRAB))
+    .children(treeLines(t, line))
+    .child(programIcon(programOf(w, ctx), 14, nested ? t.muted : t.foreground))
     .child(div().flex_none().text_size(12).text_color(nested ? t.muted : t.foreground).child(w.name ?? w.address))
     .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim)
       .child(work ? [work.task.id, work.task.name].filter(Boolean).join(" ") : ""))
@@ -1395,7 +1410,7 @@ function runDetail(view, t, r, ctx) {
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
     .when(r.decided.length > 0, (el) => el.child(decisionsSection(view, t, r)))
     .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
-      .children(workers.map((w) => workerRow(t, w, ctx, workOf.get(w.address), w.parent !== r.terminal)))))
+      .children(workerTree(workers, r.terminal).map((line) => workerRow(t, line.w, ctx, workOf.get(line.w.address), line)))))
     .when(Boolean(r.tokens), (el) => el.child(tokensSection(view, t, r)))
     .child(actionRow(view, t, r, orch, closed, counts));
 }
