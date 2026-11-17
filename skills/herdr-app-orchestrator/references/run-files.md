@@ -154,8 +154,9 @@ does not count as an answer to an open `question.md`.
 
 ## The PR body: Evidence and Merge danger
 
-The orchestrator's PR body has `## Evidence` (per task: what was checked, the result, and the
-local file names from `proof.md`; it replaces "validation and measurements") and `## Merge
+The orchestrator's PR body has `## Evidence` (what a reviewer of the PR can see or rerun: checks
+with counts and the commit, how to see the change, what was seen by hand, what was not checked; no local
+file names, see `proving` §5; it replaces "validation and measurements") and `## Merge
 danger`. The first line of `## Merge danger` is `One-way door — <blast radius>` or
 `Two-way door — <blast radius>`, e.g. `Two-way door — Harbormaster mod and two skills; revert the
 squash commit to undo.` Harbormaster reads that line from the PR body and shows it on the PR row,
