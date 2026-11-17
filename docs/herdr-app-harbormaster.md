@@ -353,7 +353,7 @@ Under the claims, the whole-branch checks (suite, build, lint, CI) are one line 
 `Checks:` header: `Checks ✓ 1497 tests, build, lint, CI` in green, `Checks ✗ …` in red, or dim while
 still running (`Checks pending CI`), with the details on hover. A run planned before claims (no
 `## Claims`) shows just that checks line, and its proof is judged by it alone: red is a failed proof,
-green a clean one. The task bar colours each task by its stage only.
+green a clean one. Under the checks line, one quiet line says what was last reviewed, from proof.md's `Reviewed: <sha> <which review> — <result>` lines (the latest final review): `Reviewed · final review at 4ad8528` while the integration branch is still that commit (or its tree), amber `Reviewed at 4ad8528 · 5 commits since, not reviewed` after (counted with `git rev-list --count`, on the run's machine, every 15 s while the run is open). The verdict counts it and the merge ask lists it first. A finished run with claims and no `Reviewed:` line shows a dim `not reviewed`; an old run shows nothing. The task bar colours each task by its stage only.
 
 The merge ask in the Needs-you box uses the same claims: those worth a look, at most three, then
 `+n more` (the run pane, where the proven ones are); `claimsAsk()` in `claims.js` gives it. The box

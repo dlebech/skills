@@ -51,7 +51,7 @@ export const isClaimId = (id) => /^C\d+$/.test(String(id ?? ""));
 export const emptyClaim = () => ({ result: null, why: "", shots: [], tests: [], clips: [] });
 
 export function parseProofMd(text) {
-  const out = { tier: null, checks: null, tasks: {}, claims: {}, cut: false };
+  const out = { tier: null, checks: null, reviewed: [], tasks: {}, claims: {}, cut: false };
   if (!text) return out;
   let cur = null, claim = null;
   for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
@@ -65,7 +65,7 @@ export function parseProofMd(text) {
       continue;
     }
     // `Test:` only: "Tests: 4 passed" is a note, not a test named "4 passed".
-    const kv = /^[-*\s]*(Tier|Checks|Checked|Result|Files|Shots?|Test|Clips?):\s*(.*)$/i.exec(line);
+    const kv = /^[-*\s]*(Tier|Checks|Reviewed|Checked|Result|Files|Shots?|Test|Clips?):\s*(.*)$/i.exec(line);
     if (!kv) continue;
     const key = kv[1].toLowerCase().replace(/^(shot|clip)s$/, "$1"), val = kv[2].trim();
     if (claim) { claimLine(claim, key, val); continue; }
@@ -74,6 +74,8 @@ export function parseProofMd(text) {
       // "Checks: green — <what>" / "Checks: red — <what>" (or another word, as "pending — CI":
       // still running), in the header above the first section.
       else if (key === "checks") { const c = /^(\w+)\b[\s—–:-]*(.*)$/.exec(val); if (c) out.checks = { state: c[1].toLowerCase(), text: c[2].trim() }; }
+      // "Reviewed: 4ad8528 final review — 9 findings, all fixed", repeatable (claims.js reviewedLine).
+      else if (key === "reviewed") { const x = parseReviewed(val); if (x) out.reviewed.push(x); }
       continue;
     }
     if (key === "tier") cur.tier = proofOf(val)?.tier ?? null;
@@ -85,6 +87,15 @@ export function parseProofMd(text) {
     }
   }
   return out;
+}
+
+// A `Reviewed:` value: "<sha> <which review> — <result>" → {sha, what, result}, null without a
+// hex sha first. The result may be empty.
+export function parseReviewed(val) {
+  const m = /^`?([0-9a-f]{4,40})`?\s+(.*)$/i.exec(val.trim());
+  if (!m) return null;
+  const [what, ...rest] = m[2].split(/\s+[—–]\s+/);
+  return { sha: m[1].toLowerCase(), what: what.trim(), result: rest.join(" — ").trim() };
 }
 
 // One line of a claim's section into `e` (emptyClaim()). `Shot:` and `Clip:` take one path or

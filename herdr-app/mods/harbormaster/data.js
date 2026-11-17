@@ -287,6 +287,8 @@ function parseRun(machine, chunk) {
     // The PRs an Address comments (comments.js) is still unread for, by URL.
     commentsAsked: pendingComments(requests),
     tasks,
+    // How far the branch is past its last Reviewed commit (refreshReviewed), null until read.
+    reviewedGap: reviewGaps.get(`${machine ?? ""}:${dir}`) ?? null,
     // The run's proof: its tier, its claims (plan.md's `## Claims`; [] for an old run), proof.md's
     // results by claim and task id, and the file names in shared/proof/.
     proof: {
@@ -995,6 +997,52 @@ async function askToClose(run) {
   return blocked
     ? { blocked: true, note: "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes" }
     : { blocked: false, note: "its orchestrator is cleaning up, and its tab closes when done" };
+}
+
+// ---- reviewed ----
+
+// For proof.md's `Reviewed: <sha> …`: how many commits the run's branch has past that sha, and
+// whether its tree is still that commit's. Looked up in the run's folder or its repositories,
+// on the run's machine; prints "<count> <1 when the trees match>", or "?" when git cannot tell.
+const SINCE = [
+  'folder=$1 branch=$2 sha=$3',
+  'for r in "$folder" "$folder"/*/; do',
+  '  [ -e "$r/.git" ] || continue',
+  '  git -C "$r" rev-parse -q --verify "$branch^{commit}" >/dev/null || continue',
+  '  git -C "$r" rev-parse -q --verify "$sha^{commit}" >/dev/null || { echo "?"; exit 0; }',
+  '  n=$(git -C "$r" rev-list --count "$sha..$branch") || { echo "?"; exit 0; }',
+  '  if git -C "$r" diff --quiet "$sha" "$branch"; then echo "$n 1"; else echo "$n 0"; fi',
+  '  exit 0',
+  'done',
+  'echo "?"',
+].join("\n");
+
+const reviewGaps = new Map(); // run key → {sha, count, same, at}
+const reviewBusy = new Map();
+const REVIEW_TTL = 15_000, REVIEW_TTL_DONE = 5 * 60_000;
+
+// Reads the commits since the run's last Reviewed sha when stale (every 15 s while open, 5 min once
+// finished); one cheap git call with a timeout. Unreadable: no gap shown (the line reads as current).
+// True when what the line shows changed.
+export async function refreshReviewed(run, done = false) {
+  const all = run.proof?.md?.reviewed ?? [];
+  const last = [...all].reverse().find((x) => /final/i.test(x.what)) ?? all.at(-1);
+  if (!last || !run.folder) { reviewGaps.delete(run.key); return false; }
+  const have = reviewGaps.get(run.key);
+  if (Date.now() - (reviewBusy.get(run.key) ?? 0) < 30_000) return false;
+  if (have && have.sha === last.sha && Date.now() - have.at < (done ? REVIEW_TTL_DONE : REVIEW_TTL)) return false;
+  const started = Date.now();
+  reviewBusy.set(run.key, started);
+  try {
+    const out = await exec("sh", ["-c", SINCE, "sh", run.folder, run.branch, last.sha], { on: run.machine, timeout: 8000 }).catch(() => null);
+    const m = out?.code === 0 ? /^(\d+) ([01])$/.exec(out.stdout.trim()) : null;
+    const next = { sha: last.sha, count: m ? Number(m[1]) : 0, same: m ? m[2] === "1" : true, at: Date.now() };
+    reviewGaps.set(run.key, next);
+    run.reviewedGap = next;
+    return !have || have.sha !== next.sha || have.count !== next.count || have.same !== next.same;
+  } finally {
+    if (reviewBusy.get(run.key) === started) reviewBusy.delete(run.key);
+  }
 }
 
 // The run's integration worktrees: each linked worktree with the run's branch checked

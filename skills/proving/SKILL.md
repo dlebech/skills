@@ -68,7 +68,7 @@ A `proof-accepted.json` beside `proof.md` records the claims the user accepted a
 
 ## 5. The PR's Evidence section
 
-Write `## Evidence` from `proof.md` for a reviewer of the PR, using the same claims: one line per claim (`C1 Drag a card to reorder the list — proven: <what was seen, or the tests by name>`), then the checks line. It cites only what they can see or rerun:
+Write `## Evidence` from `proof.md` for a reviewer of the PR, using the same claims: one line per claim (`C1 Drag a card to reorder the list — proven: <what was seen, or the tests by name>`), then the checks line, and the last review (`proof.md`'s latest `Reviewed:` line: which review, at which commit, and whether commits came after it, or that nothing was reviewed). It cites only what they can see or rerun:
 
 - the checks: CI (linked or named), and the test, lint and build commands they can run, with counts and the commit (say when there is no CI);
 - how to see the change themselves, when that is possible: a command, a sandbox, the URL of a preview deploy, steps in the app;

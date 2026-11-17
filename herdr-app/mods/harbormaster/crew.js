@@ -16,7 +16,7 @@ import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
 import { openNewRun, startReview, reviewStarting } from "./newrun.js";
 import { primaryOf, isMergeAsk } from "./needaction.js";
-import { claimsAsk, checksLine, withSaid, claimActions } from "./claims.js";
+import { claimsAsk, checksLine, reviewedLine, withSaid, claimActions } from "./claims.js";
 import {
   attOf, runStatus, levelTags, runTypeTag, statusDot, actionButton, closeAllControl, runFacts, needItemsOf,
   newDecisionsNote, noteRows, watchedText, edgeColor, cardBesideOrchestrator, AMBER, PASS, SELECTED, withUsage, runProps,
@@ -270,7 +270,7 @@ function boxActions(m, x, f, items) {
   // "N more" counts the buttons the unfolded box draws: not an "asked…" note, nor one that draws nothing.
   const drawn = items.flatMap((y, i) => y.actions.map((x, j) => (x.kind === "asked" ? null : needButton(view, t, r, f, x, `need-count-${r.key}-${i}-${j}`, "sidebar", false)))).filter(Boolean).length;
   // A merge ask's claims and checks line are unfolded with the rest, so they count too.
-  const claimLines = isMergeAsk(items) ? boxClaims(r, stagesOf(r, m.ctx)).rows.length + (checksLine(r.proof?.md) ? 1 : 0) : 0;
+  const claimLines = isMergeAsk(items) ? boxClaims(r, stagesOf(r, m.ctx)).rows.length + (checksLine(r.proof?.md) ? 1 : 0) + (boxReviewed(r) ? 1 : 0) : 0;
   const extra = drawn - (main ? 1 : 0) + claimLines;
   if (more) return [...needLines(view, t, r, f, items, "sidebar"), claimLines ? mergeClaims(m, r) : null, h_flex().child(moreLink(0)), changes, confirm].filter(Boolean);
   // The button's own line when it is not the first item's (the first was asked about), so it never
@@ -290,6 +290,9 @@ function boxClaims(r, stages) {
   return { rows, more: ask.more + ask.worthALook.length - rows.length };
 }
 
+// The branch's Reviewed line for a merge ask (claims.js reviewedLine), the run's own words for it.
+const boxReviewed = (r) => reviewedLine(r.proof?.md, r.reviewedGap, { finished: r.phase === "finished" || Boolean(r.away), claims: (r.proof?.claims?.length ?? 0) > 0 });
+
 // A merge ask's claims, under its lines when the box is unfolded: the claims worth a look first
 // (claims.js claimsAsk, at most three), each one quiet line (id, words, why) with Accept / Ask
 // to prove as in the run's pane, then "+ n more" (the run's pane, its Claims unfolded), then the
@@ -300,7 +303,8 @@ function mergeClaims(m, r) {
   // A click shows at once, before the next read of the run's files (overview.js said).
   const rows = withSaid(ask.rows.map((k) => ({ ...k })), said, r.key, r.proof);
   const checks = checksLine(r.proof?.md);
-  if (!rows.length && !checks) return null;
+  const reviewed = boxReviewed(r);
+  if (!rows.length && !checks && !reviewed) return null;
   const tone = (k) => (k.state === "fail" ? t.blocked : k.look ? AMBER(t) : PASS(t));
   const row = (k) => h_flex().id(`crew-claim-${r.key}-${k.id}`).gap(8).items_center().min_w(0)
     .tooltip([`${k.id} ${k.name}`, k.why, k.ac ? `AC ${k.ac}` : null].filter(Boolean).join("\n"))
@@ -309,11 +313,16 @@ function mergeClaims(m, r) {
       .child(k.why ? `${k.name} · ${k.why}` : k.name))
     .children(k.look ? claimActions(k).map((a) => proofAction(view, t, r, k, a, quietButton)) : []);
   const pane = () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: { ...runProps(r), proof: true } });
+  // Commits after the last review are the first thing worth a look; a quiet Reviewed line goes after the checks.
+  const reviewedRow = reviewed && div().id(`crew-reviewed-${r.key}`).truncate().text_size(11)
+    .text_color(reviewed.tone === "amber" ? AMBER(t) : t.dim).tooltip(reviewed.tip).child(reviewed.text);
   return v_flex().id(`crew-claims-${r.key}`).gap(4).pt(6).border_t(1).border_color(t.border)
+    .when(reviewed?.tone === "amber", (el) => el.child(reviewedRow))
     .children(rows.map(row))
     .when(ask.more > 0, (el) => el.child(h_flex().child(quietLink(t, `crew-claims-more-${r.key}`, `+ ${ask.more} more`, "Every claim, in the run's pane", pane))))
     .when(Boolean(checks), (el) => el.child(div().id(`crew-checks-${r.key}`).truncate().text_size(11)
-      .text_color(checks.tone === "pass" ? PASS(t) : checks.tone === "fail" ? t.blocked : t.dim).tooltip(checks.tip).child(checks.text)));
+      .text_color(checks.tone === "pass" ? PASS(t) : checks.tone === "fail" ? t.blocked : t.dim).tooltip(checks.tip).child(checks.text)))
+    .when(reviewed && reviewed.tone !== "amber", (el) => el.child(reviewedRow));
 }
 
 // The open item of the Needs-you box: its name and level tags, why it waits (in its colour, with

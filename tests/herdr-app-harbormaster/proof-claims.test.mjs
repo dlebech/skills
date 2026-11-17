@@ -177,7 +177,7 @@ Result: pass — tests only
 test("an old run without ## Claims has just its checks line", () => {
   const old = { tasks, phase: "finished", proof: { tier: { tier: 2 }, claims: [], md: parseProofMd("Checks: green — 120 tests\n## t1 x\nResult: pass\n"), files: [], accepted: {}, asks: new Map() } };
   assert.equal(hasClaims(old), false);
-  assert.deepEqual(claimsAsk(old), { worthALook: [], more: 0, checks: "Checks ✓ 120 tests", verdict: null });
+  assert.deepEqual(claimsAsk(old), { worthALook: [], more: 0, reviewed: null, checks: "Checks ✓ 120 tests", verdict: null });
 });
 
 test("the read signature changes with a claim's result or evidence", () => {

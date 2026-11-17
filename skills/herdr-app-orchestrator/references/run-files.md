@@ -112,6 +112,7 @@ describes them in text. Harbormaster lists the file names (up to 40) and reads `
 # Proof: <branch>
 Tier: T2
 Checks: green — 1497 tests, build, lint, CI
+Reviewed: 4ad8528 final review — 9 findings, all fixed
 
 ## C1 Drag a card to reorder the list
 Result: pass | fail | partial | pending — <one line>
@@ -128,7 +129,12 @@ so `— fail: assertion at line 3` fails; `Tests:` is a note, not a test), `Clip
 must show the claim itself ("the order is still there after a restart"), not just that something
 ran. `Checks: green — …` or `Checks: red — …` in the header is the whole branch (suite, lint, build,
 CI): one line under the claims, `Checks ✓ 1497 tests, build, lint, CI`, red on failure, dim for
-any other word (`Checks: pending — CI`, still running). `## C1: …` and `## C1. …` are C1 too.
+any other word (`Checks: pending — CI`, still running). `Reviewed: <short sha> <which review> — <result>`
+(`Reviewed: 3def855 task t9b — 3 must-fix fixed`) is repeatable and says what was reviewed at which
+commit; the latest final (whole-branch) review is the one Harbormaster reports, as `Reviewed · final
+review at 4ad8528`, or amber `Reviewed at 4ad8528 · 5 commits since, not reviewed` once the integration
+branch has moved on (its tree differing). A finished run with claims and no `Reviewed:` line shows a
+dim `not reviewed`; an old run shows nothing. `## C1: …` and `## C1. …` are C1 too.
 
 `Ran:` (one line per test, lint or build run, repeatable) records the commit a run was made against, so
 reviewers and the orchestrator reuse it instead of rerunning it on the same sha; see

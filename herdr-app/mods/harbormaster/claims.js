@@ -205,13 +205,31 @@ export function checksLine(md) {
     tip: `Whole-branch checks: ${c.state}${c.text ? ` — ${c.text}` : ""}` };
 }
 
+// The branch's last review as one quiet line under the checks line, from proof.md's `Reviewed:`
+// lines (the latest final, whole-branch review, else the latest one) and `gap`, how far the
+// branch has moved since ({sha, count, same}, from data.js refreshReviewed; null when not read yet):
+//   {text, tone ("dim" | "amber"), tip, since}
+// "Reviewed · final review at 4ad8528" while the branch is still that commit (or its tree), amber
+// "Reviewed at 4ad8528 · 5 commits since, not reviewed" after. A gap read for another sha is no gap.
+// No Reviewed line: null, except for a finished run with claims, whose dim "not reviewed" says so;
+// an old run shows nothing.
+export function reviewedLine(md, gap = null, { finished = false, claims = false } = {}) {
+  const all = md?.reviewed ?? [];
+  const last = [...all].reverse().find((x) => /final/i.test(x.what)) ?? all.at(-1);
+  if (!last) return finished && claims ? { text: "not reviewed", tone: "dim", tip: "proof.md has no Reviewed line", since: 0 } : null;
+  const g = gap && last.sha.startsWith(gap.sha) || gap && gap.sha?.startsWith(last.sha) ? gap : null;
+  const at = last.sha.slice(0, 7), tip = `Reviewed: ${at} ${last.what}${last.result ? ` — ${last.result}` : ""}`;
+  if (!g || g.same || !(g.count > 0)) return { text: `Reviewed · ${last.what || "review"} at ${at}`, tone: "dim", tip, since: 0 };
+  return { text: `Reviewed at ${at} · ${g.count} ${g.count === 1 ? "commit" : "commits"} since, not reviewed`, tone: "amber", tip, since: g.count };
+}
+
 // The verdict on top of the Claims section, and on a run's card: "3 of 4 proven · not yet: Drag to
 // reorder". {parts: [{text, tone, bold?}], text, tone ("done" | "blocked" | "dim"), tip (the tier,
 // the checks, how many are still being proved)}; null without claims. A part's tone is a status
 // tone ("pass" | "fail" | "amber" | "muted" | "dim", or null for plain): the count green once every
 // claim is proven, the named claim red when it failed, amber when it wants a look, dim while it
 // is still being proved; red checks are added, green ones live in the hover and the checks line.
-export function claimsVerdict(rows, { tier = null, md = null } = {}) {
+export function claimsVerdict(rows, { tier = null, md = null, reviewed = null } = {}) {
   if (!rows.length) return null;
   const c = claimCounts(rows);
   const rest = c.total - c.proven - c.accepted;
@@ -221,10 +239,11 @@ export function claimsVerdict(rows, { tier = null, md = null } = {}) {
     c.accepted > 0 && { text: `${c.accepted} accepted`, tone: "muted" },
     c.first && { text: `not yet: ${c.first.name}${rest > 1 ? ` +${rest - 1}` : ""}`, tone: c.first.state === "fail" ? "fail" : worthALook(c.first) ? "amber" : "dim" },
     checks?.tone === "fail" && { text: checks.text, tone: "fail" },
+    reviewed?.tone === "amber" && { text: `${reviewed.since} ${reviewed.since === 1 ? "commit" : "commits"} not reviewed`, tone: "amber" },
   ].filter(Boolean);
   const red = c.fail > 0 || md?.checks?.state === "red";
   const tip = [tier !== null && tier !== undefined ? `Proof tier T${tier}: each claim's bar unless it asks for more` : null,
-    checks?.tip, c.pending ? `${c.pending} still being proved` : null].filter(Boolean).join("\n");
+    checks?.tip, reviewed?.tip, c.pending ? `${c.pending} still being proved` : null].filter(Boolean).join("\n");
   return { parts, text: parts.map((p) => p.text).join(" · "), tone: red ? "blocked" : claimsClean(c, md?.checks) ? "done" : "dim", tip };
 }
 
@@ -264,7 +283,8 @@ export function proofState(run, stages = null, finished = Boolean(run?.phase ===
 
 // What the Needs-you box's merge item ("review proof → merge") shows of a run's claims (crew.js
 // boxClaims keeps the worth-a-look rows of it):
-//   { worthALook: [≤ 3 rows], more: n, checks: "Checks ✓ …" | null, verdict: claimsVerdict() }
+//   { worthALook: [≤ 3 rows], more: n, checks: "Checks ✓ …" | null, reviewed: reviewedLine() | null, verdict: claimsVerdict() }
+// (an amber `reviewed` is listed first among the worth-a-look items, by the box)
 // The rows are the claims worth a look first (failed, partial, below their bar, unproven), then
 // proven ones that have a thumbnail to show, in plan order within each; `more` is how many claims
 // the ≤ 3 leave out ("+n more" → the run pane). Each row is claimRows()'s, with `look` true for a
@@ -275,5 +295,7 @@ export function claimsAsk(run, stages = null, finished = Boolean(run?.phase === 
   const look = rows.filter(worthALook).map((k) => ({ ...k, look: true }));
   const shown = rows.filter((k) => k.state === "proven" && k.files.some(isImage)).map((k) => ({ ...k, look: false }));
   const top = [...look, ...shown].slice(0, 3);
-  return { worthALook: top, more: rows.length - top.length, checks: checksLine(run?.proof?.md)?.text ?? null, verdict: claimsVerdict(rows, { tier: run?.proof?.tier?.tier, md: run?.proof?.md }) };
+  const reviewed = reviewedLine(run?.proof?.md, run?.reviewedGap, { finished, claims: rows.length > 0 });
+  return { worthALook: top, more: rows.length - top.length, checks: checksLine(run?.proof?.md)?.text ?? null, reviewed,
+    verdict: claimsVerdict(rows, { tier: run?.proof?.tier?.tier, md: run?.proof?.md, reviewed }) };
 }

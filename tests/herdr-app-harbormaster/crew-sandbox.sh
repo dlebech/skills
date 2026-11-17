@@ -52,6 +52,7 @@
 #   claims-merge  finished, folder "snevagten" (peer), fake-two/api#65 approved and green; 5 claims: C1 and C4
 #                 proven with a shot, C2 a pass without its shot, C3 partial, C5 unproven -> approved — merge,
 #                 the box's merge ask: C2, C3, C5 worth a look, +2 more, the checks line (t10)
+#   reviewed-current  as claims-merge, its Reviewed line at the branch's HEAD (claims-merge itself: two commits since, amber)
 #   report-run    finished, no PR, shared/final-report.md (+ t1-report.md) -> finished — read and close
 #   asks-question running, question.md with Options, Recommended and Blocks -> a question box
 #   asks-and-pr   finished plan (2/2), open self-flow PR dlebech/wapi-beatbox#1 with proof, and a
@@ -223,6 +224,16 @@ make_runs() {
   mkdir -p "$cm/shared/proof"
   convert -size 640x400 xc:'#22324a' -fill '#e8eef7' -pointsize 34 -annotate +40+200 'Card dragged to row 2' "$cm/shared/proof/t1-drag.png"
   printf '# Proof: claims-merge\nTier: T2\nChecks: green — 1497 tests, build, lint, CI\n\n## C1 Drag a card to reorder the list\nResult: pass — dragging moves the card\nShot: shared/proof/t1-drag.png\nTest: reorder moves the card — pass\n\n## C2 The new order is saved across restarts\nResult: pass — 2 tests\nTest: order persists — pass\n\n## C3 Undo puts the card back\nResult: partial — undo works once, not twice\nTest: undo once — pass\n\n## C4 Keyboard reordering with Alt+arrows\nResult: pass — 3 tests\nShot: shared/proof/t1-drag.png\n' >"$cm/proof.md"
+  # The branch's Reviewed line: claims-merge was reviewed two commits ago (amber), reviewed-current at its HEAD.
+  local sn=$S/work/snevagten g="git -C $S/work/snevagten -c user.name=t -c user.email=t@t"
+  $g checkout -q -B claims-merge && $g commit -q --allow-empty -m reviewed && local rsha; rsha=$($g rev-parse --short HEAD)
+  echo 1 >"$sn/after" && $g add after && $g commit -q -m "after 1" && echo 2 >"$sn/after" && $g commit -q -am "after 2"
+  sed -i "s/^Checks: .*/&\nReviewed: $rsha final review — 9 findings, all fixed/" "$cm/proof.md"
+  $g checkout -q -B reviewed-current
+  RUN_FOLDER=$sn mkrun reviewed-current finished feat "Reviewed current" "${day}T08:50:00Z" 2/2 merged merged --progress "PR approved" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/66
+  cp "$cm/plan.md" "$S/runs/skills/reviewed-current/plan.md"; mkdir -p "$S/runs/skills/reviewed-current/shared/proof"; cp "$cm"/shared/proof/* "$S/runs/skills/reviewed-current/shared/proof/"
+  sed "s/^Reviewed: .*/Reviewed: $($g rev-parse --short HEAD) final review — 1 finding, fixed/" "$cm/proof.md" >"$S/runs/skills/reviewed-current/proof.md"
   mkrun report-run finished rev "Report run" "${day}T05:00:00Z" 2/2 merged merged --progress "review written"
   printf '# Review report\n\nAll good.\n' >"$S/runs/skills/report-run/shared/final-report.md"
   printf '# t1 report\n\nA task'"'"'s own report: never the run'"'"'s.\n' >"$S/runs/skills/report-run/shared/t1-report.md"

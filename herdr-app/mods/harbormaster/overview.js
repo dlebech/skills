@@ -8,7 +8,7 @@ import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, wo
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
-import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, worthALook, hasClaims, proofState, withSaid } from "./claims.js";
+import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, worthALook, hasClaims, proofState, withSaid } from "./claims.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { setNote, noteText } from "./note.js";
@@ -940,7 +940,7 @@ function claimsSummary(t, r, stages = null) {
     return red ? { parts: [paint(red)], tip: red.tip } : null;
   }
   const rows = claimRowsOf(r, stages);
-  const v = claimsVerdict(rows, { tier: r.proof.tier?.tier, md: r.proof.md });
+  const v = claimsVerdict(rows, { tier: r.proof.tier?.tier, md: r.proof.md, reviewed: reviewedLine(r.proof.md, r.reviewedGap) });
   return { parts: v.parts.map(paint), rows, tip: v.tip || null };
 }
 
@@ -1195,6 +1195,10 @@ function claimsSection(view, t, r, stages) {
   const checks = checksLine(md);
   const checksRow = checks && div().id(`pf-checks-${r.key}`).px(2).truncate().text_size(11.5)
     .text_color(checks.tone === "pass" ? PASS(t) : checks.tone === "fail" ? t.blocked : t.dim).tooltip(checks.tip).child(checks.text);
+  // Quiet like the checks line; amber once commits came after the last review.
+  const rev = reviewedLine(md, r.reviewedGap, { finished: isFinished(r), claims: hasClaims(r) });
+  const reviewRow = rev && div().id(`pf-reviewed-${r.key}`).px(2).truncate().text_size(11.5)
+    .text_color(rev.tone === "amber" ? AMBER(t) : t.dim).tooltip(rev.tip).child(rev.text);
   if (!hasClaims(r)) {
     return section(t, "Claims").child(checksRow ?? div().px(2).text_size(11.5).text_color(t.dim).child("No claims: planned before claims"));
   }
@@ -1240,6 +1244,7 @@ function claimsSection(view, t, r, stages) {
       () => markProofRead(r)))
     .children(shown.map(row))
     .when(Boolean(checksRow), (el) => el.child(checksRow))
+    .when(Boolean(reviewRow), (el) => el.child(reviewRow))
     .when(open && Boolean(md), (el) => el.child(h_flex().px(2).pt(2).child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md"))));
 }
 
@@ -1352,7 +1357,7 @@ function runDetail(view, t, r, ctx) {
     .when(r.issues.length + related.length > 0, (el) => el.child(section(t, "Issues and related PRs")
       .children(r.issues.map((url) => issueRow(t, url)))
       .children(related.map((p, i) => prDetail(t, p, i, true, Boolean(r.away))))))
-    .when(hasClaims(r) || Boolean(r.proof.md?.checks), (el) => el.child(claimsSection(view, t, r, stages)))
+    .when(hasClaims(r) || Boolean(r.proof.md?.checks) || Boolean(r.proof.md?.reviewed?.length), (el) => el.child(claimsSection(view, t, r, stages)))
     .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
       .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
     .when(r.decided.length > 0, (el) => el.child(decisionsSection(view, t, r)))

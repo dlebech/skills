@@ -15,7 +15,7 @@ import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
 import { props, theme, nextCommand, checking, openOverlay, closeOverlay, shared, setShared } from "herdr";
 import { expireNote } from "./note.js";
-import { loadRuns, cachedRuns, refreshPrs, isClosed, isParked, newestFirst } from "./data.js";
+import { loadRuns, cachedRuns, refreshPrs, refreshReviewed, isClosed, isParked, newestFirst } from "./data.js";
 import { facts, crewAddresses } from "./live.js";
 import { loadContexts } from "./context.js";
 import { hotSignature, sampleVersion } from "./resources.js";
@@ -213,6 +213,10 @@ export default class Harbormaster extends View {
       // PRs land in shared state, which re-renders every copy by itself. A parked run's PRs are
       // read as rarely as a closed run's: nobody works on them, they only show what they wait on.
       for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});
+      // The commits since each run's last review: module memory, so a change re-renders by hand.
+      let moved = false;
+      for (const r of runs) moved = (await refreshReviewed(r, isClosed(r, ctx) || isParked(r)).catch(() => false)) || moved;
+      if (moved) cx.notify();
     });
   }
 

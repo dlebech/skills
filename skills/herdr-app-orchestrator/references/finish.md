@@ -13,6 +13,7 @@ If `final-review` is on, or T0 tasks merged without a task review ([speed.md](sp
 - Triage them, and fix must-fix findings as one more task with no task review.
 - With rounds left, remove the reviewer and start another fresh one, named `rev-<prefix>-final-<round>`, on the branch with those fixes merged.
 - After the last round, let the user pick among the nice-to-haves, or record them as follow-ups. The rounds are the only review of the review fixes; do not loop.
+- After each final review round, append `Reviewed: <short sha of the HEAD it reviewed> final review — <result>` to `proof.md`'s header (run-files.md); Harbormaster warns the user in amber when commits come after the latest one.
 - Remove the final reviewer and any fixer once they are done.
 
 ## 2. Push and open the PR
