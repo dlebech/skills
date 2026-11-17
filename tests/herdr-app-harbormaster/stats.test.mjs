@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseHistory, summaryOf, mergeRuns, acrossRuns, liveGroups, isRunProp, taskOfName, timingOrder, refreshTimings, cats, addCats, catTotal, tokenParts,
-  liveTable, groupProcesses, hottest, hottestText, timeSplit, recentRuns, foldQuiet } from "../../herdr-app/mods/harbormaster/statsdata.js";
+  liveTable, groupProcesses, hottest, hottestText, timeSplit, recentRuns, foldQuiet, createSteady, sig2 } from "../../herdr-app/mods/harbormaster/statsdata.js";
 import { tokenShort, tokenHeadline } from "../../herdr-app/mods/harbormaster/context.js";
 
 const line = (o) => JSON.stringify({ v: 1, folder: "/p/skills", branch: "b", type: "feat", started: "2026-11-01T10:00:00Z", wall: 100, critical_path: { model: 60, idle: 40 }, ...o });
@@ -331,4 +331,87 @@ test("hottest: a run's orchestrator is named with its run", () => {
   const w = liveGroups([{ title: "Sunday match", root: "o1", name: "orchestrator", members: [{ address: "w1", name: "impl-x" }] }],
     { terminals: { o1: term("o1", 1, 1), w1: term("w1", 30, 1) } });
   assert.equal(hottest(w).name, "impl-x");
+});
+
+test("runs list: an open run started days ago is always listed, ahead of newer past runs", () => {
+  const o = summaryOf({ ...run, key: ":/r/resumed", dir: "/r/resumed", started: Date.parse("2026-11-14T00:00:00Z") }, null, null);
+  const history = parseHistory(Array.from({ length: 6 }, (_, i) =>
+    line({ run: `/r/p${i}`, started: `2026-11-1${5 + (i % 3)}T0${i}:00:00Z` })).join("\n"), null);
+  const runs = mergeRuns([o], history);
+  assert.equal(runs[0].run, "/r/resumed");
+  const { rows, older } = recentRuns(runs);
+  assert.ok(rows.some((r) => r.run === "/r/resumed"));
+  assert.deepEqual([rows.length, older], [6, 1], "the open run plus the newest five past runs");
+  assert.deepEqual([recentRuns(runs, true).rows.length, recentRuns(runs, true).older], [7, 0]);
+  const more = Array.from({ length: 10 }, (_, i) => ({ key: i, source: i < 3 ? "open" : "history", live: true }));
+  assert.deepEqual([recentRuns(more).rows.length, recentRuns(more).older], [8, 2], "three open runs plus five past");
+  // Past runs stay newest first after the open one.
+  const rest = rows.slice(1).map((r) => Date.parse(r.started));
+  assert.deepEqual(rest, [...rest].sort((a, b) => b - a));
+});
+
+test("steady: order is kept under small changes and swapped under a clear overtake", () => {
+  const st = createSteady();
+  const rows = (a, b) => [{ address: "a", cpu: a, rssKb: 1 }, { address: "b", cpu: b, rssKb: 1 }];
+  st.begin(1);
+  assert.deepEqual(st.order("l", rows(50, 40)).map((r) => r.address), ["a", "b"]);
+  // b is ahead by 4 points but only 8% relative: a stays on top.
+  assert.deepEqual(st.order("l", rows(50, 54)).map((r) => r.address), ["a", "b"]);
+  // 2+ points and 25%+ ahead: swapped, and kept once swapped.
+  assert.deepEqual(st.order("l", rows(40, 60)).map((r) => r.address), ["b", "a"]);
+  assert.deepEqual(st.order("l", rows(44, 46)).map((r) => r.address), ["b", "a"]);
+  // Big relative lead but under 2 points: kept.
+  assert.deepEqual(st.order("s", rows(1, 0.5)).map((r) => r.address), ["a", "b"]);
+  assert.deepEqual(st.order("s", rows(0.4, 1.9)).map((r) => r.address), ["a", "b"]);
+});
+
+test("steady: smoothing is a moving average, rounded; the same sample gives the same figures", () => {
+  const st = createSteady({ tauMs: 25000 });
+  st.begin(0);
+  assert.deepEqual(st.smooth("k", 80, 1234), { cpu: 80, rssKb: sig2(1234) });
+  assert.deepEqual(st.smooth("k", 0, 0), { cpu: 80, rssKb: sig2(1234) }, "same sample: unchanged");
+  st.begin(5000);
+  const one = st.smooth("k", 0, 1234);
+  assert.ok(one.cpu > 55 && one.cpu < 80, `moved only part of the way: ${one.cpu}`);
+  st.begin(200000);
+  assert.equal(st.smooth("k", 0, 1234).cpu, 0);
+  // Rounded in the unit memText shows: 645 MB → 650 MB, 10 GiB stays 10 GiB.
+  assert.equal(sig2(645 * 1024), 650 * 1024); assert.equal(sig2(10 * 1024 * 1024), 10 * 1024 * 1024);
+});
+
+test("steady: a row turns busy or quiet only after staying past the threshold for two samples", () => {
+  const st = createSteady();
+  const at = (n, cpu) => { st.begin(n); return st.busy("x", cpu); };
+  assert.equal(at(1, 0), false);
+  assert.equal(at(2, 5), false, "one sample over: still quiet");
+  assert.equal(at(3, 5), true);
+  assert.equal(at(4, 0), true, "one sample under: still busy");
+  assert.equal(at(5, 5), true, "back over resets the count");
+  assert.equal(at(6, 0), true);
+  assert.equal(at(7, 0), false);
+});
+
+test("steady: liveTable and foldQuiet keep their places; hottest does not flip on a near tie", () => {
+  const st = createSteady();
+  const row = (address, cpu) => ({ address, name: address, cpu, rssKb: 1, own: null, programs: [] });
+  const g = (a, b) => [{ title: "t", root: null, rows: [row("a", a), row("b", b)], cpu: a + b, rssKb: 2 }];
+  st.begin(1);
+  assert.equal(hottest(g(50, 40), st).name, "a");
+  assert.deepEqual(liveTable(g(50, 40), st).groups[0].rows.map((r) => r.address), ["a", "b"]);
+  st.begin(2);
+  assert.equal(hottest(g(50, 55), st).name, "a");
+  assert.deepEqual(liveTable(g(50, 55), st).groups[0].rows.map((r) => r.address), ["a", "b"]);
+  st.begin(3);
+  assert.equal(foldQuiet([row("a", 30), row("b", 3)], undefined, st, "z").busy[0].name, "a");
+});
+
+test("steady: terminals in no run move between a row and the idle line only after two samples", () => {
+  const st = createSteady();
+  const snap = (cpu) => ({ terminals: { t1: { cpu, rssKb: 10, own: null, programs: [] } } });
+  const rows = (n, cpu) => { st.begin(n); return liveGroups([], snap(cpu), {}, st)[0].rows.length; };
+  assert.equal(rows(1, 0), 0);
+  assert.equal(rows(2, 2), 0, "one sample over: still folded");
+  assert.equal(rows(3, 2), 1);
+  assert.equal(rows(4, 0), 1, "one sample under: still a row");
+  assert.equal(rows(5, 0), 0);
 });

@@ -100,7 +100,9 @@ export function summaryOf(run, timing, res) {
   };
 }
 
-// Open runs and past runs, one row each, newest first. A run in both is its history line once
+// Open runs and past runs, one row each: live open runs first, then the rest, each newest
+// first. (Sorting everything by `started` lost a run that was parked and resumed: its start is
+// days old, so it fell under "+ N older runs" while open.) A run in both is its history line once
 // it is closed (the line is final); while open (never closed, or resumed since) the live figures.
 export function mergeRuns(open, history) {
   const where = (x) => `${x.machine ?? ""}:${x.run}`;
@@ -112,7 +114,8 @@ export function mergeRuns(open, history) {
   for (const o of shown) live.set(where(o), [...(live.get(where(o)) ?? []), o]);
   const past = history.filter((h) => !(live.get(where(h)) ?? []).some((o) => sameStart(h, o)));
   const at = (s) => Date.parse(s.started ?? "") || 0;
-  return [...shown, ...past].sort((a, b) => at(b) - at(a));
+  const isOpen = (s) => s.source === "open" && s.live;
+  return [...shown, ...past].sort((a, b) => isOpen(b) - isOpen(a) || at(b) - at(a));
 }
 
 // Where the time goes across runs: critical_path summed, one row per group (folder, type or
@@ -135,7 +138,7 @@ export function acrossRuns(runs, by = "all") {
 // Terminals in no crew below LOOSE_MIN (idle shells, mostly) are not rows: the group's `hidden`
 // counts them, { count, cpu, rssKb }.
 export const LOOSE_MIN = { cpu: 1, rssKb: 100 * 1024 };
-export function liveGroups(crews, snapshot, names = {}) {
+export function liveGroups(crews, snapshot, names = {}, steady = null) {
   const terms = obj(snapshot?.terminals);
   const used = new Set();
   const row = (address, name) => {
@@ -149,7 +152,9 @@ export function liveGroups(crews, snapshot, names = {}) {
   }).filter((g) => g.rows.length);
   const loose = Object.keys(terms).filter((a) => !used.has(a)).map((a) => row(a, names[a])).filter(Boolean).sort((x, y) => y.cpu - x.cpu || y.rssKb - x.rssKb);
   if (loose.length) {
-    const busy = loose.filter((r) => r.cpu >= LOOSE_MIN.cpu || r.rssKb >= LOOSE_MIN.rssKb);
+    // With a `steady`, a terminal moves between a row and the folded line only after two samples.
+    const over = (r) => r.cpu >= LOOSE_MIN.cpu || r.rssKb >= LOOSE_MIN.rssKb;
+    const busy = loose.filter((r) => (steady ? steady.hold(`loose:${r.address}`, over(r)) : over(r)));
     const quiet = loose.filter((r) => !busy.includes(r));
     groups.push({
       title: "Not in a run", rows: busy, cpu: loose.reduce((s, r) => s + r.cpu, 0), rssKb: loose.reduce((s, r) => s + r.rssKb, 0),
@@ -165,11 +170,109 @@ export function liveGroups(crews, snapshot, names = {}) {
 export const QUIET_CPU = 1;
 const byCpu = (a, b) => b.cpu - a.cpu || b.rssKb - a.rssKb;
 
+// ---- steadiness: the live table is read over minutes, so it must not jump with every sample ----
+
+// Smoothing, row order and the busy/quiet split that change only on a clear, lasting difference.
+// One per view (module memory, not shared state); the sample time `at` (any increasing number)
+// is set once per sample with begin(), and every call after it in the same sample gives the same
+// answer, so a redraw between samples changes nothing.
+export const STEADY = { tauMs: 25000, rel: 0.25, abs: 2, streak: 2, keepMs: 5 * 60000 };
+
+// Memory in kB to the unit memText shows: under 1 GiB two significant figures of MB (645M → 650M),
+// above it as is (memText gives one decimal of G).
+export const sig2 = (n) => {
+  const mb = n / 1024;
+  return mb >= 1024 || mb < 1 ? n : Number(mb.toPrecision(2)) * 1024;
+};
+
+export function createSteady(cfg = {}) {
+  const c = { ...STEADY, ...cfg };
+  const ema = new Map(), orders = new Map(), flags = new Map(), asked = new Map();
+  let at = 0;
+  // Overtaking needs both a relative and an absolute lead, so two near-equal rows keep their places.
+  const beats = (a, b) => a.cpu - b.cpu >= c.abs && a.cpu >= b.cpu * (1 + c.rel);
+  const api = {
+    begin(now) {
+      if (now === at) return;
+      at = now;
+      for (const m of [ema, flags]) for (const [k, v] of m) if (now - v.seen > c.keepMs) m.delete(k);
+      for (const [k, v] of asked) if (now - v > c.keepMs) { asked.delete(k); orders.delete(k); }
+    },
+    // An exponential moving average per key (tau ~25 s), then rounded: CPU to a whole %, memory to
+    // two figures. {cpu, rssKb} in, the same out.
+    smooth(key, cpu, rssKb = 0) {
+      let e = ema.get(key);
+      if (!e) e = { at, seen: at, cpu, rssKb, out: null };
+      else if (e.at !== at) {
+        const a = 1 - Math.exp(-(at - e.at) / c.tauMs);
+        e = { at, seen: at, cpu: e.cpu + a * (cpu - e.cpu), rssKb: e.rssKb + a * (rssKb - e.rssKb), out: null };
+      }
+      e.seen = at;
+      ema.set(key, e);
+      return { cpu: Math.round(e.cpu), rssKb: sig2(e.rssKb) };
+    },
+    // Whether `key` is busy (cpu at or over QUIET_CPU): it changes sides only after `streak`
+    // samples in a row on the other side.
+    busy(key, cpu) { return api.hold(key, cpu >= QUIET_CPU); },
+    // A yes/no that changes only after it has said the other thing for `streak` samples in a row.
+    hold(key, want) {
+      let f = flags.get(key);
+      if (!f) f = { at, seen: at, on: want, run: 0 };
+      else if (f.at !== at) {
+        f.at = at;
+        f.run = want === f.on ? 0 : f.run + 1;
+        if (f.run >= c.streak) { f.on = want; f.run = 0; }
+      }
+      f.seen = at;
+      flags.set(key, f);
+      return f.on;
+    },
+    // `items` in the order of `id` last time; a new one is placed by CPU; a row moves above its
+    // neighbour only when it beats it clearly (see beats).
+    order(id, items, keyOf = (x) => x.address ?? x.name) {
+      const pos = new Map((orders.get(id) ?? []).map((k, i) => [k, i]));
+      const out = items.filter((x) => pos.has(keyOf(x))).sort((a, b) => pos.get(keyOf(a)) - pos.get(keyOf(b)));
+      for (const x of items.filter((y) => !pos.has(keyOf(y))).sort(byCpu)) {
+        const i = out.findIndex((y) => beats(x, y));
+        out.splice(i < 0 ? out.length : i, 0, x);
+      }
+      for (let moved = true, n = 0; moved && n <= out.length * out.length; n++) {
+        moved = false;
+        for (let i = 1; i < out.length; i++) if (beats(out[i], out[i - 1])) { [out[i - 1], out[i]] = [out[i], out[i - 1]]; moved = true; }
+      }
+      orders.set(id, out.map(keyOf));
+      asked.set(id, at);
+      return out;
+    },
+    // The snapshot's terminals (resources.js) with CPU and memory smoothed, per terminal, own
+    // process and program, so the table, its details and "Hottest" read the same steady figures.
+    snapshot(snap) {
+      const terminals = {};
+      for (const [a, u] of Object.entries(snap?.terminals ?? {})) {
+        const m = api.smooth(a, u.cpu, u.rssKb);
+        terminals[a] = {
+          ...u, ...m,
+          own: u.own ? { ...u.own, ...api.smooth(`${a}\town`, u.own.cpu, u.own.rssKb) } : u.own,
+          programs: (u.programs ?? []).map((p) => ({ ...p, ...api.smooth(`${a}\t${p.name}`, p.cpu, p.rssKb) })),
+        };
+      }
+      return { ...snap, terminals };
+    },
+    // Processes outside the agents ({machine, pid, cpu, rssKb, ...}), smoothed per process.
+    others(list) {
+      return list.map((p) => ({ ...p, ...api.smooth(`${p.machine ?? ""}:${p.pid}`, p.cpu, p.rssKb) }));
+    },
+  };
+  return api;
+}
+
 // Splits items ({cpu, rssKb, ...}) into the busy ones, hottest first, and the quiet ones
 // (under QUIET_CPU) as one line: { busy, quiet: { count, names, cpu, rssKb, items } or null }.
-export function foldQuiet(items, nameOf = (x) => x.name) {
-  const all = [...items].sort(byCpu);
-  const busy = all.filter((x) => x.cpu >= QUIET_CPU), rest = all.filter((x) => x.cpu < QUIET_CPU);
+// With a `steady` (createSteady) and the list's `id` the order and the split hold still.
+export function foldQuiet(items, nameOf = (x) => x.name, steady = null, id = "", keyOf = (x) => x.address ?? x.name) {
+  const all = steady ? steady.order(`${id}:all`, items, keyOf) : [...items].sort(byCpu);
+  const isBusy = steady ? (x) => steady.busy(`${id}:${keyOf(x)}`, x.cpu) : (x) => x.cpu >= QUIET_CPU;
+  const busy = all.filter(isBusy), rest = all.filter((x) => !busy.includes(x));
   return {
     busy,
     quiet: rest.length ? { count: rest.length, names: rest.map(nameOf), cpu: rest.reduce((n, x) => n + x.cpu, 0), rssKb: rest.reduce((n, x) => n + x.rssKb, 0), items: rest } : null,
@@ -180,19 +283,21 @@ export function foldQuiet(items, nameOf = (x) => x.name) {
 // whose only row is its orchestrator is the group line alone (`solo`, that row): the run row
 // says it. Runs (groups with a root) under QUIET_CPU fold into `quiet`; "Not in a run" is no
 // run, so it stays a line of its own.
-export function liveTable(groups) {
+export function liveTable(groups, steady = null) {
+  const gkey = (g) => g.root ?? g.title;
   const shaped = groups.map((g) => {
-    const rows = [...g.rows].sort(byCpu);
+    const rows = steady ? steady.order(`rows:${gkey(g)}`, g.rows) : [...g.rows].sort(byCpu);
     const solo = rows.length === 1 && g.root && rows[0].address === g.root ? rows[0] : null;
     return { ...g, rows: solo ? [] : rows, solo };
   });
-  const { busy, quiet } = foldQuiet(shaped.filter((g) => g.root), (g) => g.title);
-  return { groups: [...busy, ...shaped.filter((g) => !g.root)].sort(byCpu), quiet };
+  const { busy, quiet } = foldQuiet(shaped.filter((g) => g.root), (g) => g.title, steady, "groups", gkey);
+  const shown = [...busy, ...shaped.filter((g) => !g.root)];
+  return { groups: steady ? steady.order("groups", shown, gkey) : shown.sort(byCpu), quiet };
 }
 
 // Processes outside the agents, one row per program name and machine: "firefox ×3" sums its
 // processes' CPU and memory. Then folded like the runs.
-export function groupProcesses(other) {
+export function groupProcesses(other, steady = null) {
   const by = new Map();
   for (const p of other) {
     const key = `${p.machine ?? ""}\t${p.name}`;
@@ -200,7 +305,7 @@ export function groupProcesses(other) {
     g.count++; g.cpu += p.cpu; g.rssKb += p.rssKb; g.pids.push(p.pid);
     by.set(key, g);
   }
-  return foldQuiet([...by.values()], (g) => (g.count > 1 ? `${g.name} ×${g.count}` : g.name));
+  return foldQuiet([...by.values()], (g) => (g.count > 1 ? `${g.name} ×${g.count}` : g.name), steady, "procs", (g) => `${g.machine ?? ""}\t${g.name}`);
 }
 
 // The hottest agent right now, from liveGroups(): { name, cpu, rssKb, mostly } or null when
@@ -208,11 +313,12 @@ export function groupProcesses(other) {
 // least half, else the two biggest ("lint and browser"), the agent's own process "the agent itself".
 // A run's root row is named after its role ("orchestrator"), so it is named with its run's
 // title: "Sunday match orchestrator".
-export function hottest(groups) {
+export function hottest(groups, steady = null) {
   const rows = groups.flatMap((g) => g.rows.map((r) => ({ r, g })));
-  const pick = rows.sort((a, b) => byCpu(a.r, b.r))[0];
+  const pick = steady ? steady.order("hottest", rows.map((x) => ({ ...x, cpu: x.r.cpu, rssKb: x.r.rssKb })), (x) => x.r.address)[0]
+    : rows.sort((a, b) => byCpu(a.r, b.r))[0];
   const top = pick?.r;
-  if (!top || top.cpu < QUIET_CPU) return null;
+  if (!top || !(steady ? steady.busy("hottest", top.cpu) : top.cpu >= QUIET_CPU)) return null;
   const g = pick.g;
   const name = g.root && top.address === g.root && g.title && g.title.toLowerCase() !== top.name.toLowerCase() ? `${g.title} ${top.name}` : top.name;
   const parts = [...(top.own ? [{ name: "the agent itself", cpu: top.own.cpu }] : []), ...top.programs.map((p) => ({ name: p.name, cpu: p.cpu }))]
@@ -235,10 +341,12 @@ export function timeSplit(m, top = 4) {
   return { working, idle: c.idle ?? 0, parts: all, shown, hidden: all.filter((p) => !shown.includes(p)) };
 }
 
-// The runs list: the newest `n` unless all are asked for; `older` is how many are folded.
+// The runs list (from mergeRuns, live open runs first): every open run, then the newest `n`
+// others, unless all are asked for; `older` is how many past runs are folded.
 export const RECENT = 5;
 export function recentRuns(runs, all = false, n = RECENT) {
-  const rows = all ? runs : runs.slice(0, n);
+  const open = runs.filter((s) => s.source === "open" && s.live).length;
+  const rows = all ? runs : runs.slice(0, open + n);
   return { rows, older: runs.length - rows.length };
 }
 
