@@ -41,6 +41,7 @@
 #   red-ci        finished, cli/cli#14927 (a public PR with a failing check) -> red CI, then
 #                 review proof → merge
 #   review-proof  finished, dlebech/wapi-beatbox#1, proof.md T2 1/2 pass  -> review proof → merge
+#   no-shot       finished, no PR, proof T2: t2 "pass" with only a .txt  -> its Proof pill "no screenshot", amber
 #   report-run    finished, no PR, shared/final-report.md (+ t1-report.md) -> finished — read and close
 #   asks-question running, question.md with Options, Recommended and Blocks -> a question box
 #   asks-and-pr   finished plan (2/2), open self-flow PR dlebech/wapi-beatbox#1 with proof, and a
@@ -175,6 +176,10 @@ make_runs() {
   mkrun review-proof finished feat "Review proof" "${day}T08:00:00Z" 2/2 merged merged --progress "PR up with proof" \
     --pr dlebech/wapi-beatbox https://github.com/dlebech/wapi-beatbox/pull/1
   printf '# Proof: review-proof\nTier: T2\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\n\n## t2 polish\nTier: T1\nChecked: tests\nResult: fail — 1 of 9 fails\n' >"$S/runs/skills/review-proof/proof.md"
+  # A T2 pass with no screenshot among its Files (t22): its pill reads "no screenshot", amber.
+  mkrun no-shot finished feat "No shot" "${day}T07:30:00Z" 2/2 merged merged --progress "proof written"
+  printf '# Proof: no-shot\nTier: T2\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\nFiles: shared/proof/t1.txt\n\n## t2 polish\nTier: T2\nChecked: the hover card, by screenshot\nResult: pass — it looks right\nFiles: shared/proof/t2.txt\n' >"$S/runs/skills/no-shot/proof.md"
+  mkdir -p "$S/runs/skills/no-shot/shared/proof" && echo ok >"$S/runs/skills/no-shot/shared/proof/t1.txt" && echo ok >"$S/runs/skills/no-shot/shared/proof/t2.txt"
   mkrun report-run finished rev "Report run" "${day}T05:00:00Z" 2/2 merged merged --progress "review written"
   printf '# Review report\n\nAll good.\n' >"$S/runs/skills/report-run/shared/final-report.md"
   printf '# t1 report\n\nA task'"'"'s own report: never the run'"'"'s.\n' >"$S/runs/skills/report-run/shared/t1-report.md"

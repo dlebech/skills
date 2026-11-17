@@ -10,10 +10,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, renam
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { commentSummary, commentText, commentsArgs, commentsRequest, pendingComments, commentsAsked, commentsSig, defaultMode, commentLines, commentsText, stepComments, COMMENTS, AI_PREFIX, COMMENTS_QUERY } from "../../herdr-app/mods/harbormaster/comments.js";
+import { commentSummary, commentText, commentsArgs, commentsRequest, commentsRequestAll, pendingComments, commentsAsked, commentsSig, defaultMode, commentLines, commentsText, stepComments, COMMENTS, AI_PREFIX, COMMENTS_QUERY } from "../../herdr-app/mods/harbormaster/comments.js";
 import { nextStep, nextStepText, assess, prStep } from "../../herdr-app/mods/harbormaster/attention.js";
 import { reviewCommentLines, badgeOf, rowTip } from "../../herdr-app/mods/harbormaster/crewrows.js";
-import { loadRuns, askComments, withComments, COMMENTS_TTL } from "../../herdr-app/mods/harbormaster/data.js";
+import { loadRuns, askComments, askCommentsAll, withComments, COMMENTS_TTL } from "../../herdr-app/mods/harbormaster/data.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const URL = "https://github.com/o/api/pull/1799";
@@ -303,6 +303,29 @@ test("the message: the PR and mode first, every comment with its thread, then wh
   assert.equal(defaultMode(undefined), "ask");
 });
 
+test("several PRs make one message: every URL on the first line, a section each, the instruction once", () => {
+  const a = pr(1799, "APPROVED", some(2));
+  const b = pr(1372, "APPROVED", some(1));
+  const msg = commentsRequestAll([a, b], "handle");
+  const lines = msg.split("\n");
+  assert.equal(lines[0], `address comments on ${a.url} ${b.url}: handle`);
+  assert.equal(lines.filter((l) => l.startsWith("PR #")).join("|"), `PR #1799 (${a.url}):|PR #1372 (${b.url}):`);
+  assert.equal(lines.filter((l) => l.startsWith("Asked from Harbormaster:")).length, 1);
+  assert.match(lines.at(-1), /^Asked from Harbormaster: /);
+  assert.equal(lines.filter((l) => l.startsWith("Harbormaster counts")).length, 2);
+  const m = COMMENTS.exec(lines[0]);
+  assert.equal(m[2], "handle");
+  assert.deepEqual(m[1].split(" "), [a.url, b.url]);
+  // Both URLs count as asked while the message is unread.
+  assert.deepEqual(pendingComments(`${lines[0]}\nPR #1799 (${a.url}):`), [a.url, b.url]);
+  assert.deepEqual(pendingComments(`address comments on ${a.url}: ask\naddress comments on ${b.url} ${a.url}: ask`), [a.url, b.url, a.url]);
+});
+
+test("a single PR has no PR heading", () => {
+  const a = pr(1799, "APPROVED", some(2));
+  assert.ok(!commentsRequest(a, "ask").split("\n").some((l) => l.startsWith("PR #")), "no heading for one PR");
+});
+
 test("asked… holds while the message is unread, or until the PR's open comments change", () => {
   assert.deepEqual(pendingComments("set autonomy to L2\naddress comments on https://x/pull/1: ask\nwhat is blocking? y"), ["https://x/pull/1"]);
   assert.deepEqual(pendingComments(null), []);
@@ -360,6 +383,50 @@ test("askComments writes the message to the run's inbox; the next read shows it 
     assert.match(readFileSync(join(dir, "inbox", msg), "utf8"), /^address comments on https:\/\/github\.com\/o\/r\/pull\/1799: handle\n/);
     r = await read(dir);
     assert.deepEqual(r.commentsAsked, [p.url]);
+    // Not an answer: the open question must not read as answered.
+    assert.equal(r.unhandled, 0);
+    renameSync(join(dir, "inbox", msg), join(dir, "inbox", `${msg}.handled`));
+    r = await read(dir);
+    assert.deepEqual(r.commentsAsked, []);
+  } finally {
+    Date.now = realNow;
+    rmSync(root, { recursive: true, force: true });
+    delete globalThis.__herdrExec;
+  }
+});
+
+test("askCommentsAll writes one message for all the PRs; the next read shows every PR asked", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hm-cmt-root-"));
+  const realNow = Date.now;
+  let skew = 3600000; // past the earlier test's skewed cache, which would hide this root
+  Date.now = () => realNow() + skew;
+  const read = async (dir) => { skew += 5000; return (await loadRuns()).runs.find((r) => r.dir === dir); };
+  try {
+    // Only sh runs for real, with the throwaway root; hc and gh are not called.
+    globalThis.__herdrExec = async (cmd, args) => {
+      if (cmd !== "sh") return { code: 1, stdout: "", stderr: "not in this test" };
+      const r = spawnSync(cmd, args, { encoding: "utf8", env: { ...process.env, HERDR_ORCHESTRATION_ROOT: root } });
+      return { code: r.status, stdout: r.stdout, stderr: r.stderr };
+    };
+    const dir = join(root, "skills", "feat-x");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "orchestrator.json"), JSON.stringify({ branch: "feat-x", terminal: "t99", folder: "skills" }));
+    writeFileSync(join(dir, "status.json"), JSON.stringify({ status: "finished", progress: "PR approved" }));
+    writeFileSync(join(dir, "plan.md"), "Status: finished\n");
+    writeFileSync(join(dir, "question.md"), "# Go on?\n");
+    let r = await read(dir);
+    assert.deepEqual(r.commentsAsked, []);
+    const p = pr(1799, "APPROVED", some(2));
+    const q = pr(1372, "APPROVED", some(1));
+    // The orchestrator t99 is not running here, so the ask only waits in the inbox.
+    assert.deepEqual(await askCommentsAll(r, [p, q], "handle"), { blocked: false, waits: true });
+    const files = readdirSync(join(dir, "inbox"));
+    assert.equal(files.length, 1, "one inbox file for both PRs");
+    const [msg] = files;
+    assert.match(msg, /^\d{8}T\d{6}Z-\d{3}-harbormaster-comments\.message$/);
+    assert.match(readFileSync(join(dir, "inbox", msg), "utf8"), /^address comments on https:\/\/github\.com\/o\/r\/pull\/1799 https:\/\/github\.com\/o\/r\/pull\/1372: handle\n/);
+    r = await read(dir);
+    assert.deepEqual(r.commentsAsked, [p.url, q.url]);
     // Not an answer: the open question must not read as answered.
     assert.equal(r.unhandled, 0);
     renameSync(join(dir, "inbox", msg), join(dir, "inbox", `${msg}.handled`));

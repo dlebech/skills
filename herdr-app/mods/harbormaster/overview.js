@@ -3,12 +3,12 @@
 import { div, svg } from "gpui-kit";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCi } from "./data.js";
+import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCommentsAll, askCi } from "./data.js";
 import { facts, exactStatus, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, captainPane, paneBeside, togglePin, needReason, adrift, agentNames, focusAgent, focusWithPane, currentAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, CRAB, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, treeUsage, hotText, memText } from "./resources.js";
-import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, segmentLook, proofCounts, proofRowParts, needsLook, resultLine, pendingLine, gatheringStage } from "./proof.js";
+import { proofVerdict, proofTasks, tierTip, proofTone, proofToneText, segmentLook, proofCounts, proofRowParts, needsLook, resultLine, resultPill, pendingLine, gatheringStage } from "./proof.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { levelChoices } from "./levels.js";
@@ -423,23 +423,22 @@ const modeTip = (r, mode) => `${MODE_TIP[mode]}.${mode === defaultMode(r.autonom
 // askComments); the button reads "asked…" until the PR's open comments change.
 const addressSend = (view, r, p, mode) => addressSendAll(view, r, [p], mode);
 
-// The click of Ask me about all / Handle all: the same message for each PR, one after the other.
-// Each PR reads "asked…" at once; one whose message did not reach the inbox is unmarked.
+// The click of Ask me about all / Handle all: one message for all the PRs (data.js askCommentsAll),
+// so the orchestrator is woken once. Each PR reads "asked…" at once; all are unmarked if the
+// message did not reach the inbox.
 const addressSendAll = (view, r, prs, mode) => (cx) => {
   markPrsAsked(r, prs);
   view.actionError = null;
   cx.notify();
   cx.spawn(async (cx) => {
-    for (const p of prs) {
-      try {
-        const out = await askComments(r, p, mode);
-        if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
-        else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
-      } catch (e) {
-        // Written but not woken: the ask is in the inbox, so it stays asked.
-        if (!e?.inInbox) unmarkPrAsked(p.url);
-        view.actionError = `${r.branch}: ${e?.message ?? e}`;
-      }
+    try {
+      const out = await askCommentsAll(r, prs, mode);
+      if (out?.waits) view.actionNote = `${r.branch}: the ask waits in its inbox until the run is resumed`;
+      else if (out?.blocked) view.actionNote = `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`;
+    } catch (e) {
+      // Written but not woken: the ask is in the inbox, so it stays asked.
+      if (!e?.inInbox) for (const p of prs) unmarkPrAsked(p.url);
+      view.actionError = `${r.branch}: ${e?.message ?? e}`;
     }
     view.redraw = true;
     try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
@@ -903,8 +902,9 @@ function proofSummary(t, r, stages = null) {
     accepted > 0 && { text: `${accepted} accepted`, color: t.muted },
     pending > 0 && { text: `${pending} pending`, color: t.dim },
     fail > 0 && { text: `${fail} fail`, color: t.blocked },
-    partial > 0 && { text: `${partial} partial`, color: AMBER(t) },
-    missing > 0 && { text: `${plural(missing, "task")} without a screenshot`, color: AMBER(t) },
+    // A pass without a screenshot is one of the partials: one task, said once (proof.js proofVerdict does too).
+    partial > 0 && { text: `${partial} partial${missing > 0 ? ` (${missing} without a screenshot)` : ""}`, color: AMBER(t) },
+    partial === 0 && missing > 0 && { text: `${plural(missing, "task")} without a screenshot`, color: AMBER(t) },
     unchecked > 0 && (pass + fail + partial + accepted + pending > 0 || md) && { text: `${unchecked} not checked`, color: finished ? AMBER(t) : t.dim },
     unscoped > 0 && { text: `${unscoped} not scoped`, color: AMBER(t) },
     md?.cut && { text: "proof.md cut", color: t.dim },
@@ -994,7 +994,13 @@ function prDetail(t, pr, i, related = false, away = false) {
 
 // ---- proof ----
 
-const RESULT_COLOR = { pass: PASS, fail: (t) => t.blocked, partial: AMBER };
+// The colour of a result pill (proof.js resultPill's tone).
+const PILL_COLOR = { pass: PASS, fail: (t) => t.blocked, partial: AMBER, amber: AMBER, dim: () => "dim", muted: () => "muted", other: (t) => t.border };
+const rowPill = (t, k, finished) => {
+  const p = resultPill(k, finished);
+  const el = pill(t, p.text, PILL_COLOR[p.tone](t));
+  return p.tip ? el.tooltip(p.tip) : el;
+};
 
 // A tier as a small tag, "T2"; `tip` says what it is.
 const tierTag = (t, id, tier, tip) => div().id(id).flex_none().text_size(10).font_semibold().px(5).rounded(4)
@@ -1193,7 +1199,6 @@ function proofSection(view, t, r, stages) {
       .when(files.length > 0, (el) => el.child(h_flex().px(2).pt(2).child(folder())));
   }
   const key = `pf-${r.key}`, open = isOpen(view, key);
-  const colorOf = (k) => RESULT_COLOR[k.result]?.(t) ?? t.border;
   const TONE = { pass: PASS(t), fail: t.blocked, partial: AMBER(t), unchecked: AMBER(t), pending: t.muted, dim: t.dim };
   // A task proof.md has but plan.md doesn't counts as done.
   const doneOf = (k) => { const i = r.tasks.findIndex((x) => x.id === k.id); return i < 0 || taskDone(r, stages, i); };
@@ -1225,11 +1230,7 @@ function proofSection(view, t, r, stages) {
         .when(Boolean(k.accepted), (e) => e.child(div().id(`pfa-${id}`).flex_none().text_size(10.5).px(6).rounded(9).bg(t.raised).text_color(t.muted)
           .tooltip(`You accepted this proof as it is${k.accepted.at ? ` ${ago(Date.parse(k.accepted.at))}` : ""}`).child("accepted")))
         .when(k.asked && !more, (e) => e.child(div().flex_none().text_size(10.5).text_color(t.muted).child("asked…")))
-        .child(k.pending ? pill(t, "pending", "muted").tooltip(pendingLine(k))
-          // A "pending" left on a finished run reads as not checked, as the verdict counts it.
-          : k.result === "pending" ? pill(t, "not checked", s.finished ? AMBER(t) : "dim").tooltip(resultLine(k))
-          : k.result ? pill(t, k.result, colorOf(k)).tooltip(k.why || k.result)
-          : k.scoped ? pill(t, "not checked", s.finished ? AMBER(t) : "dim") : pill(t, "not scoped", AMBER(t)).tooltip("No Proof line in plan.md")))
+        .child(rowPill(t, k, s.finished)))
       .when(more, (el) => el.children(proofRowParts(k, s.finished, doneOf(k)).map(part)));
   };
   const shown = open ? s.rows : s.rows.filter((k) => needsLook(k, s.finished));

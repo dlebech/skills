@@ -24,7 +24,7 @@ import { taskTone, taskCounts } from "./tasks.js";
 export { taskTone, taskCounts };
 import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
 import { blockingRequest, blockingPending, ciRequest } from "./blocking.js";
-import { commentsArgs, commentSummary, commentsRequest, pendingComments } from "./comments.js";
+import { commentsArgs, commentSummary, commentsRequest, commentsRequestAll, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { detachedSend } from "./wake.js";
 import { exactStatus, reportedStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
@@ -905,6 +905,11 @@ export function askCi(run, { pr, check = null, url = null }) {
 // comments Harbormaster sees (comments.js commentsRequest), the way an ask what is blocking is sent.
 export function askComments(run, pr, mode) {
   return messageRun(run, "harbormaster-comments", commentsRequest(pr, mode));
+}
+// The same for several PRs at once (Ask me about all / Handle all): one inbox message covering
+// them all, so the orchestrator is woken once and, for ask, writes one question.
+export function askCommentsAll(run, prs, mode) {
+  return messageRun(run, "harbormaster-comments", commentsRequestAll(prs, mode));
 }
 
 // proof-accepted.json in the run directory, which Harbormaster owns: read on the run's machine,
