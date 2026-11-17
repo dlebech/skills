@@ -23,7 +23,7 @@ Comments on an issue can change its scope. Read them (`gh issue view <number> --
 
 - map every task to the issue(s) it serves, honor an explicit starting issue first, and cover each included issue's acceptance criteria with some task;
 - reference the task's issue in each squash or merge commit;
-- in the PR, add a `Closes #<number>` line for each included issue the branch fully resolves, `Part of #<number>` for a parent whose remaining sub-issues stay open, and an issue column in the merged-task table;
+- in the PR, per `close-issues` (default `sub`): `Closes #<number>` only for a sub-issue the branch fully resolves; `Refs #<number>` for each issue the run started from (named issues and parents; a sub-issue named as the starting issue counts as named), which stays open; `Part of #<number>` for a parent whose remaining sub-issues stay open. `all` uses `Closes` for every fully resolved issue, `none` only `Refs`. Add an issue column in the merged-task table;
 - in the final report, list each included issue with its status and the sub-issues left for later.
 
 Once `spec.md` is written, publish each included issue with `<skill-dir>/scripts/set-status.sh <run-directory> --issue <url>`, as in the skill's section 2.

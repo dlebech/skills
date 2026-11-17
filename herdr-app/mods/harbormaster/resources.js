@@ -209,7 +209,7 @@ export function ingest(machine, text) {
   previous.set(m, { os: s.os, at: s.at, cpu: cpuNow });
   // CPU % needs two polls; until then the first one's terminals show memory only.
   const terminals = Object.fromEntries(Object.entries(live.terminals).filter(([a]) => machineOf(a) !== m));
-  live = { at: Date.now(), terminals: { ...terminals, ...terms }, machines: { ...live.machines, [m]: { os: s.os, rated: dt > 0, other: other.slice(0, OTHER_TOP) } } };
+  live = { at: Date.now(), terminals: { ...terminals, ...terms }, machines: { ...live.machines, [m]: { os: s.os, rated: dt > 0, at: Date.now(), other: other.slice(0, OTHER_TOP) } } };
   version++;
   return terms;
 }

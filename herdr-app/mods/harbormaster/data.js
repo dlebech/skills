@@ -17,10 +17,13 @@ import { parseDecidedLines } from "./decided.js";
 import { levelRequest, pendingLevels } from "./levels.js";
 import { tokenText } from "./context.js";
 import { dropCacheArgs } from "./media.js";
-import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, proveRequest, withAcceptance, resultLine } from "./proof.js";
+import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, withAcceptance } from "./proof.js";
+import { parsePlanClaims, claimProveRequest, claimResultLine } from "./claims.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
-import { taskTone, taskCounts } from "./tasks.js";
+import { taskTone, taskCounts, taskStage } from "./tasks.js";
+// taskStage moved to tasks.js (claims.js reads it without herdr); still exported from here.
+export { taskStage };
 export { taskTone, taskCounts };
 import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
 import { blockingRequest, blockingPending, ciRequest } from "./blocking.js";
@@ -284,9 +287,13 @@ function parseRun(machine, chunk) {
     // The PRs an Address comments (comments.js) is still unread for, by URL.
     commentsAsked: pendingComments(requests),
     tasks,
-    // The run's proof: its tier, proof.md's results by task id, and the file names in shared/proof/.
+    // How far the branch is past its last Reviewed commit (refreshReviewed), null until read.
+    reviewedGap: reviewGaps.get(`${machine ?? ""}:${dir}`) ?? null,
+    // The run's proof: its tier, its claims (plan.md's `## Claims`; [] for an old run), proof.md's
+    // results by claim and task id, and the file names in shared/proof/.
     proof: {
       tier,
+      claims: parsePlanClaims(plan),
       md: /^[+!]/.test(proofFile ?? "") ? { ...parseProofMd(proofFile.slice(1)), cut: proofFile[0] === "!" } : null,
       files: (proofNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
       // Tasks the user accepted as they are (proof-accepted.json), and asks to prove still unread.
@@ -451,18 +458,6 @@ function runTerminals(r, ctx) {
 
 // ---- tasks ----
 
-// Where a task is in its life cycle, from its state words: "planned" | "implement" |
-// "review" | "fix" | "done" | "blocked", or null for a state that names no stage
-// ("validating"). Agrees with taskTone on done, blocked and not started.
-export function taskStage(state) {
-  const tone = taskTone(state);
-  if (tone === "done" || tone === "blocked") return tone;
-  if (!tone) return "planned";
-  if (/\bfix/.test(state)) return "fix";
-  if (/review/.test(state)) return "review";
-  if (/implement|in progress|working|started|coding|building/.test(state)) return "implement";
-  return null;
-}
 
 // The stage an agent works on, from its role in its name: impl-, rev-, fix-, grunt-.
 const ROLE_STAGE = { impl: "implement", rev: "review", fix: "fix", grunt: "implement" };
@@ -556,13 +551,33 @@ export function mergeDanger(body) {
   return clean ? clean.slice(0, 600) : null;
 }
 
+// The viewer's own latest review on a PR: "PENDING" while they have one unsubmitted (GitHub allows
+// one, and it is the newest), else the state of their last submitted review, or null.
+export function viewerReview(reviews, viewer) {
+  const mine = (reviews ?? []).filter((r) => r.author?.login === viewer);
+  if (mine.some((r) => r.state === "PENDING")) return "PENDING";
+  return mine.length ? mine[mine.length - 1].state : null;
+}
+
+// Who the viewer is on a machine (`gh api user`), asked once per machine; null when gh cannot say
+// (asked again next refresh).
+const viewers = new Map();
+async function viewerOf(run) {
+  const key = run.machine ?? "";
+  if (viewers.has(key)) return viewers.get(key);
+  const res = await exec("gh", ["api", "user", "-q", ".login"], { on: run.machine }).catch(() => null);
+  const login = res?.code === 0 ? res.stdout.trim() : "";
+  if (login) viewers.set(key, login);
+  return login || null;
+}
+
 // What the views need from `gh pr view --json` output. GitHub only sets reviewDecision
 // where the repo requires a review, so the review comes from the reviews themselves,
 // falling back to reviewDecision ("Review needed") when nobody has approved or objected.
 // `requested`: the reviewers asked and yet to answer (a user's login, a team's name);
 // GitHub drops one from reviewRequests once they review. `ci`: when its checks started and,
 // once none is pending, finished (attention.js ciTimes).
-export function prSummary(p, repo) {
+export function prSummary(p, repo, viewer = null) {
   const { approvedBy, changesBy, reviewedAt } = standing(p);
   return {
     number: p.number,
@@ -572,6 +587,7 @@ export function prSummary(p, repo) {
     approvedBy,
     changesBy,
     reviewedAt,
+    mine: viewer ? viewerReview(p.reviews, viewer) : null,
     requested: (p.reviewRequests ?? []).map((r) => r?.login ?? r?.name ?? r?.slug).filter(Boolean),
     checks: checks(p.statusCheckRollup),
     failed: firstFailing(p.statusCheckRollup),
@@ -638,13 +654,15 @@ export async function refreshPrs(run, closed = false) {
   prBusy.set(run.key, started);
   try {
     let error = null;
+    // Only a review run's related PR needs the viewer: whether their review there is submitted.
+    const viewer = run.type === "rev" ? await viewerOf(run) : null;
     const view = async (recorded, before, own = false) => {
       const out = [];
       for (const pr of recorded) {
         if (!pr.url) continue;
         const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
         const p = res?.code === 0 ? json(res.stdout) : null;
-        if (p) { out.push(own ? await withComments(prSummary(p, pr.repo), run, before?.find((x) => x.url === pr.url)) : prSummary(p, pr.repo)); continue; }
+        if (p) { out.push(own ? await withComments(prSummary(p, pr.repo), run, before?.find((x) => x.url === pr.url)) : prSummary(p, pr.repo, own ? null : viewer)); continue; }
         error ??= `gh could not read ${pr.url}: ${(res?.stderr || res?.stdout || `exit ${res?.code}`).trim().split("\n")[0].slice(0, 200)}`;
         const old = before?.find((x) => x.url === pr.url && x.state !== "UNKNOWN");
         out.push(old ? { ...old, stale: true } : unknownPr(pr.url, pr.repo));
@@ -884,11 +902,11 @@ export function requestLevel(run, kind, level) {
   return messageRun(run, "harbormaster-level", levelRequest(kind, level, { from, finished: run.phase === "finished" }));
 }
 
-// Asks the orchestrator to finish one task's proof (a Proof row's Ask to prove): an inbox message,
-// "prove t23 to T2: <the result line>", the way a level request is sent. The row reads "asked…"
+// Asks the orchestrator to prove one claim (a Claims row's Ask to prove): an inbox message,
+// "prove C2 to T2: <the result line>", the way a level request is sent. The row reads "asked…"
 // while it is unhandled and the result line is the same.
 export function askProof(run, row) {
-  return messageRun(run, "harbormaster-proof", proveRequest(row, run.proof?.tier?.tier ?? null));
+  return messageRun(run, "harbormaster-proof", claimProveRequest(row));
 }
 
 // Asks the orchestrator of a stalled run what is blocking it (Ask what's blocking on its Crew row
@@ -960,9 +978,9 @@ async function changeAccepted(run, id, entry) {
   throw new Error("proof-accepted.json is being changed elsewhere; try again");
 }
 
-// Accepts a task's proof as it is (a Proof row's Accept), for its current result line only;
-// works with the orchestrator gone, since nothing but this file changes.
-export const acceptProof = (run, row) => changeAccepted(run, row.id, { at: new Date().toISOString(), result: resultLine(row) });
+// Accepts a claim as it is (a Claims row's Accept), for its current result line only; works
+// with the orchestrator gone, since nothing but this file changes.
+export const acceptProof = (run, row) => changeAccepted(run, row.id, { at: new Date().toISOString(), result: claimResultLine(row) });
 // Takes an acceptance back (Unaccept): the row needs a look again.
 export const unacceptProof = (run, row) => changeAccepted(run, row.id, null);
 
@@ -1002,6 +1020,52 @@ async function askToClose(run) {
   return blocked
     ? { blocked: true, note: "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes" }
     : { blocked: false, note: "its orchestrator is cleaning up, and its tab closes when done" };
+}
+
+// ---- reviewed ----
+
+// For proof.md's `Reviewed: <sha> …`: how many commits the run's branch has past that sha, and
+// whether its tree is still that commit's. Looked up in the run's folder or its repositories,
+// on the run's machine; prints "<count> <1 when the trees match>", or "?" when git cannot tell.
+const SINCE = [
+  'folder=$1 branch=$2 sha=$3',
+  'for r in "$folder" "$folder"/*/; do',
+  '  [ -e "$r/.git" ] || continue',
+  '  git -C "$r" rev-parse -q --verify "$branch^{commit}" >/dev/null || continue',
+  '  git -C "$r" rev-parse -q --verify "$sha^{commit}" >/dev/null || continue',
+  '  n=$(git -C "$r" rev-list --count "$sha..$branch") || { echo "?"; exit 0; }',
+  '  if git -C "$r" diff --quiet "$sha" "$branch"; then echo "$n 1"; else echo "$n 0"; fi',
+  '  exit 0',
+  'done',
+  'echo "?"',
+].join("\n");
+
+const reviewGaps = new Map(); // run key → {sha, count, same, at}
+const reviewBusy = new Map();
+const REVIEW_TTL = 15_000, REVIEW_TTL_DONE = 5 * 60_000;
+
+// Reads the commits since the run's last Reviewed sha when stale (every 15 s while open, 5 min once
+// finished); one cheap git call with a timeout. Unreadable: same is null (shown dim as unknown, never as current).
+// True when what the line shows changed.
+export async function refreshReviewed(run, done = false) {
+  const all = run.proof?.md?.reviewed ?? [];
+  const last = [...all].reverse().find((x) => /final/i.test(x.what)); // task shas are not on the branch (claims.js reviewedLine)
+  if (!last || !run.folder) { reviewGaps.delete(run.key); return false; }
+  const have = reviewGaps.get(run.key);
+  if (Date.now() - (reviewBusy.get(run.key) ?? 0) < 30_000) return false;
+  if (have && have.sha === last.sha && Date.now() - have.at < (done ? REVIEW_TTL_DONE : REVIEW_TTL)) return false;
+  const started = Date.now();
+  reviewBusy.set(run.key, started);
+  try {
+    const out = await exec("sh", ["-c", SINCE, "sh", run.folder, run.branch, last.sha], { on: run.machine, timeout: 8000 }).catch(() => null);
+    const m = out?.code === 0 ? /^(\d+) ([01])$/.exec(out.stdout.trim()) : null;
+    const next = { sha: last.sha, count: m ? Number(m[1]) : 0, same: m ? m[2] === "1" : null, at: Date.now() };
+    reviewGaps.set(run.key, next);
+    run.reviewedGap = next;
+    return !have || have.sha !== next.sha || have.count !== next.count || have.same !== next.same;
+  } finally {
+    if (reviewBusy.get(run.key) === started) reviewBusy.delete(run.key);
+  }
 }
 
 // The run's integration worktrees: each linked worktree with the run's branch checked

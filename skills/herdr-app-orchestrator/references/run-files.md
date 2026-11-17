@@ -23,8 +23,8 @@ and it keeps nothing the files do not.
 | `question.md` | orchestrator | Harbormaster, captain, you | The open question to you, if any (below). Removed once answered. |
 | `inbox/*.message` | anyone who answers or instructs | orchestrator | Messages to the orchestrator (below). The orchestrator renames a message it has read to `.handled`. |
 | `shared/` | orchestrator, agents | orchestrator, agents | Briefs, findings, reports. Not committed. `shared/proof/` holds captured proof. |
-| `proof.md` | orchestrator, `proving` skill | Harbormaster, you | Per-task proof results (below). Not committed. |
-| `proof-accepted.json` | Harbormaster | Harbormaster, orchestrator | Tasks whose proof you accepted as it is (below). Nobody else writes it. |
+| `proof.md` | orchestrator, `proving` skill | Harbormaster, you | Each claim's result and evidence (below). Not committed. |
+| `proof-accepted.json` | Harbormaster | Harbormaster, orchestrator | Claims you accepted as they are (below). Nobody else writes it. |
 | `parked`, `closed` | captain, Harbormaster, orchestrator | everyone | You put the run away. One line, `<UTC time>\t<plan status then>`; `init-run.sh` deletes them when an orchestrator resumes the run. |
 
 The root also holds `.captain-decisions.json`, the captain's own open decisions (below).
@@ -66,20 +66,41 @@ be answered from its summary alone:
 - A file with none of these `## ` sections is a free-form question, as older runs wrote
   them: it is shown as it is and can only be answered with free text.
 
-## plan.md: proof lines and tier
+## plan.md: claims, proof lines and tier
 
-Proof is a review aid: each task names the evidence that shows it is done, when it is
-planned. A task you cannot name evidence for is not scoped yet. Harbormaster reads the lines
-below and shows them in the run's Proof section.
+Proof is a review aid: it lets the user see that the change works without running it, and its
+verdict answers "can I merge?". It is told as **claims**: what the user can now do, in the spec's
+words, one per acceptance criterion (or a few per criterion when it holds several things to see).
+Harbormaster shows them in the run pane's Claims section.
 
+- `## Claims` in plan.md, written at plan time with the tasks, one claim per line:
+
+  ```markdown
+  ## Claims
+  - C1 Drag a card to reorder the list — AC 3 — tasks t1, t3 — bar T3
+  - C2 The new order is saved across restarts — AC 4 — tasks t2
+  ```
+
+  `C<n>` and the claim's words come first; `AC <n>`, `tasks <ids>` and `bar T<n>` follow, each
+  after ` — `, in any order (any other part is part of the claim's words). The words say what the
+  user can do, never which task did it; tasks are only where it comes from. A claim's bar is the
+  run's tier, or its own `bar` when that asks for more; a `bar` below the run's tier is ignored. Every claim
+  starts "not proven yet" and fills in as its tasks merge (proof.md, below).
 - Below `Status:` and `Prefix:`, `Proof tier: T<n>` is the run's tier, the orchestrator's
-  proposal. When the user overrides it the line reads `Proof tier: T<n> (set by user)`.
-  Without the line, the run's tier is the highest of its tasks'.
-- Every task has a proof line, in any of the task shapes Harbormaster reads: `- Proof: T1 — <the
-  evidence>` under a heading task, a `proof` column in a task table, or `Proof: T1 — …` inside
-  a list item under `## Tasks`. The tier is `T0` to `T3`; the text after the dash is the evidence.
-- Tiers: `T0` CI or the local test suite is green (the default, so not by itself a sign that a task needs no review); `T1` T0 plus test output for the
-  changed behaviour; `T2` T1 plus screenshots or a recording; `T3` T2 plus a guided demo. The proving skill's tier table has the canonical wording, which Harbormaster shows on hover as a definition ("Proof tier T2 — proved with …"); `tests/herdr-app-harbormaster/tiers.sh` and `levels.test.mjs` check they match.
+  proposal, and every claim's bar unless it names its own. When the user overrides it the line
+  reads `Proof tier: T<n> (set by user)`. Without the line, the run's tier is the highest of its tasks'.
+- Every task still has a proof line, for planning and review: `- Proof: T1 — <the evidence>`
+  under a heading task, a `proof` column in a task table, or `Proof: T1 — …` inside a list item
+  under `## Tasks`. The tier is `T0` to `T3`; the text after the dash is the evidence.
+- Tiers, as a claim's bar: `T0` CI or the local test suite is green (the default, so not by itself
+  a sign that a task needs no review); `T1` T0 plus test output for the changed behaviour; `T2` T1
+  plus a screenshot (or a clip); `T3` T2 plus a guided demo where one can be recorded (a clip).
+  The proving skill's tier table has the canonical wording, which Harbormaster shows on hover as a
+  definition ("Proof tier T2 — proved with …"); `tests/herdr-app-harbormaster/tiers.sh` and
+  `levels.test.mjs` check they match.
+
+A run planned before claims (no `## Claims`) is an old run: Harbormaster shows just its checks
+line and judges its proof by that line alone (red: failed; green: clean).
 
 ## proof.md and shared/proof/
 
@@ -90,67 +111,85 @@ describes them in text. Harbormaster lists the file names (up to 40) and reads `
 ```markdown
 # Proof: <branch>
 Tier: T2
-Checks: green — <what ran, e.g. the repo's checks on the integration branch>
+Checks: green — 1497 tests, build, lint, CI
+Reviewed: 4ad8528 final review — 9 findings, all fixed
 
-## <task id> <task name>
-Tier: T1
-Checked: <what was checked>
+## C1 Drag a card to reorder the list
 Result: pass | fail | partial | pending — <one line>
-Files: shared/proof/<file>, shared/proof/<file>
+Shot: shared/proof/t1-drag.png
+Test: reorder moves the card — pass
+Clip: shared/proof/t3-reorder.mp4
 Ran: <short sha> <command> — <result>
 ```
+
+One `## C<n>` section per claim of plan.md, updated (never repeated) as each task that serves it
+merges. Evidence lines are repeatable: `Shot: <path>` a screenshot (comma-separated paths are fine),
+`Test: <name> — pass|fail` one test by name (its status is the first word after the last ` — `,
+so `— fail: assertion at line 3` fails; `Tests:` is a note, not a test), `Clip: <path>` a recording, for flows. The evidence
+must show the claim itself ("the order is still there after a restart"), not just that something
+ran. `Checks: green — …` or `Checks: red — …` in the header is the whole branch (suite, lint, build,
+CI): one line under the claims, `Checks ✓ 1497 tests, build, lint, CI`, red on failure, dim for
+any other word (`Checks: pending — CI`, still running). `Reviewed: <short sha> <which review> — <result>`
+(`Reviewed: 3def855 task t9b — 3 must-fix fixed`) is repeatable and says what was reviewed at which
+commit; the latest final (whole-branch) review is the one Harbormaster reports, as `Reviewed · final
+review at 4ad8528`, or amber `Reviewed at 4ad8528 · 5 commits since, not reviewed` once the integration
+branch has moved on (its tree differing). Task reviews never measure that gap (their sha is on the task branch); with only task lines the line is a dim `not reviewed (branch)`. When git cannot compare, it is a dim `Reviewed at 4ad8528`, never `Reviewed ·`. A finished run with claims and no `Reviewed:` line shows a
+dim `not reviewed`; an old run shows nothing. `## C1: …` and `## C1. …` are C1 too.
 
 `Ran:` (one line per test, lint or build run, repeatable) records the commit a run was made against, so
 reviewers and the orchestrator reuse it instead of rerunning it on the same sha; see
 [speed.md](speed.md). The result is `pass` or `fail: <one line>`. Reuse a line only when its sha is HEAD, or `git diff --quiet <sha> HEAD` (same tree), the tree is clean, and the result starts with `pass`; otherwise rerun.
 
-A task's `## ` section is matched to the task by its id; its `Result` shows beside the task's
-row in the Proof section. The optional header line `Checks: green — …` or `Checks: red — …` (CI or
-the local suite on the integration branch) shows as "checks green" in the verdict line. A T2 or T3
-task with a `Result:` whose `Files:` has no image or video (png, jpg, jpeg, gif, webp; mp4, webm, mov, m4v) counts as "n tasks without a screenshot" (tasks, not images; an image missing from `shared/proof/` does not count). `Files:` is comma-separated paths only: a note in parentheses after a path is ignored, and notes belong in `Checked:`. Only a `## ` section with a `Result:` or `Tier:` is a task; Harbormaster reads the first 64 kB of proof.md and marks the verdict "(proof.md cut)" past that.
-`pending` says the proof is still being gathered and is not the user's yet, with why
-(`Result: pending — waiting for t4`, when a later task takes this one's screenshots). Harbormaster
-also reads a task still under way (planned, implementing, in review, fixing; not blocked) as pending,
-whatever its result short of `fail`. A pending task shows calm, with no Accept or Ask to prove, and
-the verdict counts it apart (`1/8 pass · 2 pending`, an unscoped pending task included); once the run is finished, a `pending` result
-reads as not checked and needs a look. Replace it with the real result once the proof is in.
-A run with no `proof.md` shows its plan's evidence only.
+How Harbormaster reads a claim:
 
-### Accepting proof, or asking for it
+- **proven**: `Result: pass` with evidence at its bar: a `Shot:` or `Clip:` that exists in
+  `shared/proof/` for T2, a `Clip:` (mp4, webm, mov, m4v) for T3. A pass below its bar reads
+  "needs a screenshot" / "needs a clip".
+- **not proven yet**: no result, or `pending — <why>` (`pending — waiting for t4`), while one of its
+  tasks is still under way (planned, implementing, in review, fixing) and nothing failed. It shows
+  calm, with nothing to do. Once its tasks are done, or the run is finished, it wants a look.
+- **fail**, **partial**: as written; a fail is red and never merged past.
 
-A task whose proof is not a pass (partial, fail, a T2+ pass without a screenshot, not checked, not
-scoped), and not pending, has two buttons on its Proof row in Harbormaster. **Accept** records that you take its
-proof as it is (for a not-checked or not-scoped task, only once the task is done or the run is
-finished), in `proof-accepted.json`, which only Harbormaster writes, so it works with the
-orchestrator gone. It writes it on the run's machine under a `proof-accepted.json.lock` directory
-(broken after a minute if left behind), through a temporary file and `mv`, and only if the file still
-holds what it read, so two windows lose neither change; a file that is not a JSON object is never
-overwritten (fix or delete it), and other entries and fields are kept:
+The verdict counts claims and names the first that is not proven: `3 of 4 proven · not yet: Drag to
+reorder`, with the tier and the checks in its hover. The merge ask (the Needs-you box) shows the
+claims worth a look first (failed, partial, below their bar, unproven), then proven ones with a
+thumbnail, at most three and "+n more". Harbormaster reads the first 64 kB of proof.md.
+
+Older runs wrote one `## <task id>` section per task (`Tier:`, `Checked:`, `Result:`, `Files:`);
+Harbormaster still reads them for the task bar's colours, but shows no per-task proof any more.
+
+### Accepting a claim, or asking for it
+
+A claim that is not proven and not being proved (fail, partial, below its bar, unproven) has two
+buttons on its row in the Claims section. **Accept** records that you take it as it is, in
+`proof-accepted.json`, which only Harbormaster writes, so it works with the orchestrator gone. It
+writes it on the run's machine under a `proof-accepted.json.lock` directory (broken after a minute
+if left behind), through a temporary file and `mv`, and only if the file still holds what it read,
+so two windows lose neither change; a file that is not a JSON object is never overwritten (fix or
+delete it), and other entries and fields are kept:
 
 ```json
-{ "t23": { "at": "2026-11-16T10:00:00.000Z", "result": "partial — the hover card needs a real hover, not screenshotted" } }
+{ "C2": { "at": "2026-11-17T10:00:00.000Z", "result": "pass — 2 tests (needs a screenshot)" } }
 ```
 
 `result` is the result line accepted: `<pass|fail|partial|pending> — <why>` from proof.md (with
-` (no screenshot)` for a T2+ pass without one), or `not checked` / `not scoped`. An acceptance holds
-only while the task's result line is still that one; once proof.md says something else, the task
-needs a look again. Unaccept removes its entry. An accepted task does not need a look: the
-verdict counts it apart (`23/24 pass · 1 accepted · checks green`). The orchestrator and the
-`proving` skill leave the file alone.
+` (needs a screenshot)` / ` (needs a clip)` below its bar), or `not proven yet`. An acceptance holds
+only while the claim's result line is still that one; once proof.md says something else, it
+needs a look again. Unaccept removes its entry. An accepted claim does not need a look: the verdict
+counts it apart (`3 of 4 proven · 1 accepted`). The orchestrator and the `proving` skill leave the file alone.
 
 **Ask to prove** writes an inbox message (source `harbormaster-proof`, woken like an answer) whose
-first line names the task, its tier and the result line it is about:
+first line names the claim, its bar and the result line it is about:
 
 ```
-prove t23 to T2: partial — the hover card needs a real hover, not screenshotted
-Asked from Harbormaster: finish this task's proof to T2 and update its proof.md section.
+prove C2 to T2: pass — 2 tests (needs a screenshot)
+Asked from Harbormaster: prove claim C2 ("The new order is saved across restarts") to T2, with a screenshot that shows it, and update its ## C2 section in proof.md.
 ```
 
-(`prove <task id>: …` when no tier is named; whitespace in a task id is written as `_`, so the id
-stays one word). The orchestrator finishes that task's proof (with the
-`proving` skill if available), updates its proof.md section, and renames the message `.handled`.
-Until then, while the result line is unchanged, the row reads `asked…`. Like a level request, it
-does not count as an answer to an open `question.md`.
+The orchestrator proves that claim (with the `proving` skill if available), updates its `## C2`
+section, and renames the message `.handled`. Until then, while the result line is unchanged, the
+row reads `asked…`. Like a level request, it does not count as an answer to an open `question.md`.
+(An old run's `prove <task id> to T<n>: …` asks for that task's proof the same way.)
 
 ## The PR body: Evidence and Merge danger
 
@@ -199,7 +238,7 @@ a `- [user]` line in `decisions.md`, renames the message `.handled` and acts on 
 a finished run means proving its done tasks to the new tier, which sets the run back to running.
 Until `status.json` or `plan.md` shows the level, while the message is unhandled, the tag reads
 `T3 requested…`. A level request does not count as an answer to an open `question.md`. Neither
-does an ask to prove (`prove <task> to T<n>: …`, see [Accepting proof](#accepting-proof-or-asking-for-it)),
+does an ask to prove (`prove C<n> to T<n>: …`, see [Accepting a claim](#accepting-a-claim-or-asking-for-it)),
 an ask what is blocking, an ask to address review comments or an ask for changes (below).
 
 ### Asking for changes

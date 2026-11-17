@@ -2,9 +2,11 @@
 // props().role picks the view:
 //   (none) / "cards"  the runs overview: totals, what's waiting on you, the captain, run cards with progress, tasks, PRs
 //   "run"             one run's card (props().dir and .terminal name it), pinned beside its orchestrator
-//   "crew"            the captain, orchestrators and agents adrift, above Herdr's own Agents list
+//   "crew"            the sidebar: header, Needs-you box, Next for you, runs as one-line rows, agents adrift
 //   "viewer"          a proof screenshot, opened as an overlay by a click on a thumbnail (viewer.js)
 //   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
+//   "newrun"          the + New run dialog (newrun.js), an overlay
+//   "spaces"          the Spaces picker row (spaces.js) and "spaces-list" its popup
 //   "stats"           where the time goes, tokens, CPU and memory: per run, task and agent, live, and past runs
 // Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute;
 // the crew and the overview also read each crew agent's context size (context.js).
@@ -13,17 +15,20 @@ import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
 import { props, theme, nextCommand, checking, openOverlay, closeOverlay, shared, setShared } from "herdr";
 import { expireNote } from "./note.js";
-import { loadRuns, cachedRuns, refreshPrs, isClosed, isParked, newestFirst } from "./data.js";
+import { loadRuns, cachedRuns, refreshPrs, refreshReviewed, isClosed, isParked, newestFirst } from "./data.js";
 import { facts, crewAddresses } from "./live.js";
 import { loadContexts } from "./context.js";
 import { hotSignature, sampleVersion } from "./resources.js";
-import { cards, crew, runPane, submitReply, runProps } from "./overview.js";
+import { cards, runPane, submitReply, runProps } from "./overview.js";
+import { crew } from "./crew.js";
 import { viewer, startCopies } from "./viewer.js";
 import { harbor, rail, paneHeader } from "./harbor.js";
 import { statsView } from "./stats.js";
+import { spacesRow, spacesList, startSpacesList } from "./spaces.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
 import { observeTelling } from "./telling.js";
-import { parseCommand, runNamed } from "./commands.js";
+import { parseCommand, runNamed, newRunArgs } from "./commands.js";
+import { openNewRun, initNewRun, newRunView } from "./newrun.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
 const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"]);
@@ -34,6 +39,7 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"
 //                                                         "… details" / "… proof" unfold its question / its Proof list
 //   show-stats[:<branch | run dir>]                         open the Stats view (a run: focused on it)
 //   show-overview, show-crew                               open the runs overview, or the Crew block
+//   new-run[:repo=<name or folder> kind=<issue|review|describe> input=<text>]   the + New run dialog (a key binding's command)
 //   close-popup                                            close it
 //   open-run:key=<run key>                                 a toast's click (telling.js) for a run whose
 //                                                         orchestrator is gone: its card, kept open until closed
@@ -88,11 +94,11 @@ function showStats(view, arg) {
 
 // The runs overview (role "cards") or the Crew block (role "crew", sidebar-narrow) as the
 // same brief popup, for screenshots of their cards.
-function showView(key, role, width, height) {
+function showView(key, role, width, height, extra = {}) {
   const cur = shared(POPUP);
   if (cur && cur.arg === key && Date.now() - cur.at < 2000) return;
   closePopup();
-  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width, height, props: { role } });
+  const id = openOverlay({ mod: "harbormaster", kind: "dialog", width, height, props: { role, ...extra } });
   const won = shared(POPUP);
   if (won && won.arg === key && Date.now() - won.at < 2000) { try { closeOverlay(id); } catch { /* gone */ } return; }
   setShared(POPUP, { id, at: Date.now(), arg: key });
@@ -110,6 +116,7 @@ async function listen(view, cx) {
       else if (name === "show-stats") showStats(view, arg);
       else if (name === "show-overview") showView("overview", "cards", 560, 900);
       else if (name === "show-crew") showView("crew", "crew", 360, 640);
+      else if (name === "new-run") openNewRun(newRunArgs(arg));
       else if (name === "close-popup") closePopup();
       else if (name === "open-run") showPopup(view, arg, true);
       cx.notify();
@@ -132,6 +139,8 @@ export default class Harbormaster extends View {
     this.redraw = false; // an action ended in a task that could not redraw this view
     this.reply = InputState.new({ placeholder: "Your answer…" });
     this.reply.on("submit", (_e, cx) => submitReply(this, cx));
+    if (role === "newrun") { initNewRun(this, cx); return; }
+    if (role === "spaces-list") startSpacesList(this, cx);
     if (!DATA_ROLES.has(role)) return;
     // The popup's own copy doesn't listen: a command that closed or replaced the popup would end it.
     if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards" || role === "crew") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
@@ -204,6 +213,10 @@ export default class Harbormaster extends View {
       // PRs land in shared state, which re-renders every copy by itself. A parked run's PRs are
       // read as rarely as a closed run's: nobody works on them, they only show what they wait on.
       for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});
+      // The commits since each run's last review (not for closed runs: their line is never shown): module memory, so a change re-renders by hand.
+      let moved = false;
+      for (const r of runs) if (!isClosed(r, ctx)) moved = (await refreshReviewed(r, isClosed(r, ctx) || isParked(r)).catch(() => false)) || moved;
+      if (moved) cx.notify();
     });
   }
 
@@ -224,6 +237,9 @@ export default class Harbormaster extends View {
       case "harbor-rail": return rail(this);
       case "harbor-pane": return paneHeader(p);
       case "stats": return statsView(this, t);
+      case "newrun": return newRunView(this, t);
+      case "spaces": return spacesRow(t);
+      case "spaces-list": return spacesList(this, t);
       default: return cards(this, t, this.runs, this.errors, this.decisions);
     }
   }

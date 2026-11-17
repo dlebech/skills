@@ -1,6 +1,6 @@
 // How the Crew block shows each orchestrator's attention (attention.js assess): its group
 // (Needs you, Working, Waiting on others, Can't tell, Done), its place in it, the words that lead its detail line,
-// their colour, and its hover. Pure, so the tests drive it; overview.js crew() draws it.
+// their colour, and its hover. Pure, so the tests drive it; crew.js draws it.
 
 import { byWait, nextStepText, stepText, ageText, reviewWaitText, FINISHED_LABEL } from "./attention.js";
 import { commentLines, commentsText, hasComments } from "./comments.js";
@@ -121,7 +121,8 @@ export const pillReason = (a) => (a?.group === "needs" ? a.reasons.find((r) => r
 // "red CI on #42" over a run whose label is review proof, never a step the box puts second.
 export function badgeOf(a, finished = false) {
   // A finished run with no PR has no PR label: its own reason is the pill.
-  if (!a?.next && a?.group === "needs" && a.reasons.some((r) => r.key === "finished")) return { label: FINISHED_LABEL, tone: "blocked" };
+  const own = !a?.next && a?.group === "needs" ? a.reasons.find((r) => r.key === "finished" || r.key === "review-pending") : null;
+  if (own) return { label: own.text, tone: "blocked" };
   if (!a?.next) return null;
   const tone = a.group === "needs" ? "blocked" : a.group === "done" ? "done" : finished ? "muted" : null;
   // With review comments, a `tip` saying who said what.
@@ -225,4 +226,61 @@ export function workerTree(workers, rootAddress) {
   };
   add(null, []);
   return out;
+}
+
+// ---- the calm sidebar (props needs: "box") ----
+
+// Claude Code reports "working" while a background shell runs, and says so in its status
+// message ("1 shell still running"). A captain on the old skill waits on its watcher that way,
+// so that "working" is watching, not replying.
+export const SHELLS_ONLY = /^\s*\d+\s+(background\s+)?shells?\s+(are\s+|is\s+)?still\s+running\s*\.?\s*$/i;
+
+// The captain link's mark, from its agent status, its status message and whether its watcher
+// runs: "blocked" (a dialog waits), "working" (it is really replying: the spinner), "watching"
+// (idle with its watcher running, or working only on background shells: a calm eye) or "idle".
+export function captainMark({ status = null, msg = null, watching = false } = {}) {
+  if (status === "blocked") return "blocked";
+  const shellsOnly = SHELLS_ONLY.test(msg ?? "");
+  if (status === "working" && !shellsOnly) return "working";
+  if (shellsOnly || watching) return "watching";
+  return "idle";
+}
+
+// The Needs-you entries under the open box, as compact rows: at most `limit`, the rest behind
+// "+ n more" until unfolded (`open`). {shown, extra}: `extra` is how many the fold holds, shown
+// or not, so the toggle can say "+ 3 more" and fold them back.
+export function needsRest(entries, expanded, { limit = 3, open = false } = {}) {
+  const rest = entries.filter((x) => x !== expanded);
+  const extra = Math.max(0, rest.length - limit);
+  return { shown: open ? rest : rest.slice(0, limit), extra };
+}
+
+// A compact Crew row's second line: what the run is doing now, in its own words (status.json's
+// progress, else the plan's status line), one line. It changes as tasks do, which is why no
+// count of them is shown: plans grow during a run. Null when it says nothing.
+export const subtitleOf = (progress, statusLine) => String(progress ?? statusLine ?? "").replace(/\s+/g, " ").trim() || null;
+
+// ---- Next for you ----
+
+// "skills#52": the repository's name without its owner, and the number.
+export const prRef = (repo, number) => `${String(repo ?? "").split("/").pop()}#${number}`;
+
+// ---- titles ----
+
+// A review run's title: "api#52 · Triage" (the repository's name from its related PR, its
+// topic the PR's subject), so two reviews in different repositories never read alike. Null for
+// any other run, or a review without a related PR or topic yet.
+export function reviewTitle(type, related, topic) {
+  if (type !== "rev" || !topic) return null;
+  const m = /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(related?.[0]?.url ?? "");
+  return m ? `${m[1]}#${m[2]} · ${topic}` : null;
+}
+
+// Rows whose title is the same get their repository's name, muted, before it ("api · …"):
+// {key, title, repo} → Map key → prefix, only for the rows that need one. A title that already
+// names its repository (a review's) never gets a second.
+export function repoPrefixes(rows) {
+  const count = new Map();
+  for (const x of rows) count.set(x.title, (count.get(x.title) ?? 0) + 1);
+  return new Map(rows.filter((x) => count.get(x.title) > 1 && x.repo && !x.title.startsWith(`${x.repo}#`)).map((x) => [x.key, x.repo]));
 }

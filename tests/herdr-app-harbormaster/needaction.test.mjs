@@ -29,15 +29,15 @@ const att = (r, list, o = {}) => assess(r, { orch: "idle", working: false, pr: r
 const items = (r, list, o = {}, ctx = {}) => needActions(att(r, list, o), { run: r, prs: list, now, ...ctx });
 const kinds = (it) => it.actions.map((a) => a.kind);
 
-test("approved — merge names the PRs, who approved and when, with an Open button for each", () => {
+test("approved — merge names the PRs, who approved and when, with a Merge on GitHub button for each", () => {
   const list = [pr({ approvedBy: ["mfalkenbrink"], review: "APPROVED", reviewedAt: ago(65) }),
     pr({ number: 1372, url: "https://github.com/o/skills/pull/1372", approvedBy: ["mfalkenbrink"], review: "APPROVED", reviewedAt: ago(70) })];
   const [it] = items(run({ folder: "/p/snevagten" }), list, { flow: "peer" });
   assert.equal(it.key, "approved — merge");
   assert.equal(it.line, "Merge #42 and #1372 · approved by mfalkenbrink 1h5m ago");
   assert.deepEqual(it.actions, [
-    { kind: "open", label: "Open #42", url: list[0].url },
-    { kind: "open", label: "Open #1372", url: list[1].url },
+    { kind: "open", label: "Merge #42 on GitHub", url: list[0].url, primary: true },
+    { kind: "open", label: "Merge #1372 on GitHub", url: list[1].url, primary: true },
   ]);
 });
 
@@ -50,7 +50,7 @@ test("approved with open comments says to address them, then merge", () => {
 
 test("review proof → merge points at the proof first, then the PR", () => {
   const [it] = items(run(), [pr()], { flow: "self" }, { proof: { tier: 2, pass: 5, total: 10 } });
-  assert.equal(it.line, "Read the proof (T2 · 5/10 pass), then merge #42");
+  assert.equal(it.line, "Read the proof (T2 · 5/10 proven), then merge #42");
   assert.deepEqual(it.actions.map((a) => a.label), ["Proof", "Open #42"]);
   // Without proof to read, the PR is what there is to review.
   const [bare] = items(run(), [pr()], { flow: "self" });
@@ -62,9 +62,9 @@ test("review proof never says merge while CI is red, and a draft is marked ready
   const proof = { proof: { tier: 1, pass: 0, total: 2 } };
   const red = items(run(), [pr({ checks: checks(2, 1), failed: { name: "lint", url: null } })], { flow: "self" }, proof);
   assert.deepEqual(red.map((x) => x.key), ["red-ci", "review proof → merge"]);
-  assert.equal(red[1].line, "Read the proof (T1 · 0/2 pass)");
+  assert.equal(red[1].line, "Read the proof (T1 · 0/2 proven)");
   const draft = items(run(), [pr({ state: "DRAFT" })], { flow: "self" }, proof);
-  assert.equal(draft[0].line, "Read the proof (T1 · 0/2 pass), then mark #42 ready and merge");
+  assert.equal(draft[0].line, "Read the proof (T1 · 0/2 proven), then mark #42 ready and merge");
   const [bare] = items(run(), [pr({ state: "DRAFT" })], { flow: "self" });
   assert.equal(bare.line, "Review #42, then mark it ready and merge");
 });
@@ -182,8 +182,8 @@ test("a run not in Needs you has no items; the Crew hover's line is the first it
 });
 
 test("proofText: tier and pass count, either alone, or null", () => {
-  assert.equal(proofText({ tier: 2, pass: 5, total: 10 }), "T2 · 5/10 pass");
-  assert.equal(proofText({ tier: null, pass: 0, total: 3 }), "0/3 pass");
+  assert.equal(proofText({ tier: 2, pass: 5, total: 10 }), "T2 · 5/10 proven");
+  assert.equal(proofText({ tier: null, pass: 0, total: 3 }), "0/3 proven");
   assert.equal(proofText({ tier: 1, pass: 0, total: 0 }), "T1");
   assert.equal(proofText({ tier: null, pass: 0, total: 0 }), null);
   assert.equal(proofText(null), null);
@@ -245,7 +245,7 @@ test("changes requested with comments offers Address too; a run that can't be as
 
 test("a failed proof task is named and read before any merge", () => {
   const proof = { tier: 1, pass: 1, total: 2, fail: 1, failed: "t2 polish" };
-  assert.equal(proofText(proof), "T1 · 1/2 pass · 1 fail");
+  assert.equal(proofText(proof), "T1 · 1/2 proven · 1 fail");
   const [it] = items(run(), [pr({ number: 1 })], { flow: "self" }, { proof });
   assert.equal(it.line, "Proof: t2 polish failed — read it before merging #1");
   assert.deepEqual(it.actions.map((a) => a.label), ["Proof", "Open #1"]);

@@ -13,11 +13,12 @@ If `final-review` is on, or T0 tasks merged without a task review ([speed.md](sp
 - Triage them, and fix must-fix findings as one more task with no task review.
 - With rounds left, remove the reviewer and start another fresh one, named `rev-<prefix>-final-<round>`, on the branch with those fixes merged.
 - After the last round, let the user pick among the nice-to-haves, or record them as follow-ups. The rounds are the only review of the review fixes; do not loop.
+- After each final review round, append `Reviewed: <short sha of the HEAD it reviewed> final review — <result>` to `proof.md`'s header (run-files.md); Harbormaster warns the user in amber when commits come after the latest one.
 - Remove the final reviewer and any fixer once they are done.
 
 ## 2. Push and open the PR
 
-Push each integration branch. Create or update one PR per repository when requested or all planned work is complete. With several, each PR links the others and says they merge together; put the `Closes` lines only in the one meant to merge last, and `Part of` lines in the rest. Include:
+Push each integration branch. Create or update one PR per repository when requested or all planned work is complete. With several, each PR links the others and says they merge together; put the `Closes` lines only in the one meant to merge last, and `Part of` lines in the rest. Start the body with the issue lines from `spec.md`'s Issue handling ([issues.md](issues.md)), one per line at the very top before anything else, so they are easy to scan. Then include:
 
 - a short statement of the goal from `spec.md`;
 - a table of the merged tasks;
@@ -25,8 +26,7 @@ Push each integration branch. Create or update one PR per repository when reques
 - `## Merge danger`: one line, `One-way door` or `Two-way door`, then ` — ` and the blast radius (formats in [run-files.md](run-files.md#the-pr-body-evidence-and-merge-danger));
 - decisions to check, yours and the user's;
 - a pre-launch or deploy checklist (migrations, new env vars, schedules, manual steps);
-- follow-ups;
-- the issue lines from `spec.md`'s Issue handling ([issues.md](issues.md)).
+- follow-ups.
 
 Publish each PR with `set-status.sh <run-directory> --pr <owner/repo> <url>` as soon as it exists. Without a GitHub remote or `gh`, print the description for the user to paste.
 

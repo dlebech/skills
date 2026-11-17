@@ -9,7 +9,7 @@ export const TIER_TEXT = [
   "passing tests (CI, or the repo's local suite)",
   "passing tests and their output for the changed behaviour",
   "passing tests, their output for the changed behaviour, and screenshots or a recording",
-  "passing tests, their output for the changed behaviour, screenshots or a recording, and a guided demo",
+  "passing tests, their output for the changed behaviour, screenshots or a recording, and a guided demo where one can be recorded",
 ];
 
 // "Proof tier T2 — proved with passing tests, …"
@@ -54,9 +54,10 @@ export function levelRequest(kind, level, { from = null, finished = false } = {}
     return `${requestLine(kind, level)}\nAsked from Harbormaster${from ? ` (was ${from})` : ""}. From now on: ${AUTONOMY[level]}.`;
   }
   const up = from === null || level > from;
-  const why = !up ? `every task needs only to be proved with ${TIER_TEXT[level]}; proof already gathered stays`
-    : finished ? `the run is finished, so prove its done tasks to T${level} (${TIER_TEXT[level]}), which sets it back to running`
-    : `every task is proved with ${TIER_TEXT[level]}, done tasks included`;
+  // The run's tier is each claim's bar unless a claim names its own (claims.js).
+  const why = !up ? `every claim needs only to be proved with ${TIER_TEXT[level]}; proof already gathered stays`
+    : finished ? `the run is finished, so prove its claims to T${level} (${TIER_TEXT[level]}), which sets it back to running`
+    : `every claim is proved with ${TIER_TEXT[level]}, proven ones included`;
   return `${requestLine(kind, level)}\nAsked from Harbormaster${from !== null ? ` (was T${from})` : ""}: ${why}.`;
 }
 

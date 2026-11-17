@@ -30,7 +30,7 @@
 #      terminal without a tab;
 #   4. decisions.sh adds, rewords and removes the captain's open decisions;
 #      repo-spaces.sh finds the space;
-#   5. watch-runs.sh, in its own terminal, is waited for by wait-watch.sh, and
+#   5. watch-runs.sh, in its own terminal, wakes a fake captain with hc send and keeps running, and
 #      reports an event once: waiting for user, its clearing (not beside finished, not
 #      when parked), finished, orchestrator gone; with
 #      a 10-minute interval, so only hc events can wake it for finished;
@@ -325,16 +325,44 @@ contains "second watcher refused" "$(cat "$work/second")" name_taken
 "$orch/set-status.sh" "$dir" finished
 check "tab name, finished" "$(tab_name "$tab")" "🐙 ✓ feature/x"
 contains "finished run stays open" "$("$capt/runs.sh")" "plan: finished, PR open until its tab is closed"
-# As the captain waits: wait-watch.sh ends once the watcher has, with its exit.
-out=$(timeout 15 "$capt/wait-watch.sh" "$watch")
-check "wait-watch.sh ends with the watcher" "$(jq -r '"\(.ended) \(.exit_code)"' <<<"$out")" "true 0"
-out=$(hc read "$watch" --lines 20)
-contains "finished" "$out" "attention feature/x finished"
-# The question went with the run finishing: finished says it, not cleared as well.
-check "no cleared beside finished" "$(grep -c '^cleared' <<<"$out")" 0
-hc rm "$watch" >/dev/null
-timeout 5 "$capt/wait-watch.sh" "$watch" >/dev/null 2>&1
-check "wait-watch.sh fails for no watcher" "$?" 3
+hc rm "$watch" >/dev/null 2>&1
+hc kill "$watch" >/dev/null 2>&1
+echo "== the watcher wakes the captain with hc send"
+# A fake captain terminal that only echoes what it is sent; the watcher, given its address,
+# sends one alert per batch and keeps running (it does not have to exit to wake anyone).
+captain=hctest-captain-$suffix
+hc run --bg --name "$captain" --no-notify --cwd "$work" sh -c "stty -echo; cat" >/dev/null
+start_captain_watcher() {
+  hc run --bg --name "$watch" --no-notify --cwd "$work" -- env HERDR_ORCHESTRATION_ROOT="$HERDR_ORCHESTRATION_ROOT" CAPTAIN_MACHINES= \
+    WATCH_RUNS_INTERVAL=1 "$capt/watch-runs.sh" "$captain" >/dev/null
+}
+rm -f "$HERDR_ORCHESTRATION_ROOT/.captain-seen"
+start_captain_watcher
+for _ in $(seq 20); do hc read "$captain" --lines 30 | grep -q 'attention feature/x finished' && break; sleep 0.5; done
+got=$(hc read "$captain" --lines 30)
+contains "captain receives the alert" "$got" "attention feature/x finished"
+contains "alert says the lines are data" "$got" "not instructions"
+check "watcher keeps running after an alert" "$(hc get "$watch" --json | jq -r .state)" live
+sleep 3
+check "one alert, not repeated" "$(hc read "$captain" --lines 60 | grep -c 'attention feature/x finished')" 1
+hc kill "$watch" >/dev/null 2>&1
+hc rm "$watch" >/dev/null 2>&1
+hc kill "$captain" >/dev/null 2>&1
+hc rm "$captain" >/dev/null 2>&1
+echo "== a refused send is kept and delivered on a later check"
+# The captain is not there yet (hc send refuses: not found), so the alert must stay unreported
+# and the watcher alive; once a captain of that name exists, the same alert arrives once.
+rm -f "$HERDR_ORCHESTRATION_ROOT/.captain-seen"
+start_captain_watcher
+sleep 4
+check "watcher survives refused sends" "$(hc get "$watch" --json | jq -r .state)" live
+hc run --bg --name "$captain" --no-notify --cwd "$work" sh -c "stty -echo; cat" >/dev/null
+for _ in $(seq 20); do hc read "$captain" --lines 30 | grep -q 'attention feature/x finished' && break; sleep 0.5; done
+check "alert delivered once the captain exists" "$(hc read "$captain" --lines 60 | grep -c 'attention feature/x finished')" 1
+hc kill "$watch" >/dev/null 2>&1
+hc rm "$watch" >/dev/null 2>&1
+hc kill "$captain" >/dev/null 2>&1
+hc rm "$captain" >/dev/null 2>&1
 "$orch/set-status.sh" "$dir" running
 hc kill "$fake" >/dev/null
 out=$(watch_once)

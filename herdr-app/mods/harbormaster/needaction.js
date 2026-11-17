@@ -40,12 +40,12 @@ const checksUrl = (pr) => (/^https:\/\//i.test(pr?.failed?.url ?? "") ? pr.faile
 // The order the lines come in: what blocks a run outright first (a question or dialog, a gone
 // orchestrator), then a broken build, then the PR steps, most urgent first, then a stall, then
 // the cleanup of a finished run.
-const ORDER = ["question", "gone", "red-ci", "changes requested", "approved — merge", "review proof → merge", "request review", "stalled", "finished"];
+const ORDER = ["question", "gone", "red-ci", "changes requested", "approved — merge", "review proof → merge", "request review", "stalled", "review-pending", "finished"];
 
-// "T2 · 5/10 pass · 1 fail" from {tier, pass, total, fail}, or null with no proof to read.
+// "T2 · 5/10 proven · 1 fail" from {tier, pass, total, fail}, or null with no proof to read.
 export function proofText(proof) {
   if (!proof) return null;
-  const parts = [proof.tier != null ? `T${proof.tier}` : null, proof.total ? `${proof.pass ?? 0}/${proof.total} pass` : null,
+  const parts = [proof.tier != null ? `T${proof.tier}` : null, proof.total ? `${proof.pass ?? 0}/${proof.total} proven` : null,
     proof.fail ? `${proof.fail} fail` : null].filter(Boolean);
   return parts.length ? parts.join(" · ") : null;
 }
@@ -101,7 +101,7 @@ function readyItem(a, ctx, prs) {
   const tasks = taskCounts(run ?? {});
   const checks = ciState(ctx.prs ?? []).state === "green" ? "checks green" : "no checks";
   const detail = [tasks.planned > 0 ? `All ${plural(tasks.done, "task")} done` : null,
-    proof ? `proof ${proof.pass ?? 0}/${proof.total} pass${proof.accepted ? ` · ${proof.accepted} accepted` : ""}` : null, checks].filter(Boolean).join(" · ");
+    proof ? `proof ${proof.pass ?? 0}/${proof.total} proven${proof.accepted ? ` · ${proof.accepted} accepted` : ""}` : null, checks].filter(Boolean).join(" · ");
   return { key: "review proof → merge", ready: true, headline: "Ready to merge", detail,
     line: `Ready to merge ${prsText(prs)}: ${detail}`,
     actions: [...mergePrs(prs), { kind: "proof", label: "Proof", primary: false }, { kind: "changes", label: "Ask for changes", primary: false }] };
@@ -170,7 +170,9 @@ function reasonItem(r, a, ctx) {
         ? `Approved${by}${ago(at, now)} with ${commentsText(next.comments)} on ${prsText(same)}: address them${plan ? "" : ", then merge"}`
         : plan ? `${prsText(same)} approved${by}${ago(at, now)} · merge once the plan is done (${tasks.done}/${tasks.planned} tasks)`
         : `Merge ${prsText(same)} · approved${by}${ago(at, now)}`;
-      return { line, actions: addressPrs(same, run, next?.asked) };
+      // Nothing to address and nothing left to do: the merge itself is the button, as for a ready run.
+      const merge = !hasComments(next?.comments) && !plan && !(next?.asked ?? []).length ? mergePrs(same) : [];
+      return { line, actions: merge.length ? merge : addressPrs(same, run, next?.asked) };
     }
     case "review proof → merge": {
       const p = proofText(proof);
@@ -213,6 +215,8 @@ function reasonItem(r, a, ctx) {
     }
     case "stalled":
       return { line: `${r.text[0].toUpperCase()}${r.text.slice(1)}${a.step?.text ? ` at ${a.step.text}` : ""}: ask what's blocking it`, actions: [{ kind: "ask-blocking", label: "Ask what's blocking" }] };
+    case "review-pending":
+      return { line: "Your review is still pending: submit it on GitHub", actions: openPrs(r.pr ? [r.pr] : []).map((x) => ({ ...x, primary: true })) };
     case "finished": {
       // Only a report about the whole run; without one the orchestrator gave its final report
       // in its terminal.
@@ -274,3 +278,20 @@ export function detailsLabel(sections, options = []) {
   const parts = detailsParts(sections, options);
   return parts.length ? `Details: ${parts.join(", ")}` : null;
 }
+
+// The one button the sidebar's box shows for its items: {i, j}, the item and action it is. The
+// items come most urgent first, so the first item with a button: its action that says it is
+// primary (Merge over Proof, the autonomy's Ask me or Handle them), else its first. An "asked…"
+// note is no button. Null when no item has one.
+export function primaryOf(items) {
+  const can = (x) => x.kind !== "asked";
+  const i = (items ?? []).findIndex((it) => it.actions.some(can));
+  if (i < 0) return null;
+  const acts = items[i].actions;
+  const j = acts.findIndex((x) => can(x) && x.primary === true);
+  return { i, j: j >= 0 ? j : acts.findIndex(can) };
+}
+
+// Whether the box's items ask for a merge: an approved PR ("approved — merge"), a proof to read
+// before the merge ("review proof → merge") or a run that is ready to merge. Its unfolded box then shows the run's claims worth a look (claims.js claimsAsk).
+export const isMergeAsk = (items) => (items ?? []).some((it) => it.key === "approved — merge" || it.key === "review proof → merge" || it.ready === true);

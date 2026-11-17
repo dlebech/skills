@@ -8,6 +8,7 @@ Read this when a message asks you to read a file in `inbox/` (from `herdr-app-ca
 - Read it and act on it, then rename it to `<file>.handled`. A close message is the exception to the rules below: see [The user closed this run](#the-user-closed-this-run).
 - An answer to your open question (`Answer to "<title>": <option>`) goes through the skill's section 6, step 4. Every other kind below is an instruction, not an answer: it leaves an open `question.md` standing.
 - An instruction is the user's own words: handle it like a mid-run decision (the skill's section 6). Record it in `decisions.md` as a `- [user] <UTC time> <topic>: <decision> — <why>` line, update `spec.md` if it changes the goal or scope, and pass it to affected agents.
+- An instruction that arrives while `question.md` is open and no longer needed: delete `question.md` first, then set the status to `running` (the order of the skill's section 6, step 4), so the captain's watcher never sees a running run with an open question.
 - When it arrives while you are `waiting for user`, `blocked`, or `finished`, set the status to `running` before reading files or starting work, so the user's views stop showing that the run needs them.
 
 ## The user closed this run

@@ -185,6 +185,8 @@ export const sig2 = (n) => {
   return mb >= 1024 || mb < 1 ? n : Number(mb.toPrecision(2)) * 1024;
 };
 
+const machineInfo = (snap, name) => snap?.machines?.[name] ?? null;
+
 export function createSteady(cfg = {}) {
   const c = { ...STEADY, ...cfg };
   const ema = new Map(), orders = new Map(), flags = new Map(), asked = new Map();
@@ -200,12 +202,14 @@ export function createSteady(cfg = {}) {
     },
     // An exponential moving average per key (tau ~25 s), then rounded: CPU to a whole %, memory to
     // two figures. {cpu, rssKb} in, the same out.
-    smooth(key, cpu, rssKb = 0) {
+    // `when` is the sample time of the machine the figure came from (default: the view's); each
+    // machine polls on its own clock, so one machine's poll must not count as a sample of another's.
+    smooth(key, cpu, rssKb = 0, when = at) {
       let e = ema.get(key);
-      if (!e) e = { at, seen: at, cpu, rssKb };
-      else if (e.at !== at) {
-        const a = 1 - Math.exp(-(at - e.at) / c.tauMs);
-        e = { at, seen: at, cpu: e.cpu + a * (cpu - e.cpu), rssKb: e.rssKb + a * (rssKb - e.rssKb) };
+      if (!e) e = { at: when, seen: at, cpu, rssKb };
+      else if (e.at !== when) {
+        const a = 1 - Math.exp(-Math.max(0, when - e.at) / c.tauMs);
+        e = { at: when, seen: at, cpu: e.cpu + a * (cpu - e.cpu), rssKb: e.rssKb + a * (rssKb - e.rssKb) };
       }
       e.seen = at;
       ema.set(key, e);
@@ -246,21 +250,28 @@ export function createSteady(cfg = {}) {
     },
     // The snapshot's terminals (resources.js) with CPU and memory smoothed, per terminal, own
     // process and program, so the table, its details and "Hottest" read the same steady figures.
+    // Each is smoothed on its machine's sample time; a machine with no rating yet (CPU 0 would seed
+    // the average) passes through as it is.
     snapshot(snap) {
       const terminals = {};
       for (const [a, u] of Object.entries(snap?.terminals ?? {})) {
-        const m = api.smooth(a, u.cpu, u.rssKb);
+        const m = machineInfo(snap, a.includes("/") ? a.slice(0, a.indexOf("/")) : "");
+        if (m && !m.rated) { terminals[a] = u; continue; }
+        const when = m?.at ?? snap?.at ?? at;
         terminals[a] = {
-          ...u, ...m,
-          own: u.own ? { ...u.own, ...api.smooth(`${a}\town`, u.own.cpu, u.own.rssKb) } : u.own,
-          programs: (u.programs ?? []).map((p) => ({ ...p, ...api.smooth(`${a}\t${p.name}`, p.cpu, p.rssKb) })),
+          ...u, ...api.smooth(a, u.cpu, u.rssKb, when),
+          own: u.own ? { ...u.own, ...api.smooth(`${a}\town`, u.own.cpu, u.own.rssKb, when) } : u.own,
+          programs: (u.programs ?? []).map((p) => ({ ...p, ...api.smooth(`${a}\t${p.name}`, p.cpu, p.rssKb, when) })),
         };
       }
       return { ...snap, terminals };
     },
     // Processes outside the agents ({machine, pid, cpu, rssKb, ...}), smoothed per process.
-    others(list) {
-      return list.map((p) => ({ ...p, ...api.smooth(`${p.machine ?? ""}:${p.pid}`, p.cpu, p.rssKb) }));
+    others(list, snap = null) {
+      return list.map((p) => {
+        const m = machineInfo(snap, p.machine ?? "");
+        return m && !m.rated ? p : { ...p, ...api.smooth(`${p.machine ?? ""}:${p.pid}`, p.cpu, p.rssKb, m?.at ?? at) };
+      });
     },
   };
   return api;
