@@ -304,6 +304,17 @@ test("a T2 pass without a screenshot reads 'no screenshot' in the partial colour
   assert.equal(proofVerdict({ tier: { tier: 2 }, md, tasks, shotFiles: ["t1.txt"] }).text, "Proof T2 · 0/1 pass · 1 partial (1 task without a screenshot)");
 });
 
+test("an accepted or asked no-screenshot row's pill hover says so, not to accept or ask", () => {
+  const base = { scoped: true, result: "pass", why: "ok", missing: true, tier: 2, files: [] };
+  assert.match(resultPill({ ...base, accepted: { at: "x" } }, false).tip, /You accepted it without a screenshot\.$/);
+  assert.match(resultPill({ ...base, asked: true }, false).tip, /Asked its orchestrator to prove it\.$/);
+  for (const k of [{ ...base, accepted: { at: "x" } }, { ...base, asked: true }]) {
+    const p = resultPill(k, false);
+    assert.equal(p.text, "no screenshot");
+    assert.doesNotMatch(p.tip, /Accept it as it is/);
+  }
+});
+
 test("a pass with a screenshot, a T1 pass, a fail and a partial keep their own pill", () => {
   const row = (tier, result, files) => proofTasks([{ id: "t1", name: "one", proof: { tier, text: "x" } }],
     parseProofMd(`# Proof\n\n## t1 one\nTier: T${tier}\nResult: ${result}\nFiles: ${files.map((f) => `shared/proof/${f}`).join(", ")}\n`), files, {})[0];

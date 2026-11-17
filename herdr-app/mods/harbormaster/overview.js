@@ -902,8 +902,9 @@ function proofSummary(t, r, stages = null) {
     accepted > 0 && { text: `${accepted} accepted`, color: t.muted },
     pending > 0 && { text: `${pending} pending`, color: t.dim },
     fail > 0 && { text: `${fail} fail`, color: t.blocked },
-    partial > 0 && { text: `${partial} partial`, color: AMBER(t) },
-    missing > 0 && { text: `${plural(missing, "task")} without a screenshot`, color: AMBER(t) },
+    // A pass without a screenshot is one of the partials: one task, said once (proof.js proofVerdict does too).
+    partial > 0 && { text: `${partial} partial${missing > 0 ? ` (${missing} without a screenshot)` : ""}`, color: AMBER(t) },
+    partial === 0 && missing > 0 && { text: `${plural(missing, "task")} without a screenshot`, color: AMBER(t) },
     unchecked > 0 && (pass + fail + partial + accepted + pending > 0 || md) && { text: `${unchecked} not checked`, color: finished ? AMBER(t) : t.dim },
     unscoped > 0 && { text: `${unscoped} not scoped`, color: AMBER(t) },
     md?.cut && { text: "proof.md cut", color: t.dim },

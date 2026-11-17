@@ -235,8 +235,12 @@ export function resultPill(k, finished) {
   if (k.pending) return { text: "pending", tone: "muted", tip: pendingLine(k) };
   // A "pending" left on a finished run reads as not checked, as the verdict counts it.
   if (k.result === "pending") return { text: "not checked", tone: finished ? "amber" : "dim", tip: resultLine(k) };
-  if (k.missing && k.result === "pass") return { text: "no screenshot", tone: "partial",
-    tip: `${resultLine(k)}\nA pass at T${k.tier} needs a screenshot or a recording. Accept it as it is, or ask the orchestrator to prove it.` };
+  if (k.missing && k.result === "pass") {
+    const next = k.accepted ? "You accepted it without a screenshot."
+      : k.asked ? "Asked its orchestrator to prove it."
+      : "Accept it as it is, or ask the orchestrator to prove it.";
+    return { text: "no screenshot", tone: "partial", tip: `${resultLine(k)}\nA pass at T${k.tier} needs a screenshot or a recording. ${next}` };
+  }
   if (k.result) return { text: k.result, tone: ["pass", "fail", "partial"].includes(k.result) ? k.result : "other", tip: k.why || k.result };
   return k.scoped ? { text: "not checked", tone: finished ? "amber" : "dim", tip: null } : { text: "not scoped", tone: "amber", tip: "No Proof line in plan.md" };
 }
