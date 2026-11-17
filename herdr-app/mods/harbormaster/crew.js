@@ -125,7 +125,7 @@ function startCaptainLink(t, asks) {
   return h_flex().id("crew-start-captain").flex_none().px(7).h(22).items_center().rounded(5).bg(t.raised)
     .text_size(11.5).font_medium().text_color(asks ? t.blocked : t.muted).cursor_pointer()
     .hover((st) => st.text_color(asks ? t.blocked : t.foreground).bg(t.hover))
-    .tooltip(`${asks ? `${plural(asks, "decision")} for you, and no captain running. ` : "No captain running. "}Start the captain in a folder of your choice`)
+    .tooltip(`Start captain\n${asks ? `${plural(asks, "decision")} for you, and no captain running. ` : "No captain running. "}Pick the folder to start it in`)
     .on_click((_e, cx) => { cx.stop_propagation(); openStartCaptain(); })
     .child(asks ? `⚓+ · ${asks}` : "⚓+");
 }
@@ -230,9 +230,9 @@ function needRow(m, x, onOpen) {
   const open = onOpen ?? openRun(m, x);
   const id = `crew-need-${needKey(x)}`;
   return v_flex().id(id).relative().overflow_hidden().flex_none().gap(1).pl(PAD + 3).pr(PAD).py(5).rounded(6)
-    .bg(edge + "0d").cursor_pointer().hover((st) => st.bg(edge + "26"))
+    .bg(edge + "14").cursor_pointer().hover((st) => st.bg(edge + "26"))
     .tooltip([name.tip ?? name.title, ...rowTip(a, now), onOpen ? OPEN_HERE : null].filter(Boolean).join("\n")).on_click(open)
-    .child(div().absolute().left(0).top(0).bottom(0).w(2).bg(edge + "99"))
+    .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
     .child(titleText(t, name, 12.5, true))
     .child(div().min_w(0).truncate().text_size(11).text_color(color).child(lead));
 }
@@ -378,7 +378,7 @@ function needsSection(m) {
   const moreKey = "crew-needs-more";
   const open = unfolded(view, moreKey, false);
   const { slots, extra } = needsSlots(list, expanded, { open });
-  const capNote = captainNeedNote(asks);
+  const capNote = captainNeedNote(asks, !!m.cap?.terminal);
   return [
     h_flex().id("crew-group-needs").flex_none().h(22).px(PAD).items_center().text_size(10.5).font_semibold().text_color(t.blocked).child(`${g.title} · ${needs}`),
     ...(capNote ? [div().id("crew-needs-captain").flex_none().px(PAD).min_w(0).truncate().text_size(10.5).text_color(t.dim).child(capNote.replace(", above", ": captain ↗ above"))] : []),

@@ -109,9 +109,10 @@ export function lastActivity(run) {
   if (!a && !s) return null;
   // Looked at on every call, so a wake shows at once, before the next poll has finished.
   noteSleep();
-  return awakeSince(Math.max(a ?? 0, s ?? 0), Math.max(wokeAt ?? 0, machineWokeAt.get(run.machine ?? "") ?? 0) || null);
+  return awakeSince(Math.max(a ?? 0, s ?? 0), Math.max(run.machine ? 0 : wokeAt ?? 0, machineWokeAt.get(run.machine ?? "") ?? 0) || null);
 }
 
+// (This machine's wake only moves runs on this machine; a remote run follows its own machine.)
 // When this machine last woke from sleep, the clocks as last looked at, and for each other
 // machine when it woke (machineWokeAt) and when a poll first missed it (unseenSince).
 let wokeAt = null;

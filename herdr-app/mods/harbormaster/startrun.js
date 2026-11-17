@@ -2,6 +2,7 @@
 // orchestrator prompt, the profile line, the start-agent.sh arguments and the remembered
 // choices. Pure, so the tests drive it; newrun.js does the exec and the drawing.
 
+import { captainOf } from "./live.js";
 import { RECENT_MAX } from "./folders.js";
 
 export const KINDS = [
@@ -85,7 +86,7 @@ export function startArgs({ name, cwd, taskFile, spaceId, kind = "claude" }) {
 export const CAPTAIN_PROMPT = "/herdr-app-captain";
 
 // The live captain, if any: it is what Harbormaster's captain spot shows (live.js captainOf).
-const liveCaptain = (terminals) => (terminals ?? []).find((t) => t.state === "live" && t.labels?.role === "captain") ?? null;
+const liveCaptain = (terminals) => captainOf({ terminals: terminals ?? [] }).terminal;
 
 // Why no captain can be started now, or null. A second captain would answer the same decisions twice.
 export const captainProblem = (terminals) => (liveCaptain(terminals) ? "A captain is already running: open it from the captain link" : null);

@@ -55,23 +55,12 @@ async function launchRun({ repo, kind, input, profile, drafts }) {
   const problem = inputProblem(kind, input);
   if (problem) return { ok: false, error: problem };
   if (!repo) return { ok: false, error: "Pick a folder first" };
-  const script = await findScript();
-  if (!script) return { ok: false, error: "The orchestrator skill is not installed: npx skills add dlebech/skills --skill herdr-app-orchestrator" };
   const name = runAgentName(repo.name, kind, input);
-  const taskFile = `${await rootDir()}/.newrun-${name}.txt`;
-  // A fresh machine may have no runs root yet (the captain, which makes it, is optional).
-  await sh('mkdir -p "$(dirname "$1")"', [taskFile]);
-  await writeTextFile(taskFile, buildPrompt({ kind, input, profile, drafts }) + "\n", null);
-  // start-agent.sh waits for the agent to take its task, up to two minutes.
-  const res = await exec("bash", [script, ...startArgs({ name, cwd: repo.root, taskFile, spaceId: repo.space ?? repo.spaceId ?? newSpaceId(repo.root, spaces()) })], { timeout: 150000 }).catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
-  await sh('rm -f "$1"', [taskFile]).catch(() => {});
-  const out = startOutcome(res.code, res.stdout, res.stderr);
-  if (out.ok || out.started) {
+  return startAgent({
+    repo, name, prompt: buildPrompt({ kind, input, profile, drafts }), args: startArgs,
     // Remembered once it started, so a typo'd start leaves the last good profile alone.
-    const key = await repoRoot(repo.root);
-    await updatePrefs((prefs) => remember(prefs, { kind, profile, repo: key, drafts })).catch(() => {});
-  }
-  return out;
+    remembered: async () => ({ kind, profile, repo: await repoRoot(repo.root), drafts }),
+  });
 }
 
 // Starts the captain in a folder, the same way: {ok, address} or {ok: false, error, started?}; never throws.
@@ -81,18 +70,31 @@ export async function launchCaptain({ repo }) {
     const problem = captainProblem(live);
     if (problem) return { ok: false, error: problem };
     if (!repo) return { ok: false, error: "Pick a folder first" };
-    const script = await findScript();
-    if (!script) return { ok: false, error: "The orchestrator skill is not installed: npx skills add dlebech/skills --skill herdr-app-orchestrator" };
-    const name = captainName(live);
-    const taskFile = `${await rootDir()}/.newrun-${name}.txt`;
-    await sh('mkdir -p "$(dirname "$1")"', [taskFile]);
-    await writeTextFile(taskFile, CAPTAIN_PROMPT + "\n", null);
-    const res = await exec("bash", [script, ...captainArgs({ name, cwd: repo.root, taskFile, spaceId: repo.space ?? repo.spaceId ?? newSpaceId(repo.root, spaces()) })], { timeout: 150000 }).catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
-    await sh('rm -f "$1"', [taskFile]).catch(() => {});
-    const out = startOutcome(res.code, res.stdout, res.stderr);
-    if (out.ok || out.started) await updatePrefs((prefs) => remember(prefs, { kind: "captain", profile: null, repo: repo.root, drafts: "herdr" })).catch(() => {});
-    return out;
+    return await startAgent({
+      repo, name: captainName(live), prompt: CAPTAIN_PROMPT, args: captainArgs,
+      remembered: async () => ({ kind: "captain", profile: null, repo: repo.root, drafts: "herdr" }),
+    });
   } catch (e) { return { ok: false, error: `Could not start it: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}` }; }
+}
+
+// The one start path of a run and the captain: the prompt in a task file, start-agent.sh with
+// `args({name, cwd, taskFile, spaceId})`, the file removed, and on a start `remembered()` (the choices to keep) saved.
+async function startAgent({ repo, name, prompt, args, remembered }) {
+  const script = await findScript();
+  if (!script) return { ok: false, error: "The orchestrator skill is not installed: npx skills add dlebech/skills --skill herdr-app-orchestrator" };
+  const taskFile = `${await rootDir()}/.newrun-${name}.txt`;
+  // A fresh machine may have no runs root yet (the captain, which makes it, is optional).
+  await sh('mkdir -p "$(dirname "$1")"', [taskFile]);
+  await writeTextFile(taskFile, prompt + "\n", null);
+  // start-agent.sh waits for the agent to take its task, up to two minutes.
+  const res = await exec("bash", [script, ...args({ name, cwd: repo.root, taskFile, spaceId: repo.space ?? repo.spaceId ?? newSpaceId(repo.root, spaces()) })], { timeout: 150000 }).catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
+  await sh('rm -f "$1"', [taskFile]).catch(() => {});
+  const out = startOutcome(res.code, res.stdout, res.stderr);
+  if (out.ok || out.started) {
+    const what = await remembered().catch(() => null);
+    if (what) await updatePrefs((prefs) => remember(prefs, what)).catch(() => {});
+  }
+  return out;
 }
 
 // The review of one PR with the remembered settings: the one-click path. `repo` is the Review
@@ -150,7 +152,7 @@ export function openNewRun({ repo, kind, input } = {}) {
 
 // The same dialog with only the folder, for starting the captain (the "no captain running" spots).
 export function openStartCaptain() {
-  return openOverlay({ mod: "harbormaster", kind: "dialog", width: 520, height: 260, props: { role: "newrun", kind: "captain" } });
+  return openOverlay({ mod: "harbormaster", kind: "dialog", width: 520, height: 440, props: { role: "newrun", kind: "captain" } });
 }
 
 // ---- the dialog ----
@@ -172,8 +174,9 @@ export function initNewRun(view, cx) {
   nr.profile.on("submit", (_e, cx) => start(view, cx));
   nr.where.on("submit", (_e, cx) => (nr.open && shownList(nr).length ? choose(view, shownList(nr)[nr.sel], cx) : start(view, cx, true)));
   nr.where.on("change", (_e, cx) => typed(view, cx));
-  nr.where.on("focus", (_e, cx) => openList(view, cx));
-  if (kind !== "captain") nr.text.focus();
+  nr.where.on("focus", (_e, cx) => { if (nr.quiet) nr.quiet = false; else openList(view, cx); });
+  // The captain dialog has only the folder: focus it, without opening the list over Start.
+  if (kind === "captain") { nr.quiet = true; nr.where.focus(); } else nr.text.focus();
   // Escape closes the list before it closes the dialog: bound to an action inside the open list's own context.
   if (!bound) { try { bound = cx.bind_keys([{ keystroke: "escape", action: "harbormaster-folder-list-close", context: "HarborFolderList" }]) > 0; } catch { /* no binding: Esc closes the dialog */ } }
   if (checking()) return; // herdr-app check runs init for real: no find, git or jq then

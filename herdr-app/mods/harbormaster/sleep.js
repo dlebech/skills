@@ -6,6 +6,9 @@
 //     both clocks alike, so none of them looks like a sleep.
 //   - another machine's: Harbormaster cannot see it while it sleeps, so its runs are marked
 //     stale; when it answers again after being unseen for SLEEP_GAP_MS it has just woken.
+// Assumption: performance.now is monotonic and stands still while the machine is suspended
+// (true for the mod runtime, quickjs, on Linux: CLOCK_MONOTONIC). Where it counts through sleep
+// (macOS), wall minus monotonic never grows, so a local sleep is not detected there.
 // The quiet clock of the runs then starts again from the wake: a fresh grace window, and a
 // real stall still shows after STALL_MS awake. Several sleeps need no sum: each wake restarts it.
 

@@ -19,12 +19,12 @@ export const GROUPS = [
   { key: "done", title: "Done", folded: true },
 ];
 
-// Rows ({a: assess result, ...}) by group, each longest wait first. A row without a result
+// Rows ({a: assess result, ...}) by group, each longest wait first (Needs you: byNeed, below). A row without a result
 // can't be told.
 export function groupRows(rows) {
   const out = Object.fromEntries(GROUPS.map((g) => [g.key, []]));
   for (const x of rows) (out[x.a?.group] ?? out.cant).push(x);
-  for (const list of Object.values(out)) list.sort((x, y) => byWait(x.a ?? {}, y.a ?? {}));
+  for (const [key, list] of Object.entries(out)) if (key !== "needs") list.sort((x, y) => byWait(x.a ?? {}, y.a ?? {}));
   out.needs = out.needs.map((x) => [importance(x.a), x]).sort((p, q) => byNeed(p[1], q[1], p[0], q[0])).map((p) => p[1]);
   return out;
 }
@@ -211,8 +211,10 @@ export const runlessNeeds = (orchs) => orchs.filter((x) => !x.r && x.a?.group ==
 export const needCount = (needRuns, orchs, decisions) => needRuns.length + runlessNeeds(orchs).length + decisions;
 
 // The line under Needs you while the captain has open decisions: they count in the heading,
-// and the captain's own row (above, where it always is) is where to answer them.
-export const captainNeedNote = (decisions) => (decisions > 0 ? `+ the captain's ${decisions === 1 ? "decision" : `${decisions} decisions`}, above` : null);
+// and the captain's own row (above, where it always is) is where to answer them; with no
+// captain running, the ⚓+ pill above is where to start one.
+export const captainNeedNote = (decisions, running = true) => (decisions > 0
+  ? `+ the captain's ${decisions === 1 ? "decision" : `${decisions} decisions`}${running ? ", above" : ": no captain running, start one with ⚓+ above"}` : null);
 
 // What the captain's row says it watches, from stats(): "watching 2 runs · 1 finished", every
 // run it keeps an eye on (running and finished but open), then how many of them are finished.

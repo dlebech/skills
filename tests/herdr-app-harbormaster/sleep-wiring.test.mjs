@@ -65,3 +65,12 @@ test("a machine missed for one poll only is not a wake", () => {
   awake(6 * MIN);
   assert.equal(quiet(r).by, "quiet");
 });
+test("this machine's sleep does not give a remote run that stayed awake a fresh window", () => {
+  const r = { key: "m:e", terminal: "m/t5", machine: "m", phase: "running" };
+  poll([r], ["", "m"]);
+  awake(10 * MIN); poll([r], ["", "m"]);
+  awake(STALL_MS - 5 * MIN); // the remote run has been quiet nearly 30 minutes
+  sleep(180 * MIN); // this machine sleeps; the remote one does not
+  poll([r], ["", "m"]);
+  assert.equal(quiet(r).by, "quiet", "stalled right after the first poll");
+});

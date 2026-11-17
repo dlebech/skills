@@ -281,6 +281,7 @@ test("the Crew's Needs you count is the overview's, for the same facts", () => {
   assert.equal(captainNeedNote(1), "+ the captain's decision, above");
   assert.equal(captainNeedNote(2), "+ the captain's 2 decisions, above");
   assert.equal(captainNeedNote(0), null);
+  assert.equal(captainNeedNote(2, false), "+ the captain's 2 decisions: no captain running, start one with ⚓+ above");
 });
 
 test("the captain says how many runs it watches, then how many of them are finished", () => {
