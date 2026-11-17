@@ -11,7 +11,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, renam
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { proofTasks, proofVerdict, proofRowParts, needsLook, resultLine, pendingProofs, proveRequest, parseAccepted, acceptedFile, withAcceptance, parseProofMd, proofTone, proofCounts } from "../../herdr-app/mods/harbormaster/proof.js";
+import { proofTasks, proofVerdict, proofRowParts, needsLook, resultLine, pendingProofs, proveRequest, parseAccepted, acceptedFile, withAcceptance, parseProofMd, proofTone, proofCounts, resultPill } from "../../herdr-app/mods/harbormaster/proof.js";
 import { loadRuns, acceptProof, unacceptProof, askProof, WRITE_ACCEPTED } from "../../herdr-app/mods/harbormaster/data.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -279,4 +279,40 @@ test("Accept, Unaccept and Ask to prove write the run's files, and the next read
     rmSync(root, { recursive: true, force: true });
     delete globalThis.__herdrExec;
   }
+});
+
+// A T2 pass whose Files hold no image or video: the row's line is amber "(no screenshot)", so its
+// pill, tone, the verdict's counts and the segment must say the same, not "pass".
+test("a T2 pass without a screenshot reads 'no screenshot' in the partial colour everywhere", () => {
+  const md = parseProofMd(`# Proof\nTier: T2\n\n## t1 one\nTier: T2\nChecked: tests\nResult: pass — 12 tests\nFiles: shared/proof/t1.txt\n`);
+  const tasks = [{ id: "t1", name: "one", proof: { tier: 2, text: "a screenshot" } }];
+  const [k] = proofTasks(tasks, md, ["t1.txt"], {});
+  assert.equal(k.missing, true);
+  const pill = resultPill(k, false);
+  assert.equal(pill.text, "no screenshot");
+  assert.equal(pill.tone, "partial");
+  assert.match(pill.tip, /pass — 12 tests \(no screenshot\)\nA pass at T2 needs a screenshot or a recording\. Accept it as it is, or ask the orchestrator to prove it\./);
+  // The row's own line and tone agree.
+  const parts = proofRowParts(k, false, true);
+  assert.equal(parts[0].tone, "partial");
+  assert.match(parts[0].text, /no screenshot/);
+  assert.deepEqual(parts.find((x) => x.kind === "actions").actions, ["accept", "ask"]);
+  assert.equal(proofTone(k, false), "partial");
+  // The verdict counts it as partial, not pass.
+  const c = proofCounts([k]);
+  assert.deepEqual([c.pass, c.partial, c.missing, c.unchecked], [0, 1, 1, 0]);
+  assert.equal(proofVerdict({ tier: { tier: 2 }, md, tasks, shotFiles: ["t1.txt"] }).text, "Proof T2 · 0/1 pass · 1 partial (1 task without a screenshot)");
+});
+
+test("a pass with a screenshot, a T1 pass, a fail and a partial keep their own pill", () => {
+  const row = (tier, result, files) => proofTasks([{ id: "t1", name: "one", proof: { tier, text: "x" } }],
+    parseProofMd(`# Proof\n\n## t1 one\nTier: T${tier}\nResult: ${result}\nFiles: ${files.map((f) => `shared/proof/${f}`).join(", ")}\n`), files, {})[0];
+  assert.deepEqual(resultPill(row(2, "pass", ["t1.png"]), false), { text: "pass", tone: "pass", tip: "pass" });
+  assert.equal(resultPill(row(1, "pass", ["t1.txt"]), false).text, "pass");
+  assert.equal(resultPill(row(2, "fail — broke", ["t1.png"]), false).tone, "fail");
+  assert.equal(resultPill(row(2, "partial — half", ["t1.png"]), false).tone, "partial");
+  assert.equal(resultPill({ scoped: true, result: null, files: [] }, true).tone, "amber");
+  assert.equal(resultPill({ scoped: true, result: null, files: [] }, false).tone, "dim");
+  assert.equal(resultPill({ scoped: false, result: null, files: [] }, false).text, "not scoped");
+  assert.equal(resultPill({ pending: true, result: "pending", why: "waiting", files: [] }, false).text, "pending");
 });

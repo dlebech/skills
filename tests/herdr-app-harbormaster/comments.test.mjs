@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, renam
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { commentSummary, commentText, commentsArgs, commentsRequest, pendingComments, commentsAsked, commentsSig, defaultMode, commentLines, commentsText, stepComments, COMMENTS, AI_PREFIX, COMMENTS_QUERY } from "../../herdr-app/mods/harbormaster/comments.js";
+import { commentSummary, commentText, commentsArgs, commentsRequest, commentsRequestAll, pendingComments, commentsAsked, commentsSig, defaultMode, commentLines, commentsText, stepComments, COMMENTS, AI_PREFIX, COMMENTS_QUERY } from "../../herdr-app/mods/harbormaster/comments.js";
 import { nextStep, nextStepText, assess, prStep } from "../../herdr-app/mods/harbormaster/attention.js";
 import { reviewCommentLines, badgeOf, rowTip } from "../../herdr-app/mods/harbormaster/crewrows.js";
 import { loadRuns, askComments, withComments, COMMENTS_TTL } from "../../herdr-app/mods/harbormaster/data.js";
@@ -301,6 +301,30 @@ test("the message: the PR and mode first, every comment with its thread, then wh
   assert.equal(defaultMode("L2"), "handle");
   assert.equal(defaultMode("L1"), "ask");
   assert.equal(defaultMode(undefined), "ask");
+});
+
+test("several PRs make one message: every URL on the first line, a section each, the instruction once", () => {
+  const a = pr(1799, "APPROVED", some(2));
+  const b = pr(1372, "APPROVED", some(1));
+  const msg = commentsRequestAll([a, b], "handle");
+  const lines = msg.split("\n");
+  assert.equal(lines[0], `address comments on ${a.url} ${b.url}: handle`);
+  assert.equal(lines.filter((l) => l.startsWith("PR #")).join("|"), `PR #1799 (${a.url}):|PR #1372 (${b.url}):`);
+  assert.equal(lines.filter((l) => l.startsWith("Asked from Harbormaster:")).length, 1);
+  assert.match(lines.at(-1), /^Asked from Harbormaster: /);
+  assert.equal(lines.filter((l) => l.startsWith("Harbormaster counts")).length, 2);
+  const m = COMMENTS.exec(lines[0]);
+  assert.equal(m[2], "handle");
+  assert.deepEqual(m[1].split(" "), [a.url, b.url]);
+  // Both URLs count as asked while the message is unread.
+  assert.deepEqual(pendingComments(`${lines[0]}\nPR #1799 (${a.url}):`), [a.url, b.url]);
+  assert.deepEqual(pendingComments(`address comments on ${a.url}: ask\naddress comments on ${b.url} ${a.url}: ask`), [a.url, b.url, a.url]);
+});
+
+test("a single PR's message is the same through the several-PR builder", () => {
+  const a = pr(1799, "APPROVED", some(2));
+  assert.equal(commentsRequestAll([a], "ask"), commentsRequest(a, "ask"));
+  assert.ok(!commentsRequest(a, "ask").split("\n").some((l) => l.startsWith("PR #")), "no heading for one PR");
 });
 
 test("asked… holds while the message is unread, or until the PR's open comments change", () => {

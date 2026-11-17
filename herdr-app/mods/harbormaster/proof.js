@@ -228,6 +228,19 @@ export function pendingProofs(lines) {
   return out;
 }
 
+// A row's result pill: {text, tone, tip}. The same word as the row's own line and tone say, so a
+// T2+ pass without a screenshot reads "no screenshot" in the partial colour, not "pass".
+// `tone`: "pass" | "fail" | "partial" | "amber" | "dim" | "muted" | "other". `finished`: the run is.
+export function resultPill(k, finished) {
+  if (k.pending) return { text: "pending", tone: "muted", tip: pendingLine(k) };
+  // A "pending" left on a finished run reads as not checked, as the verdict counts it.
+  if (k.result === "pending") return { text: "not checked", tone: finished ? "amber" : "dim", tip: resultLine(k) };
+  if (k.missing && k.result === "pass") return { text: "no screenshot", tone: "partial",
+    tip: `${resultLine(k)}\nA pass at T${k.tier} needs a screenshot or a recording. Accept it as it is, or ask the orchestrator to prove it.` };
+  if (k.result) return { text: k.result, tone: ["pass", "fail", "partial"].includes(k.result) ? k.result : "other", tip: k.why || k.result };
+  return k.scoped ? { text: "not checked", tone: finished ? "amber" : "dim", tip: null } : { text: "not scoped", tone: "amber", tip: "No Proof line in plan.md" };
+}
+
 // The verdict's counts over proofTasks() rows: accepted rows count only as accepted, pending
 // rows (isPending) only as pending, so a partial still being gathered is not a partial yet.
 // `unchecked` is the rest: scoped, no result (or a "pending" one on a finished run). `pending`
@@ -236,7 +249,10 @@ export function proofCounts(rows) {
   const scoped = rows.filter((k) => k.scoped);
   const open = scoped.filter((k) => !k.accepted && !k.pending);
   const n = (res) => open.filter((k) => k.result === res).length;
-  const pass = n("pass"), fail = n("fail"), partial = n("partial");
+  // A pass at T2+ without a screenshot is not a pass (isPass): it counts as partial, as its row
+  // and its segment read it, and says so in the verdict's "without a screenshot".
+  const pass = open.filter(isPass).length, fail = n("fail");
+  const partial = n("partial") + open.filter((k) => k.result === "pass" && k.missing).length;
   return {
     total: scoped.length, pass, fail, partial,
     // Over scoped rows only, like pass: an accepted unscoped task is in neither count.
