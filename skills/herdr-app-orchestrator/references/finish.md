@@ -21,7 +21,7 @@ Push each integration branch. Create or update one PR per repository when reques
 
 - a short statement of the goal from `spec.md`;
 - a table of the merged tasks;
-- `## Evidence`, written for the PR's reviewer: what they can see or rerun, never local proof files (rules in `proving` §5). For tasks of tier T1 and above, capture what is missing with the `proving` skill if available, passing it `run=<run-directory>`, else the same way yourself;
+- `## Evidence`, written for the PR's reviewer: what they can see or rerun, never local proof files (rules in `proving` §5, or [run-files.md](run-files.md#the-pr-body-evidence-and-merge-danger) without the skill). For tasks of tier T1 and above, capture what is missing with the `proving` skill if available, passing it `run=<run-directory>`, else the same way yourself;
 - `## Merge danger`: one line, `One-way door` or `Two-way door`, then ` — ` and the blast radius (formats in [run-files.md](run-files.md#the-pr-body-evidence-and-merge-danger));
 - decisions to check, yours and the user's;
 - a pre-launch or deploy checklist (migrations, new env vars, schedules, manual steps);
@@ -32,7 +32,7 @@ Publish each PR with `set-status.sh <run-directory> --pr <owner/repo> <url>` as 
 
 ## 3. Watch CI
 
-Watch each PR's CI to the end, with `gh pr checks <url> --watch` run with `hc run --bg`, so you stay reachable. Fix a red build in a short-lived worktree like any change, push, and watch again. If you cannot make it green, ask the user (the skill's section 6) instead of finishing. Without CI, go on.
+Watch each PR's CI to the end, with `gh pr checks <url> --watch` run with `hc run --bg`, so you stay reachable. Fix a red build in a short-lived worktree like any change, push, and watch again. After pushing more commits to an open PR, update its `## Evidence` so the commit and counts match the head (`proving` §5's `gh pr edit` way). If you cannot make it green, ask the user (the skill's section 6) instead of finishing. Without CI, go on.
 
 ## 4. Finished
 
