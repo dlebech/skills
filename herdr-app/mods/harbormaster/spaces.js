@@ -1,7 +1,7 @@
 // The Spaces picker: one row at the foot of the sidebar list (above Settings) ("skills ▾ · 8 spaces", role "spaces")
 // and the popup it opens (role "spaces-list"): every space grouped by repository, a run's
 // worktree spaces dimmed under their repository, plain folders under "Other". It replaces
-// Herdr's own Spaces list in the harbormaster-needs layout; the row switches space and
+// Herdr's own Spaces list in the harbormaster-main layout; the row switches space and
 // makes new ones with Herdr's own commands.
 
 import { div, svg } from "gpui-kit";

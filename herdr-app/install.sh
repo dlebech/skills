@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # Installs Harbormaster into the Herdr app on this computer: the `harbormaster` mod,
-# the harbormaster-sea layout, harbormaster-main (Herdr's main layout with a Crew
-# block above its own, unchanged Agents list) and harbormaster-needs (a test layout made
-# from harbormaster-main: the Crew block opens with the Needs-you box, a one-row Spaces
-# picker at the bottom, no Agents list),
-# and binds ctrl-shift-h to open and close the overview. Run it from any terminal while
-# the Herdr app is open. Safe to run again: it updates the mod, the sea layout and
-# harbormaster-needs, and adds the Crew block and the key only if they are missing. It
-# refuses to replace a mod or layout of the same name that isn't Harbormaster's, and
-# removes the harbormaster-board layout of earlier versions.
+# the harbormaster-sea layout, and harbormaster-main (Herdr's main layout made calm: the
+# Crew block opens with the Needs-you box and takes the height, a one-row Spaces picker
+# sits at the bottom, Herdr's Agents list is gone), and binds ctrl-shift-h to open and
+# close the overview. Run it from any terminal while the Herdr app is open. Safe to run
+# again: it updates the mod and the sea layout and makes harbormaster-main calm once
+# and then leaves it alone, and adds the key only if it is missing. It refuses to
+# replace a mod or layout of the same name that isn't Harbormaster's, and removes the
+# harbormaster-board and harbormaster-needs layouts of earlier versions.
 #
 # Usage: herdr-app/install.sh
 set -euo pipefail
@@ -22,7 +21,7 @@ command -v herdr-app >/dev/null || die "herdr-app is not on PATH"
 command -v jq >/dev/null || die "needs jq"
 herdr-app status >/dev/null 2>&1 || die "open the Herdr app first; this uses its layout.clone"
 
-# 1. The mod and both layouts. Herdr's rule is never to overwrite someone else's mod
+# 1. The mod and the sea layout. Herdr's rule is never to overwrite someone else's mod
 #    or layout, so replace them only when they are an earlier Harbormaster.
 ours() { # <file> <jq test>: true when the file is missing or passes the test
   [ ! -e "$1" ] || jq -e "$2" "$1" >/dev/null 2>&1
@@ -31,8 +30,6 @@ ours() { # <file> <jq test>: true when the file is missing or passes the test
   || die "mods/harbormaster exists and isn't Harbormaster; move it aside first"
 ours "$home/layouts/harbormaster-sea.json" '.id == "hs-root"' \
   || die "layouts/harbormaster-sea.json exists and isn't Harbormaster's; move it aside first"
-ours "$home/layouts/harbormaster-needs.json" '.id == "hn-root"' \
-  || die "layouts/harbormaster-needs.json exists and isn't Harbormaster's; move it aside first"
 mkdir -p "$home/mods/harbormaster" "$home/layouts"
 # timing.sh and categories.tsv are read by timing.js and run as text, so they need no
 # execute bit there.
@@ -47,52 +44,46 @@ if [ -f "$home/layouts/harbormaster-board.json" ] && jq -e '.id == "hb-root"' "$
   rm -f "$home/layouts/harbormaster-board.json" "$home/layouts/harbormaster-board.svg"
   echo "removed the harbormaster-board layout of an earlier version"
 fi
+# The test layout of the calm sidebar; harbormaster-main is that layout now. Only ours
+# (a needs layout of the user's own keeps its name and its file).
+if [ -f "$home/layouts/harbormaster-needs.json" ] && jq -e '.id == "hn-root"' "$home/layouts/harbormaster-needs.json" >/dev/null 2>&1; then
+  rm -f "$home/layouts/harbormaster-needs.json" "$home/layouts/harbormaster-needs.svg"
+  echo "removed the harbormaster-needs test layout (harbormaster-main is that layout now)"
+fi
 
 # 2. harbormaster-main: a clone of Herdr's main layout (made here, so whatever main
-#    looks like in this Herdr) with the Crew block inserted above the Agents list.
+#    looks like in this Herdr), made calm. A Crew block is added above the Agents list
+#    when there is none (a fresh clone), then needs-layout.jq drops Herdr's Agents block,
+#    turns the first Spaces block into the one-row picker and gives Crew the Needs-you box
+#    and the height that is left. This happens once: main from an older install is
+#    upgraded in place, and a main that already has Crew with the box is left alone.
 main="$home/layouts/harbormaster-main.json"
 if [ ! -f "$main" ]; then
   herdr-app do layout.clone '{"name":"main","as":"harbormaster-main"}' >/dev/null
   for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$main" ] && break; sleep 0.5; done
   [ -f "$main" ] || die "layout.clone did not create layouts/harbormaster-main.json"
 fi
-tmp=$(mktemp)
-jq '
-  def crew: {"id": "crew", "type": "block", "size": {"weight": 0.6}, "min": 90,
-             "content": {"mod": "harbormaster", "props": {"role": "crew"}}};
-  if ([.. | objects | select(.content.mod? == "harbormaster" and .content.props.role? == "crew")] | length) > 0 then .
-  else walk(if type == "object" and (.children? | type) == "array" and any(.children[]; .content.mod? == "agents")
-            then .children |= map(if .content.mod? == "agents" then (crew, .) else . end) else . end)
-  end' "$main" > "$tmp"
-if ! cmp -s "$tmp" "$main"; then
-  cat "$tmp" > "$main"
-  echo "added the Crew block to harbormaster-main"
+# Calm means a Crew block with needs: "box". Once main has one, it is the user's file:
+# nothing is redone (their resizing, a moved picker, an Agents block they added back stay).
+calm='[.. | objects | select(.content.mod? == "harbormaster" and .content.props.role? == "crew" and .content.props.needs? == "box")] | length > 0'
+if ! jq -e "$calm" "$main" >/dev/null; then
+  tmp=$(mktemp)
+  jq '
+    def crew: {"id": "crew", "type": "block", "size": {"weight": 0.6}, "min": 90,
+               "content": {"mod": "harbormaster", "props": {"role": "crew"}}};
+    if ([.. | objects | select(.content.mod? == "harbormaster" and .content.props.role? == "crew")] | length) > 0 then .
+    else walk(if type == "object" and (.children? | type) == "array" and any(.children[]; .content.mod? == "agents")
+              then .children |= map(if .content.mod? == "agents" then (crew, .) else . end) else . end)
+    end' "$main" | jq -f "$here/needs-layout.jq" > "$tmp"
+  # With no Crew block and no Agents block to put it above there is nothing to build from.
+  if ! jq -e "$calm" "$tmp" >/dev/null 2>&1; then
+    echo "install.sh: harbormaster-main has no Crew block (and no Agents block to add it above); left unchanged" >&2
+  else
+    cat "$tmp" > "$main"
+    echo "made harbormaster-main the calm layout"
+  fi
+  rm -f "$tmp"
 fi
-rm -f "$tmp"
-jq -e '[.. | objects | select(.content.mod? == "harbormaster" and .content.props.role? == "crew")] | length > 0' "$main" >/dev/null \
-  || echo "install.sh: no Agents block found in main; harbormaster-main has no Crew block" >&2
-
-# 3. harbormaster-needs: the test layout for "Needs you first". It is regenerated from
-#    harbormaster-main on every install (so it follows changes the user makes to main;
-#    edits to this file itself are lost), and its root id "hn-root" is how a later install
-#    knows it is ours. Herdr's Agents block goes wherever it is in the tree, Herdr's Spaces
-#    block (the first, if there are several) becomes Harbormaster's one-row Spaces picker (a fixed height, at the bottom), and
-#    the Crew block opens with the Needs-you box (needs: "box") and takes all the height left.
-needs="$home/layouts/harbormaster-needs.json"
-tmp=$(mktemp)
-jq -f "$here/needs-layout.jq" "$main" > "$tmp"
-# Without a Crew block in main there is nothing to build from: warn, as step 2 does, and
-# leave any existing harbormaster-needs alone.
-if ! jq -e '[.. | objects | select(.content.props.needs? == "box")] | length > 0' "$tmp" >/dev/null 2>&1; then
-  echo "install.sh: harbormaster-main has no Crew block; skipped harbormaster-needs" >&2
-elif [ ! -e "$needs" ]; then
-  cat "$tmp" > "$needs"
-  echo "created the harbormaster-needs layout"
-elif ! cmp -s "$tmp" "$needs"; then
-  cat "$tmp" > "$needs"
-  echo "updated the harbormaster-needs layout"
-fi
-rm -f "$tmp"
 
 # 4. ctrl-shift-h opens and closes the overview as a popup, unless that key is taken
 #    in any section (a layout's or mod's own binding wins over global). keys.json holds
@@ -118,8 +109,7 @@ herdr-app check "$home/mods/harbormaster"
 cat <<'EOF'
 
 Done. ctrl-shift-h opens and closes the overview. Switch layouts with ctrl-shift-l, or:
-  herdr-app do layout.switch '{"name":"harbormaster-main"}'   # your usual window, with the Crew block
-  herdr-app do layout.switch '{"name":"harbormaster-needs"}'  # test layout: Needs-you box first, no Agents list
+  herdr-app do layout.switch '{"name":"harbormaster-main"}'   # your usual window, calm: Needs-you box, Crew, Spaces picker
   herdr-app do layout.switch '{"name":"harbormaster-sea"}'    # the harbor
 To keep the overview beside the captain, click "Pin beside captain" on the captain's card.
 EOF

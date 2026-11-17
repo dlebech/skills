@@ -71,7 +71,7 @@
 # Needs xvfb-run, ImageMagick's import (root only), jq, gh, python3 and libXtst. The window lands
 # at screen offset (162, 90) on the 1600x1000 screen; add that to a shot's coordinates for click.
 # Env: CREW_SESSION (default harbormaster-crew-sandbox), CREW_DISPLAY (default 97), CREW_LAYOUT (main, the default,
-# or needs: the harbormaster-needs layout that install.sh made in the sandbox).
+# or sea).
 set -euo pipefail
 
 [ $# -ge 2 ] || { sed -n '2,35p' "$0" >&2; exit 2; }
@@ -282,7 +282,6 @@ case $cmd in
         cp -r "$HOME/.config/herdr-app/mods/$m" "$S/home/mods/"
     done
     "$repo/herdr-app/install.sh" >/dev/null
-    # install.sh above made harbormaster-needs in the sandbox's own home; CREW_LAYOUT=needs shows that one.
     herdr-app do layout.switch "{\"name\":\"harbormaster-${CREW_LAYOUT:-main}\"}" >/dev/null
     make_runs
     sleep 2
