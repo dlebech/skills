@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { assess, runDot, STALL_MS } from "../../herdr-app/mods/harbormaster/attention.js";
 import { needsYouNow } from "../../herdr-app/mods/harbormaster/attend.js";
 import { decisionQueue } from "../../herdr-app/mods/harbormaster/data.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, cantWhy, crewEntries, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText } from "../../herdr-app/mods/harbormaster/crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, cantWhy, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText } from "../../herdr-app/mods/harbormaster/crewrows.js";
 
 const MIN = 60000;
 const now = Date.parse("2026-11-16T12:00:00Z");
@@ -328,4 +328,24 @@ test("a run's dot works while its orchestrator or any agent works, and is blocke
   assert.equal(runDot("gone", [], { ciRunning: true }), "gone");
   assert.equal(runDot("gone", ["working"]), "working");
   assert.equal(runDot("done"), "done");
+});
+
+test("the Needs-you box opens the clicked entry while it still needs you, else the first with a run directory, else none", () => {
+  const e = (key, dir = "/r/" + key) => ({ r: { key, dir }, term: { address: "t" + key }, a: {} });
+  const list = [e("a"), e("b"), e("c")];
+  assert.equal(expandedNeed(list, "b"), list[1]);
+  assert.equal(expandedNeed(list, "gone"), list[0], "a clicked run that left Needs you falls back to the first");
+  assert.equal(expandedNeed(list, undefined), list[0]);
+  const runless = { r: null, term: { address: "t9" }, a: {} };
+  assert.equal(expandedNeed([runless, list[1]], null), list[1], "an orchestrator without a run directory stays a compact row");
+  assert.equal(expandedNeed([runless], "t9"), null);
+  assert.equal(expandedNeed([], "a"), null);
+  assert.equal(needKey(runless), "t9");
+  assert.equal(needKey(list[0]), "a");
+});
+
+test("only entries with a run directory open on click in the Needs-you box; a runless orchestrator keeps its focus click", () => {
+  assert.equal(canExpand({ r: { key: "a", dir: "/r/a" }, term: { address: "t1" } }), true);
+  assert.equal(canExpand({ r: null, term: { address: "t9" } }), false, "blocked on a dialog: no run to open");
+  assert.equal(canExpand({ r: { key: "b" }, term: null }), false);
 });

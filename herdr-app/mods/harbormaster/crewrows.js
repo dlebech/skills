@@ -171,6 +171,19 @@ export function crewEntries(orchs, needRuns, attOf) {
   return rows;
 }
 
+// A Needs-you entry's key: its run's, else its orchestrator's address (no run directory).
+export const needKey = (x) => x.r?.key ?? x.term?.address ?? null;
+
+// Which Needs-you entry the sidebar's Needs-you box draws open (props needs: "box"): the one
+// clicked (`openKey`) while it still needs you, else the first, longest wait first. Only
+// entries with a run directory can be drawn as a box; the rest stay compact rows. Null for none.
+export const canExpand = (x) => Boolean(x.r?.dir);
+
+export function expandedNeed(entries, openKey) {
+  const can = entries.filter(canExpand);
+  return can.find((x) => needKey(x) === openKey) ?? can[0] ?? null;
+}
+
 // Orchestrators without a run directory that need you (blocked on a dialog): the overview has
 // no run for them, so it adds these to its count.
 export const runlessNeeds = (orchs) => orchs.filter((x) => !x.r && x.a?.group === "needs");

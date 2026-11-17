@@ -25,6 +25,8 @@
 #   unreadable-pr finished, PR in a repo that does not exist (gh fails)   -> Everything else, can't tell
 #   quiet-run     running, "t2 implementing", no PR, nothing moves       -> idle, then stalled
 #                 ("quiet Nm", Needs you, Ask) 30 minutes after the app started (module memory)
+#                 To shoot it amber, `up` early and keep quiet-run listed (its clock is the app's memory, so a
+#                 run that is hidden or a restarted app starts over); hide the others with role= meanwhile.
 #   busy-run      running, both tasks implementing, its orchestrator reporting working (OSC 7501),
 #                 status.json dated 75 minutes back                      -> Working, spinner, "t1 implementing 1h15m · +1 task"
 #   review-wait   finished, folder "snevagten" (peer), cli/cli#14846 with a reviewer requested
@@ -50,6 +52,7 @@
 #   plan-open     running, 1/3 tasks done, the same open PR                -> Working: no "review proof → merge" until the plan is done
 #   ready-run     finished, fake-two/api#60 (one green check), proof T1 2/2 pass -> review proof → merge;
 #                 once its proof is read: the green "Ready to merge" box (t23)
+#   ci-stalled    running, fake-two/api#70 with a check running 45 min (usual 10, from ci-base's #62-64) -> amber "quiet"-like stall, at once
 #   partial-run   the same with t2 partial (#61)                         -> read: "Proof read · 1/2 pass, 1 partial …"
 # For an approval over two PRs with comments (t17), fake PRs through fake-gh.sh (installed as
 # <scratch>/bin/gh, first on the app's PATH; it answers only owner "fake-two", the real gh the rest):
@@ -224,6 +227,12 @@ Q
   mkrun ready-run finished feat "Ready run" "${day}T08:30:00Z" 2/2 merged merged --progress "PR up with proof" \
     --pr fake-two/api https://github.com/fake-two/api/pull/60
   printf '# Proof: ready-run\nTier: T1\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\n\n## t2 polish\nTier: T1\nChecked: tests\nResult: pass — 9 tests\n' >"$S/runs/skills/ready-run/proof.md"
+  # A stalled run, amber at once: its PR's check has run 45 min against a usual 10 (the CI rule
+  # needs no wait; the quiet rule's clock is module memory). ci-base gives fake-two/api its 3 samples.
+  mkrun ci-base finished feat "CI base" "${day}T08:50:00Z" 2/2 merged merged --progress "PRs up" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/62 --pr fake-two/api https://github.com/fake-two/api/pull/63 --pr fake-two/api https://github.com/fake-two/api/pull/64
+  mkrun ci-stalled running feat "CI stalled" "${day}T07:20:00Z" 1/2 merged implementing --progress "waiting on CI" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/70
   mkrun partial-run finished feat "Partial run" "${day}T08:40:00Z" 2/2 merged merged --progress "PR up with proof" \
     --pr fake-two/api https://github.com/fake-two/api/pull/61
   printf '# Proof: partial-run\nTier: T1\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\n\n## t2 polish\nTier: T1\nChecked: tests\nResult: partial — one case not run\n' >"$S/runs/skills/partial-run/proof.md"
