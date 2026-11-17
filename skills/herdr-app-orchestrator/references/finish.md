@@ -17,7 +17,7 @@ If `final-review` is on, or T0 tasks merged without a task review ([speed.md](sp
 
 ## 2. Push and open the PR
 
-Push each integration branch. Create or update one PR per repository when requested or all planned work is complete. With several, each PR links the others and says they merge together; put the `Closes` lines only in the one meant to merge last, and `Part of` lines in the rest. Include:
+Push each integration branch. Create or update one PR per repository when requested or all planned work is complete. With several, each PR links the others and says they merge together; put the `Closes` lines only in the one meant to merge last, and `Part of` lines in the rest. Start the body with the issue lines from `spec.md`'s Issue handling ([issues.md](issues.md)), one per line at the very top before anything else, so they are easy to scan. Then include:
 
 - a short statement of the goal from `spec.md`;
 - a table of the merged tasks;
@@ -25,8 +25,7 @@ Push each integration branch. Create or update one PR per repository when reques
 - `## Merge danger`: one line, `One-way door` or `Two-way door`, then ` — ` and the blast radius (formats in [run-files.md](run-files.md#the-pr-body-evidence-and-merge-danger));
 - decisions to check, yours and the user's;
 - a pre-launch or deploy checklist (migrations, new env vars, schedules, manual steps);
-- follow-ups;
-- the issue lines from `spec.md`'s Issue handling ([issues.md](issues.md)).
+- follow-ups.
 
 Publish each PR with `set-status.sh <run-directory> --pr <owner/repo> <url>` as soon as it exists. Without a GitHub remote or `gh`, print the description for the user to paste.
 

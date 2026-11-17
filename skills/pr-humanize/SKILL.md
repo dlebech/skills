@@ -20,8 +20,9 @@ argument-hint: "[PR number, defaults to current branch's PR]"
    - Keep everything useful from the existing body; drop nothing.
    - Base claims on the diff; don't invent behavior or test results that aren't there.
 4. Order: `## For humans`, then `## Evidence` and `## Merge danger` if the body had them (unchanged), then `## For AI`.
-5. Keep the existing attribution footer (if any) at the very end, after both sections.
-6. Apply the new body and print the PR/MR URL:
+5. Keep issue/PR reference lines (`Closes`, `Refs`, `Part of`, links) at the very top of the description, above `## For humans`. Never add a `Closes`/`Fixes`/`Resolves` keyword, or turn `Refs`/`Part of`/related into one; the author decides what closes.
+6. Keep the existing attribution footer (if any) at the very end, after both sections.
+7. Apply the new body and print the PR/MR URL:
    - GitHub: `gh pr edit <number> --body-file -` (pipe the body via stdin).
    - GitLab: `glab mr update <number> --description "<body>"`.
    - Local git only: print the body in a fenced markdown block for the user to paste.
