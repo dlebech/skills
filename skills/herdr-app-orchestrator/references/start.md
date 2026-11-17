@@ -23,7 +23,7 @@ Check that each configured kind is installed with `command -v <kind>`, and model
 
 ## Options
 
-- `push-task-branches` (default `yes`): push task branches to the remote as a backup, so work survives a crash. Never open PRs for them. Use `no` when the remote must stay clean or there is no remote.
+- `push-task-branches` (default `no`): only the integration branch is pushed, one push target per repository. Tasks are small, so a lost task branch is cheap, and unpushed task branches do not pile up on the remote. `yes` pushes task branches as a backup, so work survives a crash; never open PRs for them.
 - `merge` (default `squash`): `squash` lands each task as one commit with a message you write, so the final PR's history reads like a reviewable changelog. `merge` keeps each task's full commit history in non-fast-forward merges, at the cost of a noisier PR.
 - `draft-pr` (default `ask`): ask once at the start whether to open the integration branch as a draft PR right after the first merge. An early draft PR runs CI on every merge, which catches failures local runs hide.
 - `task-review` (default `yes`): review each task before it merges (the skill's section 4), except a task the plan explicitly marks `Proof: T0` that you judge wording or config only, which only the final review covers ([speed.md](speed.md) §3). `no` reviews only the integration branch, which suits a run of one issue or of small tasks; it turns `final-review` on without asking.
