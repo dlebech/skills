@@ -422,3 +422,39 @@ test("steady: terminals in no run move between a row and the idle line only afte
   assert.equal(rows(4, 0), 1, "one sample under: still a row");
   assert.equal(rows(5, 0), 0);
 });
+
+test("steady: each machine's figures are averaged on that machine's own sample time", () => {
+  const st = createSteady({ tauMs: 25000 });
+  const snap = (aAt, bAt, a, b) => ({
+    at: Math.max(aAt, bAt),
+    machines: { "": { rated: true, at: aAt }, m2: { rated: true, at: bAt } },
+    terminals: { t1: { cpu: a, rssKb: 10, own: null, programs: [] }, "m2/t2": { cpu: b, rssKb: 10, own: null, programs: [] } },
+  });
+  st.begin(0);
+  st.snapshot(snap(0, 0, 80, 80));
+  // Only this machine polled (m2's sample is the old one): m2's figure must not move, however often we draw.
+  st.begin(5000);
+  const s1 = st.snapshot(snap(5000, 0, 0, 0)).terminals;
+  assert.ok(s1.t1.cpu > 55 && s1.t1.cpu < 80, `this machine moved part of the way: ${s1.t1.cpu}`);
+  assert.equal(s1["m2/t2"].cpu, 80, "m2 did not poll: not a sample for it");
+  st.begin(10000);
+  assert.equal(st.snapshot(snap(5000, 0, 0, 0)).terminals["m2/t2"].cpu, 80);
+  // When m2 does poll, it moves by the time since its own last sample (10 s), not the view's.
+  st.begin(11000);
+  const s2 = st.snapshot(snap(5000, 10000, 0, 0)).terminals["m2/t2"].cpu;
+  assert.ok(s2 > 45 && s2 < 65, `10 s of m2's time: ${s2}`);
+});
+
+test("steady: a machine with no rating yet passes through unsmoothed and seeds nothing", () => {
+  const st = createSteady({ tauMs: 25000 });
+  const snap = (rated, cpu) => ({
+    at: 1, machines: { m2: { rated, at: 1 } },
+    terminals: { "m2/t2": { cpu, rssKb: 2000, own: null, programs: [] } },
+  });
+  st.begin(1);
+  assert.deepEqual(st.snapshot(snap(false, 0)).terminals["m2/t2"], { cpu: 0, rssKb: 2000, own: null, programs: [] }, "memory not rounded, as is");
+  st.begin(2000);
+  assert.equal(st.snapshot(snap(true, 90)).terminals["m2/t2"].cpu, 90, "its first rated sample is not averaged with the unrated 0");
+  const others = st.others([{ machine: "m2", pid: 1, cpu: 7, rssKb: 1234 }], snap(false, 0));
+  assert.equal(others[0].rssKb, 1234);
+});

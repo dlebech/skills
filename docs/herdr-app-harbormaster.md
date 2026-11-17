@@ -267,7 +267,7 @@ did each run cost. Numbers are right-aligned in fixed columns so they line up; d
   agents that is busier still is named after it. CPU % counts one core as 100% (on hover). Until the
   first sample that can rate CPU (two polls) it says "sampling…".
 - **CPU and memory now.** Every agent terminal from the 5-second samples, under its run (and the
-  captain), hottest first, with CPU % (averaged over about half a minute and rounded, so the figures and the order hold still: a row moves up only when it is clearly busier, and busy/quiet, idle terminals and Hottest switch only after two samples), a small CPU bar, memory, and what it is busy with (its programs of
+  captain), hottest first, with CPU % (averaged over about half a minute of each machine's own polls, and rounded; a machine with no rating yet shows its figures as they are, so the figures and the order hold still: a row moves up only when it is clearly busier, and busy/quiet, idle terminals and Hottest switch only after two samples), a small CPU bar, memory, and what it is busy with (its programs of
   1% or more, repeated ones as "firefox ×3"). A run whose only agent is its orchestrator is one line.
   Runs under 1% CPU each fold into one "N quiet runs" line that names them; click it to list them. The
   terminals in no run (idle shells under 1% and 100 MB counted, not listed), then **Other processes**: the

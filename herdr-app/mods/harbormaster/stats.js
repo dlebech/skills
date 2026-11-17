@@ -315,7 +315,7 @@ function liveData() {
   }
   const names = Object.fromEntries(Object.keys(snap.terminals ?? {}).map((a) => [a, nameOf(a)]));
   const groups = liveGroups(crews, snap, names, calm);
-  const procs = groupProcesses(calm ? calm.others(otherProcesses()) : otherProcesses(), calm);
+  const procs = groupProcesses(calm ? calm.others(otherProcesses(), raw) : otherProcesses(), calm);
   const hot = hottest(groups, calm);
   const topOther = procs.busy[0];
   return {
