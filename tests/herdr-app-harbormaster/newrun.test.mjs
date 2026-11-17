@@ -121,3 +121,20 @@ test("a bare PR number in a run's issues counts when its folder is the PR's repo
   assert.equal(runReviewing(runs, "https://github.com/acme/api/pull/9"), "/runs/a");
   assert.equal(runReviewing(runs, "https://github.com/acme/api/pull/10"), null);
 });
+
+test("a review started from here says starting… until its run is seen or five minutes pass, then Review again", async () => {
+  const { reviewStarting, markReviewStarted, clearReviewStarted, STARTED_MS } = await import("../../herdr-app/mods/harbormaster/startrun.js");
+  const url = "https://github.com/o/r/pull/9";
+  assert.equal(reviewStarting(url, 1000), false);
+  markReviewStarted(url, 1000);
+  assert.equal(reviewStarting(url, 1000 + 60000), true);
+  assert.equal(reviewStarting(url, 1000 + STARTED_MS), true);
+  assert.equal(reviewStarting(url, 1001 + STARTED_MS), false);
+  // Forgotten once expired; a failed start clears it at once.
+  assert.equal(reviewStarting(url, 1000), false);
+  markReviewStarted(url, 1000);
+  clearReviewStarted(url);
+  assert.equal(reviewStarting(url, 1000), false);
+  markReviewStarted(null, 1000);
+  assert.equal(reviewStarting(null, 1000), false);
+});

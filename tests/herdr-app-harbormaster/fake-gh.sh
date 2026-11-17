@@ -2,10 +2,13 @@
 # A fake `gh` for crew-sandbox.sh's two-prs run: `pr view` and the review-comments query for
 # owner fake-two answer from here (PR 1799: 2 open threads, 1372: 9, 44, 60 and 61: none; 60-64 have one green check (10 min, a CI baseline of 3+ samples for fake-two/api); 70 has a check running for 45 min; all approved by
 # mfalkenbrink). `api graphql` with a `viewer` query (mypr.js) answers 5 open PRs of dlebech: 11 red CI, 12 changes requested,
-# 13 approved and mergeable, 14 two new comments since the push, 15 quiet; 16 is in a run; 17-20 have no reviewDecision (repo without required reviews): 17 anna's APPROVED stands, 18 her CHANGES_REQUESTED, 19 approved but CI pending, 20 approved with mergeable UNKNOWN. Anything else runs the real gh ($REAL_GH).
+# 13 approved and mergeable, 14 two new comments since the push, 15 quiet; 16 is in a run; 17-20 have no reviewDecision (repo without required reviews): 17 anna's APPROVED stands, 18 her CHANGES_REQUESTED, 19 approved but CI pending, 20 approved with mergeable UNKNOWN.
+# `search prs --review-requested` answers from <scratch>/review-requests.json (none without it). Anything else runs the real gh ($REAL_GH).
 args="$*"
 case "$args" in
+  # <scratch>/no-mine makes the viewer query answer no PRs (a "nothing for you" shot).
   *"api graphql"*viewer*)
+    if [ -e "$(dirname "$0")/../no-mine" ]; then echo '{"data":{"viewer":{"login":"dlebech","pullRequests":{"nodes":[]}}}}'; exit 0; fi
     jq -n 'def pr($n; $o): {number:$n,title:"Mine \($n)",url:"https://github.com/acme/app/pull/\($n)",isDraft:false,updatedAt:"2026-11-17T02:00:00Z",reviewDecision:null,mergeable:"MERGEABLE",
         repository:{nameWithOwner:"acme/app"},latestOpinionatedReviews:{nodes:[]},reviews:{nodes:[]},comments:{nodes:[]},reviewThreads:{nodes:[]},
         commits:{nodes:[{commit:{committedDate:"2026-11-17T01:00:00Z",statusCheckRollup:{state:"SUCCESS",contexts:{nodes:[]}}}}]}} * $o;
@@ -34,6 +37,12 @@ case "$args" in
     jq -n --argjson t "$t" '{data:{repository:{pullRequest:{author:{login:"dlebech"},
       reviewThreads:{nodes:[range($t)|{id:"th\(.)",isResolved:false,path:"app/X.php",line:(10+.),first:{nodes:[{author:{__typename:"User",login:"mfalkenbrink"},authorAssociation:"MEMBER",body:"Comment \(.)",url:"u"}]},last:{nodes:[{body:"Comment"}]}}]},
       reviews:{nodes:[]},comments:{nodes:[]}}}}}'
+    ;;
+  # Review requests (Next for you): from <scratch>/review-requests.json when there is one, else
+  # none, so a sandbox never lists the user's real requests.
+  "search prs"*"--review-requested"*)
+    f="$(dirname "$0")/../review-requests.json"
+    if [ -f "$f" ]; then cat "$f"; else echo '[]'; fi
     ;;
   *) exec "$REAL_GH" "$@" ;;
 esac

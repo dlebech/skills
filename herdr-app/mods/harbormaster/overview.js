@@ -614,7 +614,7 @@ function needProof(r, stages) {
 
 // One of a need item's buttons (needaction.js action kinds). `where` is "card" or "pane": the
 // pane unfolds its own Proof section, the card opens the run's pane as a popup with it unfolded.
-function needButton(view, t, r, f, x, id, where, primary) {
+export function needButton(view, t, r, f, x, id, where, primary) {
   const confirm = (action) => (cx) => { view.confirm = { key: r.key, action, box: where }; view.actionError = null; view.actionNote = null; cx.notify(); };
   switch (x.kind) {
     case "open": return actionButton(t, id, x.label, x.url, () => openUrl(x.url), primary);
@@ -676,7 +676,7 @@ function changesButton(view, t, r, id) {
 // The need items as lines, each with its buttons; the first item's first button stands out, unless
 // the actions say which does (`primary`). Actions about one PR each (`row`: "#1799 · 15 comments")
 // go in a row per PR, led by it.
-function needLines(view, t, r, f, items, where, underQuestion = false) {
+export function needLines(view, t, r, f, items, where, underQuestion = false) {
   return items.map((it, i) => {
     const buttons = it.actions.map((x, j) => ({ row: x.row ?? null,
       el: needButton(view, t, r, f, x, `need-${where}-${r.key}-${i}-${j}`, where, isPrimary(x, i, j, underQuestion)) })).filter((b) => b.el);
@@ -701,7 +701,7 @@ function needLines(view, t, r, f, items, where, underQuestion = false) {
 
 // A Close or Resume clicked in this need box, confirmed here rather than in the action row at
 // the bottom, which a long pane may have scrolled away; null otherwise.
-const boxConfirm = (view, t, r, f, where) => (view.confirm?.key === r.key && view.confirm.box === where && !view.busy?.[r.key]
+export const boxConfirm = (view, t, r, f, where) => (view.confirm?.key === r.key && view.confirm.box === where && !view.busy?.[r.key]
   ? confirmBlock(view, t, r, f.orch, f.counts, view.confirm.action, `need-${where}-${r.key}`) : null);
 
 // "Open the orchestrator", small: never the headline, since most reasons are done elsewhere.
@@ -946,7 +946,7 @@ function claimsSummary(t, r, stages = null) {
 
 // What was clicked on a claim row (Accept, Unaccept, Ask to prove) and not read back from the
 // run's files yet (claims.js withSaid). Shared by the pane and the card, so both show it at once.
-const said = new Map();
+export const said = new Map();
 
 const isFinished = (r) => r.phase === "finished" || Boolean(r.away);
 
@@ -1252,11 +1252,12 @@ const PROOF_ACTION = {
   unaccept: { label: "Unaccept", tip: "Take the acceptance back: it needs a look again" },
   ask: { label: "Ask to prove", tip: "Ask the orchestrator to prove this claim to its bar (a message in its inbox)" },
 };
-function proofAction(view, t, r, k, a) {
+// `button` draws it (actionButton's arguments): the sidebar's box passes a quieter one.
+export function proofAction(view, t, r, k, a, button = actionButton) {
   if (a === "asked") return div().id(`pfx-${r.key}-${k.id}`).text_size(11).text_color(t.muted).tooltip("Waiting for the orchestrator to prove it").child("asked…");
   const line = claimResultLine(k);
   const { label, tip } = PROOF_ACTION[a];
-  return actionButton(t, `pf${a}-${r.key}-${k.id}`, label, tip, (cx) => {
+  return button(t, `pf${a}-${r.key}-${k.id}`, label, tip, (cx) => {
     const key = `${r.key}:${k.id}`;
     said.set(key, { kind: a, line, at: Date.now() });
     view.actionError = null;
@@ -1501,7 +1502,7 @@ function noAnswer(it) {
 // happens next. `slot` keeps the two apart: the queue's ids as they were, the box's prefixed
 // ("box:"), so a card and the queue in one overview never open the same Reply twice.
 // {replyBtn, optionButton(i), canPick, note, input}; replyBtn, note and input may be false.
-function answerParts(view, t, it, ctx, slot = "") {
+export function answerParts(view, t, it, ctx, slot = "") {
   const cap = captainOf(ctx);
   // An answer written for an earlier question of this run (another `since`) no longer counts.
   if (view.answered[it.id] !== undefined && view.answered[it.id] !== (it.since ?? 0)) delete view.answered[it.id];

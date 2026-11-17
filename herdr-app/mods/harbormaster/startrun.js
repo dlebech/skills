@@ -115,3 +115,19 @@ export function remember(prefs, { kind, profile, repo, drafts }) {
   else next.profile = profile;
   return next;
 }
+
+// The reviews started from here, by PR URL → when the click was. A review's orchestrator writes
+// the run files that name the PR (reviews.js runReviewing) a while after it takes its task, so
+// until then, or for STARTED_MS, its row says "starting…" instead of offering Review again.
+// Module state: every view and copy of the mod shares it.
+export const STARTED_MS = 5 * 60000;
+const started = new Map();
+export const markReviewStarted = (url, at = Date.now()) => { if (url) started.set(url, at); };
+export const clearReviewStarted = (url) => { started.delete(url); };
+export function reviewStarting(url, now = Date.now()) {
+  const at = started.get(url);
+  if (at == null) return false;
+  if (now - at <= STARTED_MS) return true;
+  started.delete(url);
+  return false;
+}

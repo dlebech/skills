@@ -226,3 +226,43 @@ export function workerTree(workers, rootAddress) {
   add(null, []);
   return out;
 }
+
+// ---- the calm sidebar (props needs: "box") ----
+
+// Claude Code reports "working" while a background shell runs, and says so in its status
+// message ("1 shell still running"). A captain on the old skill waits on its watcher that way,
+// so that "working" is watching, not replying.
+export const SHELLS_ONLY = /^\s*\d+\s+(background\s+)?shells?\s+(are\s+|is\s+)?still\s+running\s*\.?\s*$/i;
+
+// The captain link's mark, from its agent status, its status message and whether its watcher
+// runs: "blocked" (a dialog waits), "working" (it is really replying: the spinner), "watching"
+// (idle with its watcher running, or working only on background shells: a calm eye) or "idle".
+export function captainMark({ status = null, msg = null, watching = false } = {}) {
+  if (status === "blocked") return "blocked";
+  const shellsOnly = SHELLS_ONLY.test(msg ?? "");
+  if (status === "working" && !shellsOnly) return "working";
+  if (shellsOnly || watching) return "watching";
+  return "idle";
+}
+
+// The Needs-you entries under the open box, as compact rows: at most `limit`, the rest behind
+// "+ n more" until unfolded (`open`). {shown, extra}: `extra` is how many the fold holds, shown
+// or not, so the toggle can say "+ 3 more" and fold them back.
+export function needsRest(entries, expanded, { limit = 3, open = false } = {}) {
+  const rest = entries.filter((x) => x !== expanded);
+  const extra = Math.max(0, rest.length - limit);
+  return { shown: open ? rest : rest.slice(0, limit), extra };
+}
+
+// A compact Crew row's progress: tasks done of planned and the bar's fill (0–1), or null while
+// nothing is planned. `counts` is tasks.js taskCounts of the run.
+export function progressOf(counts) {
+  if (!counts?.planned) return null;
+  const done = Math.min(counts.done ?? 0, counts.planned);
+  return { text: `${done}/${counts.planned}`, frac: done / counts.planned };
+}
+
+// ---- Next for you ----
+
+// "skills#52": the repository's name without its owner, and the number.
+export const prRef = (repo, number) => `${String(repo ?? "").split("/").pop()}#${number}`;

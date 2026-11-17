@@ -11,8 +11,9 @@ import { exec, focused, openOverlay, closeOverlay, props, notify, readTextFile, 
 import { repoSpaces } from "./repospaces.js";
 import {
   KINDS, DRAFTS, profileText, parseProfile, profileFor, buildPrompt, inputProblem, runAgentName, startArgs,
-  startOutcome, parsePrefs, draftsFor, remember,
+  startOutcome, parsePrefs, draftsFor, remember, markReviewStarted, clearReviewStarted,
 } from "./startrun.js";
+export { reviewStarting } from "./startrun.js";
 
 const sh = (script, args = [], timeout) => exec("sh", ["-c", script, "_", ...args], timeout ? { timeout } : undefined);
 
@@ -65,12 +66,22 @@ export async function launch({ repo, kind, input, profile, drafts }) {
 // The review of one PR with the remembered settings: the one-click path. `repo` is the Review
 // row's `local` ({space, root}) or a repository folder; a toast says how it went.
 const starting = new Set(); // "<root>#<pr>" being started: a second click must not start a second review
-export async function startReview({ repo, pr }) {
+
+// `url`: the PR's, to mark it started from the click on (reviewStarting); a start that fails clears it.
+export async function startReview({ repo, pr, url = null }) {
   const root = typeof repo === "string" ? repo : repo?.root;
   const id = `${root}#${pr}`;
   if (starting.has(id)) { try { notify({ title: "Already starting", body: `PR ${pr} is being started`, level: "info", timeout: 4000 }); } catch { /* no toast mod */ } return { ok: false, error: "already starting" }; }
   starting.add(id);
-  try { return await reviewNow(root, repo, pr); } finally { starting.delete(id); }
+  markReviewStarted(url);
+  try {
+    const out = await reviewNow(root, repo, pr);
+    if (!out.ok && !out.started) clearReviewStarted(url);
+    return out;
+  } catch (e) {
+    clearReviewStarted(url);
+    throw e;
+  } finally { starting.delete(id); }
 }
 
 async function reviewNow(root, repo, pr) {

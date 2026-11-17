@@ -170,7 +170,9 @@ function reasonItem(r, a, ctx) {
         ? `Approved${by}${ago(at, now)} with ${commentsText(next.comments)} on ${prsText(same)}: address them${plan ? "" : ", then merge"}`
         : plan ? `${prsText(same)} approved${by}${ago(at, now)} · merge once the plan is done (${tasks.done}/${tasks.planned} tasks)`
         : `Merge ${prsText(same)} · approved${by}${ago(at, now)}`;
-      return { line, actions: addressPrs(same, run, next?.asked) };
+      // Nothing to address and nothing left to do: the merge itself is the button, as for a ready run.
+      const merge = !hasComments(next?.comments) && !plan && !(next?.asked ?? []).length ? mergePrs(same) : [];
+      return { line, actions: merge.length ? merge : addressPrs(same, run, next?.asked) };
     }
     case "review proof → merge": {
       const p = proofText(proof);
@@ -274,3 +276,20 @@ export function detailsLabel(sections, options = []) {
   const parts = detailsParts(sections, options);
   return parts.length ? `Details: ${parts.join(", ")}` : null;
 }
+
+// The one button the sidebar's box shows for its items: {i, j}, the item and action it is. The
+// items come most urgent first, so the first item with a button: its action that says it is
+// primary (Merge over Proof, the autonomy's Ask me or Handle them), else its first. An "asked…"
+// note is no button. Null when no item has one.
+export function primaryOf(items) {
+  const can = (x) => x.kind !== "asked";
+  const i = (items ?? []).findIndex((it) => it.actions.some(can));
+  if (i < 0) return null;
+  const acts = items[i].actions;
+  const j = acts.findIndex((x) => can(x) && x.primary === true);
+  return { i, j: j >= 0 ? j : acts.findIndex(can) };
+}
+
+// Whether the box's items ask for a merge: an approved PR ("approved — merge") or a run that is
+// ready to merge. Its unfolded box then shows the run's claims worth a look (claims.js claimsAsk).
+export const isMergeAsk = (items) => (items ?? []).some((it) => it.key === "approved — merge" || it.ready === true);

@@ -49,6 +49,9 @@
 #   claims-run    running, t1 merged, t2 implementing; plan.md's ## Claims (4, tier T2, C4 bar T3) and
 #                 proof.md's C1 proven (2 shots, 2 tests), C2 a pass without a shot, C4 failed, C3 still
 #                 being proved                                           -> Claims "1 of 4 proven · not yet: …" (#47)
+#   claims-merge  finished, folder "snevagten" (peer), fake-two/api#65 approved and green; 5 claims: C1 and C4
+#                 proven with a shot, C2 a pass without its shot, C3 partial, C5 unproven -> approved — merge,
+#                 the box's merge ask: C2, C3, C5 worth a look, +2 more, the checks line (t10)
 #   report-run    finished, no PR, shared/final-report.md (+ t1-report.md) -> finished — read and close
 #   asks-question running, question.md with Options, Recommended and Blocks -> a question box
 #   asks-and-pr   finished plan (2/2), open self-flow PR dlebech/wapi-beatbox#1 with proof, and a
@@ -212,6 +215,14 @@ make_runs() {
   convert -size 640x400 xc:'#22324a' -fill '#e8eef7' -pointsize 34 -annotate +40+200 'Card dragged to row 2' "$cr/shared/proof/t1-drag.png"
   convert -size 640x400 xc:'#2a3d2f' -fill '#e8f7ea' -pointsize 34 -annotate +40+200 'Dropped: order 2, 1, 3' "$cr/shared/proof/t1-drop.png"
   printf '# Proof: claims-run\nTier: T2\nChecks: green — 1497 tests, build, lint, CI\n\n## C1 Drag a card to reorder the list\nResult: pass — dragging moves the card\nShot: shared/proof/t1-drag.png, shared/proof/t1-drop.png\nTest: reorder moves the card — pass\nTest: reorder keeps focus — pass\n\n## C2 The new order is saved across restarts\nResult: pass — 2 tests\nTest: order persists — pass\nTest: order survives a reload — pass\n\n## C4 A guided tour of reordering\nResult: fail — the tour stops at step 2\nTest: tour reaches the end — fail\n' >"$cr/proof.md"
+  # An approved PR whose run has claims (t10): the box's merge ask shows the claims worth a look.
+  local cm=$S/runs/skills/claims-merge
+  RUN_FOLDER=$S/work/snevagten mkrun claims-merge finished feat "Claims merge" "${day}T08:45:00Z" 2/2 merged merged --progress "PR approved" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/65
+  printf '\nProof tier: T2\n\n## Claims\n- C1 Drag a card to reorder the list — AC 3 — tasks t1\n- C2 The new order is saved across restarts — AC 4 — tasks t1\n- C3 Undo puts the card back — AC 5 — tasks t2\n- C4 Keyboard reordering with Alt+arrows — AC 6 — tasks t2\n- C5 Screen readers announce the move — AC 7 — tasks t2\n' >>"$cm/plan.md"
+  mkdir -p "$cm/shared/proof"
+  convert -size 640x400 xc:'#22324a' -fill '#e8eef7' -pointsize 34 -annotate +40+200 'Card dragged to row 2' "$cm/shared/proof/t1-drag.png"
+  printf '# Proof: claims-merge\nTier: T2\nChecks: green — 1497 tests, build, lint, CI\n\n## C1 Drag a card to reorder the list\nResult: pass — dragging moves the card\nShot: shared/proof/t1-drag.png\nTest: reorder moves the card — pass\n\n## C2 The new order is saved across restarts\nResult: pass — 2 tests\nTest: order persists — pass\n\n## C3 Undo puts the card back\nResult: partial — undo works once, not twice\nTest: undo once — pass\n\n## C4 Keyboard reordering with Alt+arrows\nResult: pass — 3 tests\nShot: shared/proof/t1-drag.png\n' >"$cm/proof.md"
   mkrun report-run finished rev "Report run" "${day}T05:00:00Z" 2/2 merged merged --progress "review written"
   printf '# Review report\n\nAll good.\n' >"$S/runs/skills/report-run/shared/final-report.md"
   printf '# t1 report\n\nA task'"'"'s own report: never the run'"'"'s.\n' >"$S/runs/skills/report-run/shared/t1-report.md"

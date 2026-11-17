@@ -29,15 +29,15 @@ const att = (r, list, o = {}) => assess(r, { orch: "idle", working: false, pr: r
 const items = (r, list, o = {}, ctx = {}) => needActions(att(r, list, o), { run: r, prs: list, now, ...ctx });
 const kinds = (it) => it.actions.map((a) => a.kind);
 
-test("approved — merge names the PRs, who approved and when, with an Open button for each", () => {
+test("approved — merge names the PRs, who approved and when, with a Merge on GitHub button for each", () => {
   const list = [pr({ approvedBy: ["mfalkenbrink"], review: "APPROVED", reviewedAt: ago(65) }),
     pr({ number: 1372, url: "https://github.com/o/skills/pull/1372", approvedBy: ["mfalkenbrink"], review: "APPROVED", reviewedAt: ago(70) })];
   const [it] = items(run({ folder: "/p/snevagten" }), list, { flow: "peer" });
   assert.equal(it.key, "approved — merge");
   assert.equal(it.line, "Merge #42 and #1372 · approved by mfalkenbrink 1h5m ago");
   assert.deepEqual(it.actions, [
-    { kind: "open", label: "Open #42", url: list[0].url },
-    { kind: "open", label: "Open #1372", url: list[1].url },
+    { kind: "open", label: "Merge #42 on GitHub", url: list[0].url, primary: true },
+    { kind: "open", label: "Merge #1372 on GitHub", url: list[1].url, primary: true },
   ]);
 });
 
