@@ -162,3 +162,37 @@ test("a need box's Reply id maps back to the queue item's id; the queue's is its
   assert.equal(replyItem(replyId("", "dec-x")), "dec-x");
   assert.equal(replyItem(null), null);
 });
+
+// The sample the orchestrator's references/review.md prescribes for review-drafts=herdr.
+const REVIEW_DRAFTS = `# 3 draft review comments ready for skills#52
+
+## Question
+Add retry to fetcher, by anna. Nothing is posted yet. The drafts are in review-drafts.md.
+
+## Options
+1. **Post as pending review**: creates a pending review on GitHub; you submit it there
+2. **Post review**: submits the review now as comments
+3. **Edit first**: change review-drafts.md or reply with changes, then I ask again
+4. **Discard**: post nothing
+
+## Recommended
+Post as pending review: you see them in GitHub's UI before anyone else does
+
+## Evidence
+- src/app.js:42 must-fix: retry loop never stops
+
+## Risk
+Only you can answer this: it posts in your name. A review is visible to the PR's author; a pending review is visible only to you.
+
+## Blocks
+Nothing else.
+`;
+
+test("the review-drafts question parses: four options, pending review recommended", () => {
+  const q = parseQuestion(REVIEW_DRAFTS);
+  assert.equal(q.structured, true);
+  assert.deepEqual(q.options.map((o) => o.label), ["Post as pending review", "Post review", "Edit first", "Discard"]);
+  assert.equal(q.recommended, 0);
+  assert.match(needHead(q).title, /3 draft review comments ready for skills#52/);
+  assert.equal(needHead(q).rec.startsWith("Recommends Post as pending review"), true);
+});

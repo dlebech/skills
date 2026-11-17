@@ -35,6 +35,10 @@ Check that each configured kind is installed with `command -v <kind>`, and model
 
 Write the run's profiles and options, with the answers to the start-of-run questions, into `spec.md`, so a resumed run keeps them.
 
+## Review runs
+
+`$ARGUMENTS` starting with `review <PR url or number>` is the review preset, started with one click from Harbormaster's New run dialog or a review request, so the user has handed off: ask no start-of-run questions unless something is genuinely ambiguous (which repository, a PR that cannot be read). Set `type=rev`, run proof `T0`, `task-review=no`, `final-review=no`, no integration PR, and `autonomy=L1` unless given. `review-drafts=herdr|pending|direct` (default `herdr`) says what happens to the findings. The reviewer profile is the one given (`reviewer-model=`), else Opus. The spec is the PR itself: link it, name the repository. Branch name `review-<number>`, prefix `rev<number>`. Then read [review.md](review.md); it replaces sections 2 to 5 and 8.
+
 ## Repositories
 
 The run covers the repository you were started in. Started in a folder that is not a repository, such as one holding a frontend and a backend repository, it covers the repositories directly inside it that the work touches: tell them apart by what the spec, issues, and code say, list them in `spec.md` and the start-of-run summary, and ask only when it is unclear. Issues may live in yet another repository; that one gets no branch unless the work changes it. Record the repositories in `plan.md`, below the prefix, as `Repos: <name> <path>, ...`. Everything that says "repository" applies to each of them.

@@ -39,6 +39,8 @@ This section produces the run directory with `spec.md`, `decisions.md`, and `pla
 6. For each repository, reuse an unambiguous integration branch/worktree, then run `<skill-dir>/scripts/integration-worktree.sh <branch> origin/<default-branch>` from it. It prints the worktree's path and opens it as a space. When the user's Herdr window is on another computer, connected over ssh, it warns that it could not reach the window: that is expected, since Harbormaster in the user's window opens the space; do not retry or report it. If it exits 3, the branch is checked out in the user's own checkout: ask the user to switch it. Only the integration worktree gets a space, for the user to watch the branch: never run an orchestrator or agent in its terminal.
 7. Record the run prefix in `plan.md`, below the Status line. Every name in sections 3, 4, and 8 starts with it.
 
+A review run (`review <PR>`): record the prefix as in step 7, then follow [references/review.md](references/review.md) instead of the planning and merging sections.
+
 Addresses such as `t7` come from `hc`; never predict them. Refer to your agents by name.
 
 ### 1a. Issues

@@ -68,7 +68,7 @@ Keep every decision you are waiting on in a file, so alerts do not bury it. Harb
 
 ## Answer routine questions
 
-Only for a run whose `status.json` has `autonomy` `L1` or `L2`; a missing one is `L0`, and L0 runs you never answer. When its `question.md` has a `## Recommended` option, no one-way door in `## Risk`, and is not a direction or design call, read the Risk and Recommended sections from the file itself, not from a watcher line, and answer as in Relay instructions with the message `Answer to "<title>": <Recommended label>` (run-files.md, inbox/), unless an unhandled message already answers it. Say what you answered in your reply to the user. Never answer a budget question (`Over the token budget`): it is always the user's. Anything else stays in the user's queue, as before.
+Only for a run whose `status.json` has `autonomy` `L1` or `L2`; a missing one is `L0`, and L0 runs you never answer. When its `question.md` has a `## Recommended` option, no one-way door in `## Risk`, and is not a direction or design call, read the Risk and Recommended sections from the file itself, not from a watcher line, and answer as in Relay instructions with the message `Answer to "<title>": <Recommended label>` (run-files.md, inbox/), unless an unhandled message already answers it. Say what you answered in your reply to the user. Never answer a budget question (`Over the token budget`) or a review run's "draft review comments ready" (post review) question: they are always the user's. Anything else stays in the user's queue, as before.
 
 ## Park, resume, or close a run
 
