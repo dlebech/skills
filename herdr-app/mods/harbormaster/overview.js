@@ -958,21 +958,27 @@ const claimRowsOf = (r, stages = null) => withSaid(claimRows(r.proof, r, stageNa
 
 // ---- one run on its own, as the pane pinned beside its orchestrator ----
 
-const section = (t, title, ...rest) => v_flex().gap(4)
+// Every top-level section of the pane is one lightly raised block, so they read as separate things.
+// The rows inside (claims, PRs) are a shade brighter (raised + "88") and stand out from it.
+const boxed = (t, el) => el.p(8).rounded(8).bg(t.raised + "33");
+
+const section = (t, title, ...rest) => boxed(t, v_flex().gap(4))
   .child(h_flex().gap(6).px(2).items_center().text_size(11).font_semibold().text_color(t.dim).child(title)
     .children(rest.filter(Boolean).map((x) => div().font_normal().child(x))));
 
-// Every fold in the pane looks the same: under the section's small grey label, a dim chevron
-// and a one-line summary in normal text; colour only on status words. Open state per key in
+// Every fold in the pane looks the same: a dim chevron and a one-line summary in normal text;
+// colour only on status words. Open state per key in
 // view.folds, closed by default and not persisted.
 export const isOpen = (view, key) => Boolean(view.folds?.get(key));
-function foldLine(view, t, key, tip, items, onOpen = null) {
+// `title`: a header like Decisions', the section's name in semibold text ahead of the summary,
+// with no small grey label above.
+function foldLine(view, t, key, tip, items, onOpen = null, title = null) {
   const open = isOpen(view, key);
   return h_flex().id(`fold-${key}`).gap(6).px(2).items_center().min_w(0).rounded(4).cursor_pointer().text_size(11.5).text_color(t.foreground)
     .hover((s) => s.bg(t.hover)).tooltip(tip)
     .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); if (!open) onOpen?.(); cx.notify(); })
     .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
-    .child(h_flex().flex_1().min_w(0).flex_wrap().items_center().children(joined(t, items)));
+    .child(h_flex().flex_1().min_w(0).flex_wrap().items_center().children(joined(t, [title && { el: div().flex_none().font_semibold().text_color(t.foreground).child(title) }, ...items])));
 }
 
 // A PR as a row with room to spare: its whole title, then repo, checks and review.
@@ -1122,7 +1128,7 @@ function decisionsSection(view, t, r) {
         .child(div().when(!more, (el) => el.truncate()).text_color(t.foreground).when(fresh.has(d), (el) => el.font_semibold()).child(title(d)))
         .when(Boolean(more && d.why), (el) => el.child(div().text_size(11).text_color(t.dim).child(d.why))));
   };
-  return v_flex().gap(4)
+  return boxed(t, v_flex().gap(4))
     .child(h_flex().id(`fold-${key}`).gap(6).px(2).items_center().min_w(0).rounded(4).cursor_pointer().text_size(11)
       .hover((st) => st.bg(t.hover)).tooltip(open ? "Fold the decisions" : "Show every decision")
       .on_click((_e, cx) => {
@@ -1238,10 +1244,10 @@ function claimsSection(view, t, r, stages) {
         .when(actions.length > 0, (e) => e.child(h_flex().gap(6).pl(30).pt(2).items_center().children(actions.map((a) => proofAction(view, t, r, k, a))))));
   };
   const shown = open ? s.rows : s.rows.filter(worthALook);
-  return section(t, "Claims")
+  return boxed(t, v_flex().gap(4))
     .child(foldLine(view, t, key, `${s.tip ? `${s.tip}\n` : ""}${open ? "Show only the claims worth a look" : `Show every claim (${s.rows.length})`}`, s.parts,
       // Unfolding the Claims section is reading it.
-      () => markProofRead(r)))
+      () => markProofRead(r), "Claims"))
     .children(shown.map(row))
     .when(Boolean(checksRow), (el) => el.child(checksRow))
     .when(Boolean(reviewRow), (el) => el.child(reviewRow))
