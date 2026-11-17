@@ -100,6 +100,9 @@ export function reviewItems(ctx, now = Date.now()) {
 
 // "Next for you", the combined list for the sidebar (impl-calm-t7 renders it): review requests first,
 // then the user's own PRs that need something, each oldest wait first. `runs` are the live ones.
+// A request a live run is reviewing is left out (the run shows in Crew); one only being started
+// stays, as "starting…", until its run is found.
+export const notReviewing = (items) => items.filter((it) => !(it.kind === "review" && it.run));
 export function nextItems(ctx = {}, now = Date.now()) {
-  return [...reviewItems(ctx, now), ...minePrs(ctx, now)];
+  return notReviewing([...reviewItems(ctx, now), ...minePrs(ctx, now)]);
 }

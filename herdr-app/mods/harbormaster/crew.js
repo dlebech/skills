@@ -5,13 +5,12 @@ import { div, svg } from "gpui-kit";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, runPhase, decisionQueue } from "./data.js";
-import { taskCounts } from "./tasks.js";
 import { openUrl, facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, focusAgent, focusWithPane, currentAgent, adrift, agentNames } from "./live.js";
 import { programIcon, plural, runName } from "./ui.js";
 import { startedTip } from "./context.js";
 import { liveUsage } from "./resources.js";
 import { attentionOf } from "./attend.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, captainNeedNote, captainMark, needsRest, progressOf, prRef } from "./crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, captainNeedNote, captainMark, needsRest, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
 import { reviewError } from "./reviews.js";
 import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
@@ -23,6 +22,32 @@ import {
   newDecisionsNote, noteRows, watchedText, edgeColor, cardBesideOrchestrator, AMBER, PASS, SELECTED, withUsage, runProps,
   needButton, needLines, answerParts, boxConfirm, proofAction, said, stagesOf,
 } from "./overview.js";
+
+// A run's title as the sidebar shows it: a review's "<repo>#<n> · <topic>", else runName's; with
+// the repository's name, muted, before it when another live row would read the same
+// (crewrows.js repoPrefixes). `prefixes` is the Map of rows that need one, by needKey.
+function titleOf(x, prefixes = new Map()) {
+  const { term, r } = x;
+  const topic = term?.labels?.["run.topic"] ?? r?.topic;
+  const name = runName(r?.branch ?? term?.name ?? term?.address, topic);
+  const rev = reviewTitle(r?.type ?? term?.labels?.["run.type"], r?.related, topic);
+  return { ...name, title: rev ?? name.title, prefix: prefixes.get(needKey(x)) ?? null };
+}
+
+// The title's text with its muted repository prefix, when it has one.
+const titleText = (t, name, size = 12.5, weight = null) => h_flex().flex_1().min_w(0).gap(4).items_baseline()
+  .when(Boolean(name.prefix), (el) => el.child(div().flex_none().text_size(size).text_color(t.dim).child(`${name.prefix} ·`)))
+  .child(div().flex_1().min_w(0).truncate().text_size(size).text_color(t.foreground).when(Boolean(weight), (el) => el.font_semibold()).child(name.title));
+
+// What a click on a run opens: its orchestrator, with its card beside it when that fits. The same
+// for a Crew row and for a Needs-you item, so the box stays in the sidebar and the run shows.
+function openRun(m, x) {
+  const { ctx } = m;
+  const { term, r } = x;
+  const address = term?.address ?? null;
+  const card = () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) });
+  return address ? () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(address, runProps(r)) : focusAgent(address)) : card;
+}
 
 // A Needs-you row's hover in the needs box, where a click opens the run there instead of its orchestrator.
 const OPEN_HERE = "Click to open it here";
@@ -119,14 +144,15 @@ function captainLink(m) {
 // The sidebar's one header row.
 function harborHeader(m) {
   const { t } = m;
-  return h_flex().id("crew-header").flex_none().h(36).pl(PAD * 2).pr(PAD).gap(8).items_center()
-    .child(div().flex_none().text_size(13).font_semibold().text_color(t.foreground).child("⚓ Harbormaster"))
+  // The label gives way first (it ellipsizes), then the spacer: the captain link never clips.
+  return h_flex().id("crew-header").flex_none().h(36).pl(PAD * 2).pr(PAD).gap(8).items_center().min_w(0).overflow_hidden()
+    .child(div().min_w(0).truncate().text_size(13).font_semibold().text_color(t.foreground).child("⚓ Harbormaster"))
     .child(h_flex().id("crew-new-run").flex_none().px(7).h(22).items_center().rounded(5).bg(t.raised)
       .text_size(11.5).font_medium().text_color(t.muted).cursor_pointer().hover((st) => st.text_color(t.foreground).bg(t.hover))
       .tooltip("Start a run in a repository's own space: issues, a PR to review, or a task in your words. No captain needed")
       .on_click((_e, cx) => { cx.stop_propagation(); openNewRun(); })
       .child("+ New run"))
-    .child(div().flex_1())
+    .child(div().flex_1().min_w(0))
     .children([captainLink(m)].filter(Boolean));
 }
 
@@ -152,7 +178,7 @@ function section(m, g) {
 }
 
 // A run that is not in the box, in one line: its state as a dot, its name, its type (muted)
-// and its tasks done of planned, with a thin bar of them under it. Why it is in its group and
+// and, under it, what it does now. Why it is in its group and
 // what it does now are in the hover; a click focuses its orchestrator (or opens its card).
 function compactRow(m, x, g) {
   const { view, t, ctx, now, current } = m;
@@ -160,9 +186,9 @@ function compactRow(m, x, g) {
   const labels = term?.labels ?? {};
   const address = term?.address ?? null;
   const id = address ? `crew-${address}` : `crew-run-${r.key}`;
-  const name = runName(r?.branch ?? term?.name ?? address, labels["run.topic"] ?? r?.topic);
+  const name = titleOf(x, m.prefixes);
   const type = r?.type ?? labels["run.type"] ?? null;
-  const prog = r ? progressOf(taskCounts(r)) : null;
+  const sub = subtitleOf(r?.progress ?? labels.progress, r?.statusLine);
   const { lead, rest } = rowLead(a, now);
   const tip = [name.tip ?? name.title, [lead, rest ?? (r ? null : labels.progress)].filter(Boolean).join(" · "), ...rowTip(a, now).slice(1), startedTip(r?.started)]
     .filter((l, i, all) => l && all.indexOf(l) === i).join("\n");
@@ -171,20 +197,16 @@ function compactRow(m, x, g) {
     : g.key === "cant" ? statusDot(t, "gone")
     : div().size(8).flex_none().rounded(4).bg(edgeColor(t, rowEdge(a)));
   const here = address != null && address === current;
-  const card = () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) });
-  const open = term ? () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(address, runProps(r)) : focusAgent(address)) : card;
-  return v_flex().id(id).flex_none().gap(3).px(PAD).pt(4).pb(5).rounded(6).cursor_pointer()
+  const open = openRun(m, x);
+  return v_flex().id(id).flex_none().gap(1).px(PAD).py(4).rounded(6).cursor_pointer()
     .when(here, (el) => el.bg(SELECTED(t))).hover((st) => st.bg(here ? SELECTED(t) : t.hover))
     .tooltip(tip).on_click(open)
     .child(h_flex().gap(8).items_center().min_w(0)
       .child(h_flex().w(12).flex_none().justify_center().child(dot))
-      .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(name.title))
-      .when(Boolean(type), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(String(type))))
-      .when(Boolean(prog), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(prog.text))))
-    // The bar sits under the name, from the name's left edge to the row's right.
-    .when(Boolean(prog), (el) => el.child(h_flex().ml(20).h(3).rounded(2).overflow_hidden().bg(t.border)
-      .child(div().h_full().flex_grow(prog.frac).bg(t.muted))
-      .child(div().h_full().flex_grow(1 - prog.frac))));
+      .child(titleText(t, name))
+      .when(Boolean(type), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(String(type)))))
+    // What it does now, under the name (from the name's left edge), muted and cut to one line.
+    .when(Boolean(sub), (el) => el.child(div().ml(20).min_w(0).truncate().text_size(11).text_color(t.dim).child(sub)));
 }
 
 // A Needs-you entry under the box: two short lines, its name and why (with its age), in its
@@ -193,17 +215,17 @@ function compactRow(m, x, g) {
 function needRow(m, x, onOpen) {
   const { t, now, narrow } = m;
   const { term, r, a } = x;
-  const name = runName(r?.branch ?? term?.name ?? term?.address, term?.labels?.["run.topic"] ?? r?.topic);
+  const name = titleOf(x, m.prefixes);
   const { lead, tone } = rowLead(a, now, { narrow });
   const edge = edgeColor(t, rowEdge(a));
   const color = tone === "amber" ? AMBER(t) : tone === "pass" ? PASS(t) : t[tone] ?? t.dim;
-  const open = onOpen ?? (() => (term ? focusAgent(term.address) : null));
+  const open = onOpen ?? openRun(m, x);
   const id = `crew-need-${needKey(x)}`;
   return v_flex().id(id).relative().overflow_hidden().flex_none().gap(1).pl(PAD + 3).pr(PAD).py(5).rounded(6)
     .bg(edge + "14").cursor_pointer().hover((st) => st.bg(edge + "26"))
     .tooltip([name.tip ?? name.title, ...rowTip(a, now), onOpen ? OPEN_HERE : null].filter(Boolean).join("\n")).on_click(open)
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
-    .child(div().min_w(0).truncate().text_size(12.5).font_semibold().text_color(t.foreground).child(name.title))
+    .child(titleText(t, name, 12.5, true))
     .child(div().min_w(0).truncate().text_size(11).text_color(color).child(lead));
 }
 
@@ -301,21 +323,22 @@ function needCard(m, x) {
   const r = x.r;
   const f = runFacts(r, ctx);
   const items = needItemsOf(r, ctx, x.a);
-  const name = runName(r.branch, x.term?.labels?.["run.topic"] ?? r.topic);
+  const name = titleOf(x, m.prefixes);
   const { lead, tone } = rowLead(x.a, now, { narrow });
   const edge = edgeColor(t, rowEdge(x.a));
   const color = tone === "amber" ? AMBER(t) : tone === "pass" ? PASS(t) : t[tone] ?? t.dim;
   const id = `crew-box-${r.key}`;
-  const focus = (_e, cx) => { cx.stop_propagation(); if (x.term) focusAgent(x.term.address); };
+  const go = openRun(m, x);
+  const focus = (_e, cx) => { cx.stop_propagation(); if (x.term) go(); };
   return v_flex().id("crew-needs-box").relative().overflow_hidden().flex_none().min_w(0).gap(6).pl(PAD + 3).pr(PAD).pt(7).pb(8).rounded(6)
     .bg(edge + "1a").on_click((_e, cx) => cx.stop_propagation())
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
     .child(v_flex().gap(1).min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)
-        .child(div().id(`${id}-title`).flex_1().min_w(0).truncate().text_size(12.5).font_semibold().text_color(t.foreground)
+        .child(div().id(`${id}-title`).flex_1().min_w(0).flex().cursor_default()
           .when(Boolean(x.term), (el) => el.cursor_pointer().on_click(focus))
           .tooltip([name.tip ?? name.title, startedTip(r.started), newDecisionsNote(r), x.term ? "Click to open its orchestrator" : null].filter(Boolean).join("\n"))
-          .child(name.title))
+          .child(titleText(t, name, 12.5, true)))
         .children([runTypeTag(t, r, id), ...levelTags(view, t, r, id, true)].filter(Boolean)))
       .child(div().id(`${id}-why`).min_w(0).truncate().text_size(11).text_color(color).tooltip(rowTip(x.a, now).join("\n")).child(lead)))
     .children(boxActions(m, x, f, items));
@@ -332,7 +355,8 @@ function needsSection(m) {
   if (!needs) return [];
   const list = groups.needs;
   const expanded = expandedNeed(list, view.needsOpen);
-  const pick = (x) => (_e, cx) => { view.needsOpen = needKey(x); cx.notify(); };
+  // A click expands it here and also shows its orchestrator; the sidebar stays, so the box is not lost.
+  const pick = (x) => (_e, cx) => { view.needsOpen = needKey(x); cx.notify(); if (x.term) openRun(m, x)(); };
   const moreKey = "crew-needs-more";
   const open = unfolded(view, moreKey, false);
   const { shown, extra } = needsRest(list, expanded, { open });
@@ -422,6 +446,8 @@ function calmCrew(m) {
   const { view, t, entries, needRuns, orchestrators, asks, ctx } = m;
   m.groups = groupRows(entries);
   m.needs = needCount(needRuns, orchestrators, asks);
+  // Rows that would read the same get their repository's name (every live row, the box's too).
+  m.prefixes = repoPrefixes(entries.map((x) => ({ key: needKey(x), title: titleOf(x).title, repo: x.r?.folder ? String(x.r.folder).split("/").pop() : null })));
   const closing = closeAllControl(view, t, m.groups.done, ctx);
   const rest = GROUPS.slice(1).flatMap((g) => section(m, {
     key: g.key, title: g.title, count: m.groups[g.key].length, folded: Boolean(g.folded),

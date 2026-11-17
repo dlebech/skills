@@ -1,10 +1,10 @@
 // The calm sidebar's pure rules (crew.js, props needs: "box"): the captain link's mark, the
-// Needs-you rows under the box, a compact row's progress, the box's one button and the Next for
+// Needs-you rows under the box, a compact row's second line, the box's one button and the Next for
 // you rows' PR names.
 // Run: node --import ./loader.mjs --test calmcrew.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { captainMark, SHELLS_ONLY, needsRest, progressOf, prRef } from "../../herdr-app/mods/harbormaster/crewrows.js";
+import { captainMark, SHELLS_ONLY, needsRest, subtitleOf, prRef } from "../../herdr-app/mods/harbormaster/crewrows.js";
 import { primaryOf, isMergeAsk } from "../../herdr-app/mods/harbormaster/needaction.js";
 
 test("the captain watches while idle with its watcher, or working only on background shells", () => {
@@ -38,11 +38,11 @@ test("under the box, at most three rows, the rest behind + n more until unfolded
   assert.deepEqual(needsRest(["x", "y"], null), { shown: ["x", "y"], extra: 0 });
 });
 
-test("a compact row's progress is done of planned, with the bar's fill; none while nothing is planned", () => {
-  assert.deepEqual(progressOf({ done: 1, planned: 4 }), { text: "1/4", frac: 0.25 });
-  assert.deepEqual(progressOf({ done: 5, planned: 4 }), { text: "4/4", frac: 1 });
-  assert.equal(progressOf({ done: 0, planned: 0 }), null);
-  assert.equal(progressOf(null), null);
+test("a compact row's second line is the run's progress note, else its plan status, on one line", () => {
+  assert.equal(subtitleOf("t2 implementing", "running"), "t2 implementing");
+  assert.equal(subtitleOf(null, "  waiting\n for  user "), "waiting for user");
+  assert.equal(subtitleOf("", null), null);
+  assert.equal(subtitleOf(undefined, undefined), null);
 });
 
 const item = (key, actions) => ({ key, line: key, actions });
@@ -77,4 +77,30 @@ test("a merge ask is an approved PR, a proof to read before merging or a run rea
   assert.equal(isMergeAsk([item("red-ci", []), item("question", [])]), false);
   assert.equal(isMergeAsk([]), false);
   assert.equal(isMergeAsk(null), false);
+});
+
+test("a review run's title is repo#number · topic, from its related PR", async () => {
+  const { reviewTitle } = await import("../../herdr-app/mods/harbormaster/crewrows.js");
+  const rel = [{ url: "https://github.com/o/api/pull/52" }];
+  assert.equal(reviewTitle("rev", rel, "Triage"), "api#52 · Triage");
+  assert.equal(reviewTitle("feat", rel, "Triage"), null);
+  assert.equal(reviewTitle("rev", [], "Triage"), null);
+  assert.equal(reviewTitle("rev", rel, ""), null);
+});
+
+test("rows with the same title get their repository's name; a review's own title never does", async () => {
+  const { repoPrefixes } = await import("../../herdr-app/mods/harbormaster/crewrows.js");
+  const p = repoPrefixes([
+    { key: "a", title: "Login", repo: "api" }, { key: "b", title: "Login", repo: "web" },
+    { key: "c", title: "Other", repo: "api" },
+    { key: "d", title: "api#1 · X", repo: "api" }, { key: "e", title: "api#1 · X", repo: "api" },
+    { key: "f", title: "Same", repo: null }, { key: "g", title: "Same", repo: null },
+  ]);
+  assert.deepEqual([...p], [["a", "api"], ["b", "web"]]);
+});
+
+test("Next for you drops a review request a live run is reviewing, keeps one only starting", async () => {
+  const { notReviewing } = await import("../../herdr-app/mods/harbormaster/mypr.js");
+  const items = [{ kind: "review", url: "a", run: "/runs/x" }, { kind: "review", url: "b", run: null }, { kind: "mine", url: "c", run: null }];
+  assert.deepEqual(notReviewing(items).map((i) => i.url), ["b", "c"]);
 });
