@@ -151,8 +151,8 @@ export function parkedLabel(att, away, now = Date.now()) {
 // The Parked heading: "Parked · 3 · 2 with open PRs". `withOpen`: how many of them have an open PR.
 export const parkedHeading = (n, withOpen) => `Parked · ${n}${withOpen ? ` · ${withOpen} with open PRs` : ""}`;
 
-// The overview header's PR stat label after its number: "open PRs · 1 failing (+4 parked)". The
-// parked runs' open PRs are not in the number, so it says so.
+// The Bridge's PR stat label after its number: "open PRs · 1 failing". `parkedOpen`, when a caller leaves
+// parked runs' open PRs out of the number, adds "(+4 parked)"; the Bridge passes 0.
 export function openPrsLabel(open, failing, parkedOpen) {
   const base = failing ? `open PRs · ${failing} failing` : open === 1 ? "open PR" : "open PRs";
   return parkedOpen ? `${base} (+${parkedOpen} parked)` : base;

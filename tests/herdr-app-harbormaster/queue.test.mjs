@@ -62,6 +62,13 @@ test("a decision's button with no captain: the same answer for a named run, else
   assert.deepEqual(decisionAction(dec("a", 1, { run: { key: "r" }, options: [], recommended: null }), { captain: false }), { kind: "open" });
 });
 
+test("a decision's button with no captain, about a run that can't take an answer (parked, gone, other machine): start the captain", () => {
+  const run = { run: { key: "r" } };
+  assert.deepEqual(decisionAction(dec("a", 1, run), { captain: false, unreachable: true }), { kind: "start-captain" });
+  assert.deepEqual(decisionAction(dec("a", 1, run), { captain: false, unreachable: false }), { kind: "answer", option: 0 });
+  assert.deepEqual(decisionAction(dec("a", 1, run), { captain: true, unreachable: true }), { kind: "answer", option: 0 }, "with a captain nothing changes");
+});
+
 test("the box opens the clicked item while it is queued, else the first that can open: a decision, or an entry with a run directory", () => {
   const e = (key, dir = "/r/" + key) => ({ kind: "entry", x: { r: { key, dir }, term: { address: "t" + key }, a: {} } });
   const list = [e("a"), e("b"), e("c")];

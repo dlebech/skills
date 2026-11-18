@@ -23,12 +23,13 @@ export function needQueue(entries, decisions) {
 
 // What a decision row's one button does, as {kind: "answer", option} (send that option, an index),
 // {kind: "open"} (focus the captain) or {kind: "start-captain"}. With a captain: its recommended
-// option, else open it. Without: the same answer when the decision names a run (it goes to that
-// run's inbox, answers.js sendAnswer), else start the captain.
-export function decisionAction(it, { captain }) {
+// option, else open it. Without: the same answer when the decision names a run that can take it (it
+// goes to that run's inbox, answers.js sendAnswer), else start the captain. `unreachable` is the
+// caller's fact (answers.js runUnreachable): the run is parked, gone or on another machine.
+export function decisionAction(it, { captain, unreachable = false }) {
   const answer = it.recommended != null && it.options?.[it.recommended] ? { kind: "answer", option: it.recommended } : null;
   if (captain) return answer ?? { kind: "open" };
-  return it.run ? answer ?? { kind: "open" } : { kind: "start-captain" };
+  return it.run && !unreachable ? answer ?? { kind: "open" } : { kind: "start-captain" };
 }
 
 // Which queue item the sidebar's Needs-you box draws open: the one clicked (`openKey`) while it is

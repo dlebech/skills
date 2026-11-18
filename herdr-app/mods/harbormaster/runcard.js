@@ -1,4 +1,4 @@
-// One run's card in the overview list.
+// One run's card in the Bridge's lists.
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";

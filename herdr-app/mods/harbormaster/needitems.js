@@ -15,7 +15,7 @@ import { needActions } from "./needaction.js";
 import { stagesOf } from "./cardparts.js";
 
 // What card() and runDetail() both show: the run's state, its links and the header row.
-// Each run's attention (attend.js), once per facts() snapshot: the overview's header, its
+// Each run's attention (attend.js), once per facts() snapshot: the Bridge's header, its
 // order and every card read it, and a render takes one snapshot.
 const attention = new WeakMap();
 

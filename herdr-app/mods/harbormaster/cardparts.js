@@ -3,11 +3,12 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { taskTone, taskAgents, shownStage, isParked, putAway, resumeRun, deleteRun } from "./data.js";
-import { openUrl } from "./live.js";
+import { openUrl, orchestratorState } from "./live.js";
 import { plural, shortRef, stateText, TYPE } from "./ui.js";
 import { tokenText, tokenHeadline } from "./context.js";
 import { hotText, memText } from "./resources.js";
 import { setNote, noteText } from "./note.js";
+import { closableDone } from "./crewrows.js";
 
 // How each runPhase() reads on a card. Running is muted, not the working colour: colour means
 // something to look at (see AMBER), and the run's spinning dot already says it works.
@@ -22,7 +23,7 @@ export const PHASE = {
   cant: { label: "Can't tell", tone: "dim" },
 };
 
-// Text sizes: the run pane and the overview's cards draw with TYPE's four sizes. The helpers they
+// Text sizes: the run pane and the Bridge's cards draw with TYPE's four sizes. The helpers they
 // share with the Crew sidebar (crew.js) read this flag, set only while a card or the pane is drawn,
 // and keep their own sizes otherwise: T(was, role) is `was` in the sidebar and TYPE[role] here.
 let inPane = false;
@@ -49,7 +50,7 @@ export const withContext = (view, t, id, address, run = null) => (el) => {
 };
 
 // What withContext's hover says: the context size, and for an orchestrator the run's total; null without either.
-export const contextTip = (view, address, run = null) => {
+const contextTip = (view, address, run = null) => {
   const c = view.contexts?.[address];
   return [c && `Context: ${c.tokens.toLocaleString("en")} tokens${c.model ? ` (${c.model})` : ""}, as of its last turn`,
     run?.tokens && `Run total: ${tokenHeadline(run.tokens)} (${run.tokens.total.toLocaleString("en")} in all), all its agents`].filter(Boolean).join("\n") || null;
@@ -316,3 +317,58 @@ export const isOpen = (view, key) => Boolean(view.folds?.get(key));
 // the run by what every screen reads the same: its directory and its orchestrator's
 // terminal as its own machine names it.
 export const runProps = (r) => ({ role: "run", dir: r.dir, terminal: r.localTerminal });
+
+// Close all merged, from the Crew's Done heading: closes each run as its card's Close does
+// (data.js putAway), one at a time, after the heading asked, naming how many.
+const CLOSE_ALL_KEY = "done:close-all";
+
+function closeAll(view, runs, ctx, cx) {
+  if (!runs.length) return;
+  const at = Date.now();
+  const batch = { label: `Closing ${plural(runs.length, "merged run")}…`, at, branch: "merged runs", limit: 2 * 60000 + runs.length * 30000 };
+  view.busy[CLOSE_ALL_KEY] = batch;
+  for (const r of runs) view.busy[r.key] = { label: "Closing…", at, branch: r.branch, limit: batch.limit };
+  const orchs = new Map(runs.map((r) => [r.key, orchestratorState(r, ctx)]));
+  // As a card's action: owned by no view, notifying through cx.spawn's cx.
+  cx.spawn(async (cx) => {
+    const failed = [], notes = [];
+    for (const r of runs) {
+      try {
+        const note = await putAway(r, "closed", orchs.get(r.key));
+        if (note && /blocked/.test(note)) notes.push(`${r.branch}: ${note}`);
+      } catch (e) { failed.push(`${r.branch} (${e?.message ?? e})`); }
+      if (view.busy[r.key]?.at === at) delete view.busy[r.key];
+    }
+    if (view.busy[CLOSE_ALL_KEY]?.at === at) delete view.busy[CLOSE_ALL_KEY];
+    const done = runs.length - failed.length;
+    setNote(view, [done ? `Closing ${plural(done, "merged run")}: their orchestrators clean up and close their tabs.` : null, ...notes].filter(Boolean).join("\n") || null);
+    if (failed.length) view.actionError = `${failed.length} not closed: ${failed.join("; ")}`;
+    view.redraw = true;
+    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+    try { await view.load(cx); } catch { /* the next refresh shows it */ }
+  }, { owner: null });
+}
+
+// The Done heading's right side: Close all merged, its question once clicked, or what it is doing.
+export function closeAllControl(view, t, rows, ctx) {
+  const busy = view.busy?.[CLOSE_ALL_KEY];
+  if (busy) return { button: div().flex_none().text_size(T(10.5, "meta")).font_normal().text_color(t.muted).child(busy.label), confirm: null };
+  const runs = closableDone(rows, view.busy ?? {});
+  if (!runs.length) return { button: null, confirm: null };
+  const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
+  if (view.confirm?.key !== CLOSE_ALL_KEY) {
+    return { button: actionButton(t, "close-all-merged", "Close all merged",
+      `Close ${plural(runs.length, "run")} whose pull requests are all merged or closed, as each card's Close does`,
+      (cx) => set(cx, { key: CLOSE_ALL_KEY })), confirm: null };
+  }
+  const names = runs.map((r) => r.branch).join(", ");
+  return {
+    button: null,
+    confirm: v_flex().id("close-all-confirm").flex_none().gap(6).p(8).rounded(7).bg(t.raised)
+      .child(div().text_size(T(12, "body")).text_color(t.foreground)
+        .child(`Close ${plural(runs.length, "merged run")} (${names})? Each orchestrator pushes what isn't pushed, deletes the worktrees and closes its tab; branches and PRs stay.`))
+      .child(h_flex().gap(6)
+        .child(actionButton(t, "close-all-yes", `Close ${runs.length}`, null, (cx) => { set(cx, null); closeAll(view, runs, ctx, cx); }, true))
+        .child(actionButton(t, "close-all-no", "Cancel", null, (cx) => set(cx, null)))),
+  };
+}

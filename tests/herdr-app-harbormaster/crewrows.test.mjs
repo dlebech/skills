@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assess, runDot, STALL_MS, waitSig } from "../../herdr-app/mods/harbormaster/attention.js";
 import { needsYouNow } from "../../herdr-app/mods/harbormaster/attend.js";
-import { decisionQueue } from "../../herdr-app/mods/harbormaster/data.js";
+import { decisionQueue, decisionItems } from "../../herdr-app/mods/harbormaster/data.js";
 import { GROUPS, groupRows, byNeed, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, cantWhy, crewEntries, canExpand, needKey, needCount, needRunsOf, runlessNeeds, watchingText, workerTree } from "../../herdr-app/mods/harbormaster/crewrows.js";
 
 const MIN = 60000;
@@ -378,4 +378,11 @@ test("a run marked waiting on someone: its row, pill and hover say on whom and s
   assert.ok(rowTip(a, now).includes("Waiting on Kari — preview check, since 2h5m ago"));
   assert.equal(badgeOf(a, true).label, "waiting on Kari — preview check");
   assert.equal(needLine(a), null);
+});
+
+test("decisionItems is the decisions loop of decisionQueue, alone", () => {
+  const d = { key: ":a", id: "a", question: "Q?", run: null, asked: 5, options: [], recommended: null, why: "", evidence: "", risk: "", blocks: "" };
+  const items = decisionItems([d], []);
+  assert.deepEqual(items, decisionQueue([], [d], { terminals: [], agents: [] }));
+  assert.equal(items[0].kind, "decision");
 });

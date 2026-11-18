@@ -15,7 +15,7 @@ export function taskTone(state) {
 // toward "n/m done".
 export const isDropped = (state) => /^(skipped|dropped|cancel+ed|won'?t|superseded|abandoned)/.test(state ?? "");
 
-// How many tasks a run has done (`done`) and planned: one count for the overview's header, the
+// How many tasks a run has done (`done`) and planned: one count for the Bridge's header, the
 // cards, the pane and a confirm's "N of M tasks done" alike. Done is plan.md's tasks whose state
 // reads done (taskTone), as the task strip shows them; status.json's `merged` only when plan.md
 // lists no tasks, since an orchestrator updates it less often (one said 7 merged of 14 done).

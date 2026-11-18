@@ -111,7 +111,7 @@ export function agentNames(list, scope = () => "") {
 // The live orchestrators' terminals, as the Crew block lists them.
 export const orchestratorsOf = (ctx) => ctx.terminals.filter((t) => t.state === "live" && t.labels?.role === "orchestrator");
 
-// The addresses whose context size the crew and the overview show: the captain and the orchestrators.
+// The addresses whose context size the crew and the Bridge show: the captain and the orchestrators.
 export const crewAddresses = (ctx) => [captainOf(ctx).terminal?.address, ...orchestratorsOf(ctx).map((t) => t.address)].filter(Boolean);
 
 export function captainOf(ctx) {
@@ -167,7 +167,7 @@ export function captainPane(ctx) {
   return cap ? paneBeside(cap.address) : null;
 }
 
-// Shows a Harbormaster pane right of an agent (the runs overview, or with `props` another
+// Shows a Harbormaster pane right of an agent (the Bridge, or with `props` another
 // view, such as one run's card), or closes it again.
 export function togglePin(spot, props = undefined) {
   if (spot.pinned) run("pane.close", { pane: spot.pinned });
@@ -175,7 +175,7 @@ export function togglePin(spot, props = undefined) {
 }
 
 // Focuses an agent and makes sure a Harbormaster pane is open beside it (the runs
-// overview, or with `props` another view, such as one run's card). Never closes one, so
+// Bridge, or with `props` another view, such as one run's card). Never closes one, so
 // clicking again only focuses; close the pane with Herdr's own pane close.
 export function focusWithPane(address, props = undefined) {
   focusAgent(address);

@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 import { resetShared } from "herdr";
 import { find } from "gpui-kit";
 import { cards } from "../../herdr-app/mods/harbormaster/overview.js";
+import { BRIDGE_SIZE } from "../../herdr-app/mods/harbormaster/crew.js";
+import { readFileSync } from "node:fs";
 
 const t = new Proxy({}, { get: () => "#888" });
 const text = (e) => (e && typeof e === "object" && "kids" in e ? e.kids.map(text).join(" ") : typeof e === "string" || typeof e === "number" ? String(e) : "");
@@ -127,4 +129,9 @@ test("the captain strip: a stopped watcher says what to do, in full as its toolt
   assert.match(text(find(d, "captain-watch")), /Watcher not running · ask the captain to watch/);
   globalThis.__herdrTerminals = [orch("a")];
   assert.match(text(find(draw([run("a")]), "captain")), /The Bridge works without one\. Start a captain when you want someone to talk to across runs\./);
+});
+
+test("the popup's size in mod.json is BRIDGE_SIZE, so the title click and the shortcut open the same popup", () => {
+  const mod = JSON.parse(readFileSync(new URL("../../herdr-app/mods/harbormaster/mod.json", import.meta.url), "utf8"));
+  assert.deepEqual(mod.overlay, BRIDGE_SIZE);
 });

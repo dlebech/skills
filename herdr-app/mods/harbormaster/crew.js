@@ -4,13 +4,13 @@
 import { div, svg } from "gpui-kit";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, runPhase, decisionQueue, markOpened } from "./data.js";
+import { stats, runPhase, decisionQueue, decisionItems, markOpened } from "./data.js";
 import { openUrl, facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, focusAgent, focusWithPane, currentAgent, adrift, agentNames } from "./live.js";
 import { programIcon, plural, runName } from "./ui.js";
 import { startedTip } from "./context.js";
 import { liveUsage } from "./resources.js";
 import { attentionOf } from "./attend.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, canExpand, needKey, needCount, needRunsOf, captainMark, needsSlots, needCardLook, HOVER_TINT, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
+import { GROUPS, watchedText, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, canExpand, needKey, needCount, needRunsOf, captainMark, needsSlots, needCardLook, HOVER_TINT, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
 import { reviewError } from "./reviews.js";
 import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
@@ -19,11 +19,10 @@ import { openNewRun, openStartCaptain, reviewStarting } from "./newrun.js";
 import { primaryOf, isMergeAsk, requestingFor } from "./needaction.js";
 import { claimsAsk, checksLine, reviewedLine, withSaid, withAsked, claimActions } from "./claims.js";
 import { attOf, needItemsOf, said } from "./needitems.js";
-import { runStatus, closeAllControl, runFacts, newDecisionsNote, needButton, needLines, boxConfirm, waitOnField } from "./needbox.js";
+import { runStatus, runFacts, newDecisionsNote, needButton, needLines, boxConfirm, waitOnField } from "./needbox.js";
 import { levelTags, runTypeTag, cardBesideOrchestrator, proofAction } from "./runpane.js";
-import { statusDot, actionButton, noteRows, edgeColor, AMBER, PASS, SELECTED, withUsage, runProps, stagesOf } from "./cardparts.js";
-import { watchedText } from "./bridgerows.js";
-import { answerParts } from "./answers.js";
+import { statusDot, actionButton, closeAllControl, noteRows, edgeColor, AMBER, PASS, SELECTED, withUsage, runProps, stagesOf } from "./cardparts.js";
+import { answerParts, runUnreachable } from "./answers.js";
 import { needQueue, queueKey, decisionAction, expandedItem } from "./queue.js";
 import { queueLines } from "./question.js";
 
@@ -73,13 +72,13 @@ function crewModel(view, t, ctx = facts(), s = stats(view.runs, ctx)) {
   const orchestrators = orchestratorsOf(ctx)
     .map((term) => ({ term, r: runOf(term) }))
     .map((o) => ({ ...o, state: o.r?.phase ?? runPhase(o.term.labels?.["run.status"]), a: o.r ? attOf(o.r, ctx) : attentionOf(null, ctx, now, o.term) }));
-  // Its Needs you is the overview's (crewrows.js crewEntries): a run that needs you whose
+  // Its Needs you is the Bridge's (crewrows.js crewEntries): a run that needs you whose
   // orchestrator is gone gets a row too, and the captain's open decisions count in its heading.
   const needRuns = needRunsOf(s.shown, (r) => attOf(r, ctx));
   const entries = crewEntries(orchestrators, needRuns, (r) => attOf(r, ctx));
-  // The captain's open decisions as queue items (decisionQueue's shapes), for the Needs-you rows.
+  // The captain's open decisions as queue items (data.js decisionItems), for the Needs-you rows.
   // Built with the runs, so a decision that names a live run carries it (the answer then goes to its inbox).
-  const decisions = decisionQueue(view.runs ?? [], view.decisions ?? [], ctx).filter((it) => it.kind === "decision");
+  const decisions = decisionItems(view.decisions ?? [], view.runs ?? []);
   const asks = decisions.length;
   const addresses = [cap.terminal?.address, ...orchestrators.map((o) => o.term.address)].filter(Boolean);
   // The focused agent, or the crew agent beside a focused Harbormaster pane.
@@ -126,7 +125,7 @@ const statusMsg = (term) => term?.report?.msg ?? (typeof term?.status === "objec
 
 // "captain ↗" at the header's right: an eye while it only watches, the spinner only while it
 // really replies (crewrows.js captainMark); its decisions are rows in Needs you, so no count here.
-// Clicking does what the captain card did: focus it, with the overview beside it. No captain:
+// Clicking does what the captain card did: focus it, with the Bridge beside it. No captain:
 // a compact "⚓+" pill, styled like "+ New run" (a longer label squeezes the title), that opens the Start captain dialog (a folder to
 // start it in).
 function startCaptainLink(t, asks) {
@@ -415,7 +414,7 @@ function decisionCard(m, it) {
   const look = needCardLook(false);
   const key = `crew-box-more-${it.id}`;
   const more = unfolded(view, key, false);
-  const act = decisionAction(it, { captain: Boolean(cap.terminal) });
+  const act = decisionAction(it, { captain: Boolean(cap.terminal), unreachable: runUnreachable(it, ctx) });
   const a = answerParts(view, t, it, ctx, "box");
   const main = act.kind === "answer" ? a.optionButton(act.option)
     : act.kind === "open" ? (cap.terminal ? actionButton(t, `${key}-open`, "Open captain", "Focus the captain's terminal", () => focusAgent(cap.terminal.address), true) : a.replyBtn || null)

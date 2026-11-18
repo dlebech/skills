@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { resetShared } from "herdr";
 import { find } from "gpui-kit";
 import { crew, queueSections } from "../../herdr-app/mods/harbormaster/crew.js";
+import { forgetSentToCaptain } from "../../herdr-app/mods/harbormaster/answers.js";
 import { stats } from "../../herdr-app/mods/harbormaster/data.js";
 import { needRunsOf } from "../../herdr-app/mods/harbormaster/crewrows.js";
 
@@ -135,6 +136,21 @@ test("with no captain, a decision that names a live run offers its recommended o
   assert.doesNotMatch(after, /Start captain/);
 });
 
+test("with no captain, a decision about a parked run offers Start captain, with nothing greyed in the box", () => {
+  const dir = "/runs/skills/p1";
+  const run = { key: `:${dir}`, dir, branch: "p1", terminal: null, localTerminal: null, phase: "finished", prs: [], question: null, ask: null, away: "parked", updated: ago(5), started: ago(60) };
+  view.runs = [run];
+  view.decisions = [decision("resume", { run: dir })];
+  const box = find(crew(view, t), "crew-needs-box");
+  assert.equal(text(find(box, "crew-box-more-dec-:resume-start")), "Start captain");
+  assert.equal(buttonOf(box, "★ Yes"), null, "no recommended option to grey out");
+  assert.equal(find(box, "crew-box-more-dec-:resume-toggle")?.opacity, undefined);
+  assert.doesNotMatch(text(box), /Reply/);
+  // A parked run named with a captain running: the answer goes to the captain, as before.
+  globalThis.__herdrTerminals = [captain];
+  assert.ok(buttonOf(find(crew(view, t), "crew-needs-box"), "★ Yes"));
+});
+
 test("with a captain, an option is sent once: a second click sends nothing and the note says it went", () => {
   globalThis.__herdrTerminals = [captain];
   const sent = [];
@@ -147,4 +163,23 @@ test("with a captain, an option is sent once: a second click sends nothing and t
   assert.match(text(box), /Sent to the captain/);
   click();
   assert.equal(sent.filter(([c]) => c === "hc").length, 1, "nothing sent the second time");
+});
+
+test("an answer sent to a captain is forgotten once its decision is gone, and a new captain can be answered", () => {
+  globalThis.__herdrTerminals = [captain];
+  globalThis.__herdrExec = async () => ({ code: 0, stdout: "[]", stderr: "" });
+  view.decisions = [decision("a")];
+  buttonOf(find(crew(view, t), "crew-needs-box"), "★ Yes").click({}, cx);
+  assert.match(text(find(crew(view, t), "crew-needs-box")), /Sent to the captain/);
+  // Another captain: the record is by address, so the buttons are live again.
+  globalThis.__herdrTerminals = [{ ...captain, address: "cap2" }];
+  assert.doesNotMatch(text(find(crew(view, t), "crew-needs-box")), /Sent to the captain/);
+  // The decision leaves the file; the next load forgets it, so the same decision coming back is open.
+  globalThis.__herdrTerminals = [captain];
+  forgetSentToCaptain([]);
+  assert.doesNotMatch(text(find(crew(view, t), "crew-needs-box")), /Sent to the captain/);
+  // A decision still open is kept.
+  buttonOf(find(crew(view, t), "crew-needs-box"), "★ Yes").click({}, cx);
+  forgetSentToCaptain(view.decisions);
+  assert.match(text(find(crew(view, t), "crew-needs-box")), /Sent to the captain/);
 });

@@ -9,7 +9,7 @@
 //   "stats"           where the time goes, tokens, CPU and memory: per run, task and agent, live, and past runs
 // Reads run directories on every machine (data.js) every 5 s, and a run's PRs from gh within ~30 s
 // of its own changes (its files, a push of a PR's head) or of being opened, else every 5 minutes (30 once parked or closed);
-// the crew and the overview also read each crew agent's context size (context.js).
+// the crew and the Bridge also read each crew agent's context size (context.js).
 
 import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
@@ -22,7 +22,7 @@ import { loadContexts } from "./context.js";
 import { hotSignature, sampleVersion } from "./resources.js";
 import { cards } from "./overview.js";
 import { runPane, runOfProps, pathInput } from "./runpane.js";
-import { submitReply } from "./answers.js";
+import { submitReply, forgetSentToCaptain } from "./answers.js";
 import { runProps } from "./cardparts.js";
 import { runFacts } from "./needbox.js";
 import { mergePath } from "./mergepath.js";
@@ -52,7 +52,7 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "harbor
 //                                                         orchestrator is gone: its card, kept open until closed
 // Every shown Harbormaster copy hears a command, so the popup's id and time are in shared state and
 // a copy that sees the same command opened a moment ago leaves it alone (and one that lost a race closes its own).
-// The popup's own copy doesn't listen, so a Harbormaster copy that isn't the popup (the Crew block or the overview) must be shown. A popup nobody closed goes
+// The popup's own copy doesn't listen, so a Harbormaster copy that isn't the popup (the Crew block or the Bridge) must be shown. A popup nobody closed goes
 // after POPUP_LIMIT.
 const POPUP = "harbormaster.popup";
 const POPUP_LIMIT = 60000;
@@ -99,7 +99,7 @@ function showStats(view, arg) {
   setShared(POPUP, { id, at: Date.now(), arg: key });
 }
 
-// The runs overview (role "cards") or the Crew block (role "crew", sidebar-narrow) as the
+// The Bridge (role "cards") or the Crew block (role "crew", sidebar-narrow) as the
 // same brief popup, for screenshots of their cards.
 function showView(key, role, width, height, extra = {}) {
   const cur = shared(POPUP);
@@ -191,6 +191,7 @@ export default class Harbormaster extends View {
     this.hot = hot;
     this.runs = runs;
     this.decisions = decisions;
+    forgetSentToCaptain(decisions);
     this.errors = errors;
     if (changed || freed) cx.notify();
     return runs;
@@ -216,19 +217,19 @@ export default class Harbormaster extends View {
     expirePopup();
     cx.spawn(async (cx) => {
       const runs = await this.load(cx);
-      // The crew and the overview show each crew agent's context size; the harbor and stats do not.
+      // The crew and the Bridge show each crew agent's context size; the harbor and stats do not.
       if (props()?.role !== "harbor" && props()?.role !== "harbor-rail" && props()?.role !== "stats") {
         const contexts = await loadContexts(crewAddresses(facts()));
         if (JSON.stringify(contexts) !== JSON.stringify(this.contexts)) { this.contexts = contexts; cx.notify(); }
       }
       const ctx = facts();
       // Toasts and the decisions seen: from the copies that poll for the whole window only (the
-      // Crew block, the overview, the sea layout's harbor; the store's claim keeps it to one toast).
+      // Crew block, the Bridge, the sea layout's harbor; the store's claim keeps it to one toast).
       const role = props()?.role;
       if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) {
         try { observeTelling(runs, ctx); } catch (e) { console.log(`harbormaster: telling failed: ${e?.message ?? e}`); }
       }
-      // Harbor 3D's facts file, from any copy that polls for the whole window (the Crew block, the overview, the sea
+      // Harbor 3D's facts file, from any copy that polls for the whole window (the Crew block, the Bridge, the sea
       // layout's harbor): a layout without a Crew block still feeds it. Two copies may both write; they write the same
       // facts atomically. exportFacts does nothing without its want file.
       if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) await exportFacts(() => harborFacts(runs, ctx)).catch((e) => console.log(`harbormaster: harbor3d facts failed: ${e?.message ?? e}`));

@@ -1,11 +1,11 @@
 // The Bridge's pure pieces: how many columns, which run goes in which block, the words on a run's
 // line and a parked row, the header's totals and the fold state. No drawing; bridge.js draws them.
 
-import { needRunsOf, rowLead, subtitleOf, watchingText } from "./crewrows.js";
+import { needRunsOf, rowLead, subtitleOf } from "./crewrows.js";
 import { parkedLabel, openPrsLabel } from "./tell.js";
 
 // The view's width (after zoom) from which the Bridge draws two columns; narrower it is one.
-export const WIDE = 700;
+const WIDE = 700;
 
 export const bridgeColumns = (width) => (width >= WIDE ? 2 : 1);
 
@@ -71,5 +71,3 @@ export function pruneFolds(set, groups) {
   return new Set([...(set ?? [])].filter((k) => live.has(k)));
 }
 
-// What the captain watches, from stats(): "watching 2 runs · 1 finished" (crewrows.js watchingText).
-export const watchedText = (s) => watchingText(s.live.length, s.docked.length);

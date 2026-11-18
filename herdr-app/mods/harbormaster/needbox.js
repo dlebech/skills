@@ -3,15 +3,14 @@
 import { div, svg } from "gpui-kit";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { decisionQueue, taskCounts, prsOf, relatedOf, unknownPr, isClosed, isParked, putAway, refreshPrs, markOpened, cachedReviewers, loadReviewers, requestReview } from "./data.js";
+import { decisionQueue, taskCounts, prsOf, relatedOf, unknownPr, isClosed, isParked, refreshPrs, markOpened, cachedReviewers, loadReviewers, requestReview } from "./data.js";
 import { facts, orchestratorState, agentStatus, workersOf, needReason, focusAgent, openUrl } from "./live.js";
 import { plural, ago } from "./ui.js";
 import { oneLine, needHead, questionSections, paragraphs, plain } from "./question.js";
-import { setNote } from "./note.js";
 import { stepText, quietText, flowState, flowSetting, runDot, ageText } from "./attention.js";
 import { parkedLabel, newDecisions } from "./tell.js";
 import { decisionsSeen } from "./telling.js";
-import { badgeOf, needLine, closableDone } from "./crewrows.js";
+import { badgeOf, needLine } from "./crewrows.js";
 import { asked as inboxAsked } from "./inbox.js";
 import { askClick } from "./askclick.js";
 import { defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
@@ -155,61 +154,6 @@ export function flowToggle(t, r, id) {
   };
   return h_flex().id(`flow-${id}`).flex_none().gap(3).items_center().text_size(T(10.5, "meta")).text_color(t.dim)
     .child(div().flex_none().pr(2).child("Review")).child(seg("self")).child(seg("peer"));
-}
-
-// Close all merged, from the Crew's Done heading: closes each run as its card's Close does
-// (data.js putAway), one at a time, after the heading asked, naming how many.
-const CLOSE_ALL_KEY = "done:close-all";
-
-function closeAll(view, runs, ctx, cx) {
-  if (!runs.length) return;
-  const at = Date.now();
-  const batch = { label: `Closing ${plural(runs.length, "merged run")}…`, at, branch: "merged runs", limit: 2 * 60000 + runs.length * 30000 };
-  view.busy[CLOSE_ALL_KEY] = batch;
-  for (const r of runs) view.busy[r.key] = { label: "Closing…", at, branch: r.branch, limit: batch.limit };
-  const orchs = new Map(runs.map((r) => [r.key, orchestratorState(r, ctx)]));
-  // As a card's action: owned by no view, notifying through cx.spawn's cx.
-  cx.spawn(async (cx) => {
-    const failed = [], notes = [];
-    for (const r of runs) {
-      try {
-        const note = await putAway(r, "closed", orchs.get(r.key));
-        if (note && /blocked/.test(note)) notes.push(`${r.branch}: ${note}`);
-      } catch (e) { failed.push(`${r.branch} (${e?.message ?? e})`); }
-      if (view.busy[r.key]?.at === at) delete view.busy[r.key];
-    }
-    if (view.busy[CLOSE_ALL_KEY]?.at === at) delete view.busy[CLOSE_ALL_KEY];
-    const done = runs.length - failed.length;
-    setNote(view, [done ? `Closing ${plural(done, "merged run")}: their orchestrators clean up and close their tabs.` : null, ...notes].filter(Boolean).join("\n") || null);
-    if (failed.length) view.actionError = `${failed.length} not closed: ${failed.join("; ")}`;
-    view.redraw = true;
-    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
-    try { await view.load(cx); } catch { /* the next refresh shows it */ }
-  }, { owner: null });
-}
-
-// The Done heading's right side: Close all merged, its question once clicked, or what it is doing.
-export function closeAllControl(view, t, rows, ctx) {
-  const busy = view.busy?.[CLOSE_ALL_KEY];
-  if (busy) return { button: div().flex_none().text_size(T(10.5, "meta")).font_normal().text_color(t.muted).child(busy.label), confirm: null };
-  const runs = closableDone(rows, view.busy ?? {});
-  if (!runs.length) return { button: null, confirm: null };
-  const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
-  if (view.confirm?.key !== CLOSE_ALL_KEY) {
-    return { button: actionButton(t, "close-all-merged", "Close all merged",
-      `Close ${plural(runs.length, "run")} whose pull requests are all merged or closed, as each card's Close does`,
-      (cx) => set(cx, { key: CLOSE_ALL_KEY })), confirm: null };
-  }
-  const names = runs.map((r) => r.branch).join(", ");
-  return {
-    button: null,
-    confirm: v_flex().id("close-all-confirm").flex_none().gap(6).p(8).rounded(7).bg(t.raised)
-      .child(div().text_size(T(12, "body")).text_color(t.foreground)
-        .child(`Close ${plural(runs.length, "merged run")} (${names})? Each orchestrator pushes what isn't pushed, deletes the worktrees and closes its tab; branches and PRs stay.`))
-      .child(h_flex().gap(6)
-        .child(actionButton(t, "close-all-yes", `Close ${runs.length}`, null, (cx) => { set(cx, null); closeAll(view, runs, ctx, cx); }, true))
-        .child(actionButton(t, "close-all-no", "Cancel", null, (cx) => set(cx, null)))),
-  };
 }
 
 // A run's dot (Crew row, card, pane): working while its orchestrator or any of its agents
@@ -382,7 +326,7 @@ function changesButton(view, t, r, id) {
 // Nothing goes to the run's inbox: the orchestrator has nothing to do about it.
 export const waitOnId = (r) => `wait:${r.key}`;
 
-export const WAIT_HINT = "Who is it waiting on? (e.g. Kari — preview check) · Enter moves the run to Waiting on others until something needs you";
+const WAIT_HINT = "Who is it waiting on? (e.g. Kari — preview check) · Enter moves the run to Waiting on others until something needs you";
 
 function waitOnButton(view, t, r, id) {
   const open = view.replying === waitOnId(r);
@@ -467,7 +411,7 @@ const orchLink = (t, r, f, id) => (f.orch === "gone" || !r.terminal ? null
 // saying what to do and why, with the buttons that do it (needaction.js), and a small link to
 // the orchestrator. With one: what it asks, the recommendation in short and what it blocks, then
 // a Details fold with the question's sections, a button per option and Reply, answered the way
-// Waiting on you answers (answerParts, sendAnswer: the run's inbox, then a wake); any other
+// The queue answers (answerParts, sendAnswer: the run's inbox, then a wake); any other
 // reason under it. `where` tells the card's and the pane's ids apart.
 export function needBox(view, t, r, f, ctx, where) {
   const focus = (_e, cx) => { cx.stop_propagation(); if (f.orch !== "gone") { markOpened(r); focusAgent(r.terminal); } };

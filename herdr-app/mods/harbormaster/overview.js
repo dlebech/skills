@@ -16,7 +16,8 @@ import { pinButton } from "./runpane.js";
 import { card } from "./runcard.js";
 import { queueSections, BRIDGE_SIZE } from "./crew.js";
 import { weekBlock } from "./bridgeweek.js";
-import { bridgeColumns, bridgeGroups, totalsText, watchedText, pruneFolds } from "./bridgerows.js";
+import { bridgeColumns, bridgeGroups, totalsText, pruneFolds } from "./bridgerows.js";
+import { watchedText } from "./crewrows.js";
 import { openBlock, doneBlock, parkedBlock } from "./bridge.js";
 
 // The captain's one fixed-height row: with a captain running, what it watches, Open chat and the pin; with none,

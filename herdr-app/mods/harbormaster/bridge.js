@@ -7,15 +7,15 @@ import { orchestratorState, workersOf } from "./live.js";
 import { runName, typeTag } from "./ui.js";
 import { rowEdge } from "./crewrows.js";
 import { attOf } from "./needitems.js";
-import { runStatus, closeAllControl, runFacts } from "./needbox.js";
-import { statusDot, edgeColor, actionButton, confirmBlock, ACTION } from "./cardparts.js";
+import { runStatus, runFacts } from "./needbox.js";
+import { statusDot, closeAllControl, edgeColor, actionButton, confirmBlock, ACTION } from "./cardparts.js";
 import { card } from "./runcard.js";
 import { runLineText, parkedRowText, toggleOpen, unfoldAll, foldAll, allUnfolded, foldKey } from "./bridgerows.js";
 
 const chevron = (t, open) => svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim);
 
 // A block's small heading, as the sidebar's group headings: "Open runs · 5", with a quiet action at its right.
-export function blockHead(t, id, title, { note = null, action = null, toggle = null } = {}) {
+function blockHead(t, id, title, { note = null, action = null, toggle = null } = {}) {
   const label = h_flex().id(`${id}-fold`).flex_none().gap(5).items_center()
     .when(Boolean(toggle), (el) => el.cursor_pointer().hover((st) => st.text_color(t.foreground)).on_click(toggle.onClick).child(chevron(t, toggle.open)))
     .child(title);

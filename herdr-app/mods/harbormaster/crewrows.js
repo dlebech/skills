@@ -182,15 +182,15 @@ export const needCardLook = (selected) => (selected ? { tint: "3d", border: "", 
 
 export const needsRun = (r, a) => !r.away && a.group === "needs";
 
-// The runs that need you, for the overview's cards and header and the Crew alike; `attOf(run)`
+// The runs that need you, for the Bridge's cards and header and the Crew alike; `attOf(run)`
 // gives a run's attention.
 export const needRunsOf = (runs, attOf) => runs.filter((r) => needsRun(r, attOf(r)));
 
-// The Crew's rows, with its Needs you made the overview's set (attend.js needsYouNow), so the
+// The Crew's rows, with its Needs you made the Bridge's set (attend.js needsYouNow), so the
 // two never disagree. `orchs`: a row ({term, r, a}) per live orchestrator, `r` its run or null;
-// `needRuns`: the runs the overview counts as needing you. A run there whose orchestrator has
+// `needRuns`: the runs the Bridge counts as needing you. A run there whose orchestrator has
 // no row (gone, or on a machine that did not answer) gets one of its own, {term: null, r, a},
-// `attOf(run)` giving its attention. An orchestrator's row in Needs you that the overview does
+// `attOf(run)` giving its attention. An orchestrator's row in Needs you that the Bridge does
 // not count (its run is parked or closed) shows its step under Working instead.
 export function crewEntries(orchs, needRuns, attOf) {
   const need = new Set(needRuns);
@@ -207,11 +207,11 @@ export const needKey = (x) => x.r?.key ?? x.term?.address ?? null;
 // compact rows (queue.js expandedItem picks the open one).
 export const canExpand = (x) => Boolean(x.r?.dir);
 
-// Orchestrators without a run directory that need you (blocked on a dialog): the overview has
+// Orchestrators without a run directory that need you (blocked on a dialog): the Bridge has
 // no run for them, so it adds these to its count.
 export const runlessNeeds = (orchs) => orchs.filter((x) => !x.r && x.a?.group === "needs");
 
-// How many things need you, for the overview's header and the Crew's Needs you heading alike:
+// How many things need you, for the Bridge's header and the Crew's Needs you heading alike:
 // the runs that need you, orchestrators without a run blocked on a dialog, and the captain's
 // open decisions.
 export const needCount = (needRuns, orchs, decisions) => needRuns.length + runlessNeeds(orchs).length + decisions;
@@ -222,6 +222,9 @@ export function watchingText(live, docked) {
   const n = live + docked;
   return `watching ${n} run${n === 1 ? "" : "s"}${docked ? ` · ${docked} finished` : ""}`;
 }
+
+// The same from stats() itself.
+export const watchedText = (s) => watchingText(s.live.length, s.docked.length);
 
 // A run's workers as Herdr's Agents list draws them: each parent followed by its children, with
 // how deep it hangs and the tree lines to draw. `guides` has one entry per ancestor level below

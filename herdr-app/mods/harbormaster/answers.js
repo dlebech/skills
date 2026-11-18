@@ -10,11 +10,18 @@ import { askClick } from "./askclick.js";
 import { actionButton } from "./cardparts.js";
 import { needItemsOf, markWaiting } from "./needitems.js";
 
-// The captain decisions answered from here, by id and time asked, until the file drops them.
-const toCaptain = new Set();
-const sentKey = (it) => `${it.id}@${it.since ?? ""}`;
-export const sentToCaptain = (it) => it.kind === "decision" && toCaptain.has(sentKey(it));
-export const forgetSentToCaptain = () => toCaptain.clear();
+// The captain decisions answered from here, by the captain's address and the decision's id and time
+// asked, until the file drops them (forgetSentToCaptain, on each load). A new captain is a fresh chance.
+const toCaptain = new Map();
+const decisionKey = (it) => `${it.id}@${it.since ?? ""}`;
+const sentKey = (it, ctx) => `${captainOf(ctx).terminal?.address ?? ""}|${decisionKey(it)}`;
+const sentToCaptain = (it, ctx = facts()) => it.kind === "decision" && toCaptain.has(sentKey(it, ctx));
+
+// Forgets the answers whose decision is no longer open (`decisions`: the file's, as view.decisions).
+export function forgetSentToCaptain(decisions) {
+  const open = new Set(decisions.map((d) => decisionKey({ id: `dec-${d.key}`, since: d.asked })));
+  for (const [k, d] of toCaptain) if (!open.has(d)) toCaptain.delete(k);
+}
 
 // Sends an answer to an item of the queue. A captain decision goes to the captain, typed
 // into its input, when it is there; otherwise, and for a run's question, to the run's inbox
@@ -25,9 +32,9 @@ export function sendAnswer(view, it, text, cx, option = false) {
   const cap = captainOf(facts()).terminal;
   if (it.kind === "decision" && cap) {
     // Sent once: the decision stays in the file until the captain drops it, so it is marked here.
-    if (toCaptain.has(sentKey(it))) return true;
+    if (sentToCaptain(it)) return true;
     replyToCaptain(cap.address, it.decision, text);
-    toCaptain.add(sentKey(it));
+    toCaptain.set(sentKey(it, facts()), decisionKey(it));
     cx?.notify?.();
     return true;
   }
@@ -83,27 +90,32 @@ function sendChanges(view, key, text, cx) {
 }
 
 // A gone or lost orchestrator: an answer only waits in its inbox, and nothing is typed into its terminal.
-const runGone = (run) => orchestratorState(run, facts()) === "gone";
+const runGone = (run, ctx = facts()) => orchestratorState(run, ctx) === "gone";
+
+// A decision about a run whose orchestrator can't take an answer from here: no local terminal, or gone.
+// With no captain, nobody else reads it: the decision's box offers Start captain instead (queue.js decisionAction).
+export const runUnreachable = (it, ctx = facts()) => !it.run?.localTerminal || orchestratorState(it.run, ctx) === "gone";
 
 // Why an item can't be answered from here, or null when it can.
-export function noAnswer(it) {
+function noAnswer(it, ctx = facts()) {
   if (it.kind === "attention") {
-    const line = it.run ? needItemsOf(it.run, facts())[0]?.line : null;
+    const line = it.run ? needItemsOf(it.run, ctx)[0]?.line : null;
     return `${line ?? "This run needs you without a question"}. Nothing to answer here: click it to open its orchestrator`;
   }
-  if (it.kind === "decision" && !captainOf(facts()).terminal) {
+  if (it.kind === "decision" && !captainOf(ctx).terminal) {
+    if (!runUnreachable(it, ctx)) return null;
     if (!it.run?.localTerminal) return "The captain isn't running and this decision names no run: start the captain (⚓+ in the sidebar, or Start captain in the Bridge) to answer it";
     // Nobody reads a gone run's inbox, and this decision is about the run itself (resume, park or close).
-    if (runGone(it.run)) return "This run is gone and the captain isn't running: start the captain (⚓+ in the sidebar, or Start captain in the Bridge), or use the run's own Resume, Park or Close";
+    return "This run is gone and the captain isn't running: start the captain (⚓+ in the sidebar, or Start captain in the Bridge), or use the run's own Resume, Park or Close";
   }
   if (it.kind !== "decision" && !it.run?.localTerminal) return "This run's orchestrator isn't known: open the run to answer";
   return null;
 }
 
-// The answering half of a queue item, shared by Waiting on you and a run's need box: a button
+// The answering half of a queue item, shared by the queue (Needs you) and a run's need box: a button
 // per option (the recommended one starred), Reply with its input, and once answered what
 // happens next. `slot` keeps the two apart: the queue's ids as they were, the box's prefixed
-// ("box:"), so a card and the queue in one overview never open the same Reply twice.
+// ("box:"), so a card and the queue in one Bridge never open the same Reply twice.
 // {replyBtn, optionButton(i), canPick, note, input}; replyBtn, note and input may be false.
 export function answerParts(view, t, it, ctx, slot = "") {
   const cap = captainOf(ctx);
@@ -111,8 +123,8 @@ export function answerParts(view, t, it, ctx, slot = "") {
   const open = view.replying === rid;
   // A message waiting in the run's inbox counts too: someone else (the captain, by hand) answered.
   const sent = it.run ? inboxAsked(it.run, "answer", it.id, it) : false;
-  const answered = sent || Boolean(it.answered) || sentToCaptain(it);
-  const why = noAnswer(it);
+  const answered = sent || Boolean(it.answered) || sentToCaptain(it, ctx);
+  const why = noAnswer(it, ctx);
   const replyBtn = it.kind !== "attention" && h_flex().id(rid + "-reply").flex_none().items_center().px(8).h(22).rounded(5)
     .text_size(11).text_color(open ? t.accent : t.dim)
     .when(Boolean(why), (el) => el.opacity(0.45).tooltip(why))
@@ -141,9 +153,9 @@ export function answerParts(view, t, it, ctx, slot = "") {
       off ? null : (cx) => { sendAnswer(view, it, o.label, cx, true); }, i === it.recommended);
     return off ? b.tooltip(off) : b;
   };
-  const note = answered && div().text_size(11).text_color(t.muted).child(sentToCaptain(it) ? "Sent to the captain" : it.run && runGone(it.run) ? "Waits in its inbox until the run is resumed" : sent ? "Answered, waiting for the orchestrator" : "Message waiting for the orchestrator");
+  const note = answered && div().text_size(11).text_color(t.muted).child(sentToCaptain(it, ctx) ? "Sent to the captain" : it.run && runGone(it.run, ctx) ? "Waits in its inbox until the run is resumed" : sent ? "Answered, waiting for the orchestrator" : "Message waiting for the orchestrator");
   const input = open && v_flex().gap(4)
     .child(Input.new(view.reply))
-    .child(div().text_size(10.5).text_color(t.dim).child(it.kind === "decision" && cap.terminal ? "Enter sends it to the captain, with this decision attached" : it.run && runGone(it.run) ? "Enter writes it to the run's inbox, where it waits until the run is resumed" : "Enter writes it to the run's inbox and tells its orchestrator"));
+    .child(div().text_size(10.5).text_color(t.dim).child(it.kind === "decision" && cap.terminal ? "Enter sends it to the captain, with this decision attached" : it.run && runGone(it.run, ctx) ? "Enter writes it to the run's inbox, where it waits until the run is resumed" : "Enter writes it to the run's inbox and tells its orchestrator"));
   return { replyBtn, optionButton, canPick, note, input };
 }
