@@ -29,6 +29,7 @@ import { statsView } from "./stats.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
 import { observeTelling } from "./telling.js";
 import { parseCommand, runNamed, newRunArgs } from "./commands.js";
+import { openHarbor3d } from "./harbor3d.js";
 import { openNewRun, initNewRun, newRunView } from "./newrun.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
@@ -118,6 +119,7 @@ async function listen(view, cx) {
       else if (name === "show-overview") showView("overview", "cards", 560, 900);
       else if (name === "show-crew") showView("crew", "crew", 360, 640);
       else if (name === "new-run") openNewRun(newRunArgs(arg));
+      else if (name === "harbor3d") openHarbor3d(view).then(() => cx.notify());
       else if (name === "close-popup") closePopup();
       else if (name === "open-run") showPopup(view, arg, true);
       cx.notify();

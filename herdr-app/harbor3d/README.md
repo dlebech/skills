@@ -1,6 +1,6 @@
 # Harbor 3D
 
-A small Node server (no server dependencies) and a three.js page that show every Herdr run as a reef in a harbor.
+A small Node server (no server dependencies) and a three.js page that show every Herdr run as a berth in a working harbor: a pier, a cargo ship, a crane and containers.
 Harbormaster writes a facts file; the server turns it into a *scene* and streams it to browsers over Server-Sent Events.
 
 ```

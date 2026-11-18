@@ -13,6 +13,8 @@ import { needCount, rowLead } from "./crewrows.js";
 import { zoom, programIcon, runName, withTip } from "./ui.js";
 import { runFacts, attOf, pathInput, needItemsOf, needButton, actionButton, runProps, PASS, AMBER } from "./overview.js";
 import { primaryOf } from "./needaction.js";
+import { noteText } from "./note.js";
+import { openHarbor3d, HARBOR3D_TIP } from "./harbor3d.js";
 import { mergePath } from "./mergepath.js";
 import { buoyLook, stillLook, idle, captainText, boatBadge, railCounts, opensPopup, motionOf, BADGE_TEXT } from "./sealook.js";
 
@@ -191,8 +193,10 @@ export function rail(view, t) {
   return h_flex().id("rail").size_full().bg(t.chrome).border_t(1).border_b(1).border_color(t.border).px(14).items_center().justify_between().text_size(11).text_color(t.muted)
     .child(h_flex().gap(4).child(div().text_color(t.foreground).child(`${s?.name ?? ""} / ${tab?.name ?? ""}`)))
     .child(h_flex().gap(14).items_center()
+      .when(Boolean(noteText(view)), (el) => el.child(div().id("rail-note").text_color(t.foreground).child(noteText(view))))
       .child(h_flex().gap(4).children(counts.flatMap((c, i) => [
         ...(i ? [div().child("·")] : []),
         div().text_color(c.tone ? t[c.tone] : t.muted).child(c.text)])))
+      .child(div().id("open-3d").cursor_pointer().hover((x) => x.text_color(t.foreground)).tooltip(HARBOR3D_TIP).on_click((_e, cx) => { openHarbor3d(view).then(() => cx.notify()); }).child("3D ↗"))
       .child(div().id("to-main").cursor_pointer().hover((x) => x.text_color(t.foreground)).on_click(() => run("layout.switch", { name: "harbormaster-main" })).child("Back to main")));
 }

@@ -3,7 +3,9 @@
 # the harbormaster-sea layout, and harbormaster-main (Herdr's main layout made calm: the
 # Crew block opens with the Needs-you box and takes the height, Herdr's own Spaces list
 # stays below it with "This computer" and each machine, Herdr's Agents list is gone), and
-# binds ctrl-shift-h to open and close the overview. Run it from any terminal while the
+# binds ctrl-shift-h to open and close the overview. It also copies Harbor 3D (the browser
+# view of the runs, herdr-app/harbor3d) to <home>/harbor3d and runs npm ci --omit=dev there;
+# without npm that step is skipped with one line and the rest stays installed. Run it from any terminal while the
 # Herdr app is open. Safe to run again: it updates the mod and the sea layout, makes
 # harbormaster-main calm once and then leaves it alone (except that it swaps the Spaces
 # picker of an earlier version for Herdr's Spaces list), and adds the key only if it is missing. It refuses to
@@ -120,6 +122,24 @@ else
   echo "bound ctrl-shift-h to open and close the overview"
 fi
 
+# 3b. Harbor 3D: the server, its page and models, copied to <home>/harbor3d (not its tests,
+#     Blender scripts or node_modules), the models staying in models/out as http.js expects.
+#     Replaced only when it is Harbormaster's own (package.json named harbor3d).
+h3="$home/harbor3d"
+{ [ ! -e "$h3" ] || jq -e '.name == "harbor3d"' "$h3/package.json" >/dev/null 2>&1; } \
+  || die "harbor3d exists in $home and isn't Harbormaster's; move it aside first"
+rm -rf "$h3/bin" "$h3/server" "$h3/public" "$h3/models/out"
+mkdir -p "$h3/models/out"
+cp -R "$here/harbor3d/bin" "$here/harbor3d/server" "$here/harbor3d/public" "$h3/"
+cp "$here"/harbor3d/models/out/*.glb "$h3/models/out/"
+cp "$here/harbor3d/package.json" "$here/harbor3d/package-lock.json" "$here/harbor3d/README.md" "$h3/"
+echo "installed harbor3d"
+if command -v npm >/dev/null && (cd "$h3" && npm ci --omit=dev --no-audit --no-fund >/dev/null 2>&1); then
+  echo "installed Harbor 3D's dependencies"
+else
+  echo "Harbor 3D needs Node 22+ and npm, which are missing or failed; the rest of Harbormaster is installed"
+fi
+
 # 4. Check the mod.
 herdr-app check "$home/mods/harbormaster"
 
@@ -129,4 +149,6 @@ Done. ctrl-shift-h opens and closes the overview. Switch layouts with ctrl-shift
   herdr-app do layout.switch '{"name":"harbormaster-main"}'   # your usual window, calm: Needs-you box, Crew, Herdr's Spaces list
   herdr-app do layout.switch '{"name":"harbormaster-sea"}'    # the harbor
 To keep the overview beside the captain, click "Pin beside captain" on the captain's card.
+Harbor 3D opens from the "3D ↗" button; to share it with pseudonyms only, run:
+  node ~/.config/herdr-app/harbor3d/bin/harbor3d.js share
 EOF
