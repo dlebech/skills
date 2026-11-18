@@ -22,7 +22,7 @@ const pick = (table, key, fallback) => (Object.hasOwn(table, key) ? table[key] :
 
 const TYPES = { feat: "feat", fix: "fix", rev: "rev", expl: "expl" };
 const NEEDS = {
-  question: "question", gone: "gone", stalled: "stalled", "red-ci": "red-ci", "request review": "request-review",
+  question: "question", gone: "gone", "idle-ask": "question", stalled: "stalled", "red-ci": "red-ci", "request review": "request-review",
   "changes requested": "changes-requested", "approved — merge": "merge", "review proof → merge": "review-proof",
   finished: "finished", "review-pending": "other",
 };

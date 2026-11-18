@@ -47,6 +47,13 @@ test("toastParts: a question, an approval to merge and red CI each become a part
   assert.ok(toastParts(red, ra).parts.some((x) => x.id === "pr/red-ci:red CI on #42" && x.text === "Red CI on #42"));
 });
 
+test("toastParts: an idle orchestrator past its grace is told: stopped without asking", () => {
+  const r = run({ prs: [] });
+  const { parts } = toastParts(r, att(r, { orch: "done", pr: read([]), orchIdleMs: 3 * MIN }));
+  assert.deepEqual(parts, [{ id: "idle-ask", text: "Stopped without asking — read its tab" }]);
+  assert.deepEqual(toastParts(r, att(r, { orch: "done", pr: read([]), orchIdleMs: MIN })).parts, []);
+});
+
 test("toastParts: a finished run with no PR and a gone orchestrator are told; a stall is not", () => {
   const fin = run({ phase: "finished", prs: [] });
   assert.deepEqual(toastParts(fin, att(fin, { pr: read([]) })).parts.map((x) => x.id), ["finished"]);
