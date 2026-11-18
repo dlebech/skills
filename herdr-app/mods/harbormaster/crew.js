@@ -14,6 +14,7 @@ import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, ex
 import { reviewError } from "./reviews.js";
 import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
+import { SNOOZE_CHOICES, snoozed, splitSnoozed, loadSnoozed, setSnooze, wakeSnoozes } from "./snooze.js";
 import { openNewRun, openStartCaptain, reviewStarting } from "./newrun.js";
 import { primaryOf, isMergeAsk, requestingFor } from "./needaction.js";
 import { claimsAsk, checksLine, reviewedLine, withSaid, withAsked, claimActions } from "./claims.js";
@@ -425,23 +426,45 @@ export function nextAction(m, it, id) {
   return it.action?.url ? smallButton(t, `${id}-act`, it.action.label, it.action.url, () => openUrl(it.action.url)) : null;
 }
 
-function nextRow(m, it, i) {
+// Later, quiet, beside the action: a click swaps it for the three choices (one row at a time).
+function laterControl(m, it, id) {
+  const { t, view } = m;
+  if (view.laterOpen !== it.url) return quietLink(t, `${id}-later`, "Later", "Hide it for a while; it returns when its time is up or its need changes", (_e, cx) => { view.laterOpen = it.url; cx.notify(); });
+  // A click in a gap of the menu is not a click on the row (it would open the PR).
+  return h_flex().id(`${id}-later-menu`).flex_none().gap(7).items_center().on_click((_e, cx) => cx.stop_propagation())
+    .child(quietLink(t, `${id}-later-close`, "×", "Close this without choosing", (_e, cx) => { view.laterOpen = null; cx.notify(); }))
+    .children(SNOOZE_CHOICES.map((c) => quietLink(t, `${id}-later-${c.key}`, c.label, `Hide it until ${c.label}`, (_e, cx) => { view.laterOpen = null; setSnooze(it, c.until(Date.now())).then(() => cx.notify()); cx.notify(); })));
+}
+
+function nextRow(m, it, i, snoozedRow = false) {
   const { t } = m;
-  const id = `crew-next-${i}`;
-  const action = nextAction(m, it, id);
+  const id = `crew-next-${snoozedRow ? "z" : ""}${i}`;
+  const action = snoozedRow ? quietLink(t, `${id}-wake`, "Wake", "Show it in the list again", (_e, cx) => { setSnooze(it, null).then(() => cx.notify()); cx.notify(); }) : nextAction(m, it, id);
+  const later = snoozedRow ? null : laterControl(m, it, id);
   const far = it.kind === "review" && !it.local ? "No clone of this repository found next to your open spaces: open a space for it, or clone it beside one, to review it from here" : null;
   return h_flex().id(id).flex_none().gap(8).px(PAD).py(3).rounded(6).items_center().cursor_pointer().hover((st) => st.bg(t.hover))
     .tooltip([`${it.repo}#${it.number}: ${it.title}`, it.url, far].filter(Boolean).join("\n"))
     .on_click(() => openUrl(it.url))
     .child(v_flex().flex_1().min_w(0).gap(1)
-      .child(div().min_w(0).truncate().text_size(12).text_color(t.foreground).child(`${prRef(it.repo, it.number)} · ${it.title}`))
+      .child(div().min_w(0).truncate().text_size(12).text_color(snoozedRow ? t.dim : t.foreground).child(`${prRef(it.repo, it.number)} · ${it.title}`))
       .child(div().min_w(0).truncate().text_size(11).text_color(t.dim).child([it.reason, it.age != null ? ageText(it.age) : null].filter(Boolean).join(" · "))))
+    .when(Boolean(later), (el) => el.child(later))
     .when(Boolean(action), (el) => el.child(action));
 }
 
 function nextSection(m) {
   const { view, t } = m;
-  const items = nextItems({ runs: view.runs.filter((r) => !r.away) });
+  // Snoozed items (snooze.js) are out of the list and its count; a dim line below unfolds them.
+  if (snoozed() == null) loadSnoozed(); // the next poll shows what it read
+  const { shown: items, snoozed: asleep, woke } = splitSnoozed(nextItems({ runs: view.runs.filter((r) => !r.away) }), snoozed(), m.now ?? Date.now());
+  if (woke.length) wakeSnoozes(woke);
+  const sleepKey = "crew-next-snoozed";
+  const sleepOpen = unfolded(view, sleepKey, false);
+  const sleepRows = asleep.length ? [
+    h_flex().id("crew-next-snoozed").flex_none().px(PAD).h(20).items_center()
+      .child(quietLink(t, "crew-next-snoozed-toggle", `snoozed · ${asleep.length}`, sleepOpen ? "Fold them back" : "Show what you snoozed", toggleFold(view, sleepKey, sleepOpen))),
+    ...(sleepOpen ? asleep.map((it, i) => nextRow(m, it, i, true)) : []),
+  ] : [];
   const moreKey = "crew-next-more";
   const open = unfolded(view, moreKey, false);
   // While more than one thing needs you, three rows, so the runs below stay in sight.
@@ -449,9 +472,11 @@ function nextSection(m) {
   const extra = Math.max(0, items.length - max);
   const err = reviewError() ?? mineError();
   // Nothing to list and no way to look: say so, rather than look like "nothing waits on you".
+  // Everything snoozed: only the dim line, not an empty amber header.
+  if (!items.length && asleep.length && !err) return sleepRows;
   if (!items.length && err) return [h_flex().id("crew-group-next").flex_none().h(22).px(PAD).gap(6).items_center().text_size(10.5)
     .child(div().flex_none().font_semibold().text_color(t.dim).child("Next for you · ?"))
-    .child(div().min_w(0).truncate().text_color(t.dim).child(err))];
+    .child(div().min_w(0).truncate().text_color(t.dim).child(err)), ...sleepRows];
   return section(m, {
     key: "next", title: "Next for you", count: items.length, tone: AMBER(t),
     rows: () => [
@@ -459,6 +484,7 @@ function nextSection(m) {
       ...(extra > 0 ? [h_flex().id("crew-next-more").flex_none().px(PAD).h(20).items_center()
         .child(quietLink(t, "crew-next-more-toggle", open ? "show fewer" : `+ ${extra} more`, open ? "Fold them back" : "The rest of the list", toggleFold(view, moreKey, open)))] : []),
       ...(err ? [div().id("crew-next-error").flex_none().px(PAD).text_size(10.5).text_color(t.dim).child(`${err}: the list may be old`)] : []),
+      ...sleepRows,
     ],
   });
 }
