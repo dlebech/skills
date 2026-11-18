@@ -3,7 +3,7 @@
 # the harbormaster-sea layout, and harbormaster-main (Herdr's main layout made calm: the
 # Crew block opens with the Needs-you box and takes the height, Herdr's own Spaces list
 # stays below it with "This computer" and each machine, Herdr's Agents list is gone), and
-# binds ctrl-shift-h to open and close the overview. Run it from any terminal while the
+# binds ctrl-shift-h to open and close the Bridge. Run it from any terminal while the
 # Herdr app is open. Safe to run again: it updates the mod and the sea layout, makes
 # harbormaster-main calm once and then leaves it alone (except that it swaps the Spaces
 # picker of an earlier version for Herdr's Spaces list), and adds the key only if it is missing. It refuses to
@@ -103,22 +103,22 @@ if [ -f "$main" ] && jq -e "$picker" "$main" >/dev/null 2>&1; then
   rm -f "$tmp"
 fi
 
-# 3. ctrl-shift-h opens and closes the overview as a popup, unless that key is taken
+# 3. ctrl-shift-h opens and closes the Bridge as a popup, unless that key is taken
 #    in any section (a layout's or mod's own binding wins over global). keys.json holds
 #    every key, so without one there is nothing safe to add to.
 keys="$home/keys.json"
 bind_hint='add "ctrl-shift-h": "mod.open:harbormaster" (or another free key) under "global" in keys.json'
 if [ ! -f "$keys" ]; then
-  echo "no keys.json yet; to toggle the overview with a key, $bind_hint"
+  echo "no keys.json yet; to toggle the Bridge with a key, $bind_hint"
 elif jq -e '[.[] | objects | to_entries[] | select(.value == "mod.open:harbormaster")] | length > 0' "$keys" >/dev/null; then
   :
 elif jq -e '[.[] | objects | has("ctrl-shift-h")] | any' "$keys" >/dev/null; then
-  echo "ctrl-shift-h is taken in keys.json; to toggle the overview with a key, $bind_hint"
+  echo "ctrl-shift-h is taken in keys.json; to toggle the Bridge with a key, $bind_hint"
 else
   tmp=$(mktemp)
   jq '.global = ((.global // {}) + {"ctrl-shift-h": "mod.open:harbormaster"})' "$keys" > "$tmp" && cat "$tmp" > "$keys"
   rm -f "$tmp"
-  echo "bound ctrl-shift-h to open and close the overview"
+  echo "bound ctrl-shift-h to open and close the Bridge"
 fi
 
 # 3b. Harbor 3D is not installed (it runs from the repository); an earlier version copied it
@@ -134,8 +134,8 @@ herdr-app check "$home/mods/harbormaster"
 
 cat <<'EOF'
 
-Done. ctrl-shift-h opens and closes the overview. Switch layouts with ctrl-shift-l, or:
+Done. ctrl-shift-h opens and closes the Bridge. Switch layouts with ctrl-shift-l, or:
   herdr-app do layout.switch '{"name":"harbormaster-main"}'   # your usual window, calm: Needs-you box, Crew, Herdr's Spaces list
   herdr-app do layout.switch '{"name":"harbormaster-sea"}'    # the harbor
-To keep the overview beside the captain, click "Pin beside captain" on the captain's card.
+To keep the Bridge beside the captain, click the pin on the Captain row of the Bridge, or "captain ↗" in the sidebar.
 EOF

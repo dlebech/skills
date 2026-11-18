@@ -29,3 +29,9 @@ _Avoid_: requested, sent
 **Wake**:
 Telling an orchestrator to read a new inbox message. A gone orchestrator is never woken; its message waits until the run is resumed.
 _Avoid_: ping, notify
+
+### Where you look
+
+**Bridge**:
+Harbormaster's one view of everything: what waits on you, your open runs, parked runs, this week's figures and the captain. It works with no captain running.
+_Avoid_: overview, runs overview, dashboard, captain view

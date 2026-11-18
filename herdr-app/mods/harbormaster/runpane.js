@@ -629,13 +629,13 @@ function drawRunDetail(view, t, r, ctx) {
     .child(actionRow(view, t, r, orch, closed, counts));
 }
 
-// Adds or removes a Harbormaster pane beside an agent: the runs overview beside the
+// Adds or removes a Harbormaster pane beside an agent: the Bridge (overview.js) beside the
 // captain, or one run's card beside its orchestrator (`run`). Shown greyed out, with the
 // reason, while the agent's terminal is not on screen.
 export function pinButton(t, id, spot, { run = null, labelled = false } = {}) {
   if (!spot) return div();
   const who = run ? "orchestrator" : "captain";
-  const what = run ? "this run's card" : "the runs";
+  const what = run ? "this run's card" : "the Bridge";
   const usable = Boolean(spot.pinned || spot.pane);
   const tip = spot.pinned ? `Close the Harbormaster pane beside the ${who}`
     : usable ? `Keep ${what}${run ? " (PRs, related PRs, issues, tasks)" : ""} open as a pane beside the ${who}`
@@ -683,7 +683,7 @@ export function runPane(view, t, p) {
     .child(v_flex().id("run-pane-list").flex_1().min_h(0).p(10).gap(8).overflow_y_scrollbar()
       .child(r ? runDetail(view, t, r, ctx) : view.runs.length
         ? v_flex().p(12).gap(8).items_start().text_size(12).text_color(t.dim)
-          .child("This run is no longer in the harbor. Pin its card again from the overview or the Crew block.")
+          .child("This run is no longer in the harbor. Pin its card again from the Bridge or the Crew block.")
           .child(actionButton(t, "close-pane", "Close this pane", null, () => closeOwnPane()))
         : div().p(12).text_size(12).text_color(t.dim).child("Reading the run…"))
       .children(noteRows(view, t, false)));

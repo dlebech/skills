@@ -1,6 +1,6 @@
-// Harbormaster: an overview of herdr-app-orchestrator runs and the captain watching them.
+// Harbormaster: the Bridge (overview.js) for herdr-app-orchestrator runs, and the captain watching them.
 // props().role picks the view:
-//   (none) / "cards"  the runs overview: totals, what's waiting on you, the captain, run cards with progress, tasks, PRs
+//   (none) / "cards"  the Bridge: totals, the queue, open runs as lines, parked runs, this week, the captain
 //   "run"             one run's card (props().dir and .terminal name it), pinned beside its orchestrator
 //   "crew"            the sidebar: header, Needs-you box, Next for you, runs as one-line rows, agents adrift
 //   "viewer"          a proof screenshot, opened as an overlay by a click on a thumbnail (viewer.js)

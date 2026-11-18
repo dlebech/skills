@@ -148,7 +148,7 @@ function captainLink(m) {
     : mark === "working" || mark === "blocked" ? statusDot(t, mark) : null;
   const state = { watching: `Watching: ${watchedText(stats(view.runs, ctx))}, idle until something needs it`, working: "Working", blocked: "Waiting on a prompt in its terminal",
     idle: cap.watching ? "Idle" : "Idle, not watching runs" }[mark];
-  const tip = [`The captain · ${state}`, asks ? `${plural(asks, "decision")} for you` : null, "Click to open it, with the overview beside it"].filter(Boolean).join("\n");
+  const tip = [`The captain · ${state}`, asks ? `${plural(asks, "decision")} for you` : null, "Click to open it, with the Bridge beside it"].filter(Boolean).join("\n");
   return h_flex().id("crew-captain-link").flex_none().gap(5).items_center().px(6).h(22).rounded(5)
     .text_size(11.5).text_color(tone).tooltip(tip)
     .cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))

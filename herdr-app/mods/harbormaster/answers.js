@@ -92,9 +92,9 @@ export function noAnswer(it) {
     return `${line ?? "This run needs you without a question"}. Nothing to answer here: click it to open its orchestrator`;
   }
   if (it.kind === "decision" && !captainOf(facts()).terminal) {
-    if (!it.run?.localTerminal) return "The captain isn't running and this decision names no run: start the captain (⚓+ in the sidebar, or Start captain in the overview) to answer it";
+    if (!it.run?.localTerminal) return "The captain isn't running and this decision names no run: start the captain (⚓+ in the sidebar, or Start captain in the Bridge) to answer it";
     // Nobody reads a gone run's inbox, and this decision is about the run itself (resume, park or close).
-    if (runGone(it.run)) return "This run is gone and the captain isn't running: start the captain (⚓+ in the sidebar, or Start captain in the overview), or use the run's own Resume, Park or Close";
+    if (runGone(it.run)) return "This run is gone and the captain isn't running: start the captain (⚓+ in the sidebar, or Start captain in the Bridge), or use the run's own Resume, Park or Close";
   }
   if (it.kind !== "decision" && !it.run?.localTerminal) return "This run's orchestrator isn't known: open the run to answer";
   return null;
@@ -116,7 +116,7 @@ export function answerParts(view, t, it, ctx, slot = "") {
   const replyBtn = it.kind !== "attention" && h_flex().id(rid + "-reply").flex_none().items_center().px(8).h(22).rounded(5)
     .text_size(11).text_color(open ? t.accent : t.dim)
     .when(Boolean(why), (el) => el.opacity(0.45).tooltip(why))
-    .when(!why, (el) => el.cursor_pointer().tooltip(slot ? "Answer in your own words" : "Answer in your own words, without leaving the overview")
+    .when(!why, (el) => el.cursor_pointer().tooltip(slot ? "Answer in your own words" : "Answer in your own words, without leaving the Bridge")
       .hover((st) => st.bg(t.hover).text_color(t.foreground))
       .on_click((_e, cx) => {
         cx.stop_propagation();

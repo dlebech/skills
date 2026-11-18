@@ -11,8 +11,8 @@
 #   {"id", "question", "run" (the run as runs.sh prints it: its directory, or <machine>:<directory> for a run on another machine; or null), "asked" (UTC time)}
 # and, when given, the same sections as a run's question.md (run-files.md):
 #   "options": [{"label", "text"}], "recommended", "evidence", "risk", "blocks"
-# oldest first, so Harbormaster's "Waiting on you" queue can show them beside the
-# runs' own question.md files, with one button per option, and they survive the
+# oldest first, so Harbormaster's Needs-you queue can show them beside the
+# runs' own question.md files, its recommended option as the button, and they survive the
 # back and forth that buries a question in the captain's tab. Entries without the
 # sections stay valid. add rewords a decision with the same id in place, keeping its
 # run unless --run gives another, its sections unless a flag gives them again (--option
