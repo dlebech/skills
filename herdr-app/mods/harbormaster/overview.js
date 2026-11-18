@@ -4,7 +4,7 @@ import { div, svg } from "gpui-kit";
 import { openStartCaptain } from "./newrun.js";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, answerRun, acceptProof, unacceptProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
+import { stats, decisionQueue, acceptProof, unacceptProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, exactStatus, orchestratorState, agentStatus, workersOf, captainOf, programOf, captainPane, paneBeside, togglePin, needReason, focusAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
@@ -21,7 +21,7 @@ import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
 import { markProofSeen } from "./proofseen.js";
 import { rowEdge, badgeOf, needLine, closableDone, needCount, needRunsOf, runlessNeeds, watchingText, workerTree } from "./crewrows.js";
-import { asked as inboxAsked, askedLevel } from "./inbox.js";
+import { asked as inboxAsked, unmarkAsked, askedLevel } from "./inbox.js";
 import { askClick } from "./askclick.js";
 import { defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
@@ -1362,9 +1362,10 @@ export function captainStrip(view, t, ctx, s) {
 
 // Sends an answer to an item of the queue. A captain decision goes to the captain, typed
 // into its input, when it is there; otherwise, and for a run's question, to the run's inbox
-// (answerRun), which wakes its orchestrator. Marks the item answered once it is written.
+// (inbox.js, the answer kind), which wakes its orchestrator. Marks the item answered (inbox.js
+// asked) before the write, so a second click meanwhile is ignored.
 // Returns false when there is nowhere to send it.
-function sendAnswer(view, it, text, cx, option = false) {
+export function sendAnswer(view, it, text, cx, option = false) {
   const cap = captainOf(facts()).terminal;
   if (it.kind === "decision" && cap) {
     replyToCaptain(cap.address, it.decision, text);
@@ -1372,27 +1373,22 @@ function sendAnswer(view, it, text, cx, option = false) {
   }
   const run = it.run;
   if (!run?.localTerminal || noAnswer(it)) return false;
-  view.actionError = null;
-  // Marked before the write, so a second click meanwhile is ignored; undone if it fails.
-  view.answered[it.id] = it.since ?? 0;
-  cx.spawn(async (cx) => {
-    try {
-      // The budget question's Compact button compacts the orchestrator first (never a typed reply).
-      if (option && isCompact(text) && isBudgetQuestion(it)) await compactRun(run, it.title, text);
-      else await answerRun(run, it.title, text);
-      // The captain isn't there to clear its decision, so it goes with the answer.
-      if (it.kind === "decision") await dropDecision(it.decision).catch(() => {});
-    } catch (e) {
-      // Written but the wake failed: the answer is in the inbox, so it stays answered and
-      // a captain decision still goes (else each click would write another message).
-      if (e?.inInbox) { if (it.kind === "decision") await dropDecision(it.decision).catch(() => {}); }
-      else delete view.answered[it.id];
-      view.actionError = `${run.branch}: ${e?.message ?? e}`;
-    }
-    view.redraw = true;
-    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
-    try { await view.load(cx); } catch { /* the next refresh shows it */ }
-  }, { owner: null });
+  const key = it.id;
+  // The captain isn't there to clear its decision, so it goes with the answer.
+  const drop = async () => { if (it.kind === "decision") await dropDecision(it.decision).catch(() => {}); };
+  // The budget question's Compact button compacts the orchestrator first (never a typed reply).
+  const compact = option && isCompact(text) && isBudgetQuestion(it);
+  askClick(view, cx, run, "answer", { title: it.title, answer: text }, {
+    asks: [{ key, item: it }],
+    via: compact ? async () => { await compactRun(run, it.title, text); return { outcome: "sent" }; } : null,
+    after: drop,
+    // Written but the wake failed: the answer is in the inbox, so it stays answered and
+    // a captain decision still goes (else each click would write another message).
+    onError: async (e) => {
+      if (e?.inInbox) await drop();
+      else unmarkAsked(run, "answer", key);
+    },
+  });
   return true;
 }
 
@@ -1449,12 +1445,10 @@ function noAnswer(it) {
 // {replyBtn, optionButton(i), canPick, note, input}; replyBtn, note and input may be false.
 export function answerParts(view, t, it, ctx, slot = "") {
   const cap = captainOf(ctx);
-  // An answer written for an earlier question of this run (another `since`) no longer counts.
-  if (view.answered[it.id] !== undefined && view.answered[it.id] !== (it.since ?? 0)) delete view.answered[it.id];
   const rid = replyId(slot, it.id);
   const open = view.replying === rid;
   // A message waiting in the run's inbox counts too: someone else (the captain, by hand) answered.
-  const sent = view.answered[it.id] !== undefined;
+  const sent = it.run ? inboxAsked(it.run, "answer", it.id, it) : false;
   const answered = sent || Boolean(it.answered);
   const why = noAnswer(it);
   const replyBtn = it.kind !== "attention" && h_flex().id(rid + "-reply").flex_none().items_center().px(8).h(22).rounded(5)
@@ -1501,10 +1495,6 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
   const cap = captainOf(ctx);
   const items = decisionQueue(runs, decisions, ctx);
   if (!items.length) return null;
-  for (const id of Object.keys(view.answered)) {
-    const it = items.find((x) => x.id === id);
-    if (!it || (it.since ?? 0) !== view.answered[id]) delete view.answered[id];
-  }
   const row = (it) => {
     const why = noAnswer(it);
     const address = it.kind === "decision" ? cap.terminal?.address : it.run?.terminal;

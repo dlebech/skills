@@ -13,7 +13,7 @@
 // toast in the shared store (`by`) and posts it only if its claim still stands after writing.
 
 import { shared, setShared, notify } from "herdr";
-import { cachedRuns, prsOf, isClosed } from "./data.js";
+import { cachedRuns, prsOf, isClosed, decisionQueue, filesFresh } from "./data.js";
 import { pruneAsked, migrateCommentsAsked } from "./inbox.js";
 import { claimRows } from "./claims.js";
 import { attentionOf } from "./attend.js";
@@ -79,8 +79,18 @@ export function markDecisionsSeen(run) {
 // The item a mark's signature is read from, where the run alone does not give it: the PR of an
 // Address comments mark, the claim row of an Ask to prove. Undefined (the mark is kept) for a stale
 // run, or one that no longer has it.
-function markItem(run, family, key) {
-  if (run.stale) return undefined;
+function markItem(run, family, key, queue = null) {
+  // Not a fresh read (a stale run, a machine that failed, or polls older than two minutes): the
+  // queue is missing items only because nothing was read, so every mark is kept.
+  if (!filesFresh(run)) return undefined;
+  // An answer's queue item by id; false once it is not in the queue (the question is gone). A
+  // captain decision belongs to its own machine (its key is "dec-<machine>:<id>"): gone only
+  // when that machine answered this read too.
+  if (family === "answer") {
+    const item = queue?.get(key);
+    if (item || !key.startsWith("dec-")) return item ?? false;
+    return filesFresh({ machine: key.slice(4, key.indexOf(":")) || null }) ? false : undefined;
+  }
   if (family === "comments") return (prsOf(run) ?? []).find((p) => p.url === key);
   if (family === "proof") return claimRows(run.proof, run).find((k) => k.id === key);
   return undefined;
@@ -102,6 +112,7 @@ export function observeTelling(runs, ctx, now = Date.now()) {
   // a week passed. A comments mark reads its PR, a proof mark its claim row; a stale run's marks
   // are kept (its files are not a fresh read), and age out.
   const busy = new Set(live.filter((r) => atts.get(r).working).flatMap((r) => (prsOf(r) ?? []).map((p) => p.url)));
+  const queue = new Map(decisionQueue(runs, cachedRuns().decisions ?? [], ctx).map((x) => [x.id, x]));
   migrateCommentsAsked(runs, prsOf);
-  pruneAsked(runs, { now, closed: (r) => isClosed(r, ctx), busy, lookup: markItem });
+  pruneAsked(runs, { now, closed: (r) => isClosed(r, ctx), busy, lookup: (run, family, key) => markItem(run, family, key, queue) });
 }

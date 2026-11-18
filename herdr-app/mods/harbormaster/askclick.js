@@ -10,7 +10,10 @@ import { setNote } from "./note.js";
 // `notes` are this button's texts, after "<branch>: ": `waits` (the orchestrator is gone, the
 // message waits in the inbox), `blocked` (it is on a dialog) and optionally `sent`.
 // `before(cx)` runs first, for what only this button does (closing a text field).
-export function askClick(view, cx, run, kind, payload, { asks = [], notes = {}, before = null } = {}) {
+// `via()` sends in place of inbox.js send, for a button that does more than write (Compact); it
+// resolves to {outcome} as send does. `after()` runs once the send succeeded, `onError(e)` when it
+// failed (before the error is shown), each awaited and never failing the click.
+export function askClick(view, cx, run, kind, payload, { asks = [], notes = {}, before = null, via = null, after = null, onError = null } = {}) {
   if (before) before();
   // Marked now, before the first redraw, as the buttons always did; send marks again (the same
   // mark) and takes it back if the message never reached the inbox.
@@ -19,10 +22,12 @@ export function askClick(view, cx, run, kind, payload, { asks = [], notes = {}, 
   cx.notify();
   cx.spawn(async (cx) => {
     try {
-      const { outcome } = await send(run, kind, payload, { asks });
+      const { outcome } = await (via ? via() : send(run, kind, payload, { asks }));
+      if (after) await after(outcome);
       const note = outcome === "waits" ? notes.waits : outcome === "blocked" ? notes.blocked : notes.sent;
       if (note) setNote(view, `${run.branch}: ${note}`);
     } catch (e) {
+      if (onError) await onError(e);
       view.actionError = `${run.branch}: ${e?.message ?? e}`;
     }
     view.redraw = true;

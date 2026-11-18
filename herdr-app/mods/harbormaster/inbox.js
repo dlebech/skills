@@ -211,6 +211,15 @@ export const KINDS = {
     sig: (run, item) => String(item?.since ?? 0),
     unread: () => false,
   },
+  // Closing a run asks its orchestrator to clean up (data.js putAway). No unread prefix and no
+  // asked state: the card shows its own note.
+  close: {
+    // `tell`: always tried, never held in the inbox as "waits": a gone orchestrator fails the wake, as Close always did.
+    source: "harbormaster-close", prefix: null, family: "close", tell: true,
+    build: () => "The user closed this run in Harbormaster. Clean up and close your tab, as in your skill's section 9 (Close).",
+    sig: null,
+    unread: () => false,
+  },
 };
 
 // What a run's header tags, Crew rows and the run read use to tell the asks apart from answers:
@@ -233,12 +242,12 @@ const POST = 'd=$1 f=$2; mkdir -p "$d/inbox" && printf "%s\\n" "$3" >"$d/inbox/.
 // Resolves to {blocked}: true when the orchestrator is on a dialog and reads the message
 // once that is answered. Throws when the message could not be written, or the wake failed
 // (the message then still waits in the inbox).
-export async function tellOrchestrator(run, source, text) {
+async function tellOrchestrator(run, source, text) {
   return wakeOrchestrator(run, await writeInbox(run, source, text));
 }
 
 // Writes the message to the run's inbox and returns its file name.
-export async function writeInbox(run, source, text) {
+async function writeInbox(run, source, text) {
   // Milliseconds after the seconds, so two answers in one second are two files.
   const now = new Date().toISOString();
   const file = `${now.replace(/[-:]|\.\d+/g, "")}-${now.slice(20, 23)}-${source}.message`;
@@ -255,7 +264,7 @@ export async function writeInbox(run, source, text) {
 // window reports it) is not sent to at all, as hc would refuse it; the message waits in its
 // inbox. A dialog that opens while a wake is held drops that wake the same way, with no sign;
 // the orchestrator reads its inbox at its next step.
-export async function wakeOrchestrator(run, file) {
+async function wakeOrchestrator(run, file) {
   const fail = (why) => Object.assign(new Error(`the message is in its inbox, but its orchestrator could not be told: ${why}`), { inInbox: true });
   const hc = (args) => exec("hc", args, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
   const got = await hc(["get", run.localTerminal]);
@@ -271,7 +280,7 @@ export async function wakeOrchestrator(run, file) {
 // Writes `text` to the run's inbox and wakes its orchestrator, unless it is gone: a gone or lost
 // orchestrator is never told (its terminal is gone, or only a shell, which would run the wake-up
 // line as a command). The message waits in the inbox until the run is resumed.
-export async function messageRun(run, source, text) {
+async function messageRun(run, source, text) {
   if (orchestratorState(run, facts()) === "gone") {
     await writeInbox(run, source, text);
     return { blocked: false, waits: true };
@@ -292,13 +301,19 @@ export async function send(run, kind, payload = {}, { asks = [], now = Date.now(
   const text = k.build(run, payload);
   for (const a of asks) markAsked(run, kind, a.key, a.item, now);
   try {
-    const out = await messageRun(run, k.source, text);
+    const out = k.tell ? await tellOrchestrator(run, k.source, text) : await messageRun(run, k.source, text);
     return { outcome: out.waits ? "waits" : out.blocked ? "blocked" : "sent" };
   } catch (e) {
     if (!e?.inInbox) for (const a of asks) unmarkAsked(run, kind, a.key);
     throw e;
   }
 }
+
+// The two halves of an answer that must not be woken at once (Compact): writes the message of
+// `kind` to the run's inbox and returns its file, then wakes the orchestrator to read that file
+// (resolving as send does, to {blocked}; throwing with `inInbox` when it could not be told).
+export const writeMessage = (run, kind, payload = {}) => writeInbox(run, KINDS[kind].source, KINDS[kind].build(run, payload));
+export const wakeRun = (run, file) => wakeOrchestrator(run, file);
 
 // The level the tag shows as asked for `kind` ("autonomy" | "tier"), or null: a click mark the run has
 // not caught up with (under 15 s old, and neither the run's level nor the unread request yet), else
@@ -407,7 +422,10 @@ export function pruneAsked(runs, { now = Date.now(), lookup = () => undefined, b
     const run = byKey.get(rk), k = family(fam);
     if (!run || closed(run) || !k || !k.sig) return false;
     if (now - (e?.at ?? 0) > (k.keep ?? ASKED_KEEP_MS)) return false;
-    const item = lookup(run, fam, key) ?? (fam === "blocking" ? run : fam === "level" ? { current: currentLevel(run, key) } : undefined);
+    const found = lookup(run, fam, key);
+    // An answer's queue item is gone (answered for good, or the run no longer needs you).
+    if (found === false) return false;
+    const item = found ?? (fam === "blocking" ? run : fam === "level" ? { current: currentLevel(run, key) } : undefined);
     if (item === undefined) return true;
     // A click mark of a level or proof ask goes once the run shows the request unread: from then
     // the unread message carries it, and reading it ends it (as the views' own marks did).

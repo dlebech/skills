@@ -5,6 +5,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { resetShared } from "herdr";
 import { observeTelling } from "../../herdr-app/mods/harbormaster/telling.js";
+import { loadRuns } from "../../herdr-app/mods/harbormaster/data.js";
 import { facts } from "../../herdr-app/mods/harbormaster/live.js";
 import { markAsked, askedStore } from "../../herdr-app/mods/harbormaster/inbox.js";
 
@@ -23,4 +24,22 @@ test("observeTelling drops a blocking mark whose signature moved or whose run is
   // What is left, by run: the unchanged run's, and the stale run's (unchanged, though not read this time).
   const left = Object.keys(askedStore()).map((k) => k.split("\u001f")[0]).sort();
   assert.deepEqual(left, [":/r/same", ":/r/stale"]);
+});
+
+// An answer's mark reads the queue, which only a fresh read can vouch for: after polls stall
+// (the cache is old) nothing is pruned, and once a read is fresh a question that is gone drops it.
+test("answer marks: kept while the read is not fresh, dropped once fresh and the question or decision is gone", async () => {
+  const r = run("ans");
+  const need = `need-${r.key}`, dec = "dec-:d1";
+  const marks = () => Object.keys(askedStore()).map((k) => k.split("\u001f")[2]).sort();
+  markAsked(r, "answer", need, { since: 1 });
+  markAsked(r, "answer", dec, { since: 1 });
+  // No read yet (the cache is at 0): the queue is empty only because nothing was read.
+  observeTelling([r], facts());
+  assert.deepEqual(marks(), [dec, need].sort());
+  // A fresh read with no questions and no decisions.
+  globalThis.__herdrExec = async () => ({ code: 0, stdout: "", stderr: "" });
+  try { await loadRuns(); } finally { delete globalThis.__herdrExec; }
+  observeTelling([r], facts());
+  assert.deepEqual(marks(), []);
 });

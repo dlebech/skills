@@ -26,7 +26,7 @@ import { taskTone, taskCounts, taskStage } from "./tasks.js";
 export { taskStage };
 export { taskTone, taskCounts };
 import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
-import { NOT_ANSWERS, blockingPending, changesPending, send, legacyOutcome, tellOrchestrator, writeInbox, wakeOrchestrator, answerMessage } from "./inbox.js";
+import { NOT_ANSWERS, blockingPending, changesPending, send, writeMessage, wakeRun } from "./inbox.js";
 import { commentsArgs, commentSummary, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { detachedSend } from "./wake.js";
@@ -828,15 +828,6 @@ const MARK = 'd=$1 m=$2; { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d "\\n"; printf "\\
 const DROP = 'f="${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}/.captain-decisions.json"; [ -s "$f" ] && jq --arg id "$1" \'map(select(.id != $id))\' "$f" >"$f.tmp" && mv "$f.tmp" "$f"';
 export const dropDecision = (d) => exec("sh", ["-c", DROP, "sh", d.id], { on: d.machine });
 
-// Answers a run's question (or a captain decision that names the run) from the queue:
-// `answer` is an option's label or the person's own words. The messages themselves are inbox.js's;
-// these resolve to {blocked, waits?}.
-// A gone or lost orchestrator is never told: its terminal is gone, or only a shell, which
-// would run the wake-up line as a command. The message waits in the inbox until the run is
-// resumed, and this resolves to {blocked: false, waits: true}.
-const sendLegacy = async (run, kind, payload) => legacyOutcome(await send(run, kind, payload));
-export const answerRun = (run, title, answer, free = "") => sendLegacy(run, "answer", { title, answer, free });
-
 // proof-accepted.json in the run directory, which Harbormaster owns: read on the run's machine,
 // changed here, and written back only if it still holds what was read (else exit 3, and it is
 // read again), under a mkdir lock, through a temporary file of its own and mv, so two windows
@@ -891,7 +882,7 @@ export async function compactRun(run, title, answer) {
   if (orchestratorState(run, facts()) === "gone") throw new Error("not compacted: its orchestrator is gone or lost; the answer waits for a resume");
   const ok = () => ["idle", "done"].includes(exactStatus(run.terminal, facts()));
   if (!ok()) throw new Error("not compacted: its orchestrator is not idle or done");
-  const file = await writeInbox(run, "harbormaster", answerMessage(title, answer));
+  const file = await writeMessage(run, "answer", { title, answer });
   // Detached like the wake (a held draft must not fail it). The dialog case was ruled out by the
   // status check above, and the wait below outlasts the draft hold (60 s) before it goes on.
   const sent = await exec("hc", detachedSend(run.localTerminal, "/compact"), { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
@@ -902,7 +893,7 @@ export async function compactRun(run, title, answer) {
   for (let i = 0; i < 35 && ok(); i++) await sleep(2);
   for (let i = 0; i < 300 && !ok(); i++) await sleep(2);
   if (!ok()) throw new Error("compaction is still running after 10 minutes; the answer waits in its inbox");
-  return wakeOrchestrator(run, file);
+  return wakeRun(run, file);
 }
 
 // Closing a run whose orchestrator is there asks it to clean up: it ends its agents,
@@ -910,9 +901,8 @@ export async function compactRun(run, title, answer) {
 // marker and closes its own tab (herdr-app-orchestrator's section 9). Resolves to a note
 // for the card, and whether it is blocked. A blocked orchestrator reads it once its dialog is answered.
 async function askToClose(run) {
-  const { blocked } = await tellOrchestrator(run, "harbormaster-close",
-    "The user closed this run in Harbormaster. Clean up and close your tab, as in your skill's section 9 (Close).");
-  return blocked
+  const { outcome } = await send(run, "close");
+  return outcome === "blocked"
     ? { blocked: true, note: "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes" }
     : { blocked: false, note: "its orchestrator is cleaning up, and its tab closes when done" };
 }
