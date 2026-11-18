@@ -66,4 +66,4 @@ GitHub rejects the whole request (422) if one comment's line is outside the diff
 
 ## 3. Finish
 
-Report in one line (what was posted and where, or that nothing was), mark the run done, remove the review worktree and the reviewer agent, and close as in section 9, except that close.md's steps 3, 4 and 6 do not apply (no integration branch to push, no space, no task branches): remove only the review checkout and the agents.
+Report in one line (what was posted and where, or that nothing was), remove the reviewer agent, and set the run `finished`. Do not close it yourself: keep the review worktree and your own session, so the user can ask you to reword, drop or add comments (update the pending review, or `review-drafts.md`) until they close the run. When they do, close as in section 9, except that close.md's steps 3, 4 and 6 do not apply (no integration branch to push, no space, no task branches): remove only the review checkout and the agents.
