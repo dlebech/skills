@@ -31,6 +31,7 @@ import { crew } from "./crew.js";
 import { viewer, startCopies } from "./viewer.js";
 import { harbor, rail } from "./harbor.js";
 import { statsView } from "./stats.js";
+import { weekReads } from "./bridgeweek.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
 import { observeTelling } from "./telling.js";
 import { parseCommand, runNamed, newRunArgs } from "./commands.js";
@@ -256,6 +257,7 @@ export default class Harbormaster extends View {
     const t = theme();
     const el = this.view(p, t);
     startCopies(this, cx); // the proof images this render asked for
+    weekReads(this, cx); // the Bridge's This week block, if this render drew it
     return el;
   }
 
