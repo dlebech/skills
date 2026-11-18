@@ -149,3 +149,29 @@ test("one git call per refresh, however many final lines", async () => {
   globalThis.__herdrExec = real;
   assert.equal(calls.length, 1);
 });
+
+test("two final lines at one sha show the later line, as the pick does", async () => {
+  const { dir, shas } = repo();
+  const r = asRun(dir, [`Reviewed: ${shas[3]} final review — 2 must-fix`, `Reviewed: ${shas[3]} final review 2 — 0 findings`], 8);
+  await refreshReviewed(r);
+  assert.equal(r.reviewedGap.sha, shas[3]);
+  const l = reviewedLine(r.proof.md, r.reviewedGap);
+  assert.equal(l.text, `Reviewed at ${shas[3]} · 1 commit since, not reviewed`);
+  assert.match(l.tip, /final review 2 — 0 findings/);
+  const same = reviewedLine(r.proof.md, { ...r.reviewedGap, count: 0, same: true });
+  assert.equal(same.text, `Reviewed · final review 2 at ${shas[3]}`);
+});
+
+test("a gap read before a final line was added does not measure from the old pick", async () => {
+  const { dir, shas } = repo();
+  const old = asRun(dir, [`Reviewed: ${shas[1]} final review — ok`], 9);
+  await refreshReviewed(old);
+  assert.equal(reviewedLine(old.proof.md, old.reviewedGap).tone, "amber");
+  const grown = md(`Reviewed: ${shas[1]} final review — ok\nReviewed: ${shas[4]} final review 2 — ok`);
+  // The stale gap (key of the old set) is no gap: dim line at the new last review, state current, not compared.
+  const l = reviewedLine(grown, old.reviewedGap);
+  assert.deepEqual([l.tone, l.text.includes(shas[4])], ["dim", true]);
+  assert.deepEqual(reviewedState(grown, old.reviewedGap), { kind: "current", behind: null, sha: shas[4], compared: false });
+  // A gap without a key (older callers) still names its sha.
+  assert.equal(reviewedLine(grown, { sha: shas[1], count: 3, same: false }).tone, "amber");
+});

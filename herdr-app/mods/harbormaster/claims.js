@@ -216,12 +216,14 @@ export const finalReviews = (md) => (md?.reviewed ?? []).filter((x) => /final/i.
 
 // Which final review is "the" review, for a proof.md whose lines may be in any order. data.js
 // refreshReviewed measures every final sha in one git call and picks with pickFinal; the gap it
-// stores names the pick, so this finds the line by that sha. Without a gap (not read yet, or
-// git could not tell) the last in file order, as before.
+// stores names the pick, so this finds the line by that sha, from the end like pickFinal's tie
+// rule (two final lines at one sha show the later one). A gap read for another set of lines
+// (its key differs: a final line was just added) is stale, so it names nothing until the next
+// read. Without a gap (not read yet, or git could not tell) the last in file order, as before.
 export function finalReview(md, gap = null) {
   const finals = finalReviews(md);
-  const sha = gap?.sha;
-  return (sha && finals.find((x) => x.sha.startsWith(sha) || sha.startsWith(x.sha))) || finals[finals.length - 1];
+  const sha = gap && (gap.key == null || gap.key === finals.map((x) => x.sha).join(" ")) ? gap.sha : null;
+  return (sha && finals.findLast((x) => x.sha.startsWith(sha) || sha.startsWith(x.sha))) || finals[finals.length - 1];
 }
 
 // The newest final review on the branch, from `measured` ({sha → {count, anc, same} | null}, what git
