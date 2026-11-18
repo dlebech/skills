@@ -14,11 +14,13 @@ import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
 import { props, theme, nextCommand, checking, openOverlay, closeOverlay, shared, setShared } from "herdr";
 import { expireNote } from "./note.js";
-import { loadRuns, cachedRuns, refreshPrs, refreshReviewed, isClosed, isParked, newestFirst } from "./data.js";
-import { facts, crewAddresses } from "./live.js";
+import { loadRuns, cachedRuns, refreshPrs, refreshReviewed, isClosed, isParked, newestFirst, stats } from "./data.js";
+import { facts, crewAddresses, captainOf, adrift, agentNames, agentStatus, programOf } from "./live.js";
 import { loadContexts } from "./context.js";
 import { hotSignature, sampleVersion } from "./resources.js";
-import { cards, runPane, submitReply, runProps } from "./overview.js";
+import { cards, runPane, submitReply, runProps, runFacts, pathInput } from "./overview.js";
+import { mergePath } from "./mergepath.js";
+import { sceneFacts, exportFacts } from "./sceneexport.js";
 import { crew } from "./crew.js";
 import { viewer, startCopies } from "./viewer.js";
 import { harbor, rail, paneHeader } from "./harbor.js";
@@ -122,6 +124,19 @@ async function listen(view, cx) {
   }
 }
 
+// The facts Harbor 3D is told (sceneexport.js), from the runs the Crew shows and the same live facts.
+function harborFacts(runs, ctx) {
+  const s = stats(runs, ctx);
+  const rows = [...s.shown, ...s.parked].map((r) => { const f = runFacts(r, ctx); return { r, f, path: mergePath(pathInput(r, f, f.stages)) }; });
+  const cap = captainOf(ctx);
+  const drifters = adrift([cap.terminal?.address, ...rows.map(({ r }) => r.terminal)], ctx).slice(0, 12);
+  const names = agentNames(drifters);
+  return sceneFacts(rows, {
+    now: Date.now(), captain: cap, agentState: (t) => agentStatus(t, ctx), programOf: (t) => programOf(t, ctx) ?? t.program,
+    adrift: drifters.map((a, i) => ({ address: a.address, name: names[i], program: a.program, status: agentStatus(a, ctx) })),
+  });
+}
+
 export default class Harbormaster extends View {
   init(_props, cx) {
     const role = props()?.role;
@@ -206,6 +221,8 @@ export default class Harbormaster extends View {
       if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) {
         try { observeTelling(runs, ctx); } catch (e) { console.log(`harbormaster: telling failed: ${e?.message ?? e}`); }
       }
+      // Harbor 3D's facts file, from the Crew's copy only (exportFacts does nothing without its want file).
+      if (role === "crew" && !props()?.overlay && !checking()) await exportFacts(() => harborFacts(runs, ctx)).catch((e) => console.log(`harbormaster: harbor3d facts failed: ${e?.message ?? e}`));
       // PRs land in shared state, which re-renders every copy by itself. A parked run's PRs are
       // read as rarely as a closed run's: nobody works on them, they only show what they wait on.
       for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});

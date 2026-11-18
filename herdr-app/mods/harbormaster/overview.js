@@ -881,7 +881,7 @@ function factsLine(t, r, prs, size = 13, att = null, { parts = "all" } = {}) {
 }
 
 // The strip's input from what runFacts has: plain data for mergepath.js.
-function pathInput(r, f, stages) {
+export function pathInput(r, f, stages) {
   const rows = hasClaims(r) ? claimRowsOf(r, stages) : null;
   const c = rows ? claimCounts(rows) : null;
   const md = r.proof?.md;
