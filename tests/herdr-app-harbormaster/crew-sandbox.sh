@@ -27,7 +27,7 @@
 #                 ("quiet Nm", Needs you, Ask) 30 minutes after the app started (module memory)
 #                 To shoot it amber, `up` early and keep quiet-run listed (its clock is the app's memory, so a
 #                 run that is hidden or a restarted app starts over); hide the others with role= meanwhile.
-#   busy-run      running, both tasks implementing, its orchestrator reporting working (OSC 7501),
+#   busy-run      running, both tasks implementing, claims C1 proven and C2 not yet (Proven 1/2), its orchestrator reporting working (OSC 7501),
 #                 status.json dated 75 minutes back                      -> Working, spinner, "t1 implementing 1h15m · +1 task"
 #   review-wait   finished, folder "snevagten" (peer), cli/cli#14846 with a reviewer requested
 #                                                                         -> Waiting on others, "review from BagToad"
@@ -164,6 +164,12 @@ make_runs() {
   hc run --bg --no-notify --parent "$w1" --name x-t1-build --cwd "$S" sh -c 'echo build; exec sleep infinity' >/dev/null
   hc run --bg --no-notify --parent "$w1" --name x-t1-serve --cwd "$S" php -r 'sleep(100000);' >/dev/null
   hc run --bg --no-notify --parent "$w2" --name x-t2-helper --cwd "$S" node -e 'setInterval(()=>{},1e6)' >/dev/null
+  # Claims for busy-run (t1 pane strip): one proven, one still being proved, so its Proven stage is current.
+  local bd=$S/runs/skills/busy-run
+  printf '\nProof tier: T2\n\n## Claims\n- C1 Drag a card to reorder the list — AC 3 — tasks t1\n- C2 The new order is saved across restarts — AC 4 — tasks t2\n' >>"$bd/plan.md"
+  mkdir -p "$bd/shared/proof"
+  convert -size 640x400 xc:'#22324a' -fill '#e8eef7' -pointsize 34 -annotate +40+200 'Card dragged to row 2' "$bd/shared/proof/t1-drag.png"
+  printf '# Proof: busy-run\nTier: T2\nChecks: pending — CI\n\n## C1 Drag a card to reorder the list\nResult: pass — dragging moves the card\nShot: shared/proof/t1-drag.png\nTest: reorder moves the card — pass\n' >"$bd/proof.md"
   # Dated back, so the first sight of its tasks (seeded by status.json's updated) shows an age.
   local sj=$S/runs/skills/busy-run/status.json
   jq --arg u "$(date -u -d '75 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" '.updated = $u' "$sj" >"$sj.tmp" && mv "$sj.tmp" "$sj"

@@ -2,7 +2,7 @@
 // Run: node --import ./loader.mjs --test reviewed.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reviewedLine, claimsVerdict, claimsAsk } from "../../herdr-app/mods/harbormaster/claims.js";
+import { reviewedLine, reviewedState, claimsVerdict, claimsAsk } from "../../herdr-app/mods/harbormaster/claims.js";
 import { parseProofMd } from "../../herdr-app/mods/harbormaster/proof.js";
 
 const md = (lines) => parseProofMd(`# Proof\nTier: T2\nChecks: green — ok\n${lines}\n\n## C1 Thing\nResult: pass — ok\nShot: a.png\n`);
@@ -63,4 +63,17 @@ test("a gap git could not read is unknown, not current", () => {
   const l = reviewedLine(m, { sha: "4ad8528", count: 0, same: null });
   assert.deepEqual([l.text, l.tone, l.since], ["Reviewed at 4ad8528", "dim", 0]);
   assert.match(l.tip, /could not compare with the branch/i);
+});
+
+test("reviewedState: the same rules as reviewedLine, as plain facts", () => {
+  const m = (l) => parseProofMd(`# Proof\nTier: T2\n${l}\n\n## C1 Thing\nResult: pass — ok\nShot: a.png\n`);
+  assert.equal(reviewedState(m("")).kind, "none");
+  assert.equal(reviewedState(m("Reviewed: abc1234 task t1 — pass")).kind, "task-only");
+  const fin = m("Reviewed: abc1234 final review — pass");
+  assert.deepEqual(reviewedState(fin), { kind: "current", behind: null, sha: "abc1234", compared: false });
+  assert.deepEqual(reviewedState(fin, { sha: "abc1234", count: 2, same: false }), { kind: "behind", behind: 2, sha: "abc1234", compared: true });
+  assert.equal(reviewedState(fin, { sha: "abc1234", count: 0, same: false }).kind, "current");
+  assert.equal(reviewedState(fin, { sha: "abc1234", count: 0, same: true }).compared, true);
+  assert.equal(reviewedState(fin, { sha: "abc1234", count: 0, same: null }).compared, false);
+  assert.equal(reviewedState(fin, { sha: "ffff", count: 3, same: false }).kind, "current");
 });

@@ -9,13 +9,14 @@ import { facts, exactStatus, orchestratorState, agentStatus, workersOf, captainO
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, hotText, memText } from "./resources.js";
-import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, worthALook, hasClaims, proofState, withSaid, withAsked } from "./claims.js";
+import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, reviewedState, worthALook, hasClaims, proofState, withSaid, withAsked } from "./claims.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { setNote, noteText } from "./note.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf, needsYouNow as needsYouOf, runlessOrchs } from "./attend.js";
-import { stepText, quietText, flowState, flowSetting, runDot } from "./attention.js";
+import { stepText, quietText, flowState, flowSetting, runDot, ciState } from "./attention.js";
+import { mergePath } from "./mergepath.js";
 import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } from "./tell.js";
 import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
@@ -517,7 +518,7 @@ export function runFacts(r, ctx) {
   };
 }
 
-function cardHeader(view, t, r, f, meta) {
+function cardHeader(view, t, r, f, meta, lead = null) {
   return h_flex().gap(8).items_center()
     .child(div().flex_none().text_size(15).child(OCTOPUS))
     .child(v_flex().flex_1().min_w(0)
@@ -526,7 +527,7 @@ function cardHeader(view, t, r, f, meta) {
         .children(levelTags(view, t, r, r.key))
         .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(13.5).text_color(t.foreground), runName(r.branch, r.topic)))
         .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
-      .child(metaLine(t, r, meta)))
+      .child(metaLine(t, r, meta, lead)))
     .map(withContext(view, t, `run-${r.key}`, r.terminal))
     .child(runPin(t, `pin-${r.key}`, r, f.orch))
     .child(statusDot(t, f.dot))
@@ -772,7 +773,14 @@ const tokenMeta = (r) => (r.tokens && r.budget && overBudget(r) ? `over budget $
 const runMeta = (r, f) => [r.repo, f.workers.length ? plural(f.workers.length, "agent") : null, tokenMeta(r), unscopedOf(r) ? `${unscopedOf(r)} unscoped` : null, r.updated ? `updated ${ago(r.updated)}` : null].filter(Boolean).join(" · ");
 // The meta line as three texts, around the tokens segment: it has the breakdown on hover, and
 // the blocked colour once over budget.
-const metaLine = (t, r, meta) => {
+const metaLine = (t, r, meta, lead = null) => {
+  // The pane's first segment, when the run started and how long it has gone, with its date in the hover.
+  if (lead) {
+    const rest = meta;
+    return h_flex().min_w(0).text_size(11.5).text_color(t.dim)
+      .child(div().id(`age-${r.key}`).flex_none().tooltip(startedTip(r.started)).child(lead))
+      .when(Boolean(rest), (el) => el.child(div().flex_none().px(5).child("·")).child(div().min_w(0).flex_1().child(metaLine(t, r, rest))));
+  }
   const tok = tokenMeta(r), at = tok ? meta.indexOf(tok) : -1;
   const line = h_flex().min_w(0).text_size(11.5).text_color(t.dim);
   if (at < 0) return div().truncate().text_size(11.5).text_color(t.dim).child(meta);
@@ -848,9 +856,10 @@ function joined(t, items) {
 // The facts line, the one prominent line under the header: when the run started and how
 // long it has gone, then each of its PRs (a link) with its checks, a one-way door, and its review.
 // "Started today 09:28 · finished after 8h 7m · PR #42 open · checks ✓". Null when it has none of them.
-function factsLine(t, r, prs, size = 13, att = null) {
+// `parts: "live"` (the pane) leaves out the start time and the PRs, which its header and the strip say.
+function factsLine(t, r, prs, size = 13, att = null, { parts = "all" } = {}) {
   const items = [];
-  if (r.started) items.push({ el: div().id(`age-${r.key}`).flex_none().tooltip(startedTip(r.started)).child(runAgeText(r)) });
+  if (r.started && parts !== "live") items.push({ el: div().id(`age-${r.key}`).flex_none().tooltip(startedTip(r.started)).child(runAgeText(r)) });
   // The current step and its age, as the Crew shows it, while the run is not finished; the
   // progress line carries its own age (progressLine). A stalled run says so, in amber.
   const live = att && r.phase !== "finished" && !r.away;
@@ -858,7 +867,7 @@ function factsLine(t, r, prs, size = 13, att = null) {
   if (live && att.step?.text && att.step.text !== r.progress) items.push({ text: stepText(att.step), color: t.muted });
   // Each PR (a link) with its checks, a one-way door and its review; PRs that all say the same
   // as one ("2 PRs open · checks ✓ · Approved by anna"), each one's title and link in its hover.
-  for (const x of prFacts(prs, { away: Boolean(r.away), oneWay })) {
+  for (const x of parts === "live" ? [] : prFacts(prs, { away: Boolean(r.away), oneWay })) {
     if (x.kind === "pr") {
       const p = x.pr;
       items.push({ el: div().id(`fact-pr-${r.key}-${x.i}`).flex_none().cursor_pointer().hover((s) => s.text_color(t.accent)).tooltip(`${p.title ?? ""}\n${p.url}`.trim())
@@ -869,6 +878,62 @@ function factsLine(t, r, prs, size = 13, att = null) {
   }
   if (items.length === 0) return null;
   return h_flex().flex_wrap().items_center().text_size(size).font_medium().text_color(t.foreground).children(joined(t, items));
+}
+
+// The strip's input from what runFacts has: plain data for mergepath.js.
+function pathInput(r, f, stages) {
+  const rows = hasClaims(r) ? claimRowsOf(r, stages) : null;
+  const c = rows ? claimCounts(rows) : null;
+  const md = r.proof?.md;
+  const reviewed = reviewedState(md, r.reviewedGap);
+  const state = md?.checks?.state;
+  return {
+    phase: r.phase, away: r.away, counts: f.counts, blockedTasks: r.tasks.filter((k) => taskTone(k.state) === "blocked").length,
+    claims: c ? { total: c.total, proven: c.proven, accepted: c.accepted, failed: c.fail, look: c.look } : null,
+    checks: state === "green" || state === "red" ? state : state ? "pending" : null,
+    reviewed, flow: flowState(r, reviewFlows()).flow, prs: f.prs.length,
+    allMerged: f.prs.length > 0 && f.prs.every((p) => p.state === "MERGED"),
+    next: f.att?.next ? { label: f.att.next.label, who: f.att.next.who ?? [] } : null,
+    held: Boolean(f.att?.held), ready: Boolean(f.att?.ready), ci: ciState(f.prs).state,
+  };
+}
+
+// The path-to-merge strip under the pane's header: each stage with its value and mark, a click on
+// one that has a section unfolds it ("Built 3/3 ✓ › Proven 6/6 ✓ › AI review ⚠ 2 behind › Peer review ● you › Merge").
+function pathStrip(view, t, r, f, stages) {
+  // A stage opens the Claims section, which an old run without claims does not have.
+  const stops = mergePath(pathInput(r, f, stages)).map((s) => (s.fold && !hasClaims(r) ? { ...s, fold: null } : s));
+  const open = (fold) => { view.folds ??= new Map(); if (fold === "claims") view.folds.set(`pf-${r.key}`, true); };
+  const part = (s) => {
+    const ask = s.value === "ask" || s.value === "read the proof";
+    const label = div().flex_none().child(s.label);
+    const value = (c) => (s.value ? div().flex_none().text_color(c).child(s.value) : null);
+    const tone = {
+      done: [t.muted, t.muted], current: [t.foreground, t.muted], you: [t.foreground, t.muted], look: [t.foreground, AMBER(t)],
+      fail: [t.foreground, t.blocked], todo: [t.dim, t.dim],
+    }[s.state];
+    // Each piece sets its own colour, so a clickable stage's hover goes on every piece (a hover on the
+    // stage alone would be overridden by them).
+    const hov = (el, n) => (s.fold ? el.id(`path-${s.key}-${r.key}-${n}`).hover((x) => x.text_color(t.accent)) : el);
+    const mark = (c, text, bold = false) => div().flex_none().text_color(c).when(bold, (e) => e.font_semibold()).child(text);
+    const kids = [label.text_color(tone[0]).when(s.state === "current", (e) => e.font_medium()).when(s.state === "you", (e) => e.font_semibold())];
+    if (s.state === "done") kids.push(s.value ? value(t.muted) : null, mark(PASS(t), "✓"));
+    else if (s.state === "you") kids.push(ask ? null : value(t.muted), mark(t.blocked, ask ? `● you · ${s.value}` : "● you", true));
+    else if (s.state === "look") kids.push(mark(AMBER(t), s.value ? `⚠ ${s.value}` : "⚠"));
+    else if (s.state === "fail") kids.push(mark(t.blocked, s.value ? `✗ ${s.value}` : "✗"));
+    else if (s.value) kids.push(value(tone[1]));
+    return h_flex().id(`path-${s.key}-${r.key}`).flex_none().gap(4).items_center().tooltip(s.tip)
+      .when(Boolean(s.fold), (e) => e.cursor_pointer().on_click((_e, cx) => { cx.stop_propagation(); open(s.fold); cx.notify(); }))
+      .children(kids.map((k, n) => (k ? hov(k, n) : null)).filter(Boolean));
+  };
+  return h_flex().flex_wrap().items_center().gap_y(2).text_size(12.5)
+    .children(stops.flatMap((s, i) => [part(s), i < stops.length - 1 ? div().flex_none().px(6).text_color(t.dim).child("›") : null]).filter(Boolean));
+}
+
+// A red line under the strip while any PR is a one-way door: the warning the facts line used to carry.
+function oneWayLine(t, r, prs) {
+  if (!prs.some((p) => p.danger && oneWay(p.danger))) return null;
+  return div().id(`oneway-${r.key}`).text_size(12.5).font_semibold().text_color(t.blocked).child("one-way door");
 }
 
 // The orchestrator's own progress note: under the facts, smaller and muted, since it is in
@@ -1277,7 +1342,9 @@ function runDetail(view, t, r, ctx) {
   const { orch, closed, need, counts, prs, related, workers, stages } = f;
   // Each agent's task and that task's stage, by address.
   const workOf = new Map(stages.flatMap(({ agents, stage }, i) => agents.map((a) => [a.agent.address, { task: r.tasks[i], stage }])));
-  const facts = factsLine(t, r, prs, 13, f.att);
+  const facts = factsLine(t, r, prs, 13, f.att, { parts: "live" });
+  const strip = pathStrip(view, t, r, f, stages);
+  const door = oneWayLine(t, r, prs);
   const notes = cardNotes(t, r, f, false);
   const blocking = need ? null : blockingAction(view, t, r, f.att, `pane-${r.key}`);
   const comments = addressRows(view, t, r, ctx, f, `pane-${r.key}`);
@@ -1287,7 +1354,8 @@ function runDetail(view, t, r, ctx) {
     .border(1).border_color(need ? t.blocked + "88" : t.border)
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
     .child(div().id(`head-${r.key}`).cursor_pointer().on_click(() => orch !== "gone" && focusAgent(r.terminal))
-      .child(cardHeader(view, t, r, f, runMeta(r, f))))
+      .child(cardHeader(view, t, r, f, runMeta(r, f), r.started ? runAgeText(r) : null)))
+    .child(v_flex().gap(4).child(strip).when(Boolean(door), (e) => e.child(door)))
     .when(need, (el) => el.child(needBox(view, t, r, f, ctx, "pane")))
     .when(Boolean(facts) || Boolean(r.progress) || notes.length > 0 || Boolean(blocking) || Boolean(comments), (el) => el.child(v_flex().gap(4)
       .when(Boolean(facts), (e) => e.child(facts))
