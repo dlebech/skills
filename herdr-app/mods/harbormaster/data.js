@@ -324,6 +324,12 @@ function tokensOf(x) {
 // orchestrator is gone, or on another machine).
 export const overBudget = (r) => Boolean(r.budget && r.tokens && r.tokens.total >= r.budget);
 
+// Whether Harbormaster asks a run's budget question itself (decisionQueue's budget item): over
+// budget, no question.md, not parked, closed or finished, and that budget not answered yet. The
+// queue also waits for its orchestrator to settle; attend.js reads this so an idle orchestrator
+// is not also said to be asking in its tab (attention.js idleAsking).
+export const budgetPending = (r) => overBudget(r) && r.askedAt === null && !r.question && !r.away && r.phase !== "finished" && r.budgetAnswered !== r.budget;
+
 // The budget question's options, as run-files.md's template words them. Compact is the one
 // button that does more than write the answer: compactRun sends /compact first.
 export const BUDGET_OPTIONS = [
@@ -838,8 +844,7 @@ export function decisionQueue(runs, decisions, ctx, fresh = filesFresh) {
     // status, `blocked: stopped at budget` among them) shows that reason instead. Answered or not
     // is the orchestrator's `set-status.sh --budget-answered`.
     const settled = orch === "gone" || exactStatus(r.terminal, ctx) === "idle" || exactStatus(r.terminal, ctx) === "done";
-    if (overBudget(r) && r.askedAt === null && !r.question && !r.away && r.phase !== "finished" && r.budgetAnswered !== r.budget
-      && settled && !needsYou(r, orch)) { items.push(budgetItem(r, tokenText)); continue; }
+    if (budgetPending(r) && settled && !needsYou(r, orch)) { items.push(budgetItem(r, tokenText)); continue; }
     if (!needsYou(r, orch)) continue;
     const q = r.ask;
     items.push(q ? {

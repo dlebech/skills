@@ -17,7 +17,8 @@
 //     sign for STALL_MS minus 5 minutes are read with `hc read` once a minute (every 5 once
 //     it is stalled; never while its orchestrator is gone or lost), and a change
 //     in their words (digits and symbols left out, so a spinner or a ticking timer is not
-//     output) counts as life.
+//     output) counts as life. The one exception, the idle anchor attention.js idleAsking reads,
+//     is also kept in shared state harbormaster.agents (see `activity` below).
 //   - each repository's finished CI runs: shared state harbormaster.ci, {[owner/repo]: [{sha, ms}]},
 //     the last CI_KEEP per repository, from the PRs' statusCheckRollup (first check started to
 //     last completed, once per head commit). The run history (.history.jsonl) has no usable
@@ -38,6 +39,7 @@ const STEPS_KEY = "harbormaster.steps";
 const CI_KEY = "harbormaster.ci";
 const FLOWS_KEY = "harbormaster.reviewFlows";
 const WAITS_KEY = "harbormaster.waitingOn";
+const AGENTS_KEY = "harbormaster.agents";
 export const CI_KEEP = 20;
 const PROBE_EVERY = 60000;
 // Once a run is stalled, its screens are read only this often, until its agents change.
@@ -102,7 +104,12 @@ export const stepAges = (run) => shared(STEPS_KEY)?.[run.key]?.parts ?? null;
 
 // ---- agents' activity (module memory) ----
 
-// run key → {sig, since, screen, probedAt, probing}
+// run key → {sig, since, agentsAt, screen, probedAt, probing}; agentsAt: when agentSig last
+// changed (screen output left out), for agentsSince. agentsAt is also kept in shared state
+// harbormaster.agents, {[run key]: {sig, since}}, so a Harbormaster reload keeps an idle
+// orchestrator's idle time (a run asking in its tab does not leave Needs you for IDLE_ASK_MS and
+// toast again). Written only when the agents settle into a new signature with none of them
+// working, the only anchor idle-ask reads, so a working run never writes it.
 const activity = new Map();
 
 // The latest sign of life of a run, ms: its step changing, its agents changing, new
@@ -113,8 +120,31 @@ export function lastActivity(run) {
   if (!a && !s) return null;
   // Looked at on every call, so a wake shows at once, before the next poll has finished.
   noteSleep();
-  return awakeSince(Math.max(a ?? 0, s ?? 0), Math.max(run.machine ? 0 : wokeAt ?? 0, machineWokeAt.get(run.machine ?? "") ?? 0) || null);
+  return awakeSince(Math.max(a ?? 0, s ?? 0), wokeOf(run));
 }
+
+// When the run's orchestrator and agents last changed status or turn, or one came or went
+// (agentSig), ms; terminal output and step changes left out. Null before its first poll.
+// attention.js idleAsking reads it. Unlike lastActivity, a sleep does not move it: an
+// orchestrator idle before the machine slept is idle still, and asking all the same.
+export const agentsSince = (run) => activity.get(run.key)?.agentsAt ?? null;
+
+// The idle anchors store after one run's poll: its {sig, since} when none of its agents works
+// (a sig line is "<address>:<status>:<turn>"), else as it was. The same store when unchanged.
+export function withAgents(store, key, sig, since) {
+  const working = sig.split("\n").some((l) => l.split(":").at(-2) === "working");
+  const have = store?.[key];
+  if (working || (have?.sig === sig && have.since === since)) return store;
+  return { ...(store ?? {}), [key]: { sig, since } };
+}
+
+// When a run's agents took on `sig`, for its first poll in this module: the stored anchor when
+// its signature is the same (a reload), else now.
+export const seededAgentsAt = (stored, sig, now) => (stored?.sig === sig && stored.since <= now ? stored.since : now);
+
+// The latest wake that moves the run's quiet time: this machine's for a local run, its own
+// machine's for a remote one. Null when none.
+const wokeOf = (run) => Math.max(run.machine ? 0 : wokeAt ?? 0, machineWokeAt.get(run.machine ?? "") ?? 0) || null;
 
 // (This machine's wake only moves runs on this machine; a remote run follows its own machine.)
 // When this machine last woke from sleep, the clocks as last looked at, and for each other
@@ -173,13 +203,22 @@ export function observeRuns(runs, ctx, answered, stagesOf = () => []) {
   if (next !== steps) setShared(STEPS_KEY, next);
   const listed = new Set(runs.map((r) => r.key));
   for (const key of activity.keys()) if (!listed.has(key)) activity.delete(key);
+  const anchors = shared(AGENTS_KEY) ?? {};
+  let nextAnchors = anchors;
+  const dropAnchor = (key) => { if (nextAnchors[key]) { nextAnchors = { ...nextAnchors }; delete nextAnchors[key]; } };
+  // As the step anchors: a run gone from a machine that answered is forgotten.
+  for (const key of Object.keys(anchors)) if (!listed.has(key) && answered.has(key.slice(0, key.indexOf(":")))) dropAnchor(key);
   for (const r of runs) {
     // A stale run (its machine did not answer) keeps what is known of it, untouched.
     if (r.stale) continue;
-    if (r.away || r.phase === "finished") { activity.delete(r.key); continue; }
+    if (r.away || r.phase === "finished") { activity.delete(r.key); dropAnchor(r.key); continue; }
     const prev = activity.get(r.key);
-    const t = trackSince(prev ? { sig: prev.sig, since: prev.since } : null, agentSig(r, ctx), now);
+    const sig = agentSig(r, ctx);
+    const t = trackSince(prev ? { sig: prev.sig, since: prev.since } : null, sig, now);
     const entry = prev ?? { screen: null, probedAt: 0, probing: false };
+    if (!prev) entry.agentsAt = seededAgentsAt(anchors[r.key], sig, now);
+    else if (t.sig !== prev.sig) entry.agentsAt = t.since;
+    nextAnchors = withAgents(nextAnchors, r.key, sig, entry.agentsAt);
     entry.sig = t.sig;
     if (!prev || t.since !== prev.since) entry.since = t.since;
     activity.set(r.key, entry);
@@ -190,6 +229,7 @@ export function observeRuns(runs, ctx, answered, stagesOf = () => []) {
       probe(r, ctx, entry).catch(() => {});
     }
   }
+  if (nextAnchors !== anchors) setShared(AGENTS_KEY, nextAnchors);
 }
 
 // ---- CI baseline ----

@@ -39,7 +39,7 @@ test("phase", () => {
 test("need from the first reason key", () => {
   const att = (key) => ({ reasons: [{ key }, { key: "stalled" }] });
   const want = { question: "question", gone: "gone", stalled: "stalled", "red-ci": "red-ci", "request review": "request-review", "changes requested": "changes-requested",
-    "approved — merge": "merge", "review proof → merge": "review-proof", finished: "finished", "review-pending": "other", "something new": "other", constructor: "other", __proto__: "other" };
+    "approved — merge": "merge", "review proof → merge": "review-proof", finished: "finished", "review-pending": "other", "idle-ask": "question", "something new": "other", constructor: "other", __proto__: "other" };
   for (const [k, v] of Object.entries(want)) assert.equal(needOf(true, att(k)), v, k);
   assert.equal(needOf(true, { reasons: [] }), "other");
   assert.equal(needOf(false, att("question")), null);
