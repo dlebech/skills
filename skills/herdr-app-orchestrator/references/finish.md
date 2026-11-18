@@ -9,6 +9,7 @@ Run the full test suite once on the integration branch, reusing a `Ran:` line fo
 If `final-review` is on, or T0 tasks merged without a task review ([speed.md](speed.md) §3), review the whole integration branch after every planned task is merged, once per `review-rounds`:
 
 - Start a fresh agent with the reviewer profile (or the specialist profile for a large branch) named `rev-<prefix>-final` in the integration worktree, or with several repositories, in the first one with the others' paths in its task.
+- Name a code-review skill in its task as in the skill's section 4 (`<skill-dir>/scripts/review-skill.sh <kind> <integration worktree>`).
 - It reviews `<default>...<integration>` in each against `spec.md` for what per-task reviews miss: bugs across task and repository boundaries, such as an API and its client disagreeing, unmet acceptance criteria, duplication across tasks, dead code, inconsistencies, modules grown too large. Same rules as the skill's section 4: read-only, findings to a file, at most about 15.
 - Triage them, and fix must-fix findings as one more task with no task review.
 - With rounds left, remove the reviewer and start another fresh one, named `rev-<prefix>-final-<round>`, on the branch with those fixes merged.
