@@ -17,6 +17,11 @@
 #   decisions [none]  write .captain-decisions.json in the scratch runs root: two open captain decisions, one naming no run
 #                   (board-1068, recommended Yes) and one about the run asks-you (recommended Not yet), asked 40 and
 #                   12 minutes ago; `none` removes the file. The sidebar shows them as rows in Needs you (#50)
+#   history [none]  write .history.jsonl in the scratch runs root: four closed runs from the last 6 days (with agent time,
+#                   tokens, user wait and a time split) and one from 20 days back, so the Bridge's This week shows
+#                   figures; `none` removes the file (#50)
+#   reviews [none]  write review-requests.json in the scratch dir (fake-gh.sh): one review request, api#88 from anna;
+#                   `none` removes it. The queue then lists it under Next for you (#50)
 #   captain on|off  start a fake captain (a tab in the focused space labelled role=captain, reporting idle),
 #                   or kill it; with none the decisions' button is Start captain
 #   hc <args>       hc against the scratch session (e.g. hc label t4 role=)
@@ -347,10 +352,32 @@ case $cmd in
        options: [{label: "Not yet", text: "keep it running"}, {label: "Park it", text: "park the run"}], recommended: "Not yet: it is waiting on you",
        evidence: "It has waited a while.", risk: "A parked run stops.", blocks: ""}]' >"$f"
     ;;
+  history)
+    f=$S/runs/.history.jsonl
+    if [ "${1:-}" = none ]; then rm -f "$f"; exit 0; fi
+    iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
+    : >"$f"
+    for spec in "a:1:3600:2500000" "b:2:5400:4200000" "c:4:2400:1100000" "d:6:7200:9000000" "old:20:3000:500000"; do
+      IFS=: read -r n d wall tok <<<"$spec"
+      jq -cn --arg run "$S/runs/skills/hist-$n" --arg n "$n" --arg s "$(iso $(( $(date +%s) - d * 86400 )))" --arg e "$(iso $(( $(date +%s) - d * 86400 + wall )))" --argjson wall "$wall" --argjson tok "$tok" '{v: 1, run: $run, folder: "skills", branch: "hist-\($n)", type: "feat",
+        started: $s, ended: $e, closed: $e, status: "finished", tasks_merged: 3, tasks_planned: 3, wall: $wall,
+        critical_path: {model: ($wall * 0.5), tool: ($wall * 0.1), user_wait: ($wall * 0.15), review: ($wall * 0.1), idle: ($wall * 0.15)},
+        categories: {model: ($wall * 0.5)}, tasks: [],
+        agents: [{name: "orchestrator", role: "orchestrator", total: $wall, categories: {model: ($wall * 0.5), user_wait: ($wall * 0.15), agent_wait: ($wall * 0.2)}},
+                 {name: "impl", role: "impl", total: ($wall * 0.6), categories: {model: ($wall * 0.5), tool: ($wall * 0.1)}}],
+        tokens: {total: $tok, input: ($tok / 10), output: ($tok / 20), cache_read: ($tok * 0.8), cache_write: ($tok / 20)}}' >>"$f"
+    done
+    ;;
+  reviews)
+    f=$S/review-requests.json
+    if [ "${1:-}" = none ]; then rm -f "$f"; exit 0; fi
+    jq -n --arg u "$(date -u -d '3 hours ago' +%Y-%m-%dT%H:%M:%SZ)" '[{number: 88, title: "Rate limit headers", url: "https://github.com/fake-two/api/pull/88",
+      author: {login: "anna"}, updatedAt: $u, repository: {nameWithOwner: "fake-two/api"}}]' >"$f"
+    ;;
   captain)
     sandbox_env
     if [ "${1:-}" = off ]; then
-      for t in $(hc ls --json | jq -r '.terminals[] | select(.labels.role == "captain") | .address'); do hc kill "$t" >/dev/null 2>&1 || true; hc rm "$t" >/dev/null 2>&1 || true; done
+      for t in $(hc ls --label role=captain --json | jq -r '.terminals[].address'); do hc kill "$t" >/dev/null 2>&1 || true; hc rm "$t" >/dev/null 2>&1 || true; done
       exit 0
     fi
     out=$(herdr-app do tab.new --name captain --argv "[\"sh\",\"$S/fake-orch.sh\",\"captain\",\"idle\"]" --focus false)

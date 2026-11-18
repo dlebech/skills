@@ -45,7 +45,7 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "harbor
 //   show-run:<branch | run dir | orchestrator terminal>   open it (no name: the newest unclosed run); one at a time;
 //                                                         "… details" / "… proof" unfold its question / its Proof list
 //   show-stats[:<branch | run dir>]                         open the Stats view (a run: focused on it)
-//   show-overview, show-crew                               open the runs overview, or the Crew block
+//   show-overview[:<w>x<h>], show-crew                      open the Bridge (default 560x900, so one column), or the Crew block
 //   new-run[:repo=<name or folder> kind=<issue|review|describe> input=<text>]   the + New run dialog (a key binding's command)
 //   close-popup                                            close it
 //   open-run:key=<run key>                                 a toast's click (telling.js) for a run whose
@@ -121,7 +121,7 @@ async function listen(view, cx) {
       const { name, arg } = parseCommand(c);
       if (name === "show-run") showPopup(view, arg);
       else if (name === "show-stats") showStats(view, arg);
-      else if (name === "show-overview") showView("overview", "cards", 560, 900);
+      else if (name === "show-overview") { const [w, h] = String(arg ?? "").split("x").map(Number); showView("overview", "cards", w || 560, h || 900); }
       else if (name === "show-crew") showView("crew", "crew", 360, 640);
       else if (name === "new-run") openNewRun(newRunArgs(arg));
       else if (name === "close-popup") closePopup();
@@ -185,11 +185,14 @@ export default class Harbormaster extends View {
     // compare a few references instead of serialising every run twice per copy.
     const changed = !sameItems(runs, this.runs) || JSON.stringify(decisions) !== JSON.stringify(this.decisions)
       || errors.join() !== this.errors.join() || hot !== this.hot;
+    // A resume's busy mark ends once its run is no longer parked or closed (cardparts.js confirmBlock).
+    let freed = false;
+    for (const [key, b] of Object.entries(this.busy)) if (b.resume && !runs.some((r) => r.key === key && r.away)) { delete this.busy[key]; freed = true; }
     this.hot = hot;
     this.runs = runs;
     this.decisions = decisions;
     this.errors = errors;
-    if (changed) cx.notify();
+    if (changed || freed) cx.notify();
     return runs;
   }
 

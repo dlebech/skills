@@ -47,8 +47,18 @@ export function orchestratorLost(run, ctx) {
   return (term.program ?? pane?.program)?.shell === true;
 }
 
-// The orchestrator's status, or "gone" when its terminal has ended or is lost.
+// The orchestrator's status, or "gone" when its terminal has ended or is lost. Worked out once per run per
+// facts() snapshot: a render asks for it many times (the Crew, the Bridge's queue, its lines, each card).
+const states = new WeakMap();
+
 export function orchestratorState(run, ctx) {
+  let m = states.get(ctx);
+  if (!m) states.set(ctx, (m = new Map()));
+  if (!m.has(run)) m.set(run, orchestratorStateOf(run, ctx));
+  return m.get(run);
+}
+
+function orchestratorStateOf(run, ctx) {
   const term = run.terminal && ctx.terminals.find((t) => t.address === run.terminal);
   if (!ctx.agents.some((a) => a.address === run.terminal) && (!term || term.state !== "live")) return "gone";
   if (orchestratorLost(run, ctx)) return "gone";

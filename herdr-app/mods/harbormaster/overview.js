@@ -1,106 +1,49 @@
-// The runs overview itself: the captain strip, the totals, what is waiting on you, the closed runs' header and bulk delete, and the list of run cards.
+// The Bridge itself (the popup and the pane beside the captain): its header, the two columns (the queue, Open runs, Done and the
+// closed runs on the left; Parked, This week and the captain strip on the right), the closed runs' header and bulk delete.
 
 import { div, svg } from "gpui-kit";
+import { props } from "herdr";
 import { openStartCaptain } from "./newrun.js";
 import { v_flex, h_flex } from "gpui-base";
-import { stats, decisionQueue, deleteRuns, newestFirst, runTime } from "./data.js";
+import { stats, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, agentStatus, captainOf, captainPane, focusAgent, openStats } from "./live.js";
-import { CAPTAIN, OCTOPUS, zoom, plural, ago } from "./ui.js";
-import { oneLine, queueLines } from "./question.js";
+import { CAPTAIN, zoom, plural } from "./ui.js";
 import { setNote } from "./note.js";
-import { runlessOrchs } from "./attend.js";
-import { parkedHeading, openPrsLabel } from "./tell.js";
 import { toastsOn, setToastsOn } from "./telling.js";
-import { needCount, needRunsOf, runlessNeeds, watchingText } from "./crewrows.js";
 import { withContext, statusDot, noteRows, actionButton } from "./cardparts.js";
 import { attOf } from "./needitems.js";
-import { noAnswer, answerParts } from "./answers.js";
 import { pinButton } from "./runpane.js";
 import { card } from "./runcard.js";
+import { queueSections, BRIDGE_SIZE } from "./crew.js";
+import { weekBlock } from "./bridgeweek.js";
+import { bridgeColumns, bridgeGroups, totalsText, watchedText, pruneFolds } from "./bridgerows.js";
+import { openBlock, doneBlock, parkedBlock } from "./bridge.js";
 
-// What the captain watches, from stats(): "watching 2 runs · 1 finished" (crewrows.js watchingText).
-export const watchedText = (s) => watchingText(s.live.length, s.docked.length);
-
+// The captain's one fixed-height row: with a captain running, what it watches, Open chat and the pin; with none,
+// a line saying the Bridge works without one and Start captain.
 export function captainStrip(view, t, ctx, s) {
   const watched = watchedText(s);
   const cap = captainOf(ctx);
-  if (!cap.terminal) return h_flex().flex_none().gap(8).p(10).rounded(10).border(1).border_color(t.border).text_size(12).text_color(t.dim)
-    .items_center().child(CAPTAIN).child(div().flex_1().child("No captain running."))
-    .child(div().id("start-captain").flex_none().px(10).h(24).rounded(6).flex().items_center().bg(t.raised).text_color(t.foreground).cursor_pointer()
-      .hover((st) => st.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); openStartCaptain(); }).child("Start captain"));
-  return h_flex().id("captain").flex_none().gap(10).p(10).px(12).rounded(10).bg(t.accent + "18").border(1).border_color(t.accent + "55")
-    .items_center().cursor_pointer().hover((s) => s.bg(t.accent + "26"))
-    .on_click(() => focusAgent(cap.terminal.address))
+  const box = (el) => el.flex_none().h(88).px(12).rounded(8);
+  if (!cap.terminal) return box(v_flex().id("captain")).bg(t.surface).justify_center().gap(2)
+    .child(h_flex().gap(10).items_center()
+      .child(div().text_size(18).child(CAPTAIN))
+      .child(div().flex_1().min_w(0).font_semibold().text_size(13).text_color(t.foreground).child("No captain running"))
+      .child(actionButton(t, "start-captain", "Start captain", "Start a captain: a chat across all your runs", () => openStartCaptain(), true)))
+    .child(div().h(40).overflow_hidden().text_size(11.5).text_color(t.muted)
+      .child("The Bridge works without one. Start a captain when you want someone to talk to across runs."));
+  const stopped = "Watcher not running · ask the captain to watch";
+  return box(h_flex().id("captain")).gap(10).items_center().bg(t.accent + "18").border(1).border_color(t.accent + "55")
     .child(div().text_size(18).child(CAPTAIN))
     .child(v_flex().flex_1().min_w(0)
       .child(div().font_semibold().text_size(13).text_color(t.foreground).child("Captain"))
-      .child(div().text_size(11.5).text_color(cap.watching ? t.muted : t.blocked)
-        .child(cap.watching ? `${watched[0].toUpperCase()}${watched.slice(1)}` : "Watcher is not running — ask the captain to watch")))
-    .child(pinButton(t, "pin-captain", captainPane(ctx), { labelled: true }))
+      .child(div().truncate().text_size(11.5).text_color(cap.watching ? t.muted : t.blocked)
+        .when(!cap.watching, (el) => el.id("captain-watch").tooltip(stopped))
+        .child(cap.watching ? `${watched[0].toUpperCase()}${watched.slice(1)}` : stopped)))
+    .child(actionButton(t, "open-chat", "Open chat", "Show the captain's terminal", () => focusAgent(cap.terminal.address), true))
+    .child(pinButton(t, "pin-captain", captainPane(ctx)))
     .map(withContext(view, t, "captain", cap.terminal.address))
     .child(statusDot(t, agentStatus(cap.terminal, ctx)));
-}
-
-// Everything waiting on the person, in one queue at the top of the overview, oldest first
-// (the work blocked longest): each run's question.md, the captain's open decisions
-// (decisions.sh) and the runs that need them without a question. Each item can be answered
-// from what it shows: its recommended option, evidence and risk, a button per option and a
-// free-text Reply. An answer goes to the run's inbox, or to the captain for its decisions.
-function waitingOnYou(view, t, s, decisions, runs, ctx) {
-  const cap = captainOf(ctx);
-  const items = decisionQueue(runs, decisions, ctx);
-  if (!items.length) return null;
-  const row = (it) => {
-    const why = noAnswer(it);
-    const address = it.kind === "decision" ? cap.terminal?.address : it.run?.terminal;
-    const meta = [it.kind === "decision" ? "captain asks" : null, it.run?.branch ?? (it.decision?.run ?? "").split("/").pop(),
-      it.run?.machine ?? it.decision?.machine, it.since ? `asked ${ago(it.since)}` : null];
-    const line = (label, text, color) => text && div().text_size(11).text_color(t.muted)
-      .child(div().flex().gap(4).child(div().flex_none().font_semibold().text_color(color ?? t.dim).child(label)).child(div().flex_1().min_w(0).child(oneLine(text))));
-    // Blocks right under the title, the urgency cue, and no recommendation the starred option
-    // says already (question.js queueLines), as the need box shows a question.
-    const tone = { blocks: t.blocked, rec: t.accent, risk: t.blocked };
-    const lines = queueLines(it);
-    const body = h_flex().id(it.id + "-body").flex_1().min_w(0).gap(8).items_start()
-      .when(Boolean(address), (el) => el.cursor_pointer().on_click(() => focusAgent(address)))
-      .child(div().flex_none().text_size(14).child(it.kind === "decision" ? CAPTAIN : OCTOPUS))
-      .child(v_flex().flex_1().min_w(0).gap(2)
-        .child(div().text_size(12.5).text_color(t.foreground).child(oneLine(it.title, 300)))
-        .children(lines.filter((x) => x.key === "blocks").map((x) => line(x.label, x.text, tone.blocks)))
-        .child(div().truncate().text_size(11).text_color(t.dim).child(meta.filter(Boolean).join(" · ")))
-        .children(lines.filter((x) => x.key !== "blocks").map((x) => line(x.label, x.text, tone[x.key]))));
-    const a = answerParts(view, t, it, ctx);
-    const buttons = a.canPick && !why && it.options.length > 0 && h_flex().flex_wrap().gap(6).pl(22)
-      .children(it.options.map((_o, i) => a.optionButton(i)));
-    return v_flex().id(it.id).gap(6).p(8).rounded(7).bg(t.surface)
-      .child(h_flex().gap(8).items_start().child(body).when(Boolean(a.replyBtn), (el) => el.child(a.replyBtn)))
-      .when(Boolean(buttons), (el) => el.child(buttons))
-      .when(Boolean(a.note), (el) => el.child(a.note.pl(22)))
-      .when(Boolean(a.input), (el) => el.child(a.input));
-  };
-  return v_flex().id("waiting").flex_none().gap(6).p(10).rounded(10).bg(t.blocked + "14").border(1).border_color(t.blocked + "66")
-    .child(div().text_size(11.5).font_semibold().text_color(t.blocked).child(`Waiting on you · ${items.length}`))
-    .children(items.map(row));
-}
-
-// The totals across runs, as small stats under the overview's title. "need you" counts as the
-// Crew's Needs you heading does (crewrows.js needCount): the runs that need you, orchestrators
-// without a run blocked on a dialog and the captain's open decisions; it focuses the first.
-function totals(t, s, need, decisions, ctx, runless = []) {
-  const stat = (id, value, label, tone, onClick) => h_flex().id(id).flex_none().gap(4).items_baseline().px(6).h(22).rounded(5)
-    .when(Boolean(onClick), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click(onClick))
-    .child(div().text_size(13).font_semibold().text_color(tone ? t[tone] : t.foreground).child(String(value)))
-    .child(div().text_size(11).text_color(t.dim).child(label));
-  const blocked = runlessNeeds(runless);
-  const firstNeed = (decisions.length ? captainOf(ctx).terminal?.address : null) ?? need[0]?.terminal ?? blocked[0]?.term.address;
-  const needs = needCount(need, runless, decisions.length);
-  return h_flex().flex_wrap().gap(2).items_center()
-    .child(stat("t-runs", s.live.length, "running", null))
-    .child(stat("t-need", needs, "need you", needs ? "blocked" : null, firstNeed ? () => focusAgent(firstNeed) : null))
-    .when(s.docked.length > 0, (el) => el.child(stat("t-done", s.docked.length, "finished", "done")))
-    .child(stat("t-agents", s.workers, s.workers === 1 ? "agent" : "agents", null))
-    .when(s.planned > 0, (el) => el.child(stat("t-tasks", `${s.done}/${s.planned}`, "tasks done", null)))
-    .child(stat("t-prs", s.open.length, openPrsLabel(s.open.length, s.failing, s.parkedOpen), s.failing ? "blocked" : s.open.length ? "done" : null));
 }
 
 // Deleting closed runs by age, from the closed runs' header: each preset's cutoff in days
@@ -191,43 +134,51 @@ function closedHeader(view, t, closed) {
         .child(actionButton(t, "bulk-no", "Cancel", null, (cx) => set(cx, null)))));
 }
 
-// The cards list: what's waiting on you, captain, runs that need you, the others, finished
-// runs still open, then closed runs folded; each group newest first (runTime).
-export function cards(view, t, runs, errors, decisions = []) {
+// The totals as one short line under the title: "5 open runs · 3 parked · 2 open PRs", the PR part red when a check fails.
+function totalsLine(t, parts) {
+  const row = h_flex().id("bridge-totals").flex_wrap().gap(5).px(4).items_center().text_size(11).text_color(t.dim);
+  parts.forEach((p, i) => { if (i) row.child(div().flex_none().child("·")); row.child(div().flex_none().text_color(p.tone ? t[p.tone] : t.dim).child(p.text)); });
+  return row;
+}
+
+// The Bridge: a fixed header (title, totals, Stats, toasts), then one scrolling body of two columns (one when narrow).
+// Left: the queue, Open runs (a line each, unfolding to the card), Done, the closed runs. Right: Parked, This week, the captain.
+export function cards(view, t, runs, errors) {
   const ctx = facts();
   const s = stats(runs, ctx);
-  // Runs that need you, as the Crew counts them (finished ones too: a PR to merge), come first.
-  const need = needRunsOf(s.shown, (r) => attOf(r, ctx));
-  const needing = new Set(need);
-  const sorted = (list) => [...list].sort(newestFirst);
-  const live = [...sorted(need), ...sorted(s.live.filter((r) => !needing.has(r)))];
-  const docked = s.docked.filter((r) => !needing.has(r));
-  const closed = sorted(s.closed);
-  const narrow = (view.size?.width ?? 600) / zoom() < 360;
-  const waiting = waitingOnYou(view, t, s, decisions, runs, ctx);
+  const g = bridgeGroups(s, (r) => attOf(r, ctx), newestFirst);
+  view.bridgeOpen = pruneFolds(view.bridgeOpen, g);
+  // Before the first size event, the width the view opens at: the popup's (so it draws two columns at once), else the pane's.
+  const width = (view.size?.width ?? (props()?.overlay ? BRIDGE_SIZE.width : 600)) / zoom();
+  const narrow = width < 360;
+  const queue = queueSections(view, t, { all: true, ctx, s });
+  const left = v_flex().id("bridge-left").gap(10).min_w(0)
+    .child(v_flex().id("bridge-queue").flex_none().gap(4).children(queue.length ? queue : [div().px(4).text_size(11.5).text_color(t.muted).child("Nothing waits on you.")]))
+    .child(openBlock(view, t, g.open, ctx, narrow))
+    .children([doneBlock(view, t, g.done, ctx, narrow)].filter(Boolean))
+    .when(g.closed.length > 0, (el) => el.child(closedHeader(view, t, g.closed)))
+    .when(Boolean(view.showDone), (el) => el.children(g.closed.map((r) => card(view, t, r, ctx, true))))
+    .children(noteRows(view, t, false))
+    .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n"))));
+  const right = v_flex().id("bridge-right").gap(10).min_w(0)
+    .child(parkedBlock(view, t, g.parked, ctx))
+    .child(weekBlock(view, t))
+    .child(captainStrip(view, t, ctx, s));
+  const two = bridgeColumns(width) === 2;
   return v_flex().id("root").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
     .on_size_change((size, cx) => { view.size = size; cx.notify(); })
     .child(v_flex().flex_none().px(10).pt(10).pb(6).gap(2)
       .child(h_flex().px(4).items_center()
-        .child(div().flex_1().text_size(11.5).font_medium().text_color(t.dim).child("Runs"))
+        .child(div().flex_1().text_size(11.5).font_medium().text_color(t.dim).child("⚓ Bridge"))
         .child(div().id("open-stats").flex_none().px(6).h(18).rounded(4).flex().items_center().text_size(11).text_color(t.dim)
           .cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))
           .tooltip("Where the time goes, tokens, CPU and memory: per run, task and agent, and past runs")
           .on_click(() => openStats()).child("Stats"))
         .child(toastsToggle(t)))
-      .child(totals(t, s, need, decisions, ctx, runlessOrchs(view.runs, ctx))))
-    .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
-      .when(Boolean(waiting), (el) => el.child(waiting))
-      .child(captainStrip(view, t, ctx, s))
-      .when(s.shown.length === 0, (el) => el.child(div().p(12).text_size(12).text_color(t.dim).child("No runs in progress. Ask the captain to start one, e.g. “start issue 185 in my-app”.")))
-      .children(live.map((r) => card(view, t, r, ctx, narrow)))
-      .children(sorted(docked).map((r) => card(view, t, r, ctx, true)))
-      .when(s.parked.length > 0, (el) => el.child(div().pt(6).px(4).text_size(11).font_semibold().text_color(t.dim).child(parkedHeading(s.parked.length, s.parkedWithOpen))))
-      .children(sorted(s.parked).map((r) => card(view, t, r, ctx, true)))
-      .when(closed.length > 0, (el) => el.child(closedHeader(view, t, closed)))
-      .when(Boolean(view.showDone), (el) => el.children(closed.map((r) => card(view, t, r, ctx, true))))
-      .children(noteRows(view, t, false))
-      .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n")))));
+      .child(totalsLine(t, totalsText(s, g.open.length))))
+    .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).overflow_y_scrollbar()
+      .when(two, (el) => el.child(h_flex().id("bridge-cols").gap(16).items_start().child(left.w("55%")).child(right.flex_1())))
+      .when(!two, (el) => el.child(v_flex().id("bridge-stack").gap(10).child(left).child(right))));
 }
 
 // Toasts on or off (telling.js): a toast when a run starts needing you. On by default.

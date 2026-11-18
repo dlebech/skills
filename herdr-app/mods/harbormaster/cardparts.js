@@ -237,7 +237,9 @@ export function confirmBlock(view, t, r, orch, counts, asking, id) {
   const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
   const yes = (cx) => {
     set(cx, null);
-    if (asking === "resume") return resumeRun(r);
+    // A resume has no end to wait for here: the run is busy ("Resuming…", on the card and the Bridge's row alike) until a
+    // load shows it no longer parked (main.js load) or the busy limit passes, so a second click can't start a second orchestrator.
+    if (asking === "resume") { view.busy[r.key] = { label: "Resuming…", at: Date.now(), branch: r.branch, resume: true }; return resumeRun(r); }
     const busy = { label: BUSY[asking], at: Date.now(), branch: r.branch };
     view.busy[r.key] = busy;
     // The click's cx dies with the click; the awaited work notifies through cx.spawn's.

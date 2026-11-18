@@ -956,7 +956,6 @@ export function stats(runs, ctx) {
     failing: open.filter((p) => p.checks?.fail).length,
     done: tasks.reduce((n, c) => n + c.done, 0),
     planned: tasks.reduce((n, c) => n + c.planned, 0),
-    workers: shown.reduce((n, r) => n + workersOf(r.terminal, ctx).length, 0),
   };
 }
 

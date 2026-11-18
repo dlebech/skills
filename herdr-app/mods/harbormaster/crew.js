@@ -22,7 +22,7 @@ import { attOf, needItemsOf, said } from "./needitems.js";
 import { runStatus, closeAllControl, runFacts, newDecisionsNote, needButton, needLines, boxConfirm, waitOnField } from "./needbox.js";
 import { levelTags, runTypeTag, cardBesideOrchestrator, proofAction } from "./runpane.js";
 import { statusDot, actionButton, noteRows, edgeColor, AMBER, PASS, SELECTED, withUsage, runProps, stagesOf } from "./cardparts.js";
-import { watchedText } from "./overview.js";
+import { watchedText } from "./bridgerows.js";
 import { answerParts } from "./answers.js";
 import { needQueue, queueKey, decisionAction, expandedItem } from "./queue.js";
 import { queueLines } from "./question.js";
@@ -59,8 +59,7 @@ function openRun(m, x) {
 const OPEN_HERE = "Click to open it here";
 
 // What every piece of the block reads, worked out once per render.
-function crewModel(view, t) {
-  const ctx = facts();
+function crewModel(view, t, ctx = facts(), s = stats(view.runs, ctx)) {
   const cap = captainOf(ctx);
   // A live run before a parked or closed one that recorded the same address (as runOfProps), or
   // the live run would get a second, "orchestrator gone" row with a Resume.
@@ -76,7 +75,7 @@ function crewModel(view, t) {
     .map((o) => ({ ...o, state: o.r?.phase ?? runPhase(o.term.labels?.["run.status"]), a: o.r ? attOf(o.r, ctx) : attentionOf(null, ctx, now, o.term) }));
   // Its Needs you is the overview's (crewrows.js crewEntries): a run that needs you whose
   // orchestrator is gone gets a row too, and the captain's open decisions count in its heading.
-  const needRuns = needRunsOf(stats(view.runs, ctx).shown, (r) => attOf(r, ctx));
+  const needRuns = needRunsOf(s.shown, (r) => attOf(r, ctx));
   const entries = crewEntries(orchestrators, needRuns, (r) => attOf(r, ctx));
   // The captain's open decisions as queue items (decisionQueue's shapes), for the Needs-you rows.
   // Built with the runs, so a decision that names a live run carries it (the answer then goes to its inbox).
@@ -158,9 +157,9 @@ function captainLink(m) {
     .child("captain ↗");
 }
 
-// Opens Harbormaster's popup (the mod's default view, sized by its mod.json), as ctrl-shift-h does.
-// The popup's size: it must match `overlay` in mod.json, which ctrl-shift-h opens it at.
-export const BRIDGE_SIZE = { width: 760, height: 640 };
+// Opens the Bridge as a popup (the mod's default view), as ctrl-shift-h does. Its size must match `overlay` in mod.json,
+// which ctrl-shift-h opens it at.
+export const BRIDGE_SIZE = { width: 860, height: 680 };
 const openBridge = () => openOverlay({ mod: "harbormaster", kind: "dialog", ...BRIDGE_SIZE, props: {} });
 
 // The sidebar's one header row.
@@ -570,9 +569,9 @@ function withGroups(m) {
 }
 
 // The Needs-you and Next for you sections as the sidebar draws them, for the Bridge to put at its
-// top. With `all`: every item, no "+ n more" (snoozed items stay behind their "snoozed · n" line).
-export function queueSections(view, t, { all = false } = {}) {
-  const m = withGroups({ ...crewModel(view, t), all });
+// top. `ctx` and `s`: the caller's facts() and stats(), so a render reads each run once. With `all`: every item, no "+ n more" (snoozed items stay behind their "snoozed · n" line).
+export function queueSections(view, t, { all = false, ctx, s } = {}) {
+  const m = withGroups({ ...crewModel(view, t, ctx, s), all });
   return [...needsSection(m), ...nextSection(m)];
 }
 
