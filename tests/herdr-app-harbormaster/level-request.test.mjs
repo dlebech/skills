@@ -9,17 +9,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, renameSync, rmSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { withRoot } from "./root.mjs";
 import { loadRuns, requestLevel } from "../../herdr-app/mods/harbormaster/data.js";
-
-// Only sh runs for real (the runs read and the inbox write), with the throwaway root; nothing else
-// (hc, gh) is called for real.
-function withRoot(root) {
-  globalThis.__herdrExec = async (cmd, args) => {
-    if (cmd !== "sh") return { code: 1, stdout: "", stderr: "not in this test" };
-    const r = spawnSync(cmd, args, { encoding: "utf8", env: { ...process.env, HERDR_ORCHESTRATION_ROOT: root } });
-    return { code: r.status, stdout: r.stdout, stderr: r.stderr };
-  };
-}
 
 // loadRuns keeps a read for 2.5 s; step the clock past it between reads.
 const realNow = Date.now;

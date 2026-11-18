@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { blockingRequest, blockingPending, blockingAsked, askSig, BLOCKING } from "../../herdr-app/mods/harbormaster/blocking.js";
+import { withRoot } from "./root.mjs";
 import { flowState, flowSetting, reviewFlow } from "../../herdr-app/mods/harbormaster/attention.js";
 import { withFlow } from "../../herdr-app/mods/harbormaster/tracking.js";
 import { loadRuns, askBlocking } from "../../herdr-app/mods/harbormaster/data.js";
@@ -78,12 +79,7 @@ test("askBlocking writes the message to the run's inbox, and the next read shows
   Date.now = () => realNow() + skew;
   const read = async (dir) => { skew += 5000; return (await loadRuns()).runs.find((r) => r.dir === dir); };
   try {
-    // Only sh runs for real, with the throwaway root; hc and gh are not called.
-    globalThis.__herdrExec = async (cmd, args) => {
-      if (cmd !== "sh") return { code: 1, stdout: "", stderr: "not in this test" };
-      const r = spawnSync(cmd, args, { encoding: "utf8", env: { ...process.env, HERDR_ORCHESTRATION_ROOT: root } });
-      return { code: r.status, stdout: r.stdout, stderr: r.stderr };
-    };
+    withRoot(root);
     const dir = join(root, "skills", "feat-x");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "orchestrator.json"), JSON.stringify({ branch: "feat-x", terminal: "t99", folder: "skills" }));

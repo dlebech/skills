@@ -10,6 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, renam
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { withRoot } from "./root.mjs";
 import { acceptedFile, withAcceptance } from "../../herdr-app/mods/harbormaster/proof.js";
 import { claimRows, claimsVerdict } from "../../herdr-app/mods/harbormaster/claims.js";
 import { loadRuns, acceptProof, unacceptProof, askProof, WRITE_ACCEPTED } from "../../herdr-app/mods/harbormaster/data.js";
@@ -69,14 +70,6 @@ test("the captain watcher does not take an ask to prove or a level request as an
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// Only sh runs for real, with the throwaway root; hc and gh are not called.
-function withRoot(root) {
-  globalThis.__herdrExec = async (cmd, args) => {
-    if (cmd !== "sh") return { code: 1, stdout: "", stderr: "not in this test" };
-    const r = spawnSync(cmd, args, { encoding: "utf8", env: { ...process.env, HERDR_ORCHESTRATION_ROOT: root } });
-    return { code: r.status, stdout: r.stdout, stderr: r.stderr };
-  };
-}
 const realNow = Date.now;
 let skew = 0;
 Date.now = () => realNow() + skew;
