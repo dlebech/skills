@@ -1,18 +1,17 @@
-// The "+ New run" dialog (role "newrun") and the one-click review: start an orchestrator in a
-// repository's own space as a new tab, without the captain and without switching the user's
-// view, as herdr-app-captain's "Start a run" does. openNewRun({repo, kind, input}) opens the
-// dialog (Crew's header button and the Review buttons call it); startReview({repo, pr}) starts
-// a review with the remembered settings and no dialog. The prompt, arguments and the remembered
-// choices are in startrun.js.
+// The "+ New run" dialog (role "newrun"): start an orchestrator in a repository's own space as a
+// new tab, without the captain and without switching the user's view, as herdr-app-captain's
+// "Start a run" does. openNewRun({repo, kind, input, url}) opens the dialog (Crew's header button
+// and the Review buttons call it; a Review button prefills the folder, the PR and the kind, and
+// nothing starts until Start). The prompt, arguments and the remembered choices are in startrun.js.
 
 import { div } from "gpui-kit";
 import { InputState, Input, TextareaState, Textarea, v_flex, h_flex } from "gpui-base";
 import { exec, focused, terminals, openOverlay, closeOverlay, props, notify, readTextFile, writeTextFile, spaces, home, checking } from "herdr";
-import { repoSpaces, knownRepos, repoRoot, openFolders, runFolders, scanFolders, isFolder } from "./repospaces.js";
+import { repoRoot, openFolders, runFolders, scanFolders, isFolder } from "./repospaces.js";
 import { recentFolders, listFolders, matchFolders, literalFolder, tilde, base, newSpaceId } from "./folders.js";
 import {
   KINDS, DRAFTS, profileText, parseProfile, profileFor, buildPrompt, inputProblem, runAgentName, startArgs,
-  startOutcome, parsePrefs, AGENTS, agentFor, agentLabel, lastProfile, roleValue, modelProblems, setRole, parsePiModels, parseOpencodeModels, CAPTAIN_PROMPT, captainProblem, captainName, captainArgs, draftsFor, remember, markReviewStarted, clearReviewStarted,
+  startOutcome, parsePrefs, AGENTS, agentFor, agentLabel, lastProfile, prefillProfile, roleValue, modelProblems, setRole, parsePiModels, parseOpencodeModels, CAPTAIN_PROMPT, captainProblem, captainName, captainArgs, draftsFor, remember, markReviewStarted, clearReviewStarted, reviewStarting,
 } from "./startrun.js";
 export { reviewStarting } from "./startrun.js";
 
@@ -125,19 +124,19 @@ async function startAgent({ repo, name, prompt, args, remembered }) {
   return out;
 }
 
-// The review of one PR with the remembered settings: the one-click path. `repo` is the Review
-// row's `local` ({space, root}) or a repository folder; a toast says how it went.
-const starting = new Set(); // "<root>#<pr>" being started: a second click must not start a second review
+// Reviews being started from a dialog, by PR url. A second Start of the same PR (another
+// dialog, a double click) must not start a second review.
+const starting = new Set();
 
-// `url`: the PR's, to mark it started from the click on (reviewStarting); a start that fails clears it.
-export async function startReview({ repo, pr, url = null }) {
-  const root = typeof repo === "string" ? repo : repo?.root;
-  const id = `${root}#${pr}`;
-  if (starting.has(id)) { try { notify({ title: "Already starting", body: `PR ${pr} is being started`, level: "info", timeout: 4000 }); } catch { /* no toast mod */ } return { ok: false, error: "already starting" }; }
+// The guard around a review's start from the dialog: marks its PR (`url`) "starting…" at once and
+// clears the mark when nothing started. `run` is the start; the guard answers a repeat without running it.
+export async function guardReview({ id, url, run }) {
+  // Refused while one is in flight, and while the PR is marked starting (a start that already returned, from another dialog).
+  if (starting.has(id) || reviewStarting(url)) { try { notify({ title: "Already starting", body: "That review is being started", level: "info", timeout: 4000 }); } catch { /* no toast mod */ } return { ok: false, error: "already starting" }; }
   starting.add(id);
   markReviewStarted(url);
   try {
-    const out = await reviewNow(root, repo, pr);
+    const out = await run();
     if (!out.ok && !out.started) clearReviewStarted(url);
     return out;
   } catch (e) {
@@ -146,37 +145,17 @@ export async function startReview({ repo, pr, url = null }) {
   } finally { starting.delete(id); }
 }
 
-// The repository to review in: its open space, else the clone as given (`repo.root`), whose
-// space start-agent.sh opens (as herdr-app-captain's Start a run does for a repository with none).
-async function reviewRepo(root, repo) {
-  const open = (await repoSpaces().catch(() => [])).find((r) => r.root === root || (repo?.space && r.space === repo.space));
-  if (open || !root) return open ?? null;
-  const clone = (await knownRepos().catch(() => [])).find((r) => r.root === root);
-  return clone ?? { space: null, name: root.split("/").pop(), root, origin: null };
+// The entries with the folder asked for (an absolute path) added when none lists it, so a clone
+// that has no space and is not a recent folder can still be chosen; pure.
+export function withFolder(entries, want) {
+  if (!want || !String(want).startsWith("/") || entries.some((e) => e.folder === want || base(e.folder) === want || e.name === want)) return entries;
+  return [...entries, literalFolder(want, "")];
 }
 
-async function reviewNow(root, repo, pr) {
-  let out;
-  let found = null;
-  try {
-    found = await reviewRepo(root, repo);
-    const [prefs, installed] = await Promise.all([loadPrefs(), installedAgents()]);
-    const agent = agentFor(prefs, installed);
-    out = await launch({
-      repo: found, kind: "review", input: String(pr), agent,
-      profile: profileFor("review", lastProfile(prefs, agent), agent), drafts: draftsFor(prefs, found?.root),
-    });
-  } catch (e) { out = { ok: false, error: String(e?.message ?? e).split("\n")[0].slice(0, 160) }; }
-  try {
-    notify(out.ok ? { title: "Review started", body: `${found.name}: PR ${pr} in a new tab`, level: "success", timeout: 6000 }
-      : { title: "Review not started", body: out.error, level: "warning" });
-  } catch { /* no toast mod */ }
-  return out;
-}
-
-// Opens the dialog; every field is optional. `repo` is a folder or its name.
-export function openNewRun({ repo, kind, input } = {}) {
-  return openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 760, props: { role: "newrun", repo, kind, input } });
+// Opens the dialog; every field is optional. `repo` is a folder or its name. `url`: a review's PR,
+// marked "starting…" in Next for you once its Start starts it.
+export function openNewRun({ repo, kind, input, url } = {}) {
+  return openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 760, props: { role: "newrun", repo, kind, input, url } });
 }
 
 // The same dialog with only the folder, for starting the captain (the "no captain running" spots).
@@ -218,7 +197,7 @@ export function initNewRun(view, cx) {
     nr.prefs = prefs;
     nr.agents = agents;
     nr.agent = agentFor(prefs, agents);
-    nr.entries = listFolders({ spaces: spaceEntries, recents: recentFolders(prefs.folders, runs) });
+    nr.entries = withFolder(listFolders({ spaces: spaceEntries, recents: recentFolders(prefs.folders, runs) }), p.repo);
     const pick = chooseFolder(nr.entries, p.repo);
     if (pick) setFolder(view, pick);
     nr.drafts = draftsFor(prefs, draftKey(nr));
@@ -255,6 +234,10 @@ function setFolder(view, entry) {
   nr.root = null;
   repoRoot(entry.folder).then((root) => { if (nr.folder === entry) { nr.root = root; nr.drafts = draftsFor(nr.prefs, root); } }).catch(() => {});
 }
+
+// The dialog still holds the PR it was opened for: only then is that PR's row the one being started.
+export const sameReview = (kind, text, opened) => kind === "review" && String(text).trim() === String(opened ?? "").trim();
+const sameAsOpened = (nr) => sameReview(nr.kind, nr.text.value(), props()?.input);
 
 const draftKey = (nr) => nr.root ?? nr.folder?.folder;
 
@@ -303,7 +286,7 @@ function typed(view, cx) {
 // Prefills the profile line, unless the user has edited it since the last prefill.
 function setProfile(nr) {
   if (nr.profile.value() !== nr.prefill && nr.profile.value() !== "") return;
-  nr.prefill = profileText(profileFor(nr.kind, lastProfile(nr.prefs, nr.agent), nr.agent));
+  nr.prefill = profileText(prefillProfile(nr.prefs, nr.kind, nr.agent));
   nr.profile.set_value(nr.prefill);
 }
 
@@ -332,7 +315,7 @@ function start(view, cx, fromList = false) {
   const pick = target(nr, fromList);
   if (pick && pick !== nr.folder) setFolder(view, pick);
   const captain = nr.kind === "captain";
-  const { profile, bad } = captain ? { profile: null, bad: [] } : parseProfile(nr.profile.value(), profileFor(nr.kind, lastProfile(nr.prefs, nr.agent), nr.agent));
+  const { profile, bad } = captain ? { profile: null, bad: [] } : parseProfile(nr.profile.value(), prefillProfile(nr.prefs, nr.kind, nr.agent));
   const problem = !pick ? "Pick a folder from the list"
     : pick.machine ? `That space is on ${pick.machine}: start ${captain ? "the captain" : "the run"} from the Herdr window there`
     : captain ? captainProblem(terminals())
@@ -340,12 +323,12 @@ function start(view, cx, fromList = false) {
     : lineProblem(nr, profile) || inputProblem(nr.kind, nr.text.value());
   if (problem) { nr.error = problem; nr.hint = true; nr.open = false; cx.notify(); return; }
   nr.busy = true; nr.error = null; nr.hint = false; nr.open = false;
-  const ask = { pick, profile, kind: nr.kind, input: nr.text.value(), drafts: nr.drafts, agent: nr.agent, overlay: props()?.overlay };
+  const ask = { pick, profile, kind: nr.kind, input: nr.text.value(), drafts: nr.drafts, agent: nr.agent, overlay: props()?.overlay, url: sameAsOpened(nr) ? props()?.url : null };
   cx.notify();
   cx.spawn((cx) => startNow(view, cx, ask));
 }
 
-async function startNow(view, cx, { pick, profile, kind, input, drafts, agent, overlay }) {
+async function startNow(view, cx, { pick, profile, kind, input, drafts, agent, overlay, url }) {
   const nr = view.nr;
   let out;
   try {
@@ -353,7 +336,9 @@ async function startNow(view, cx, { pick, profile, kind, input, drafts, agent, o
     const open = spaces();
     if (!pick.space) pick = (await openFolders().catch(() => [])).find((e) => e.folder === pick.folder && e.space && !e.machine) ?? pick;
     const repo = { space: pick.space, name: base(pick.folder), root: pick.folder, spaceId: pick.space ? null : newSpaceId(pick.folder, open) };
-    out = kind === "captain" ? await launchCaptain({ repo }) : await launch({ repo, kind, input, profile, drafts, agent });
+    const go = () => launch({ repo, kind, input, profile, drafts, agent });
+    out = kind === "captain" ? await launchCaptain({ repo })
+      : kind === "review" && url ? await guardReview({ id: url, url, run: go }) : await go();
   } catch (e) { out = { ok: false, error: `Could not start it: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}` }; }
   nr.busy = false;
   // Started: the new tab is the confirmation. Not quite (the trust prompt, a dialog): say where, calmly.
@@ -416,7 +401,7 @@ export function newRunView(view, t) {
   const agentRow = nr.agents.length > 1 && field(t, "Agent", h_flex().gap(6).flex_wrap().children(AGENTS.filter((a) => nr.agents.includes(a.id))
     .map((a) => pill(t, `nr-a-${a.id}`, a.label, nr.agent === a.id, (cx) => { nr.agent = a.id; setProfile(nr); set({}, cx); }, a.tip))));
   // The line checked as it is typed: the first role it can't use, and the models that match it, one click each.
-  const parsed = captain ? null : parseProfile(nr.profile.value(), profileFor(nr.kind, lastProfile(nr.prefs, nr.agent), nr.agent));
+  const parsed = captain ? null : parseProfile(nr.profile.value(), prefillProfile(nr.prefs, nr.kind, nr.agent));
   const wrong = parsed && !parsed.bad.length ? lineProblems(nr, parsed.profile)[0] : null;
   const fix = wrong && v_flex().gap(6)
     .child(div().text_size(11).text_color(t.blocked).child(`${wrong.role}: ${wrong.why}${wrong.suggestions.length ? ". Did you mean:" : ""}`))
