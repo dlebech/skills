@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resetShared } from "herdr";
-import { refreshPrs, wantPrs, textSig, prFilesSig, PR_BACKSTOP_CAP } from "../../herdr-app/mods/harbormaster/data.js";
+import { refreshPrs, wantPrs, wantPrsWhenOpened, textSig, prFilesSig, PR_BACKSTOP_CAP } from "../../herdr-app/mods/harbormaster/data.js";
 import { prTtl, prOffset, prMaxAge, PR_EVENT_FLOOR_MS, PR_OPENED_MS, PR_SPREAD_MS } from "../../herdr-app/mods/harbormaster/attention.js";
 
 const MIN = 60_000;
@@ -253,4 +253,35 @@ test("two Harbormaster copies asking at once start one read", withClock(async ()
   tick(prTtl(false) + PR_SPREAD_MS);
   await Promise.all([refreshPrs(run, false), refreshPrs(run, false), refreshPrs(run, false)]);
   assert.equal(w.calls.view, 4);
+}));
+
+test("a run pane opening a run reads its PRs only when the last read is over a minute old, and once per opening", withClock(async () => {
+  const w = world();
+  const stale = w.run(2);
+  const fresh = w.run(2);
+  await refreshPrs(stale, false);
+  await refreshPrs(fresh, false);
+  const base = w.calls.view;
+  tick(PR_OPENED_MS + 1000);
+  const pane = new Set();
+  await wantPrsWhenOpened(pane, stale);
+  assert.equal(w.calls.view, base + 2, "61 s old: read once");
+  await wantPrsWhenOpened(pane, stale);
+  tick(PR_OPENED_MS + 1000);
+  await wantPrsWhenOpened(pane, stale);
+  assert.equal(w.calls.view, base + 2, "the same pane asking again does not read, even a minute later");
+  const second = new Set();
+  tick(0);
+  await wantPrsWhenOpened(second, stale);
+  assert.equal(w.calls.view, base + 4, "a pane opened over a minute after the last read reads again");
+  await wantPrsWhenOpened(new Set(), stale);
+  assert.equal(w.calls.view, base + 4, "reopened right away: the last read is fresh, no read");
+  // 30 s old: not read.
+  const other = w.run(2);
+  await refreshPrs(other, false);
+  const n = w.calls.view;
+  tick(30_000);
+  await wantPrsWhenOpened(new Set(), other);
+  assert.equal(w.calls.view, n, "30 s old: no read");
+  await wantPrsWhenOpened(new Set(), null);
 }));

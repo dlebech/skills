@@ -827,6 +827,16 @@ export async function refreshPrs(run, closed = false, opts = false) {
 // merged PRs are not read again.
 export const wantPrs = (run, closed = isClosed(run, facts()) || isParked(run)) => refreshPrs(run, closed, { reason: "opened" });
 
+// What a run pane calls from its poll (never from a render): wantPrs once for each run the pane
+// shows, the first time it shows it, so opening a run reads its PRs when they are over a minute old.
+// `shown` is the pane's own Set of run keys. After that the open pane reads only through the normal
+// triggers (files, head, backstop), not by itself every minute: the user asked for "when you open".
+export async function wantPrsWhenOpened(shown, run) {
+  if (!run || shown.has(run.key)) return;
+  shown.add(run.key);
+  await wantPrs(run);
+}
+
 // ---- who could review (reviewers.js) ----
 // Earlier reviewers by "owner/repo", {at, list}: module memory, 30 minutes (a failed read, one).
 const reviewerCache = new Map();

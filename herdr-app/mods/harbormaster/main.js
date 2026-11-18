@@ -15,12 +15,12 @@ import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
 import { props, theme, nextCommand, checking, openOverlay, closeOverlay, shared, setShared } from "herdr";
 import { expireNote } from "./note.js";
-import { loadRuns, cachedRuns, refreshPrs, refreshReviewed, isClosed, isParked, newestFirst, stats } from "./data.js";
+import { loadRuns, cachedRuns, refreshPrs, wantPrsWhenOpened, refreshReviewed, isClosed, isParked, newestFirst, stats } from "./data.js";
 import { facts, crewAddresses, captainOf, adrift, agentNames, agentStatus, programOf } from "./live.js";
 import { observeWaits } from "./attend.js";
 import { loadContexts } from "./context.js";
 import { hotSignature, sampleVersion } from "./resources.js";
-import { cards, runPane, submitReply, runProps, runFacts, pathInput } from "./overview.js";
+import { cards, runPane, runOfProps, submitReply, runProps, runFacts, pathInput } from "./overview.js";
 import { mergePath } from "./mergepath.js";
 import { sceneFacts, exportFacts } from "./sceneexport.js";
 import { crew } from "./crew.js";
@@ -229,6 +229,8 @@ export default class Harbormaster extends View {
       // commit moved (at most every 30 s), else its backstop (5 min open, 30 min parked or closed).
       // A parked run's PRs are read as rarely as a closed run's: nobody works on them, they only
       // show what they wait on. Runs are read one after another, never all at once.
+      // A run pane that has just been opened on a run asks first: its PRs are read when over a minute old (wantPrs).
+      if (role === "run") { this.openedPrs ??= new Set(); await wantPrsWhenOpened(this.openedPrs, runOfProps(runs, props() ?? {})).catch(() => {}); }
       for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});
       // The waiting-on marks that let go are deleted here, after the PR reads, never in a render.
       try { observeWaits(runs, facts(), cachedRuns()); } catch (e) { console.log(`harbormaster: waiting-on marks failed: ${e?.message ?? e}`); }
