@@ -3,7 +3,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { TIER_TEXT, tierTip, AUTONOMY, autonomyTip, typeTip, levelChoices, levelRequest, requestLine, pendingLevels } from "../../herdr-app/mods/harbormaster/levels.js";
+import { TIER_TEXT, tierTip, AUTONOMY, autonomyTip, typeTip, levelChoices, requestLine, pendingLevels } from "../../herdr-app/mods/harbormaster/levels.js";
+import { levelRequest } from "../../herdr-app/mods/harbormaster/inbox.js";
 import { tierTip as proofTierTip } from "../../herdr-app/mods/harbormaster/proof.js";
 
 const skill = readFileSync(new URL("../../skills/proving/SKILL.md", import.meta.url), "utf8");
