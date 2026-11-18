@@ -4,25 +4,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resetShared } from "herdr";
-import { refreshPrs, wantPrs, wantPrsWhenOpened, textSig, prFilesSig, PR_BACKSTOP_CAP } from "../../herdr-app/mods/harbormaster/data.js";
-import { prTtl, prOffset, prMaxAge, PR_EVENT_FLOOR_MS, PR_OPENED_MS, PR_SPREAD_MS } from "../../herdr-app/mods/harbormaster/attention.js";
+import { refreshPrs, markOpened, textSig, prFilesSig, PR_BACKSTOP_CAP } from "../../herdr-app/mods/harbormaster/data.js";
+import { prTtl, prOffset, prMaxAge, fnv1a, PR_EVENT_FLOOR_MS, PR_OPENED_MS, PR_SPREAD_MS } from "../../herdr-app/mods/harbormaster/attention.js";
 
 const MIN = 60_000;
 const SHA = (n) => String(n).padStart(40, "a");
 let clock = Date.parse("2026-11-18T10:00:00Z");
 let keys = 0;
 
-// A fake GitHub and git: `gh` PRs by URL ({state, review, sha, head}); `local` the local refs by
-// branch ({origin, local}). Counts the calls and the GraphQL points they cost.
+// A fake GitHub and git: `gh` PRs by URL ({state, review, sha, head, updatedAt}); `local` the local
+// refs by branch ({origin, local}; the head look reads only origin). Counts the calls and the GraphQL
+// points they cost. `w.gate`, while set, is a promise the git call waits on (a slow ssh); `w.fail`,
+// while true, makes `gh pr view` fail.
 function world() {
-  const w = { prs: new Map(), local: new Map(), calls: { view: 0, comments: 0, git: 0 }, points: 0 };
+  const w = { prs: new Map(), local: new Map(), calls: { view: 0, comments: 0, git: 0 }, points: 0, gate: null, fail: false };
   globalThis.__herdrExec = async (cmd, args) => {
     if (cmd === "gh" && args[0] === "pr" && args[1] === "view") {
-      w.calls.view++; w.points += 1;
+      w.calls.view++;
+      if (w.fail) return { code: 1, stdout: "", stderr: "HTTP 502" };
+      w.points += 1;
       const p = w.prs.get(args[2]);
       return { code: 0, stdout: JSON.stringify({
         number: p.number, title: "t", state: p.state, isDraft: false, reviewDecision: p.review ?? null, reviews: [], reviewRequests: [],
-        author: { login: "me" }, statusCheckRollup: [], url: args[2], headRefName: p.head, headRefOid: p.sha, body: "", updatedAt: "2026-11-18T09:00:00Z",
+        author: { login: "me" }, statusCheckRollup: [], url: args[2], headRefName: p.head, headRefOid: p.sha, body: "", updatedAt: p.updatedAt ?? "2026-11-18T09:00:00Z",
       }), stderr: "" };
     }
     if (cmd === "gh" && args[0] === "api" && args[1] === "graphql") {
@@ -31,7 +35,8 @@ function world() {
     }
     if (cmd === "sh" && args[1].includes("refs/remotes/origin")) {
       w.calls.git++;
-      const lines = args.slice(4).map((b) => { const r = w.local.get(b); return r ? `${args[3]}/\t${b}\t${r.origin ?? "-"}\t${r.local ?? "-"}` : null; }).filter(Boolean);
+      if (w.gate) await w.gate;
+      const lines = args.slice(4).map((b) => { const r = w.local.get(b); return r?.origin ? `${args[3]}/\t${b}\t${r.origin}` : null; }).filter(Boolean);
       return { code: 0, stdout: lines.join("\n"), stderr: "" };
     }
     throw new Error(`unexpected exec ${cmd} ${args.join(" ")}`);
@@ -66,6 +71,8 @@ test("each run's backstop is put off by a stable offset under a minute, so runs 
   const offsets = Array.from({ length: 20 }, (_, i) => prOffset(`:/home/u/.herdr/hc-orchestration/skills/run-${i}`));
   assert.ok(offsets.every((o) => o >= 0 && o < PR_SPREAD_MS));
   assert.equal(prOffset(":/a/b"), prOffset(":/a/b"));
+  assert.equal(prOffset(":/a/b"), fnv1a(":/a/b") % PR_SPREAD_MS, "the same FNV-1a as textSig");
+  assert.equal(textSig("abc"), `3:${fnv1a("abc").toString(36)}`);
   assert.ok(new Set(offsets.map((o) => Math.floor(o / 5000))).size >= 8, "20 runs land in at least 8 different 5 s polls");
   // A read put off by the most offset is still not taken for a stuck one.
   assert.ok(prMaxAge(true) > prTtl(true) + PR_SPREAD_MS && prMaxAge(false) > prTtl(false) + PR_SPREAD_MS);
@@ -91,9 +98,17 @@ test("budget: 10 quiet open runs of 2 PRs each stay under 500 GraphQL points an 
   assert.equal(perPoll[0], PR_BACKSTOP_CAP * 2, "the first poll reads only the capped runs");
 }));
 
-test("budget: 10 busy open runs (progress every minute, a task merged every 10) stay under 500 points an hour", withClock(async () => {
+test("budget: 10 busy open runs (progress every minute, a task merged and pushed every 10) stay under 500 points an hour", withClock(async () => {
   const w = world();
   const runs = Array.from({ length: 10 }, (_, i) => w.run(2, { review: i % 2 ? "APPROVED" : null }));
+  // The push of a merge: a minute after it (validated first), one PR's head moves on origin and on
+  // GitHub, and its updatedAt with it (so an approved PR's comments are read again too).
+  let pushes = 0;
+  const push = (r, t) => {
+    const pr = w.prs.get(r.prs[pushes % 2].url);
+    pr.sha = SHA(100000 + ++pushes); pr.updatedAt = new Date(clock).toISOString();
+    w.local.get(pr.head).origin = pr.sha;
+  };
   const status = runs.map((r) => ({ status: "running", prs: r.prs.map((p) => p.url), tasks: { merged: 0, planned: 8 }, progress: "start", updated: "0" }));
   const sync = () => runs.forEach((r, i) => { r.filesSig = prFilesSig(status[i], "Status: running\n", "+Checks: pending — CI\n"); });
   sync();
@@ -104,17 +119,19 @@ test("budget: 10 busy open runs (progress every minute, a task merged every 10) 
     status.forEach((s, i) => {
       if ((t / 1000 + i * 5) % 60 === 0) { s.progress = `step ${t}`; s.updated = String(t); }
       if ((t / 1000 + i * 5) % 600 === 0 && t > 0) { s.tasks = { ...s.tasks, merged: s.tasks.merged + 1 }; triggers++; }
+      if ((t / 1000 + i * 5) % 600 === 60 && t > 60_000) push(runs[i], t);
     });
     sync();
     for (const r of runs) await refreshPrs(r, false);
     tick(5000);
   }
-  console.log(`budget (busy): ${w.points} GraphQL points/h (${w.calls.view} pr view, ${w.calls.comments} comments queries, ${triggers} task merges)`);
+  console.log(`budget (busy): ${w.points} GraphQL points/h (${w.calls.view} pr view, ${w.calls.comments} comments queries, ${triggers} task merges, ${pushes} pushes)`);
   assert.ok(w.points < 500, `${w.points} points in an hour`);
-  // The progress stamps read nothing. A merge reads (and puts that run's backstop off 5 minutes),
-  // so each run reads about every 5 minutes, as a quiet one does, plus a little.
-  assert.ok(triggers >= 50, `${triggers} merges`);
-  assert.ok(w.calls.view >= 10 * 2 * 11 && w.calls.view <= 10 * 2 * 15, `${w.calls.view} reads`);
+  // The progress stamps read nothing. A merge reads, and so does its push a minute later (each puts
+  // that run's backstop off 5 minutes), so each run reads about 18 times an hour: twice per merge and
+  // a backstop between. With the push's comments queries on approved PRs that is about 430 points.
+  assert.ok(triggers >= 50 && pushes >= 50, `${triggers} merges, ${pushes} pushes`);
+  assert.ok(w.calls.view >= 10 * 2 * 15 && w.calls.view <= 10 * 2 * 20, `${w.calls.view} reads`);
 }));
 
 test("only what bears on PRs changes a run's file fingerprint", () => {
@@ -148,7 +165,7 @@ test("a change in the run's files reads its PRs at the next poll past the floor,
   assert.equal(w.calls.view, 4);
 }));
 
-test("a head commit that moved locally reads the PRs, once per local state", withClock(async () => {
+test("a push of a PR's head reads the PRs, once per state of the remote-tracking refs", withClock(async () => {
   const w = world();
   const run = w.run(2);
   await refreshPrs(run, false);
@@ -161,12 +178,12 @@ test("a head commit that moved locally reads the PRs, once per local state", wit
   tick(15_000);
   await refreshPrs(run, false);
   assert.equal(w.calls.view, 4, "read at the next look");
-  // GitHub still says the old sha (or the commit is never pushed): not read again for the same state.
+  // GitHub still says the old sha (the push was read before GitHub had it): not read again for the same state.
   for (let i = 0; i < 20; i++) { tick(5000); await refreshPrs(run, false); }
   assert.equal(w.calls.view, 4);
-  // GitHub catches up, and the next local move reads again.
+  // GitHub catches up, and the next push reads again.
   w.prs.get(run.prs[0].url).sha = SHA(999);
-  w.local.set(head, { origin: SHA(999), local: SHA(998) });
+  w.local.set(head, { origin: SHA(998), local: SHA(998) });
   tick(15_000);
   await refreshPrs(run, false);
   assert.equal(w.calls.view, 6);
@@ -174,28 +191,43 @@ test("a head commit that moved locally reads the PRs, once per local state", wit
   assert.ok(w.calls.git <= 12, `${w.calls.git} git calls`);
 }));
 
-test("a push after a local commit reads again within the floor, and an unpushed commit reads once", withClock(async () => {
+test("a local-only commit reads nothing; its push reads within the floor", withClock(async () => {
   const w = world();
   const run = w.run(2);
   await refreshPrs(run, false);
   const head = w.prs.get(run.prs[0].url).head;
   // A task merged into the integration branch: the local branch moves, origin and GitHub do not.
   tick(PR_EVENT_FLOOR_MS);
-  w.local.set(head, { origin: SHA(10), local: SHA(777) });
-  w.local.get(head).origin = w.prs.get(run.prs[0].url).sha;
-  await refreshPrs(run, false);
-  assert.equal(w.calls.view, 4, "the local commit reads once");
+  w.local.get(head).local = SHA(777);
   for (let i = 0; i < 12; i++) { tick(5000); await refreshPrs(run, false); }
-  assert.equal(w.calls.view, 4, "the same unpushed commit does not read again");
-  // A minute later it is pushed: origin moves to it; GitHub has it too by the next read.
+  assert.equal(w.calls.view, 2, "a local commit can't change what GitHub shows: no read");
+  // It is pushed: origin moves to it; GitHub has it too by the next read.
   w.local.get(head).origin = SHA(777);
   w.prs.get(run.prs[0].url).sha = SHA(777);
   const pushed = clock;
-  while (w.calls.view === 4 && clock - pushed < 60_000) { tick(5000); await refreshPrs(run, false); }
-  assert.equal(w.calls.view, 6, "the push reads");
+  while (w.calls.view === 2 && clock - pushed < 60_000) { tick(5000); await refreshPrs(run, false); }
+  assert.equal(w.calls.view, 4, "the push reads");
   assert.ok(clock - pushed <= PR_EVENT_FLOOR_MS, `read ${(clock - pushed) / 1000} s after the push`);
   for (let i = 0; i < 20; i++) { tick(5000); await refreshPrs(run, false); }
-  assert.equal(w.calls.view, 6, "quiet again");
+  assert.equal(w.calls.view, 4, "quiet again");
+}));
+
+test("a read that fails does not use up the change that fired it: the next poll past the floor tries again", withClock(async () => {
+  const w = world();
+  const run = w.run(2);
+  await refreshPrs(run, false);
+  tick(PR_EVENT_FLOOR_MS);
+  run.filesSig = textSig("status.json gained a PR");
+  w.fail = true;
+  assert.equal(await refreshPrs(run, false), "files");
+  w.fail = false;
+  tick(5000);
+  assert.equal(await refreshPrs(run, false), null, "within the floor of the failed read: not yet");
+  tick(PR_EVENT_FLOOR_MS);
+  assert.equal(await refreshPrs(run, false), "files", "tried again");
+  const views = w.calls.view;
+  for (let i = 0; i < 12; i++) { tick(5000); await refreshPrs(run, false); }
+  assert.equal(w.calls.view, views, "read without error: used up");
 }));
 
 test("a parked or closed run reads at the 30-minute backstop and never reads a merged or closed PR again", withClock(async () => {
@@ -223,16 +255,20 @@ test("an open run still reads its merged PRs at the backstop (a PR may be reopen
   assert.equal(w.calls.view, 4);
 }));
 
-test("opening a run (wantPrs) reads it when the last read is over a minute old; force reads at once", withClock(async () => {
+test("opening a run (markOpened) reads it at the next poll when the last read is over a minute old; force reads at once", withClock(async () => {
   const w = world();
   const run = w.run(2);
   await refreshPrs(run, false);
   tick(45_000);
-  await wantPrs(run);
+  markOpened(run);
+  await refreshPrs(run, false);
   assert.equal(w.calls.view, 2, "45 s old: shown as read");
   tick(PR_OPENED_MS - 45_000);
-  await wantPrs(run);
-  assert.equal(w.calls.view, 4, "over a minute: read");
+  await refreshPrs(run, false);
+  assert.equal(w.calls.view, 2, "that opening was used up: a minute later the pane alone reads nothing");
+  markOpened(run.key);
+  await refreshPrs(run, false);
+  assert.equal(w.calls.view, 4, "opened again over a minute after the read: read");
   tick(1000);
   await refreshPrs(run, false, true);
   assert.equal(w.calls.view, 6, "an action's force read ignores the floor");
@@ -242,7 +278,8 @@ test("opening a run (wantPrs) reads it when the last read is over a minute old; 
   await refreshPrs(parked, true);
   tick(PR_OPENED_MS + 1000);
   const views = w.calls.view;
-  await wantPrs(parked);
+  markOpened(parked);
+  await refreshPrs(parked, true);
   assert.equal(w.calls.view, views + 1, "only its open PR is read");
 }));
 
@@ -255,33 +292,53 @@ test("two Harbormaster copies asking at once start one read", withClock(async ()
   assert.equal(w.calls.view, 4);
 }));
 
-test("a run pane opening a run reads its PRs only when the last read is over a minute old, and once per opening", withClock(async () => {
+test("each opening reads once when the last read is over a minute old, also with the run's pane already shown", withClock(async () => {
   const w = world();
-  const stale = w.run(2);
-  const fresh = w.run(2);
-  await refreshPrs(stale, false);
-  await refreshPrs(fresh, false);
+  const run = w.run(2);
+  await refreshPrs(run, false);
   const base = w.calls.view;
+  // The pane is shown and polls; the user opens the run from its Crew row over a minute after the read.
   tick(PR_OPENED_MS + 1000);
-  const pane = new Set();
-  await wantPrsWhenOpened(pane, stale);
+  await refreshPrs(run, false);
+  assert.equal(w.calls.view, base, "the shown pane alone reads nothing");
+  markOpened(run);
+  assert.equal(await refreshPrs(run, false), "opened");
   assert.equal(w.calls.view, base + 2, "61 s old: read once");
-  await wantPrsWhenOpened(pane, stale);
-  tick(PR_OPENED_MS + 1000);
-  await wantPrsWhenOpened(pane, stale);
-  assert.equal(w.calls.view, base + 2, "the same pane asking again does not read, even a minute later");
-  const second = new Set();
-  tick(0);
-  await wantPrsWhenOpened(second, stale);
-  assert.equal(w.calls.view, base + 4, "a pane opened over a minute after the last read reads again");
-  await wantPrsWhenOpened(new Set(), stale);
-  assert.equal(w.calls.view, base + 4, "reopened right away: the last read is fresh, no read");
-  // 30 s old: not read.
-  const other = w.run(2);
-  await refreshPrs(other, false);
-  const n = w.calls.view;
+  // Every copy polls: the mark is used up by the first.
+  await refreshPrs(run, false);
+  await refreshPrs(run, false);
+  assert.equal(w.calls.view, base + 2);
+  // Opened again 30 s later: the last read is fresh, no read, and the mark is used up all the same.
   tick(30_000);
-  await wantPrsWhenOpened(new Set(), other);
-  assert.equal(w.calls.view, n, "30 s old: no read");
-  await wantPrsWhenOpened(new Set(), null);
+  markOpened(run);
+  assert.equal(await refreshPrs(run, false), null);
+  tick(PR_OPENED_MS);
+  await refreshPrs(run, false);
+  assert.equal(w.calls.view, base + 2, "the 30 s opening does not read later by itself");
+  // Opened again over a minute later: a read.
+  markOpened(run);
+  await refreshPrs(run, false);
+  assert.equal(w.calls.view, base + 4);
+  markOpened(null);
+  markOpened(undefined);
+}));
+
+test("an opening that meets another copy deciding on the run is kept and read at the next poll", withClock(async () => {
+  const w = world();
+  const run = w.run(2);
+  await refreshPrs(run, false);
+  tick(PR_OPENED_MS + 1000);
+  // One copy is deciding and waits on the head look (git over ssh, say).
+  let release;
+  w.gate = new Promise((r) => { release = r; });
+  const deciding = refreshPrs(run, false);
+  await new Promise((r) => setImmediate(r));
+  markOpened(run);
+  assert.equal(await refreshPrs(run, false), "busy", "the run pane's poll meets the claim");
+  w.gate = null;
+  release();
+  assert.equal(await deciding, null, "the other copy found nothing (it decided before the opening)");
+  assert.equal(w.calls.view, 2);
+  assert.equal(await refreshPrs(run, false), "opened", "the next poll reads the kept opening");
+  assert.equal(w.calls.view, 4);
 }));

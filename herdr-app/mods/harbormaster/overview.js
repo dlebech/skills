@@ -4,7 +4,7 @@ import { div, svg } from "gpui-kit";
 import { openStartCaptain } from "./newrun.js";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, acceptProof, unacceptProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, refreshPrs, cachedReviewers, loadReviewers, loadingReviewers, requestReview } from "./data.js";
+import { stats, decisionQueue, acceptProof, unacceptProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, refreshPrs, markOpened, cachedReviewers, loadReviewers, loadingReviewers, requestReview } from "./data.js";
 import { facts, exactStatus, orchestratorState, agentStatus, workersOf, captainOf, programOf, captainPane, paneBeside, togglePin, needReason, focusAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, TYPE } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
@@ -818,7 +818,7 @@ export const boxConfirm = (view, t, r, f, where) => (view.confirm?.key === r.key
 // "Open the orchestrator", small: never the headline, since most reasons are done elsewhere.
 const orchLink = (t, r, f, id) => (f.orch === "gone" || !r.terminal ? null
   : div().id(id).flex_none().text_size(T(11, "meta")).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
-    .tooltip("Show its orchestrator's terminal").on_click((_e, cx) => { cx.stop_propagation(); focusAgent(r.terminal); }).child("Open the orchestrator"));
+    .tooltip("Show its orchestrator's terminal").on_click((_e, cx) => { cx.stop_propagation(); markOpened(r); focusAgent(r.terminal); }).child("Open the orchestrator"));
 
 // What a run needs you for, on its card and in its pane. Without a question: a line per reason
 // saying what to do and why, with the buttons that do it (needaction.js), and a small link to
@@ -827,7 +827,7 @@ const orchLink = (t, r, f, id) => (f.orch === "gone" || !r.terminal ? null
 // Waiting on you answers (answerParts, sendAnswer: the run's inbox, then a wake); any other
 // reason under it. `where` tells the card's and the pane's ids apart.
 export function needBox(view, t, r, f, ctx, where) {
-  const focus = (_e, cx) => { cx.stop_propagation(); if (f.orch !== "gone") focusAgent(r.terminal); };
+  const focus = (_e, cx) => { cx.stop_propagation(); if (f.orch !== "gone") { markOpened(r); focusAgent(r.terminal); } };
   const it = r.ask ? decisionQueue([r], [], ctx).find((x) => x.kind === "run") : null;
   const all = needItemsOf(r, ctx, f.att);
   // A run that is ready to merge is the one thing here that is good news: green, "Ready", "✓".
@@ -966,7 +966,8 @@ function drawCard(view, t, r, ctx, compact) {
     ...related.map((p) => linkChip(t, `rel-${r.key}-${p.url}`, p.url,
       svg("mods/harbormaster/pr.svg").size(11).flex_none().text_color(t[PR_TONE[p.state]] ?? t.dim), relatedTip(p))),
   ];
-  const focus = () => orch !== "gone" && focusAgent(r.terminal);
+  // Opening the run from its card reads its PRs when they are over a minute old (markOpened).
+  const focus = () => { if (orch !== "gone") { markOpened(r); focusAgent(r.terminal); } };
   const facts = factsLine(t, r, prs, TYPE.body, f.att);
   // Not on a finished or put-away run's smaller card; a live card shows it even when narrow.
   const proof = r.phase !== "finished" && !r.away ? claimsSummary(t, r) : null;
@@ -1566,7 +1567,7 @@ function drawRunDetail(view, t, r, ctx) {
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(14).p(14).pl(18).rounded(10).bg(t.surface)
     .border(1).border_color(t.border)
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
-    .child(div().id(`head-${r.key}`).cursor_pointer().on_click(() => orch !== "gone" && focusAgent(r.terminal))
+    .child(div().id(`head-${r.key}`).cursor_pointer().on_click(() => { if (orch !== "gone") { markOpened(r); focusAgent(r.terminal); } })
       .child(cardHeader(view, t, r, f, runMeta(r, f), r.started ? runAgeText(r) : null)))
     .child(v_flex().gap(4).child(strip).when(Boolean(door), (e) => e.child(door)))
     .when(need, (el) => el.child(needBox(view, t, r, f, ctx, "pane")))

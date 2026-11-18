@@ -19,22 +19,25 @@ export const STALL_MS = 30 * 60000;
 // How often a run's PRs are read at the latest (data.js refreshPrs), the backstop: every 5 minutes
 // while the run is open, every 30 minutes once it is parked or closed (data.js isClosed). Each read
 // is a `gh pr view` per PR, and GitHub's 5,000 points an hour are shared with the orchestrators and
-// the user, so the backstop is slow. What the run itself changes (its files, a pushed head commit)
+// the user, so the backstop is slow. What the run itself changes (its files, a push of a PR's head)
 // is read sooner, at most once per PR_EVENT_FLOOR_MS (data.js prTrigger). Each run's backstop is
 // also put off by up to PR_SPREAD_MS (prOffset), so runs started together don't all read in one poll.
 export const prTtl = (closed) => (closed ? 30 * 60000 : 5 * 60000);
 // Whatever fires, a run's PRs are read at most this often (but for a forced read, after an action).
 export const PR_EVENT_FLOOR_MS = 30_000;
-// Opening a run reads its PRs when the last read is older than this (data.js wantPrs).
+// Opening a run reads its PRs when the last read is older than this (data.js markOpened).
 export const PR_OPENED_MS = 60_000;
 // The most a run's backstop is put off (prOffset).
 export const PR_SPREAD_MS = 60_000;
 // A stable 0..PR_SPREAD_MS offset for a run key, so the backstops of many runs fall in different polls.
-export function prOffset(key) {
-  // FNV-1a, so keys that differ in one letter (run-1, run-2) still land far apart.
+// FNV-1a, so keys that differ in one letter (run-1, run-2) still land far apart.
+export const prOffset = (key) => fnv1a(String(key ?? "")) % PR_SPREAD_MS;
+// A 32-bit FNV-1a hash of a text's UTF-16 code units: small and fast, and a one-letter change moves
+// it far. For prOffset and data.js textSig; not for anything that must resist a chosen collision.
+export function fnv1a(text) {
   let h = 0x811c9dc5;
-  for (const c of String(key ?? "")) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193) >>> 0;
-  return h % PR_SPREAD_MS;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return h;
 }
 // A PR read older than its ttl plus this no longer tells: its refresh is stuck. It covers prOffset too.
 export const PR_READ_MARGIN = 10 * 60000;

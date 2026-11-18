@@ -6,7 +6,7 @@
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, run, setAgentOrder, openOverlay, props } from "herdr";
-import { stats, prsOf, PR_TONE, isParked, resumeRun } from "./data.js";
+import { stats, prsOf, PR_TONE, isParked, resumeRun, markOpened } from "./data.js";
 import { facts, orchestratorState, agentStatus, workersOf, captainOf, adrift, agentNames, focusAgent, openUrl } from "./live.js";
 import { needsYouNow, runlessOrchs } from "./attend.js";
 import { needCount, rowLead } from "./crewrows.js";
@@ -85,7 +85,8 @@ function reef(view, t, motion, r, ctx, att, now) {
   const path = mergePath(pathInput(r, f, f.stages));
   const focusOrch = (_e, cx) => {
     if (resumable) { view.confirm = { key: r.key, action: "resume" }; cx?.notify(); }
-    else if (orch !== "gone") focusAgent(r.terminal);
+    // Opening a run from its ship reads its PRs when they are over a minute old (markOpened).
+    else if (orch !== "gone") { markOpened(r); focusAgent(r.terminal); }
   };
   // The same line the Crew's row says, so the two agree.
   const { lead, tone } = rowLead(att, now);

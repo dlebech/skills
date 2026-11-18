@@ -4,7 +4,7 @@
 import { div, svg } from "gpui-kit";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, runPhase, decisionQueue } from "./data.js";
+import { stats, runPhase, decisionQueue, markOpened } from "./data.js";
 import { openUrl, facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, focusAgent, focusWithPane, currentAgent, adrift, agentNames } from "./live.js";
 import { programIcon, plural, runName } from "./ui.js";
 import { startedTip } from "./context.js";
@@ -41,13 +41,15 @@ const titleText = (t, name, size = 12.5, weight = null) => h_flex().flex_1().min
   .child(div().flex_1().min_w(0).truncate().text_size(size).text_color(t.foreground).when(Boolean(weight), (el) => el.font_semibold()).child(name.title));
 
 // What a click on a run opens: its orchestrator, with its card beside it when that fits. The same
-// for a Crew row and for a Needs-you item, so the box stays in the sidebar and the run shows.
+// for a Crew row and for a Needs-you item, so the box stays in the sidebar and the run shows. Each
+// click is an opening (markOpened), also when the card beside it was already there.
 function openRun(m, x) {
   const { ctx } = m;
   const { term, r } = x;
   const address = term?.address ?? null;
   const card = () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) });
-  return address ? () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(address, runProps(r)) : focusAgent(address)) : card;
+  const open = address ? () => (r && cardBesideOrchestrator(r, orchestratorState(r, ctx)) ? focusWithPane(address, runProps(r)) : focusAgent(address)) : card;
+  return () => { markOpened(r); return open(); };
 }
 
 // A Needs-you row's hover in the needs box, where a click opens the run there instead of its orchestrator.

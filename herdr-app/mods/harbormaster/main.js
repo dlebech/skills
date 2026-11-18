@@ -8,14 +8,14 @@
 //   "newrun"          the + New run dialog (newrun.js), an overlay
 //   "stats"           where the time goes, tokens, CPU and memory: per run, task and agent, live, and past runs
 // Reads run directories on every machine (data.js) every 5 s, and a run's PRs from gh within ~30 s
-// of its own changes (files, a pushed head commit), else every 5 minutes (30 once parked or closed);
+// of its own changes (its files, a push of a PR's head) or of being opened, else every 5 minutes (30 once parked or closed);
 // the crew and the overview also read each crew agent's context size (context.js).
 
 import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
 import { props, theme, nextCommand, checking, openOverlay, closeOverlay, shared, setShared } from "herdr";
 import { expireNote } from "./note.js";
-import { loadRuns, cachedRuns, refreshPrs, wantPrsWhenOpened, refreshReviewed, isClosed, isParked, newestFirst, stats } from "./data.js";
+import { loadRuns, cachedRuns, refreshPrs, markOpened, refreshReviewed, isClosed, isParked, newestFirst, stats } from "./data.js";
 import { facts, crewAddresses, captainOf, adrift, agentNames, agentStatus, programOf } from "./live.js";
 import { observeWaits } from "./attend.js";
 import { loadContexts } from "./context.js";
@@ -120,7 +120,7 @@ async function listen(view, cx) {
       else if (name === "show-crew") showView("crew", "crew", 360, 640);
       else if (name === "new-run") openNewRun(newRunArgs(arg));
       else if (name === "close-popup") closePopup();
-      else if (name === "open-run") showPopup(view, arg, true);
+      else if (name === "open-run") { markOpened(runNamed(view.runs, arg)); showPopup(view, arg, true); }
       cx.notify();
     } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }
   }
@@ -225,12 +225,18 @@ export default class Harbormaster extends View {
       // facts atomically. exportFacts does nothing without its want file.
       if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) await exportFacts(() => harborFacts(runs, ctx)).catch((e) => console.log(`harbormaster: harbor3d facts failed: ${e?.message ?? e}`));
       // PRs land in shared state, which re-renders every copy by itself. Each run is asked every
-      // poll, and refreshPrs reads only when something calls for it: the run's files or a head
-      // commit moved (at most every 30 s), else its backstop (5 min open, 30 min parked or closed).
+      // poll, and refreshPrs reads only when something calls for it: the run's files changed, a PR's
+      // head was pushed or the run was opened (markOpened; at most every 30 s), else its backstop
+      // (5 min open, 30 min parked or closed).
       // A parked run's PRs are read as rarely as a closed run's: nobody works on them, they only
       // show what they wait on. Runs are read one after another, never all at once.
-      // A run pane that has just been opened on a run asks first: its PRs are read when over a minute old (wantPrs).
-      if (role === "run") { this.openedPrs ??= new Set(); await wantPrsWhenOpened(this.openedPrs, runOfProps(runs, props() ?? {})).catch(() => {}); }
+      // A run pane's first sight of a run is an opening, as a click elsewhere is (a popup, a new split):
+      // the loop below reads its PRs when they are over a minute old.
+      if (role === "run") {
+        const shown = runOfProps(runs, props() ?? {});
+        this.seenRuns ??= new Set();
+        if (shown && !this.seenRuns.has(shown.key)) { this.seenRuns.add(shown.key); markOpened(shown); }
+      }
       for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});
       // The waiting-on marks that let go are deleted here, after the PR reads, never in a render.
       try { observeWaits(runs, facts(), cachedRuns()); } catch (e) { console.log(`harbormaster: waiting-on marks failed: ${e?.message ?? e}`); }
