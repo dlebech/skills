@@ -17,7 +17,6 @@ import { levelChoices } from "./levels.js";
 import { attentionOf, needsYouNow as needsYouOf, runlessOrchs } from "./attend.js";
 import { stepText, quietText, flowState, flowSetting, runDot, ciState, waitSig, ageText, WAIT_LABELS } from "./attention.js";
 import { mergePath } from "./mergepath.js";
-import { openHarbor3d, HARBOR3D_TIP } from "./harbor3d.js";
 import { paneSections, agentsSummary, auditDecisions } from "./paneorder.js";
 import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } from "./tell.js";
 import { reviewText, prStateText, prFacts } from "./prfacts.js";
@@ -1929,7 +1928,6 @@ export function cards(view, t, runs, errors, decisions = []) {
           .cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))
           .tooltip("Where the time goes, tokens, CPU and memory: per run, task and agent, and past runs")
           .on_click(() => openStats()).child("Stats"))
-        .child(open3d(view, t))
         .child(toastsToggle(t)))
       .child(totals(t, s, need, decisions, ctx, runlessOrchs(view.runs, ctx))))
     .child(v_flex().id("runs-list").flex_1().min_h(0).px(10).pb(12).gap(8).overflow_y_scrollbar()
@@ -1944,13 +1942,6 @@ export function cards(view, t, runs, errors, decisions = []) {
       .when(Boolean(view.showDone), (el) => el.children(closed.map((r) => card(view, t, r, ctx, true))))
       .children(noteRows(view, t, false))
       .when(errors.length > 0, (el) => el.child(div().px(4).text_size(11).text_color(t.blocked).child(errors.join("\n")))));
-}
-
-// The "3D ↗" button: opens Harbor 3D in the browser (harbor3d.js), in the quiet style of the toggle beside it.
-function open3d(view, t) {
-  return div().id("open-3d").flex_none().px(6).h(18).rounded(4).flex().items_center().text_size(11).text_color(t.dim)
-    .cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(HARBOR3D_TIP)
-    .on_click((_e, cx) => { cx.stop_propagation(); openHarbor3d(view).then(() => cx.notify()); }).child("3D ↗");
 }
 
 // Toasts on or off (telling.js): a toast when a run starts needing you. On by default.

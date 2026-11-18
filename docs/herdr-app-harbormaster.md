@@ -68,7 +68,7 @@ Harbormaster is a Herdr app mod with two layouts, `harbormaster-main` (the calm 
 - **`harbormaster-sea` layout:** a calm strip of the harbor above your terminals, in your own theme (the terminals and pane chrome are not recoloured; the sea uses a muted palette that works in dark and light). It is 220 px high, then a one-line rail, then the active tab's terminals. There is no redraw timer: the strip is drawn when its data changes, like the Crew, and any motion is a native loop that only runs when the layout block sets `props.motion` (off by default; without it a working octopus does not float, a blocked creature is raised with a small red `!`, and a run that needs you has a red ring on its buoy instead of a pulse).
   - Each run is a **reef card**: its name, the PR flags at the right (up to three, then `+2`; click one to open it), the same one-line what-now as its Crew row (`Which database should t2 use? · <1m`, `t1 implementing 1h15m · +1 task`, `Parked · click to resume`), its **path buoys**, and below, its octopus and up to five crabs (`+n` for more). The buoys are the run's path to merge, one per stage: green and filled when done, a bright ring when current, red when it waits on you, amber when it wants a look, red and still when failed, a dim ring when not reached; hover one for its words. A run that needs you has a red edge and **its one primary action** at the bottom right, the button the Crew's box shows (`Open the orchestrator`, `Resume`, `Merge on GitHub`…); a request for a review, a change request, Close and Resume need more room than a card has, so their button opens the run's pane as a popup. A parked run is dimmed. Clicking a card focuses its orchestrator, or asks whether to resume a gone or parked run.
   - The captain's boat rides the surface and drops anchor while watching; a red badge on it counts what needs you (the captain's open decisions and the runs), listed in its hover. Agents outside any run drift on the right, named as in the Crew block, as crabs (six at most, then `+n`). Click a creature to focus that agent.
-  - The **rail** is one status line: the active space and tab on the left; on the right `3 runs · 2 need you · 1 PR open`, **3D ↗** (opens [Harbor 3D](#harbor-3d)) and **Back to main**. An action's note (Harbor 3D could not start, say) shows in the rail for a few seconds.
+  - The **rail** is one status line: the active space and tab on the left; on the right `3 runs · 2 need you · 1 PR open` and **Back to main**.
   - While it shows, `alt-up` / `alt-down` step through agents in the harbor's order (captain, each run's octopus then its crabs, then those adrift).
 
 The skills work the same with or without any of this. Tested with Herdr 0.1.12.
@@ -77,7 +77,7 @@ The skills work the same with or without any of this. Tested with Herdr 0.1.12.
 
 ## Install
 
-Needs `jq`, and Node 22+ with `npm` for Harbor 3D. Run this from any terminal while the Herdr app is open, in a checkout of this repository:
+Needs `jq`. Run this from any terminal while the Herdr app is open, in a checkout of this repository:
 
 ```sh
 herdr-app/install.sh
@@ -87,10 +87,10 @@ It does five things:
 - copies `herdr-app/mods/harbormaster` and the sea layout into the app's home (`~/.config/herdr-app`, or `$HERDR_APP_HOME`). It refuses to replace a mod or layout of the same name that isn't Harbormaster's, as Herdr asks. It removes the `harbormaster-board` layout earlier versions installed, if it is Harbormaster's;
 - clones your Herdr's `main` layout as `harbormaster-main` the first time, and inserts the Crew block above its Agents block with `jq`. Then, if `harbormaster-main` has no Crew block with `needs: "box"` yet, it makes the file calm with `jq`: Herdr's Agents block removed wherever it is, its Spaces block kept and moved just below Crew (half the Crew's height), the Crew block given `needs: "box"` and the rest of the height. Once it is calm, later installs leave it alone, so your edits stay, with one exception: a Spaces picker from an earlier version is swapped for Herdr's Spaces block, in the same place, and nothing else in the file changes. An older `harbormaster-main` (Crew above Agents) is upgraded in place, and it prints a line only when it changes the file. Only a container Herdr's Agents block left empty is removed. It removes the `harbormaster-needs` test layout earlier versions installed, if it is Harbormaster's (root id `hn-root`);
 - binds `ctrl-shift-h` to `mod.open:harbormaster` under `global` in `keys.json`. It skips this and tells you how to add a key yourself if `ctrl-shift-h` is already bound in any section, or if there is no `keys.json` yet;
-- copies Harbor 3D (`herdr-app/harbor3d`: `bin`, `server`, `public`, `models/out/*.glb`, `package.json`, `package-lock.json`, its README; not its tests, Blender scripts or `node_modules`) to `harbor3d` in the app's home and runs `npm ci --omit=dev` there. It replaces an earlier copy only if its `package.json` is named `harbor3d`, and refuses otherwise. Without `npm`, or if `npm ci` fails, it prints one line (Harbor 3D needs Node 22+ and npm; the rest of Harbormaster is installed) and carries on. It ends by printing the command that shares Harbor 3D;
+- removes the `harbor3d` folder an earlier version copied to the app's home, only when its `package.json` is named `harbor3d` (Harbor 3D is not installed now; see [Harbor 3D](#harbor-3d)), and prints one line saying so;
 - runs `herdr-app check` on the mod.
 
-To update, pull and run it again. It overwrites the mod, the sea layout and Harbor 3D's files, brings `harbormaster-main` up to date as above, and leaves the key binding alone once it exists.
+To update, pull and run it again. It overwrites the mod, the sea layout, brings `harbormaster-main` up to date as above, and leaves the key binding alone once it exists.
 
 Note: install copies files and deletes only what earlier versions of Harbormaster installed and it knows about (`board.js` and the `harbormaster-board` layout). Any other file removed from the mod in a later version stays in `mods/harbormaster` until you delete it.
 
@@ -135,7 +135,7 @@ The mod runs programs and reads files outside its folder. Herdr's AGENTS.md asks
 - **While a stats view is open:** `timing.sh` (`sh`, `jq`, `find`, `stat`, `cksum`, `head`, `tail`, and `python3` for opencode's database), on each run's machine, once per open run every 90 seconds, once per parked or closed run that the history does not have, with a timeout of 2 minutes (10 minutes for a run's first read). It reads the agents' session logs and writes the run's `.timing/` cache. Once a minute per machine, `tail -c 4000000` of `.history.jsonl` in the runs root.
 - **When a run closes, and before every Delete:** the history's check and append scripts (`sh`, `grep`, `mkdir`, appending one line) on the run's machine, and `timing.sh` for the run if its cached breakdown is older than 10 minutes.
 - **Every 15 seconds per opencode agent in the crew:** `python3`, reading `opencode.db` read-only, for the context size.
-- **Every 5 seconds per open Crew, while Harbor 3D's server runs:** one `sh -c` with one `find`, to see whether `.harbor3d.want` in the runs root is under a minute old; if it is, the facts file `.harbor3d.json` beside it is written (a temporary file and `mv`) when the facts changed or 15 seconds passed (see [Harbor 3D](#harbor-3d)). Nothing is written without the want file.
+- **Every 5 seconds per open Crew, while Harbor 3D's server runs (by hand, see [Harbor 3D](#harbor-3d)):** one `sh -c` with one `find`, to see whether `.harbor3d.want` in the runs root is under a minute old; if it is, the facts file `.harbor3d.json` beside it is written (a temporary file and `mv`) when the facts changed or 15 seconds passed (see [Harbor 3D](#harbor-3d)). Nothing is written without the want file.
 - **Live from herdr-core:** the terminal labels `role`, `run.status`, `run.type`, `run.topic`, `progress` and `run.prs`, and the `captain-watch` terminal.
 
 - **When a proof thumbnail is shown or opened:** `stat` and `cp` on this computer, or on the run's machine `stat` and `base64`, of that one file (see Proof); the copies are written under `mods/harbormaster/.cache/` in the app's home. A video opens with `xdg-open` (`open` on macOS).
@@ -430,67 +430,7 @@ Parking leaves the run directory, worktrees, branches and PRs in place, and the 
 
 ## Harbor 3D
 
-A page in your browser that shows the runs as a working port: each run is a berth with a cargo ship moored at a finger pier, a gantry crane and a signal mast, and its tasks are containers. It is for watching and showing, and it reads the same facts as the Crew (the path to merge, what needs you, the tasks and agents), so the two never disagree. It is a small Node server and a three.js page in `herdr-app/harbor3d`, apart from the mod because a mod cannot draw WebGL. It needs Node 22+ and a browser with WebGL; `install.sh` puts it in `harbor3d` in the app's home.
-
-### Start it
-
-- Click **3D ↗** in the runs overview's top line or in the sea's rail. If a terminal named `harbor3d` is live, Harbormaster reads its output for the address and opens it. Otherwise it starts the server in a background terminal (`hc run --bg --no-notify --no-parent --name harbor3d -- node ~/.config/herdr-app/harbor3d/bin/harbor3d.js serve`), waits up to five seconds for the address and opens it. When that fails the note shows the server terminal's last line, for example `Harbor 3D did not start: harbor3d: three.js is missing …` (the server checks for three.js when it starts), or `Harbor 3D could not start: it needs Node 22+` when `node` is not found.
-- Or in a terminal: `node ~/.config/herdr-app/harbor3d/bin/harbor3d.js` (the same as `serve`; port 4173 or the next free one, `--port` to choose). It prints `Harbor 3D: http://127.0.0.1:4173/`. This private page shows your real run names and only answers requests for `127.0.0.1` or `localhost`.
-- From the command line of the app: `herdr-app do harbormaster.harbor3d` does what the button does.
-
-Stop it with `hc kill harbor3d`, or Ctrl-C in the terminal you started it in. Nothing else needs it: the captain, the Crew and the sea work without it.
-
-### What things mean
-
-| Run fact | In the scene |
-| --- | --- |
-| Run | A berth: a finger pier with a cargo ship moored at it, a gantry crane and a signal mast |
-| Tasks | Containers. Planned: grey, stacked in the berth's yard on the quay. Implementing, in review or being fixed: on the pier beside the crane, in the stage's colour. Blocked: on the pier, red, tilted. Done: loaded on the ship's deck |
-| Orchestrator | The octopus, floating in the water just off the pier's tip, head and eyes above the surface. It sleeps when the run is finished |
-| Workers | Crabs on the pier (eight at most are drawn), walking between the yard and the crane while they work, asleep when done |
-| PRs | Signal flags on the ship's mast: open, draft, merged, closed, red when their checks fail |
-| Needs you | The berth's signal mast blinks red, a red beacon pulses above its crane, a red ring pulses on the water round the octopus, and the octopus waves a tentacle |
-| Working or waiting | The signal mast is green while anything works (agents or CI), amber when the run waits or idles, dark when it is parked |
-| CI running | The ship's funnel puffs smoke |
-| An agent at work on a task | The crane's trolley and hook move |
-| Finished | The ship's lights are on |
-| Every PR merged | The ship has cast off and lies in the fairway |
-| Parked | The ship lies at anchor outside the breakwater, in haze, with no crew |
-| Tokens | The ship's size: S under 10M, M under 50M, L under 150M, else XL |
-| Captain | A tug that patrols the basin while the captain watches, moored and dim when no captain runs |
-| Agents outside any run | Crabs on driftwood rafts inside the breakwater |
-| Viewers | Gulls circling the harbor office's radar |
-| Facts out of date | Fog over the harbor and a banner: nothing is writing them (no Crew is showing, or Harbormaster is closed) |
-
-The sky follows the time of day on your computer, with a day and night toggle. You can orbit and zoom, click a berth to fly to it and read its card (the same facts as text), and start a slow tour for screen sharing. None of that sends the server anything.
-
-### Share it
-
-`node ~/.config/herdr-app/harbor3d/bin/harbor3d.js share [--minutes 60]` starts a second listener for colleagues and points a `cloudflared tunnel --url` (a quick tunnel, no account; `cloudflared` must be installed) at that listener only. The private page is never tunnelled. It prints a link with a 128-bit random token in it, `https://<random>.trycloudflare.com/s/<token>/`; everything outside that path answers 404 with nothing in it. Anyone with the link can look, so send it only to people you would show the screen to. Sharing stops after the time limit (60 minutes unless `--minutes` says otherwise), when `cloudflared` exits, or on Ctrl-C; after the time limit the private page keeps running. At most 20 people can watch the shared page and 8 the private one (a viewer on the live stream and one long-polling count alike), and the gull count includes both. The page uses a live event stream; where a proxy holds streams back, as Cloudflare quick tunnels do, it falls back to long-polling after four seconds, and `?stats=1` shows which one it uses. The server compresses the page and models with gzip when the browser accepts it, so the first load is small. Sharing is a command, not a button: it publishes a link, so you type it and see the result.
-
-**What a shared viewer sees.** Each run is a made-up sea name (Kelp Reef, Gull Rock, Coral Shelf…) chosen by a keyed hash of the run, so it stays the same while the server runs and changes when it restarts. Everything else is the shape of the run: its type (feature, fix, review, explore), whether it is planning, running, finished or parked, whether it needs you and the kind of need (a question, red CI, request review…), the path-to-merge stages and their states, each task's stage, each PR's state and checks (not its number), whether CI runs, each agent's state and kind (`claude`, `pi`, `opencode` or other), counts, the ship's size bucket (S, M, L, XL, from the token count), the run's age to the nearest five minutes, the captain's state and how many people are viewing.
-
-**What they never see.** No repository, issue or PR number, branch, run name, topic, folder, machine, agent or terminal name, token count, URL, progress line, question, decision, claim, PR title, or any other text an agent or you wrote. The server builds each run field by field from an allow-list, an unknown value becomes a safe default instead of passing through, and identifiers are keyed hashes that differ after every restart. A unit test feeds the server runs full of marker strings and asserts that none appears in anything the shared listener sends. Only the private page, on your computer, shows names, repository, PR numbers and agent names.
-
-### What viewers can do
-
-Four pokes, shown to every viewer of both pages: **horn** (the tug sounds its horn), **wave** (the selected berth's octopus waves), **feed** (the gulls dive) and **fireworks** (over the selected berth). Wave and fireworks are offered once you have clicked a berth. A poke is a `POST /poke` with a `kind` from those four and a `target` that must be an id in the current scene (the harbor itself for horn and feed); anything else is refused with 400. A viewer gets one poke per second and each page five per second in all, a body over 200 bytes is refused, and a poke made on either page is shown on both. A poke is a visual event and nothing more.
-
-**Why none of this can reach an agent.** The server accepts no text from a viewer: from a request it reads only the poke's enum and a scene id, and it rebuilds the event from values it checked itself. It writes one file, `.harbor3d.want` in the runs root, a fixed path it touches so Harbormaster knows to write the facts; it writes nothing into a run directory and calls no `hc` command, so it cannot send keys or messages to a terminal. The only program it starts is `cloudflared`, with a fixed argument list. Labels are drawn as text, never as HTML, and the page's content security policy forbids inline script. A test (`test/security.test.mjs`) scans the server's source for any file write other than the want file, any process start other than `cloudflared` and any `hc` call; another (`test/dom-sinks.test.mjs`) scans the page for ways to turn text into markup.
-
-### Where the data comes from
-
-While the server runs it touches `.harbor3d.want` in the runs root every 20 seconds. Any copy of Harbormaster that polls for the whole window (the Crew in the sidebar, the runs overview, the sea layout's harbor) sees that file is less than a minute old and writes `.harbor3d.json` beside it, the facts file, whenever the facts change and at least every 15 seconds. The server reads it every couple of seconds. The page gets the scene over a live event stream, and where a proxy buffers streams, as Cloudflare quick tunnels do, it switches by itself to long-polling (`GET poll?after=<n>`), so a shared viewer sees the same harbor either way. A scene whose facts are more than 45 seconds old is shown in fog. Without the want file Harbormaster writes nothing, so the page costs nothing while it is closed. The facts are built from what the Crew already knows (`sceneexport.js`), through tables that give every enum a default, so the server never reads a run folder or calls `gh`.
-
-### Rebuild the models
-
-The ship, crane, containers and the rest are built in Blender 5.3 by Python scripts, headless, exported as `.glb` and committed in `herdr-app/harbor3d/models/out/`, so neither the page nor `install.sh` needs Blender. To rebuild them all:
-
-```sh
-blender -b --factory-startup -P herdr-app/harbor3d/models/build.py
-```
-
-Name models after `--` to build just those. The script checks each model's triangle count, file size (100 kB each) and materials, and fails when one is over. `herdr-app/harbor3d/models/README.md` has the conventions.
+Harbor 3D is a page in your browser that shows the runs as a working port, one berth with a ship and a crane per run. It is separate from Harbormaster and is not installed: you run it by hand from a checkout of this repository, now and then. In a terminal, `cd herdr-app/harbor3d && npm install && node bin/harbor3d.js`, then open the address it prints; `node bin/harbor3d.js share` shares it with a link that shows made-up names only. Harbormaster's only part is that, while that server runs, it writes `.harbor3d.json` (the facts) in the runs root, and only when the server has touched `.harbor3d.want` there in the last minute; nothing else is written. What things mean, sharing, what a shared viewer sees, rebuilding the models: [herdr-app/harbor3d/README.md](../herdr-app/harbor3d/README.md).
 
 ## Files
 
@@ -530,15 +470,14 @@ Name models after `--` to build just those. The script checks each model's trian
 | `herdr-app/mods/harbormaster/harbor.js` | The sea strip: the reef cards, the captain's boat, the rail |
 | `herdr-app/mods/harbormaster/sealook.js` | What the sea decides in plain data: buoy looks, the boat's badge, the rail's counts, which buttons open the pane as a popup, the creatures' motion |
 | `herdr-app/mods/harbormaster/sceneexport.js` | The facts Harbor 3D is told: the allow-listed facts file and the want-file check |
-| `herdr-app/mods/harbormaster/harbor3d.js` | The **3D ↗** button: finds or starts the Harbor 3D server and opens its private URL |
 | `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, chevrons, eye. All original, CC0 like the rest of this repository |
 | `herdr-app/layouts/harbormaster-sea.json` (+ `.svg` preview) | The sea layout. `harbormaster-main` is made by `install.sh` |
 | `herdr-app/harbor3d/` | Harbor 3D: its server (`server/`, `bin/harbor3d.js`), the page (`public/`), the models (`models/`: Blender scripts, and the committed `.glb` files in `models/out/`) and its tests; see [its README](../herdr-app/harbor3d/README.md) |
-| `herdr-app/install.sh` | Install or update, Harbor 3D included |
+| `herdr-app/install.sh` | Install or update |
 
 ## Remove
 
 1. Switch to `main`.
-2. Delete these from the app's home: `mods/harbormaster`, `layouts/harbormaster-*` and `harbor3d` (Harbor 3D; stop it first with `hc kill harbor3d` if it runs). The facts and want files `.harbor3d.json` and `.harbor3d.want` in the runs root can go too.
+2. Delete these from the app's home: `mods/harbormaster` and `layouts/harbormaster-*` (and `harbor3d`, if an earlier install left one and the current one has not removed it). The facts and want files `.harbor3d.json` and `.harbor3d.want` in the runs root can go too.
 3. In `keys.json`, delete the `"ctrl-shift-h": "mod.open:harbormaster"` line (or whichever key you bound to it).
 4. Close any `harbormaster` pane still beside the captain.
