@@ -7,11 +7,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { observeRuns, agentsSince, lastActivity, withAgents, seededAgentsAt } from "../../herdr-app/mods/harbormaster/tracking.js";
+import { observeRuns, agentsSince, lastActivity, withAgents, seededAgentsAt, forgotten } from "../../herdr-app/mods/harbormaster/tracking.js";
 import { shared, setShared } from "herdr";
 import { attentionOf } from "../../herdr-app/mods/harbormaster/attend.js";
 import { loadRuns } from "../../herdr-app/mods/harbormaster/data.js";
-import { IDLE_ASK_MS } from "../../herdr-app/mods/harbormaster/attention.js";
+import { IDLE_ASK_MS, IDLE_ASK_TEXT } from "../../herdr-app/mods/harbormaster/attention.js";
 import { withRoot } from "./root.mjs";
 
 const MIN = 60000;
@@ -70,7 +70,7 @@ test("idle 2 minutes: Needs you (idle-ask); under it: Working, idle; working aga
   awake(MIN); await poll([r], ctxOf(r, "done", 7));
   a = attentionOf(r, ctxOf(r, "done", 7), wall);
   assert.deepEqual([a.group, keys(a)], ["needs", ["idle-ask"]]);
-  assert.equal(a.reasons[0].text, "orchestrator idle — may be asking in its tab");
+  assert.equal(a.reasons[0].text, IDLE_ASK_TEXT);
   assert.equal(a.reasons[0].since, wall - IDLE_ASK_MS);
   // The user answers in its tab: it works, so the next poll leaves Needs you.
   awake(10000); await poll([r], ctxOf(r, "working", 8));
@@ -157,14 +157,64 @@ test("a reload keeps the idle time: a fresh activity entry seeds from harbormast
   assert.equal(seededAgentsAt({ sig: "x:idle:1", since: 5 }, sig, 100), 100);
   assert.equal(seededAgentsAt({ sig, since: 5 }, sig, 100), 5);
   assert.equal(seededAgentsAt(null, sig, 100), 100);
+  assert.equal(seededAgentsAt({ sig, since: 5 }, sig, 100, 5), 100, "not after this module last saw another signature");
+});
+
+test("two Harbormaster copies that saw the same change a poll apart agree on the earlier time and stop writing", () => {
+  // Each copy's own module memory (as observeRuns keeps it), and the one shared store.
+  const sig = "o:idle:4";
+  const copies = [{ agentsAt: 130, otherAt: 100 }, { agentsAt: 115, otherAt: 105 }];
+  let store = {};
+  const pollOf = (c) => {
+    c.agentsAt = seededAgentsAt(store.k, sig, c.agentsAt, c.otherAt);
+    const next = withAgents(store, "k", sig, c.agentsAt, true);
+    const wrote = next !== store;
+    store = next;
+    return wrote;
+  };
+  pollOf(copies[0]); pollOf(copies[1]); // the first writes 130, the second 115
+  assert.equal(store.k.since, 115);
+  const writes = [];
+  for (let i = 0; i < 3; i++) for (const c of copies) writes.push(pollOf(c));
+  assert.deepEqual(copies.map((c) => c.agentsAt), [115, 115]);
+  assert.ok(writes.every((w) => !w), "no more writes");
+});
+
+test("observeRuns adopts another copy's earlier time for the same change, but not a stale one from before its agents last changed", async () => {
+  await freshFor(0);
+  const r = run("copies");
+  await poll([r], ctxOf(r, "working", 2));
+  awake(5000); await poll([r], ctxOf(r, "idle", 2));
+  const mine = wall;
+  assert.equal(shared("harbormaster.agents")[r.key].since, mine);
+  // Another copy saw the change 3s earlier, after this one last saw it working, and wrote its time.
+  const sig = `${r.terminal}:idle:2`;
+  setShared("harbormaster.agents", { ...shared("harbormaster.agents"), [r.key]: { sig, since: mine - 3000 } });
+  const store = shared("harbormaster.agents");
+  awake(5000); await poll([r], ctxOf(r, "idle", 2));
+  assert.equal(agentsSince(r), mine - 3000);
+  assert.equal(shared("harbormaster.agents"), store, "not written back");
+  // It works and ends up with the same signature: the stored time is from before that, so not adopted.
+  awake(5000); await poll([r], ctxOf(r, "working", 2));
+  awake(5000); await poll([r], ctxOf(r, "idle", 2));
+  assert.equal(agentsSince(r), wall);
+  assert.equal(shared("harbormaster.agents")[r.key].since, wall);
 });
 
 test("harbormaster.agents is written only for a settled signature, and pruned with its run", async () => {
   const store = { k: { sig: "o:idle:1", since: 1 } };
-  assert.equal(withAgents(store, "k", "o:idle:1", 1), store, "unchanged");
-  assert.equal(withAgents(store, "k", "o:working:2", 9), store, "working: never written");
-  assert.equal(withAgents(store, "k", "o:idle:2\nw:working:1", 9), store, "a worker working: never written");
-  assert.deepEqual(withAgents(store, "k", "o:done:2", 9).k, { sig: "o:done:2", since: 9 });
+  assert.equal(withAgents(store, "k", "o:idle:1", 1, true), store, "unchanged");
+  assert.equal(withAgents(store, "k", "o:working:2", 9, false), store, "not idle: never written");
+  assert.deepEqual(withAgents(store, "k", "o:done:2", 9, true).k, { sig: "o:done:2", since: 9 });
+  // observeRuns tells idle from the statuses: a working or a blocked worker writes nothing.
+  for (const status of ["working", "blocked"]) {
+    const w = run(`busy-${status}`);
+    await poll([w], ctxOf(w, "idle", 1, [{ status }]));
+    assert.equal(shared("harbormaster.agents")?.[w.key], undefined, status);
+  }
+  assert.equal(forgotten(":/r/x", new Set(), new Set([""])), true, "gone from a machine that answered");
+  assert.equal(forgotten(":/r/x", new Set([":/r/x"]), new Set([""])), false, "listed");
+  assert.equal(forgotten("box:/r/x", new Set(), new Set([""])), false, "its machine did not answer");
   const r = run(":/r/gone");
   await poll([r], ctxOf(r, "idle", 1));
   assert.ok(shared("harbormaster.agents")[r.key]);

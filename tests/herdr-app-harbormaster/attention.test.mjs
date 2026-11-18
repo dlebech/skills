@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   reviewFlow, flowKey, prStep, nextStep, nextStepText, prRead, ciState, ciTimes, usualCi, ageText, stepOf, stepText,
   trackSince, stepSig, stalled, quietText, assess, byWait, STALL_MS, prMaxAge, prTtl, trackParts, stepParts, taskKey, progressKey, reviewRunStep,
-  waitSig, IDLE_ASK_MS, idleAsking,
+  waitSig, IDLE_ASK_MS, IDLE_ASK_TEXT, idleAsking,
 } from "../../herdr-app/mods/harbormaster/attention.js";
 import { addCiSample, nextSteps, screenSig, CI_KEEP, probeEvery, withWait, prunedWaits } from "../../herdr-app/mods/harbormaster/tracking.js";
 import { prSummary, viewerReview, PR_FIELDS, carryRuns, withReadTimes, prEntrySame } from "../../herdr-app/mods/harbormaster/data.js";
@@ -678,7 +678,7 @@ test("idle-ask: an idle or done orchestrator in a running run, no question, idle
   for (const orch of ["idle", "done"]) {
     const a = idle(run({ prs: [] }), { orch });
     assert.deepEqual([a.group, a.reasons.map((x) => x.key)], ["needs", ["idle-ask"]], orch);
-    assert.equal(a.reasons[0].text, "orchestrator idle — may be asking in its tab");
+    assert.equal(a.reasons[0].text, IDLE_ASK_TEXT);
     assert.equal(a.reasons[0].since, now - IDLE_ASK_MS);
     assert.ok(a.reasons[0].short);
   }
