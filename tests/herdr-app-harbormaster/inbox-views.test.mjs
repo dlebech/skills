@@ -6,8 +6,8 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { resetShared, shared, setShared } from "herdr";
 import { askClick } from "../../herdr-app/mods/harbormaster/askclick.js";
-import { asked, askedLevel, askedStore, askedPrsOf, markAsked, migrateCommentsAsked, pruneAsked } from "../../herdr-app/mods/harbormaster/inbox.js";
-import { commentsSig, ASKED_KEEP_MS } from "../../herdr-app/mods/harbormaster/comments.js";
+import { asked, askedLevel, askedStore, askedPrsOf, markAsked, migrateCommentsAsked, pruneAsked, ASKED_KEEP_MS } from "../../herdr-app/mods/harbormaster/inbox.js";
+import { commentsSig } from "../../herdr-app/mods/harbormaster/comments.js";
 import { claimRows, claimResultLine, withSaid, withAsked, claimActions } from "../../herdr-app/mods/harbormaster/claims.js";
 import { parseProofMd } from "../../herdr-app/mods/harbormaster/proof.js";
 
@@ -193,4 +193,15 @@ test("an ask read from the inbox ends its click mark: unread, then read inside 1
   pruneAsked([shown], { now: now + 2000, lookup });
   assert.deepEqual(askedStore(), {});
   assert.equal(withAsked(rowsOf(pr1), pr1, now + 3000)[0].asked, false);
+});
+
+test("level: an older unread request of another level does not end the click's mark in prune", () => {
+  const r = { ...run(), autonomy: "L0", pending: { autonomy: "L1", tier: null } };
+  markAsked({ ...r, pending: { autonomy: null, tier: null } }, "level", "autonomy", { level: "L2", current: "L0" });
+  assert.equal(askedLevel(r, "autonomy", "L0"), "L2");
+  pruneAsked([r]);
+  assert.equal(askedLevel(r, "autonomy", "L0"), "L2", "still L2, not the older L1");
+  // Once the unread request is the click's own level, the unread message carries it and the mark goes.
+  pruneAsked([{ ...r, pending: { autonomy: "L2", tier: null } }]);
+  assert.deepEqual(askedStore(), {});
 });

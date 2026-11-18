@@ -12,9 +12,8 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resetShared, setShared } from "herdr";
-import { KINDS, askedLevel, NOT_ANSWERS, PREFIXES, send, asked, markAsked, unmarkAsked, pruneAsked, askedStore } from "../../herdr-app/mods/harbormaster/inbox.js";
+import { KINDS, askedLevel, NOT_ANSWERS, PREFIXES, send, asked, markAsked, unmarkAsked, pruneAsked, askedStore, ASKED_KEEP_MS } from "../../herdr-app/mods/harbormaster/inbox.js";
 import { withRoot } from "./root.mjs";
-import { ASKED_KEEP_MS } from "../../herdr-app/mods/harbormaster/comments.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DAY = 24 * 3600 * 1000;
@@ -245,4 +244,10 @@ test("comments while the run works: asked holds until a new counted comment; pru
   assert.equal(keepsWith(answered, new Set([url])), true);
   assert.equal(keepsWith(two, new Set([url])), false);
   assert.equal(keepsWith(answered, new Set()), false);
+});
+
+test("send: a builder that throws takes the click's marks back", async () => {
+  const run = { key: ":/r/x", dir: "/r/x", branch: "x" };
+  await assert.rejects(send(run, "comments", { pr: null, mode: "handle" }, { asks: [{ key: "https://x/1", item: { url: "https://x/1" } }] }));
+  assert.deepEqual(askedStore(), {});
 });

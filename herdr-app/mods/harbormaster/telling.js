@@ -113,6 +113,11 @@ export function observeTelling(runs, ctx, now = Date.now()) {
   // are kept (its files are not a fresh read), and age out.
   const busy = new Set(live.filter((r) => atts.get(r).working).flatMap((r) => (prsOf(r) ?? []).map((p) => p.url)));
   const queue = new Map(decisionQueue(runs, cachedRuns().decisions ?? [], ctx).map((x) => [x.id, x]));
-  migrateCommentsAsked(runs, prsOf);
-  pruneAsked(runs, { now, closed: (r) => isClosed(r, ctx), busy, lookup: (run, family, key) => markItem(run, family, key, queue) });
+  // A run absent from `runs` is gone only when its machine was read fresh this time; after a
+  // reload, or while a machine fails, it may only be unread. Then its marks are kept (they age out),
+  // and the old comments asks wait for a read that lists every machine.
+  const read = cachedRuns().at > 0;
+  const machineOf = (rk) => rk.slice(0, Math.max(rk.indexOf(":/"), 0)) || null;
+  if (read && runs.length && !failed.length) migrateCommentsAsked(runs, prsOf);
+  pruneAsked(runs, { now, gone: (rk) => read && !failed.includes(machineOf(rk)), closed: (r) => isClosed(r, ctx), busy, lookup: (run, family, key) => markItem(run, family, key, queue) });
 }

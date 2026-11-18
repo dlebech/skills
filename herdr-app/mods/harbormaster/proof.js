@@ -144,7 +144,7 @@ export function withAcceptance(file, id, entry) {
   return `${JSON.stringify(out, null, 2)}\n`;
 }
 
-// The first line of an Ask to prove (claims.js claimProveRequest), "prove C2 to T2: <result
+// The first line of an Ask to prove (inbox.js claimProveRequest), "prove C2 to T2: <result
 // line>", which the orchestrator acts on and pendingProofs() finds.
 export const PROVE = /^prove (\S+?)(?: to T([0-3]))?: (.*)$/;
 

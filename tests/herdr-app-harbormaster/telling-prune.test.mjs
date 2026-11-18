@@ -3,7 +3,7 @@
 // Run: node --import ./loader.mjs --test telling-prune.test.mjs
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { resetShared } from "herdr";
+import { resetShared, setShared, shared } from "herdr";
 import { observeTelling } from "../../herdr-app/mods/harbormaster/telling.js";
 import { loadRuns } from "../../herdr-app/mods/harbormaster/data.js";
 import { facts } from "../../herdr-app/mods/harbormaster/live.js";
@@ -42,4 +42,52 @@ test("answer marks: kept while the read is not fresh, dropped once fresh and the
   try { await loadRuns(); } finally { delete globalThis.__herdrExec; }
   observeTelling([r], facts());
   assert.deepEqual(marks(), []);
+});
+
+// A run absent from `runs` is gone only when its machine was read fresh this time. After a reload
+// the cache is empty, and a machine that fails its first read leaves its runs out of `runs`.
+const realNow = Date.now;
+let skew = 0;
+Date.now = () => realNow() + skew;
+const readWith = async (exec) => {
+  skew += 5000;
+  globalThis.__herdrExec = exec;
+  try { await loadRuns(); } finally { delete globalThis.__herdrExec; }
+};
+const marks = () => Object.keys(askedStore()).length;
+
+test("prune: marks of runs missing from a read that failed or never happened are kept; a fresh read drops them", async () => {
+  const r = run("away");
+  markAsked(r, "blocking", "", r);
+  markAsked(r, "answer", `need-${r.key}`, { since: 1 });
+  // A machine that failed its read (here this one): its runs are absent, not gone.
+  await readWith(async () => ({ code: 1, stdout: "", stderr: "unreachable" }));
+  observeTelling([], facts());
+  assert.equal(marks(), 2);
+  // The same read, but another machine's run is listed: still not gone.
+  observeTelling([run("other")], facts());
+  assert.equal(marks(), 2);
+  // Marks still age out.
+  observeTelling([], facts(), Date.now() + 8 * 24 * 3600 * 1000);
+  assert.equal(marks(), 0);
+  // A fresh read that lists no run: the run is gone.
+  markAsked(r, "blocking", "", r);
+  await readWith(async () => ({ code: 0, stdout: "", stderr: "" }));
+  observeTelling([], facts());
+  assert.equal(marks(), 0);
+});
+
+test("migration: the old comments asks wait for a read that lists every machine", async () => {
+  const OLD = "harbormaster.commentsAsked";
+  const r = run("m"), url = "https://github.com/o/r/pull/1";
+  const entry = { sig: "s", ids: [], at: Date.now() };
+  // Failed read, no runs: nothing moves, the old key stays.
+  setShared(OLD, { [url]: entry });
+  await readWith(async () => ({ code: 1, stdout: "", stderr: "unreachable" }));
+  observeTelling([], facts());
+  assert.deepEqual(shared(OLD), { [url]: entry });
+  // A failed machine with runs listed (another one's): the same.
+  observeTelling([r], facts());
+  assert.deepEqual(shared(OLD), { [url]: entry });
+  // (With a read that lists every machine the migration runs; inbox-views.test.mjs covers what it moves.)
 });

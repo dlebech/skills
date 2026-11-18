@@ -256,8 +256,6 @@ export const commentsSig = (run, pr) => `${(pr?.comments?.items ?? []).map((x) =
 // inbox message alone is not enough: the orchestrator renames it once it reads it, long before
 // the threads are done.
 
-export const ASKED_KEEP_MS = 7 * 24 * 3600 * 1000;
-
 // The ids of a PR's counted comments (people's and bots', open threads and notes), as the message
 // to the orchestrator listed them. An answer changes an item's kind, never its id.
 const itemId = (x) => x.thread ?? x.url ?? x.text;

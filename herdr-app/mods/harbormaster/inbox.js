@@ -12,7 +12,7 @@ import { exec, shared, setShared } from "herdr";
 import { detachedSend } from "./wake.js";
 import { reportedStatus, orchestratorState, facts } from "./live.js";
 import { stepSig } from "./attention.js";
-import { AI_PREFIX, botText, botCount, commentsText, commentGroups, itemLine, isOpen, commentsSig, commentsUnknown, countedIds, hasNewCounted, ASKED_KEEP_MS } from "./comments.js";
+import { AI_PREFIX, botText, botCount, commentsText, commentGroups, itemLine, isOpen, commentsSig, commentsUnknown, countedIds, hasNewCounted } from "./comments.js";
 import { claimResultLine, BAR_NEEDS } from "./claims.js";
 import { AUTONOMY, TIER_TEXT, requestLine } from "./levels.js";
 
@@ -298,9 +298,9 @@ async function messageRun(run, source, text) {
 export async function send(run, kind, payload = {}, { asks = [], now = Date.now() } = {}) {
   const k = KINDS[kind];
   if (!k) throw new Error(`unknown inbox message kind: ${kind}`);
-  const text = k.build(run, payload);
   for (const a of asks) markAsked(run, kind, a.key, a.item, now);
   try {
+    const text = k.build(run, payload);
     const out = k.tell ? await tellOrchestrator(run, k.source, text) : await messageRun(run, k.source, text);
     return { outcome: out.waits ? "waits" : out.blocked ? "blocked" : "sent" };
   } catch (e) {
@@ -327,7 +327,7 @@ export function askedLevel(run, kind, current, now = Date.now()) {
   return pending;
 }
 
-// The shape the views have always been given: {blocked, waits?}.
+// The shape the views have always been given: {blocked, waits?}. Only the tests use it now.
 export const legacyOutcome = ({ outcome }) => (outcome === "waits" ? { blocked: false, waits: true } : { blocked: outcome === "blocked" });
 
 // ---- the asked state ----
@@ -336,6 +336,8 @@ export const legacyOutcome = ({ outcome }) => (outcome === "waits" ? { blocked: 
 // unread, or while its kind's signature is what it was at the click.
 
 const KEY = "harbormaster.asked";
+// How long any mark is kept at most: a week.
+export const ASKED_KEEP_MS = 7 * 24 * 3600 * 1000;
 const SEP = "\u001f";
 export const askedStore = () => shared(KEY) ?? {};
 const entryKey = (run, kind, key) => `${run.key}${SEP}${KINDS[kind].family}${SEP}${key ?? ""}`;
@@ -389,8 +391,9 @@ export const askedPrsOf = (run, prs, now = Date.now(), working = false) => {
 // the shared asked store. Moves each into the store under the run that owns the PR (`prsOf(run)`
 // gives its PRs), then drops the old key. An entry whose PR no run has is dropped, unless a run
 // is stale or has no PR list yet (its PRs are not known now): those stay in the old key for the
-// next read, until a week old. Call it only
-// from a copy that polls the whole window (telling.js), so one copy writes.
+// next read, until a week old. Call it only from a copy that polls the whole window (telling.js),
+// so one copy writes, and only after a read that listed every machine's runs: with none listed,
+// or a machine failed, a PR may be missing without being gone (telling.js skips the call then).
 const OLD_COMMENTS_KEY = "harbormaster.commentsAsked";
 export function migrateCommentsAsked(runs, prsOf) {
   const old = shared(OLD_COMMENTS_KEY);
@@ -410,9 +413,11 @@ export function migrateCommentsAsked(runs, prsOf) {
 // Drops the marks that no longer hold: the signature moved, the run is gone or closed, or a week
 // has passed (a level's or proof's, 15 s). `closed(run)` says the run is closed (t3+ passes isClosed). `lookup(run, family, key)` gives the item a signature is read from (a PR, a claim
 // row, a queue item) where the run alone does not; a mark whose item it cannot give is kept (it
-// still ages out). `busy` is the Set of PR URLs whose run is working. A PR that is merged or
+// still ages out). `gone(runKey)` says a run that is not in `runs` is really gone (its machine was
+// read fresh); by default every absent run is. An absent run that may not be gone keeps its marks,
+// which still age out. `busy` is the Set of PR URLs whose run is working. A PR that is merged or
 // closed drops its mark. Writes only on a change.
-export function pruneAsked(runs, { now = Date.now(), lookup = () => undefined, busy = new Set(), closed = (r) => r.away?.how === "closed" } = {}) {
+export function pruneAsked(runs, { now = Date.now(), lookup = () => undefined, busy = new Set(), closed = (r) => r.away?.how === "closed", gone = () => true } = {}) {
   const store = shared(KEY);
   if (!store) return;
   const byKey = new Map((runs ?? []).map((r) => [r.key, r]));
@@ -420,8 +425,10 @@ export function pruneAsked(runs, { now = Date.now(), lookup = () => undefined, b
   const live = ([id, e]) => {
     const [rk, fam, key] = id.split(SEP);
     const run = byKey.get(rk), k = family(fam);
-    if (!run || closed(run) || !k || !k.sig) return false;
+    if (!k || !k.sig) return false;
     if (now - (e?.at ?? 0) > (k.keep ?? ASKED_KEEP_MS)) return false;
+    if (!run) return !gone(rk);
+    if (closed(run)) return false;
     const found = lookup(run, fam, key);
     // An answer's queue item is gone (answered for good, or the run no longer needs you).
     if (found === false) return false;
@@ -429,7 +436,8 @@ export function pruneAsked(runs, { now = Date.now(), lookup = () => undefined, b
     if (item === undefined) return true;
     // A click mark of a level or proof ask goes once the run shows the request unread: from then
     // the unread message carries it, and reading it ends it (as the views' own marks did).
-    if ((fam === "level" || fam === "proof") && k.unread(run, key, item)) return false;
+    // A level's unread request may be an older one than the click's: it ends the mark only when it asks the same level.
+    if (fam === "level" ? String(run.pending?.[key] ?? "") === e.sig : fam === "proof" && k.unread(run, key, item)) return false;
     if (fam === "comments") {
       if (item.state === "MERGED" || item.state === "CLOSED") return false;
       if (!item.comments || commentsUnknown(item.comments)) return true;

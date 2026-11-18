@@ -150,7 +150,7 @@ asks the orchestrator to change it: a message in the run's `inbox/` (`set autono
 `set proof tier to T2`, and what that implies), written and woken like an answer from the queue.
 Harbormaster never changes `status.json` or `plan.md` itself; the orchestrator does, and until they
 show the new level, while its message is unhandled, the tag reads `L2 requested…` (`L2…` on a Crew card; also after a
-reload, as the click's mark is kept in `harbormaster.asked`). A run without a known orchestrator lists its levels but can't be changed from here.
+reload, because the unread request is still in the inbox; the click itself is kept 15 s in `harbormaster.asked`, so other copies show it too). A run without a known orchestrator lists its levels but can't be changed from here.
 Every decision an orchestrator makes itself is a
 `- [decided] <UTC time> <topic>: <decision> — <why>` line in `decisions.md`. The run pane's **Decisions**
 section's heading is its fold, with its chevron and the counts ("Decisions · 53 · 42 by the
@@ -345,7 +345,7 @@ orchestrator gone; the claim stops wanting a look and the verdict counts it apar
 the claim's result line is the same: once proof.md says something else, it wants a look again.
 **Unaccept** takes it back. **Ask to prove** writes `prove C2 to T2: <the result line>` to the run's
 inbox, woken like an answer; the row reads `asked…` until the orchestrator has handled it or the result
-changes (kept in shared state `harbormaster.asked`, per run and claim, so it survives a reload). Neither answers an open question.
+changes (the click is kept 15 s in shared state `harbormaster.asked`, per run and claim, so other copies show it too; after that, and across a reload, it reads from the unread message). Neither answers an open question.
 
 Under the claims, the whole-branch checks (suite, build, lint, CI) are one line from proof.md's
 `Checks:` header: `Checks ✓ 1497 tests, build, lint, CI` in green, `Checks ✗ …` in red, or dim while
@@ -443,7 +443,7 @@ Parking leaves the run directory, worktrees, branches and PRs in place, and the 
 | `herdr-app/mods/harbormaster/askclick.js` | The click every button that sends an inbox message shares: marks it asked, sends, shows the note for a run that waits or is blocked on a dialog, and takes the mark back when nothing reached the inbox |
 | `herdr-app/mods/harbormaster/proofseen.js` | Whether a run's proof was read (`harbormaster.proofSeen`) |
 | `herdr-app/mods/harbormaster/needaction.js` | What a Needs-you box says to do: a line and its buttons per reason, the one button the sidebar's box shows (`primaryOf`), and the Crew hover's `Do:` line |
-| `herdr-app/mods/harbormaster/comments.js` | Review comments on approved PRs: what counts, how they read (`approved · 3 threads`), the `address comments on …` message and when it still reads `asked…` |
+| `herdr-app/mods/harbormaster/comments.js` | Review comments on approved PRs: what counts, how they read (`approved · 3 threads`), and the signature an Address comments ask is asked by (`commentsSig`); its message is in inbox.js |
 | `herdr-app/mods/harbormaster/resources.js` | CPU and memory: the process snapshot, the live usage and badges, and each run's `.resources.json` |
 | `herdr-app/mods/harbormaster/context.js` | Each crew agent's context size, from its session file, and `tokenText` (`1.2M`) |
 | `herdr-app/mods/harbormaster/timing.sh`, `categories.tsv` | Where a run's time went, from its session logs, and the table that sorts tool calls into categories |

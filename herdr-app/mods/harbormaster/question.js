@@ -200,9 +200,6 @@ export function paragraphs(text) {
 // part of file names and identifiers (__init__.py, foo__bar__baz).
 export const plain = (s) => (s ?? "").replace(/\*\*(.+?)\*\*/g, "$1");
 
-// The answer message lives in inbox.js; re-exported so imports keep working.
-export { answerMessage } from "./inbox.js";
-
 // A decision (the captain's, or a question.md read as one) squeezed to a line for the queue.
 export const oneLine = (s, max = 160) => {
   const t = (s ?? "").replace(/\s+/g, " ").trim();

@@ -18,7 +18,7 @@ import { pendingLevels } from "./levels.js";
 import { tokenText } from "./context.js";
 import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, withAcceptance } from "./proof.js";
-import { parsePlanClaims, claimProveRequest, claimResultLine } from "./claims.js";
+import { parsePlanClaims, claimResultLine } from "./claims.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
 import { taskTone, taskCounts, taskStage } from "./tasks.js";
