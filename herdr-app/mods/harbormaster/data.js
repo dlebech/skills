@@ -641,7 +641,7 @@ export function relatedOf(run) {
   return shared("harbormaster.prs")?.[run.key]?.related ?? run.related.map((p) => unknownPr(p.url, p.repo));
 }
 
-// Refreshes a run's PRs when stale: every 60 s while the run is open, every 15 min once closed
+// Refreshes a run's PRs when stale: every 5 min while the run is open, every 15 min once closed
 // or parked (`closed`).
 // A PR gh could not read keeps its last summary, marked `stale`, or is unknownPr; the
 // entry's `error` says why (null when every PR was read) and `okAt` is the last read

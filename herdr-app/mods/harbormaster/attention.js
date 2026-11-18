@@ -16,9 +16,10 @@ import { planOpen, taskCounts } from "./tasks.js";
 // No new progress line, no change in the run's agents and no new terminal output for this
 // long, and the run has stalled.
 export const STALL_MS = 30 * 60000;
-// How often a run's PRs are read (data.js refreshPrs): every minute while the run is open,
-// every 15 minutes once it is closed (data.js isClosed).
-export const prTtl = (closed) => (closed ? 15 * 60000 : 60000);
+// How often a run's PRs are read (data.js refreshPrs): every 5 minutes while the run is open,
+// every 15 minutes once it is closed (data.js isClosed). Each read is a `gh pr view` per PR, so
+// reading open runs every minute ran into GitHub's API rate limits with a few runs open.
+export const prTtl = (closed) => (closed ? 15 * 60000 : 5 * 60000);
 // A PR read older than its ttl plus this no longer tells: its refresh is stuck.
 export const PR_READ_MARGIN = 10 * 60000;
 export const prMaxAge = (closed) => prTtl(closed) + PR_READ_MARGIN;

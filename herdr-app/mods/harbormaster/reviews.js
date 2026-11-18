@@ -1,5 +1,5 @@
 // Review requests: the open PRs where the user's review is asked, from
-// `gh search prs --review-requested=@me`, polled every few minutes and cached. Each says
+// `gh search prs --review-requested=@me`, polled every 5 minutes and cached. Each says
 // whether the repository is here (an open space, or a clone found beside one: a review can start in it) and whether a live
 // run is already reviewing it. Failing quietly: no GitHub shows as "can't reach GitHub".
 
@@ -7,7 +7,8 @@ import { exec } from "herdr";
 import { knownRepos } from "./repospaces.js";
 
 export const FIELDS = "number,title,url,author,updatedAt,repository";
-export const POLL_MS = 3 * 60000;
+// Every 5 minutes, like a run's PRs (attention.js prTtl), to stay clear of GitHub's API rate limits.
+export const POLL_MS = 5 * 60000;
 
 // gh's JSON → [{repo: "owner/name", number, title, url, author, updated}], newest first.
 export function parseReviewRequests(text) {

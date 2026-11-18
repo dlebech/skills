@@ -8,7 +8,7 @@
 //   "newrun"          the + New run dialog (newrun.js), an overlay
 //   "spaces"          the Spaces picker row (spaces.js) and "spaces-list" its popup
 //   "stats"           where the time goes, tokens, CPU and memory: per run, task and agent, live, and past runs
-// Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute;
+// Reads run directories on every machine (data.js) every 5 s and PRs from gh every 5 minutes;
 // the crew and the overview also read each crew agent's context size (context.js).
 
 import { View } from "gpui-kit";

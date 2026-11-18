@@ -369,10 +369,16 @@ test("PR reads ask for reviewRequests, and the summary names who is requested", 
 
 // ---- review round 1 ----
 
+test("an open run's PRs are read every 5 minutes, so a few open runs stay within GitHub's rate limits", () => {
+  assert.equal(prTtl(false), 5 * MIN);
+  // A read one interval old is on schedule, not stuck.
+  assert.equal(prRead(run(), { at: now - prTtl(false), list: [pr()] }, now).readable, true);
+});
+
 test("a closed run's PRs, read every 15 minutes, do not go stale between reads", () => {
   assert.equal(prTtl(true), 15 * MIN);
-  const entry = { at: ago(14), list: [pr({ state: "MERGED" })] };
-  // Open, a 14-minute-old read means the refresh is stuck; closed, it is on schedule.
+  const entry = { at: ago(16), list: [pr({ state: "MERGED" })] };
+  // Open, a 16-minute-old read means the refresh is stuck; closed, it is on schedule.
   assert.equal(prRead(run(), entry, now, false).readable, false);
   assert.equal(prRead(run({ phase: "finished" }), entry, now, true).readable, true);
   assert.equal(prRead(run(), { ...entry, at: now - prMaxAge(true) - 1 }, now, true).readable, false);
