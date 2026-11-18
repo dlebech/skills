@@ -1,7 +1,7 @@
 // How the Crew block shows a run's attention (crewrows.js): groups, order, detail line, edge and hover.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assess, runDot, STALL_MS } from "../../herdr-app/mods/harbormaster/attention.js";
+import { assess, runDot, STALL_MS, waitSig } from "../../herdr-app/mods/harbormaster/attention.js";
 import { needsYouNow } from "../../herdr-app/mods/harbormaster/attend.js";
 import { decisionQueue } from "../../herdr-app/mods/harbormaster/data.js";
 import { GROUPS, groupRows, byNeed, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, cantWhy, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText, workerTree } from "../../herdr-app/mods/harbormaster/crewrows.js";
@@ -379,4 +379,16 @@ test("Needs you: most important first, then longest waiting, then by key; openin
   assert.deepEqual(order(seen), before);
   assert.deepEqual(order([...rows].reverse()), before, "input order never matters");
   assert.ok(byNeed(e("x", "question", ago(1)), e("y", "finished", ago(999))) < 0, "importance beats age");
+});
+
+test("a run marked waiting on someone: its row, pill and hover say on whom and since when", () => {
+  const r = run({ phase: "finished", statusLine: "finished", progress: "" });
+  const mark = (a) => ({ text: "Kari — preview check", at: ago(125), label: a.next.label, sig: waitSig(a.next) });
+  const a = at(r, { waitOn: mark(at(r)) });
+  assert.equal(a.group, "waiting");
+  assert.equal(rowLead(a, now).lead, "waiting on Kari — preview check · 2h5m");
+  assert.equal(rowEdge(a), "review");
+  assert.ok(rowTip(a, now).includes("Waiting on Kari — preview check, since 2h5m ago"));
+  assert.equal(badgeOf(a, true).label, "waiting on Kari — preview check");
+  assert.equal(needLine(a), null);
 });

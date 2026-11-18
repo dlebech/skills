@@ -6,7 +6,7 @@
 // "Open the orchestrator" is never the headline: the box offers it as a small link of its own,
 // since most reasons are done elsewhere (on GitHub, in the proof, with Close).
 
-import { ageText, ciState } from "./attention.js";
+import { ageText, ciState, WAIT_LABELS } from "./attention.js";
 import { andList, plural } from "./words.js";
 import { taskCounts } from "./tasks.js";
 import { hasComments, commentsText, defaultMode, askAllLabel, offersAll } from "./comments.js";
@@ -31,6 +31,16 @@ const openPrs = (prs) => prs.filter((p) => p?.url).slice(0, MAX_OPEN)
 // GitHub, where the user merges (Harbormaster never merges). `primary` stands it out.
 const mergePrs = (prs) => prs.filter((p) => p?.url).slice(0, MAX_OPEN)
   .map((p) => ({ kind: "open", label: `Merge ${numOf(p) ?? "the PR"} on GitHub`, url: p.url, primary: true }));
+
+// The one line that bears on asking for a review: the run's final AI review is behind the branch,
+// or a finished run with claims has none. `ctx.reviewed` is claims.js reviewedState's facts, `ctx.claims`
+// whether the run has claims. Null when the AI review is current (or no review is expected yet).
+export function reviewCaveat(ctx) {
+  const rv = ctx?.reviewed;
+  if (rv?.kind === "behind") return rv.behind > 0 ? `AI review is ${plural(rv.behind, "commit")} behind.` : "AI review is behind the branch.";
+  if ((rv?.kind === "none" || rv?.kind === "task-only") && ctx.claims && ctx.run?.phase === "finished") return "No AI review of the whole branch yet.";
+  return null;
+}
 
 // The first failing check of a PR's statusCheckRollup as data.js keeps it ({name, url}), and
 // where its Open button goes: the check's own page, else the PR's checks tab.
@@ -115,14 +125,18 @@ function readyItem(a, ctx, prs) {
 //   address-all {prs, mode}  the same for every PR in `prs` at once (Ask me about all, Handle all)
 //   asked {pr}          a PR whose comments were asked about: "asked…", no buttons
 //   proof               unfolds the run's proof (and marks it read, proofseen.js)
+//   request-review {pr} Request review: opens the picker of earlier reviewers for the PR (reviewers.js)
+//   rereview {reviewed} Re-review first: asks the orchestrator to run the final review again (inbox.js)
 //   changes             Ask for changes on a ready run: opens a field, its text goes to the inbox (inbox.js)
+//   wait-on             Waiting on someone…: opens a field, its text marks the run as waiting on them
+//                       (tracking.js harbormaster.waitingOn; nothing goes to the inbox)
 //   ask-ci {pr, check}  asks the orchestrator to see to the red CI (an inbox message)
 //   ask-blocking        a stalled run's Ask what's blocking
 //   report {path}       opens the run's report
 //   close               the run's Close, with its confirm
 //   resume              the run's Resume, with its confirm
 //   focus {address}     shows an agent's terminal (a dialog waits in it)
-// An action may carry `primary` (it stands out, else only the box's first does) and `row` (the
+// An item may carry `caveat`, one amber line under its own. An action may carry `quiet` (drawn as a text link, not a button), `primary` (it stands out, else only the box's first does) and `row` (the
 // PR it is about, when the box draws a row of buttons per PR).
 function reasonItem(r, a, ctx) {
   const { run, now, proof, reports = [], blocked = null } = ctx;
@@ -211,9 +225,20 @@ function reasonItem(r, a, ctx) {
         actions: [...(p ? [{ kind: "proof", label: "Proof" }] : []), ...openPrs(same)] };
     }
     case "request review": {
-      const drafts = same.filter((p) => p.state === "DRAFT").length;
-      const why = drafts === same.length ? (same.length > 1 ? "drafts" : "a draft") : drafts ? "drafts, or nobody requested" : "nobody requested";
-      return { line: `Ask for a review on ${prsText(same)} (${why})`, actions: openPrs(same) };
+      // One action: ask a peer to review, from inside Herdr (overview.js picks the person). The PR link
+      // is a quiet text link after it; the AI-review caveat that bears on the ask comes with its button.
+      const prs = same.filter((p) => p?.url).slice(0, MAX_OPEN);
+      const several = same.length > 1;
+      const caveat = reviewCaveat(ctx);
+      const actions = prs.flatMap((p, i) => {
+        const row = several ? { row: numOf(p) ?? "the PR" } : {};
+        return [
+          { kind: "request-review", label: "Request review", pr: p, primary: true, ...row },
+          ...(caveat && i === 0 ? [{ kind: "rereview", label: "Re-review first", primary: false, reviewed: ctx.reviewed, pr: p, ...row }] : []),
+          ...openPrs([p]).map((x) => ({ ...x, quiet: true, ...row })),
+        ];
+      });
+      return { line: `Ask a peer to review ${prsText(same)}`, caveat, actions };
     }
     case "stalled":
       return { line: `${r.text[0].toUpperCase()}${r.text.slice(1)}${a.step?.text ? ` at ${a.step.text}` : ""}: ask what's blocking it`, actions: [{ kind: "ask-blocking", label: "Ask what's blocking" }] };
@@ -248,14 +273,36 @@ export function needActions(a, ctx = {}) {
   const now = ctx.now ?? Date.now();
   const rank = (k) => { const i = ORDER.indexOf(k); return i < 0 ? ORDER.length : i; };
   return [...a.reasons].sort((x, y) => rank(x.key) - rank(y.key))
-    .map((r) => ({ key: r.key, tip: null, ...reasonItem(r, a, { ...ctx, now }) }));
+    .map((r) => withWaitOn(r, a, { key: r.key, tip: null, ...reasonItem(r, a, { ...ctx, now }) }));
 }
+
+// "Waiting on someone…", a plain button after the others, on a PR step the user may hand to someone
+// outside GitHub (attention.js WAIT_LABELS). Only when it is all the run needs the user for: with
+// anything else beside it the mark would not hold (attention.js assess) and would go at once.
+const WAIT_ACTION = { kind: "wait-on", label: "Waiting on someone…", primary: false };
+const withWaitOn = (r, a, item) => (WAIT_LABELS.has(r.key) && a.reasons.length === 1 ? { ...item, actions: [...item.actions, WAIT_ACTION] } : item);
 
 // Whether a run's card and pane draw their own Address comments rows (overview.js
 // commentsAction): only while the run is in Needs you (`need`) and its box's items do not carry
 // them. Outside Needs you its orchestrator is working, often on the comments it was just asked
 // about, and Ask me / Handle them again would invite a second, duplicate ask.
 export const ownAddressRows = (need, items) => !!need && !(items ?? []).some((it) => it.actions.some((x) => x.kind === "address"));
+
+// The reasons whose box shows the review flow control ("review: peer · change"): where the self
+// or peer choice changes what the box asks. Only the first item decides.
+export const FLOW_REASONS = ["request review", "review from", "review proof → merge", "approved — merge", "changes requested"];
+export const showsFlow = (items) => FLOW_REASONS.includes(items?.[0]?.key);
+
+// The request-review action whose picker is open (`view.requesting` names this run and its PR) among
+// the box's `items`, or null. A picker that no drawn item matches any more (the run moved on) is
+// dropped, unless a request is under way, so it never comes back on its own.
+export function requestingFor(view, r, items) {
+  const req = view?.requesting;
+  if (!req || req.key !== r.key) return null;
+  const x = (items ?? []).flatMap((it) => it.actions).find((a) => a.kind === "request-review" && a.pr?.url === req.pr) ?? null;
+  if (!x && !req.busy) view.requesting = null;
+  return x;
+}
 
 // The line a Crew row's hover ends with: "Do: Merge #42 · approved by anna 1h ago", or null.
 export const doLine = (items) => (items?.length ? `Do: ${items[0].line}` : null);

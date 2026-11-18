@@ -4,6 +4,10 @@ import { div, svg, image } from "gpui-kit";
 import { settings } from "herdr";
 import { typeTip } from "./levels.js";
 
+// The run pane's and the overview cards' four text sizes: meta (section titles, labels, counts, tags,
+// pills, ages, anything dim), body (what you read), strong (the "Ready to merge" headline), title (the run's name).
+export const TYPE = { meta: 11, body: 12.5, strong: 13.5, title: 15 };
+
 // Token bars, here and in the stats view: fresh tokens (input, output, cache writes) in the accent,
 // cache reads green in every theme: the theme's own "done" colour is blue in some, which made both
 // segments look the same. ansi2 is the theme's green; the fixed one reads on dark and light.
@@ -49,7 +53,7 @@ export function runName(branch, topic) {
 
 // A run's type (set-status.sh --type) as a small tag before its name: what kind of
 // run it is, so a review reads apart from a feature at a glance. With an `id`, it says so on hover.
-export const typeTag = (t, type, id = null) => (id ? div().id(id).tooltip(typeTip(type)) : div()).flex_none().text_size(10).font_semibold().px(5).rounded(4)
+export const typeTag = (t, type, id = null, size = 10) => (id ? div().id(id).tooltip(typeTip(type)) : div()).flex_none().text_size(size).font_semibold().px(5).rounded(4)
   .bg(t.raised).text_color(t.muted).child(String(type));
 
 // Puts a runName() on an element: the title as its text, the tip, if any, as its tooltip.

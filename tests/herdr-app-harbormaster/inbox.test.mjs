@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resetShared, setShared } from "herdr";
-import { KINDS, askedLevel, NOT_ANSWERS, PREFIXES, send, asked, markAsked, unmarkAsked, pruneAsked, askedStore, ASKED_KEEP_MS } from "../../herdr-app/mods/harbormaster/inbox.js";
+import { rereviewRequest, rereviewPending, KINDS, askedLevel, NOT_ANSWERS, PREFIXES, send, asked, markAsked, unmarkAsked, pruneAsked, askedStore, ASKED_KEEP_MS } from "../../herdr-app/mods/harbormaster/inbox.js";
 import { withRoot } from "./root.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -52,6 +52,9 @@ const TABLE = [
     moved: (r) => ({ run: r, item: PR({ comments: { ...PR().comments, count: 2 } }) }) },
   { kind: "changes", payload: () => ({ text: "make the card wider" }), source: "harbormaster-changes", first: /^changes asked from Harbormaster: make the card wider$/,
     key: "", item: () => null, unread: (r) => ({ ...r, changesAsked: true }), moved: null },
+  { kind: "rereview", payload: () => ({ behind: 2, sha: "abcdef0123" }), source: "harbormaster-review", first: /^re-review asked from Harbormaster: the final review is 2 commits behind abcdef0$/,
+    key: "", item: (r) => r, unread: (r) => ({ ...r, rereviewAsked: true }),
+    moved: (r) => ({ run: { ...r, statusLine: "running: final review" }, item: { ...r, statusLine: "running: final review" } }) },
   { kind: "answer", payload: () => ({ title: "Which way?", answer: "A", free: "because" }), source: "harbormaster", first: /^Answer to "Which way\?": A$/,
     key: "q-1", item: () => ({ since: 100 }), unread: null, moved: (r) => ({ run: r, item: { since: 200 } }) },
 ];
@@ -170,8 +173,8 @@ test("prune drops a moved signature, a gone or closed run and a week-old mark; k
 });
 
 test("NOT_ANSWERS is built from the kind table and equals the string data.js had", () => {
-  assert.equal(NOT_ANSWERS, "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?|address comments on |changes asked from Harbormaster: )");
-  assert.equal(PREFIXES.length, 5, "blocking and ci, comments and comments-all share a prefix");
+  assert.equal(NOT_ANSWERS, "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?|address comments on |changes asked from Harbormaster: |re-review asked from Harbormaster:)");
+  assert.equal(PREFIXES.length, 6, "blocking and ci, comments and comments-all share a prefix");
 });
 
 // ---- lib.sh contract ----
@@ -190,6 +193,7 @@ test("lib.sh's answer_messages and the module's prefixes agree on a fixture inbo
   await sendTo("comments", { pr: PR(), mode: "handle" });
   await sendTo("comments-all", { prs: [PR(), PR({ url: "u2", number: 2 })], mode: "ask" });
   await sendTo("changes", { text: "more" });
+  await sendTo("rereview", { behind: null });
   await sendTo("answer", { title: "Q", answer: "yes" });
   await sendTo("answer", { title: "Q", answer: "no", free: "set autonomy to L2" });
   writeFileSync(join(run.dir, "inbox", "20261118T000000Z-000-person.message"), "just some free text\nprove C1: not an ask on line two\n");
@@ -250,4 +254,13 @@ test("send: a builder that throws takes the click's marks back", async () => {
   const run = { key: ":/r/x", dir: "/r/x", branch: "x" };
   await assert.rejects(send(run, "comments", { pr: null, mode: "handle" }, { asks: [{ key: "https://x/1", item: { url: "https://x/1" } }] }));
   assert.deepEqual(askedStore(), {});
+});
+
+test("the re-review message: behind or none, then what to do, never merge", () => {
+  assert.equal(rereviewRequest({ behind: 1, sha: null }).split("\n")[0], "re-review asked from Harbormaster: the final review is 1 commit behind the branch");
+  const none = rereviewRequest({ behind: null }).split("\n");
+  assert.equal(none[0], "re-review asked from Harbormaster: there is no final review of the branch yet");
+  assert.match(none[1], /^Asked from Harbormaster: run the final review again on the integration branch as it is now, fix what it finds as tasks under the normal review rules, update proof\.md's Reviewed line, then finish again\. Never merge\.$/);
+  assert.equal(rereviewPending("changes asked from Harbormaster: x\nre-review asked from Harbormaster: there is no final review of the branch yet"), true);
+  assert.equal(rereviewPending("what is blocking? x"), false);
 });

@@ -10,17 +10,18 @@ import { programIcon, plural, runName } from "./ui.js";
 import { startedTip } from "./context.js";
 import { liveUsage } from "./resources.js";
 import { attentionOf } from "./attend.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, captainNeedNote, captainMark, needsSlots, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, captainNeedNote, captainMark, needsSlots, needCardLook, HOVER_TINT, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
 import { reviewError } from "./reviews.js";
 import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
-import { openNewRun, openStartCaptain, startReview, reviewStarting } from "./newrun.js";
-import { primaryOf, isMergeAsk } from "./needaction.js";
+import { openNewRun, openStartCaptain, reviewStarting } from "./newrun.js";
+import { primaryOf, isMergeAsk, requestingFor } from "./needaction.js";
 import { claimsAsk, checksLine, reviewedLine, withSaid, withAsked, claimActions } from "./claims.js";
 import {
   attOf, runStatus, levelTags, runTypeTag, statusDot, actionButton, closeAllControl, runFacts, needItemsOf,
   newDecisionsNote, noteRows, watchedText, edgeColor, cardBesideOrchestrator, AMBER, PASS, SELECTED, withUsage, runProps,
   needButton, needLines, answerParts, boxConfirm, proofAction, said, stagesOf,
+  waitOnField,
 } from "./overview.js";
 
 // A run's title as the sidebar shows it: a review's "<repo>#<n> · <topic>", else runName's; with
@@ -229,8 +230,9 @@ function needRow(m, x, onOpen) {
   const color = tone === "amber" ? AMBER(t) : tone === "pass" ? PASS(t) : t[tone] ?? t.dim;
   const open = onOpen ?? openRun(m, x);
   const id = `crew-need-${needKey(x)}`;
+  const here = term?.address != null && term.address === m.current;
   return v_flex().id(id).relative().overflow_hidden().flex_none().gap(1).pl(PAD + 3).pr(PAD).py(5).rounded(6)
-    .bg(edge + "14").cursor_pointer().hover((st) => st.bg(edge + "26"))
+    .bg(here ? SELECTED(t) : edge + "14").cursor_pointer().hover((st) => st.bg(here ? SELECTED(t) : edge + "26"))
     .tooltip([name.tip ?? name.title, ...rowTip(a, now), onOpen ? OPEN_HERE : null].filter(Boolean).join("\n")).on_click(open)
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
     .child(titleText(t, name, 12.5, true))
@@ -257,6 +259,8 @@ function boxActions(m, x, f, items) {
   const confirm = boxConfirm(view, t, r, f, "sidebar");
   const changes = view.replying === `changes:${r.key}` ? v_flex().id(`${key}-changes`).gap(4).on_click((_e, cx) => cx.stop_propagation()).child(Input.new(view.reply))
     .child(div().text_size(10.5).text_color(t.dim).child("What should change? Enter writes it to the run's inbox and tells its orchestrator")) : null;
+  // Waiting on someone…'s field (overview.js waitOnButton), under the box's buttons like Ask for changes'.
+  const wait = waitOnField(view, t, r, `${key}-wait`);
   if (it) {
     // A question: its recommended option is the button (else Reply); the other options, Reply
     // and anything else it needs you for under "more".
@@ -275,6 +279,8 @@ function boxActions(m, x, f, items) {
     const input = a.input && div().id(`${key}-reply`).on_click((_e, cx) => cx.stop_propagation()).child(a.input);
     return [more ? all : folded, input || null, a.note || null, confirm].filter(Boolean);
   }
+  // Request review was clicked: the picker opens in the box, in place of the one button.
+  if (requestingFor(view, r, items)) return [...needLines(view, t, r, f, items, "sidebar"), confirm].filter(Boolean);
   const p = primaryOf(items);
   const main = p ? needButton(view, t, r, f, items[p.i].actions[p.j], `need-sidebar-${r.key}-${p.i}-${p.j}`, "sidebar", true) : null;
   // "N more" counts the buttons the unfolded box draws: not an "asked…" note, nor one that draws nothing.
@@ -282,13 +288,13 @@ function boxActions(m, x, f, items) {
   // A merge ask's claims and checks line are unfolded with the rest, so they count too.
   const claimLines = isMergeAsk(items) ? boxClaims(r, stagesOf(r, m.ctx)).rows.length + (checksLine(r.proof?.md) ? 1 : 0) + (boxReviewed(r) ? 1 : 0) : 0;
   const extra = drawn - (main ? 1 : 0) + claimLines;
-  if (more) return [...needLines(view, t, r, f, items, "sidebar"), claimLines ? mergeClaims(m, r) : null, h_flex().child(moreLink(0)), changes, confirm].filter(Boolean);
+  if (more) return [...needLines(view, t, r, f, items, "sidebar"), claimLines ? mergeClaims(m, r) : null, h_flex().child(moreLink(0)), changes, wait, confirm].filter(Boolean);
   // The button's own line when it is not the first item's (the first was asked about), so it never
   // stands without its reason; with no button at all, the first line says what is under way.
   const lineOf = main && p.i > 0 ? items[p.i] : !main ? items[0] : null;
   const line = lineOf ? div().text_size(11.5).text_color(main ? t.foreground : t.muted).child(lineOf.line) : null;
   return [line, (main || extra > 0) && h_flex().gap(10).items_center().flex_wrap().when(Boolean(main), (el) => el.child(main)).when(extra > 0, (el) => el.child(moreLink(extra))),
-    changes, confirm].filter(Boolean);
+    changes, wait, confirm].filter(Boolean);
 }
 
 // The claims the box shows: those worth a look. The proven ones stay in the run's pane (the box
@@ -348,11 +354,15 @@ function needCard(m, x) {
   const color = tone === "amber" ? AMBER(t) : tone === "pass" ? PASS(t) : t[tone] ?? t.dim;
   const id = `crew-box-${r.key}`;
   const go = openRun(m, x);
+  const selected = x.term?.address != null && x.term.address === m.current;
+  const look = needCardLook(selected);
   const focus = (_e, cx) => { cx.stop_propagation(); if (x.term) go(); };
   return v_flex().id("crew-needs-box").relative().overflow_hidden().flex_none().min_w(0).gap(6).pl(PAD + 3).pr(PAD).pt(7).pb(8).rounded(6)
-    // The selected one: a stronger tint, an edge-coloured outline and a wider bar; the rows are quieter.
-    .bg(edge + "33").border(1).border_color(edge).when(Boolean(x.term), (el) => el.cursor_pointer()).on_click(focus)
-    .child(div().absolute().left(0).top(0).bottom(0).w(5).bg(edge))
+    // Selected (its orchestrator's terminal is the current one): a stronger tint, an edge-coloured
+    // outline and a 5 px bar. Otherwise a light tint, a transparent border (same width) and a 3 px bar.
+    .bg(edge + look.tint).border(1).border_color(edge + look.border)
+    .when(Boolean(x.term), (el) => el.cursor_pointer().hover((st) => st.bg(edge + (selected ? look.tint : HOVER_TINT)))).on_click(focus)
+    .child(div().absolute().left(0).top(0).bottom(0).w(look.bar).bg(edge))
     .child(v_flex().gap(1).min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)
         .child(div().id(`${id}-title`).flex_1().min_w(0).flex().cursor_default()
@@ -408,11 +418,7 @@ export function nextAction(m, it, id) {
     // Started from here and its run not seen yet (newrun.js reviewStarting): never a second Review.
     if (reviewStarting(it.url)) return div().flex_none().text_size(11).text_color(t.dim).tooltip("Its review run is starting; it shows as reviewing once its run files name the PR").child("starting…");
     if (!it.local) return null;
-    return smallButton(t, `${id}-act`, "Review", "Start a review run in its repository's space, with your remembered review settings", (cx) => {
-      // The click's cx is gone once startReview awaits: the redraw after it uses a task's own.
-      cx.spawn(async (cx) => { await startReview({ repo: it.local, pr: it.number, url: it.url }).catch(() => {}); cx.notify(); });
-      cx.notify();
-    });
+    return smallButton(t, `${id}-act`, "Review", "Open New run for this PR: choose the agent and reviewer, then Start", () => openNewRun({ repo: it.local.root, kind: "review", input: String(it.number), url: it.url }));
   }
   return it.action?.url ? smallButton(t, `${id}-act`, it.action.label, it.action.url, () => openUrl(it.action.url)) : null;
 }
@@ -421,7 +427,7 @@ function nextRow(m, it, i) {
   const { t } = m;
   const id = `crew-next-${i}`;
   const action = nextAction(m, it, id);
-  const far = it.kind === "review" && !it.local ? "No clone of this repository found next to your open spaces: open a space for it to review with one click" : null;
+  const far = it.kind === "review" && !it.local ? "No clone of this repository found next to your open spaces: open a space for it, or clone it beside one, to review it from here" : null;
   return h_flex().id(id).flex_none().gap(8).px(PAD).py(3).rounded(6).items_center().cursor_pointer().hover((st) => st.bg(t.hover))
     .tooltip([`${it.repo}#${it.number}: ${it.title}`, it.url, far].filter(Boolean).join("\n"))
     .on_click(() => openUrl(it.url))

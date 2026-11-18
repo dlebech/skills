@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_PROFILE, AGENTS, agentFor, lastProfile, skillPrompt, roleValue, matchModels, modelProblems, setRole, parsePiModels, parseOpencodeModels, profileText, parseProfile, profileFor, buildPrompt, inputProblem, prRef, runAgentName, startArgs,
-  startOutcome, parsePrefs, draftsFor, remember,
+  startOutcome, parsePrefs, draftsFor, remember, prefillProfile, lastReviewProfile,
 } from "../../herdr-app/mods/harbormaster/startrun.js";
 import { newRunArgs } from "../../herdr-app/mods/harbormaster/commands.js";
 import { parseReviewRequests, runReviewing, withContext } from "../../herdr-app/mods/harbormaster/reviews.js";
@@ -23,10 +23,13 @@ test("an issue run's prompt carries the work and the profile", () => {
   assert.match(buildPrompt({ kind: "describe", input: "Add a dark mode\nto the sidebar", profile: DEFAULT_PROFILE }), /^\/herdr-app-orchestrator Add a dark mode to the sidebar implementer-model=/);
 });
 
-test("a review's prompt is the review preset with its drafts mode, Opus and L1", () => {
-  const profile = profileFor("review", { ...DEFAULT_PROFILE, reviewer: "sonnet", autonomy: "L3" });
+test("a review's prompt is the review preset with its drafts mode, Opus and L1, and no implementer or specialist", () => {
+  const profile = profileFor("review", { ...DEFAULT_PROFILE, implementer: "opencode/q", reviewer: "sonnet", autonomy: "L3" });
+  assert.deepEqual(profile, { reviewer: "opus", autonomy: "L1" });
   assert.equal(buildPrompt({ kind: "review", input: "https://github.com/o/r/pull/7", profile, drafts: "pending" }),
-    "/herdr-app-orchestrator review https://github.com/o/r/pull/7 type=rev review-drafts=pending implementer-model=sonnet reviewer-model=opus specialist-model=opus autonomy=L1");
+    "/herdr-app-orchestrator review https://github.com/o/r/pull/7 type=rev review-drafts=pending reviewer-model=opus autonomy=L1");
+  // A review line the user edits does not get the implementer or specialist added back.
+  assert.deepEqual(parseProfile("reviewer=sonnet", profile).profile, { reviewer: "sonnet", autonomy: "L1" });
   assert.equal(profileFor("issue", { autonomy: "L3" }).autonomy, "L3");
 });
 
@@ -62,11 +65,12 @@ test("start-agent.sh's outcomes read calmly", () => {
 
 test("the last profile and each repository's drafts mode are remembered; direct never is", () => {
   let p = parsePrefs("not json");
-  assert.deepEqual(p, { profile: null, profiles: {}, agent: null, drafts: {}, folders: [] });
+  assert.deepEqual(p, { profile: null, profiles: {}, reviewProfiles: {}, agent: null, drafts: {}, folders: [] });
   p = remember(p, { kind: "issue", profile: { ...DEFAULT_PROFILE, implementer: "opus" }, repo: "/r" });
   assert.equal(p.profile.implementer, "opus");
-  p = remember(p, { kind: "review", profile: DEFAULT_PROFILE, repo: "/r", drafts: "pending" });
+  p = remember(p, { kind: "review", profile: { ...DEFAULT_PROFILE, reviewer: "sonnet", autonomy: "L2" }, repo: "/r", drafts: "pending" });
   assert.equal(p.profile.implementer, "opus"); // a review leaves the profile alone
+  assert.deepEqual(p.reviewProfiles, { claude: { reviewer: "sonnet", autonomy: "L2" } }); // and keeps its own, per agent
   assert.equal(draftsFor(p, "/r"), "pending");
   p = remember(p, { kind: "review", profile: DEFAULT_PROFILE, repo: "/r", drafts: "direct" });
   assert.equal(draftsFor(p, "/r"), "pending"); // direct leaves what was
@@ -219,4 +223,22 @@ test("the orchestrator's model goes to start-agent.sh, not the prompt", () => {
 test("the model lists are read from each agent's own output", () => {
   assert.deepEqual(parsePiModels("provider   model   context\nollama     gemma4:26b  64K\nllama.cpp  ggml-org/x:Q4  16K\n"), ["ollama/gemma4:26b", "llama.cpp/ggml-org/x:Q4"]);
   assert.deepEqual(parseOpencodeModels("Loading...\nstrata/qwen3\nopencode/big-pickle\n"), ["strata/qwen3", "opencode/big-pickle"]);
+});
+
+test("the last review's reviewer is remembered per agent and prefills the next review", () => {
+  let p = parsePrefs(JSON.stringify({ profile: { ...DEFAULT_PROFILE, implementer: "opus" }, agent: "claude" })); // an old file
+  assert.deepEqual(p.reviewProfiles, {});
+  assert.equal(lastReviewProfile(p, "claude"), null);
+  assert.deepEqual(prefillProfile(p, "review", "claude"), { reviewer: "opus", autonomy: "L1" }, "no memory: the preset");
+  assert.deepEqual(prefillProfile(p, "review", "pi"), { reviewer: "", autonomy: "L1" });
+  const before = p.profile;
+  p = remember(p, { kind: "review", profile: { orchestrator: "haiku", implementer: "x", reviewer: "sonnet", specialist: "y", autonomy: "L3" }, repo: "/r", drafts: "herdr", agent: "claude" });
+  p = remember(p, { kind: "review", profile: { reviewer: "", autonomy: "L2" }, repo: "/r", drafts: "herdr", agent: "pi" });
+  assert.deepEqual(p.profile, before, "the feature profile is untouched");
+  assert.deepEqual(p.profiles, {});
+  assert.deepEqual(prefillProfile(p, "review", "claude"), { reviewer: "sonnet", autonomy: "L3", orchestrator: "haiku" });
+  assert.deepEqual(prefillProfile(p, "review", "pi"), { reviewer: "", autonomy: "L2" });
+  assert.deepEqual(prefillProfile(p, "review", "opencode"), { reviewer: "", autonomy: "L1" });
+  assert.equal(prefillProfile(p, "issue", "claude").implementer, "opus", "a feature run still uses its own profile");
+  assert.deepEqual(parsePrefs(JSON.stringify(p)), p);
 });

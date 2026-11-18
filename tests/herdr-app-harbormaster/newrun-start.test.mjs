@@ -150,18 +150,71 @@ test("A start that began but was not confirmed keeps the dialog open, says where
   assert.equal(find(newRunView(view, T), "nr-start").click, null, "no second start");
 });
 
-test("Crew's one-click Review redraws from a task, not the click's stale cx", async () => {
+test("Crew's Review button opens New run prefilled; nothing starts", async () => {
   const { nextAction } = await import("../../herdr-app/mods/harbormaster/crew.js");
-  globalThis.__herdrExec = async (cmd, args) => (cmd === "sh" && args[1].includes("start-agent.sh") ? { code: 1, stdout: "", stderr: "" } : { code: 0, stdout: "/runs", stderr: "" });
-  const it = { kind: "review", local: { space: "sp-x", root: "/home/u/projects/skills" }, number: 52, url: "https://github.com/o/r/pull/52" };
+  const it = { kind: "review", local: { space: null, root: "/home/u/projects/skills" }, number: 52, url: "https://github.com/o/r/pull/52" };
   const btn = find(nextAction({ t: T }, it, "nx"), "nx-act");
   assert.ok(btn?.click, "Review has a click handler");
-  const cx = callCx();
-  btn.click({}, cx);
-  cx.stale = true;
+  globalThis.__herdrOpened = null;
+  btn.click({}, callCx());
   await settle();
-  assert.deepEqual(rejections, []);
-  assert.ok(cx.tasks.some((t) => t.cx.notified > 0), "the row was redrawn after the start");
+  assert.deepEqual(globalThis.__herdrOpened.props, { role: "newrun", repo: "/home/u/projects/skills", kind: "review", input: "52", url: it.url });
+  assert.deepEqual(execs.filter((e) => e[0] === "bash"), [], "no run was started");
+});
+
+test("a review started from the dialog marks its PR starting, once; a failed start clears the mark", async () => {
+  const { guardReview } = await import("../../herdr-app/mods/harbormaster/newrun.js");
+  const { reviewStarting } = await import("../../herdr-app/mods/harbormaster/startrun.js");
+  const url = "https://github.com/o/r/pull/77";
+  let release, runs = 0;
+  const first = guardReview({ id: url, url, run: () => { runs++; return new Promise((r) => { release = r; }); } });
+  assert.equal(reviewStarting(url), true);
+  const second = await guardReview({ id: url, url, run: async () => { runs++; return { ok: true }; } });
+  assert.equal(second.ok, false);
+  assert.equal(runs, 1, "a second start of the same PR does not run");
+  release({ ok: true });
+  assert.equal((await first).ok, true);
+  assert.equal(reviewStarting(url), true, "a start keeps the mark");
+  // A second dialog, after the first Start returned: the mark still holds, so it does not run either.
+  const again = await guardReview({ id: url, url, run: async () => { runs++; return { ok: true }; } });
+  assert.equal(again.ok, false);
+  assert.equal(runs, 1);
+  const url2 = "https://github.com/o/r/pull/78";
+  await guardReview({ id: "x", url: url2, run: async () => ({ ok: false, error: "no" }) });
+  assert.equal(reviewStarting(url2), false, "a failed start clears it");
+  await assert.rejects(guardReview({ id: "y", url: url2, run: async () => { throw new Error("x"); } }));
+  assert.equal(reviewStarting(url2), false);
+});
+
+test("the starting mark follows the PR the dialog was opened for, not another", async () => {
+  const { sameReview } = await import("../../herdr-app/mods/harbormaster/newrun.js");
+  assert.equal(sameReview("review", " 52 ", "52"), true);
+  assert.equal(sameReview("review", "53", "52"), false);
+  assert.equal(sameReview("issue", "52", "52"), false);
+  assert.equal(sameReview("review", "52", undefined), false);
+});
+
+test("withFolder adds a requested clone that no list has, and only that", async () => {
+  const { withFolder } = await import("../../herdr-app/mods/harbormaster/newrun.js");
+  const listed = [{ folder: "/home/u/skills", name: "skills", space: "sp-s" }];
+  assert.equal(withFolder(listed, "/home/u/skills"), listed);
+  assert.equal(withFolder(listed, "skills"), listed);
+  assert.equal(withFolder(listed, undefined), listed);
+  const out = withFolder(listed, "/home/u/clone/x");
+  assert.equal(out.length, 2);
+  assert.equal(out[1].folder, "/home/u/clone/x");
+  assert.equal(out[1].space, null);
+});
+
+test("a review's prompt from the dialog carries only the reviewer and autonomy", async () => {
+  globalThis.__herdrProps = { role: "newrun", kind: "review", input: "52", overlay: "ov1" };
+  const view = {};
+  initNewRun(view, callCx());
+  view.nr.prefs = { profile: { implementer: "opencode/qwen3.8flash", reviewer: "opus", specialist: "opus", autonomy: "L2" }, profiles: {}, reviewProfiles: {} };
+  view.nr.agent = "claude";
+  view.nr.profile.set_value("");
+  const { profileText, prefillProfile } = await import("../../herdr-app/mods/harbormaster/startrun.js");
+  assert.equal(profileText(prefillProfile(view.nr.prefs, "review", "claude")), "reviewer=opus autonomy=L1");
 });
 
 // With more than one agent installed the dialog offers them; the one picked is what starts.

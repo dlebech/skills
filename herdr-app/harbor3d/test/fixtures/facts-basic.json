@@ -1,0 +1,361 @@
+{
+  "v": 1,
+  "at": 1795000000000,
+  "captain": {
+    "state": "watching"
+  },
+  "runs": [
+    {
+      "key": ":/home/u/.herdr/hc-orchestration/skills/checkout-page",
+      "name": "#12 · Checkout page",
+      "repo": "shop",
+      "type": "feat",
+      "phase": "running",
+      "parked": false,
+      "needsYou": false,
+      "need": null,
+      "path": [
+        {
+          "key": "spec",
+          "state": "done"
+        },
+        {
+          "key": "build",
+          "state": "current"
+        },
+        {
+          "key": "proven",
+          "state": "todo"
+        },
+        {
+          "key": "review",
+          "state": "todo"
+        },
+        {
+          "key": "human",
+          "state": "todo"
+        },
+        {
+          "key": "merge",
+          "state": "todo"
+        }
+      ],
+      "tasks": [
+        "done",
+        "implement",
+        "implement",
+        "review",
+        "planned"
+      ],
+      "prs": [
+        {
+          "number": 31,
+          "state": "draft",
+          "checks": "running"
+        }
+      ],
+      "ciRunning": true,
+      "orchestrator": {
+        "state": "working",
+        "kind": "claude"
+      },
+      "workers": [
+        {
+          "id": "t69c",
+          "name": "impl-12-t2",
+          "kind": "claude",
+          "state": "working",
+          "task": 1
+        },
+        {
+          "id": "t69d",
+          "name": "impl-12-t3",
+          "kind": "pi",
+          "state": "working",
+          "task": 2
+        }
+      ],
+      "tokens": 121500000,
+      "startedMs": 1794990000000,
+      "updatedMs": 1794999900000
+    },
+    {
+      "key": ":/home/u/.herdr/hc-orchestration/skills/fix-cart-total",
+      "name": "#14 · Fix cart total",
+      "repo": "shop",
+      "type": "fix",
+      "phase": "finished",
+      "parked": false,
+      "needsYou": true,
+      "need": "request-review",
+      "path": [
+        {
+          "key": "spec",
+          "state": "done"
+        },
+        {
+          "key": "build",
+          "state": "done"
+        },
+        {
+          "key": "proven",
+          "state": "done"
+        },
+        {
+          "key": "review",
+          "state": "you"
+        },
+        {
+          "key": "human",
+          "state": "todo"
+        },
+        {
+          "key": "merge",
+          "state": "todo"
+        }
+      ],
+      "tasks": [
+        "done",
+        "done",
+        "done"
+      ],
+      "prs": [
+        {
+          "number": 33,
+          "state": "open",
+          "checks": "green"
+        }
+      ],
+      "ciRunning": false,
+      "orchestrator": {
+        "state": "idle",
+        "kind": "claude"
+      },
+      "workers": [
+        {
+          "id": "t6a1",
+          "name": "impl-14-t1",
+          "kind": "claude",
+          "state": "done",
+          "task": 0
+        }
+      ],
+      "tokens": 8200000,
+      "startedMs": 1794980000000,
+      "updatedMs": 1794998000000
+    },
+    {
+      "key": ":/home/u/.herdr/hc-orchestration/skills/explore-offline",
+      "name": "Explore offline maps",
+      "repo": "shop",
+      "type": "expl",
+      "phase": "planning",
+      "parked": true,
+      "needsYou": false,
+      "need": null,
+      "path": [
+        {
+          "key": "spec",
+          "state": "current"
+        },
+        {
+          "key": "build",
+          "state": "todo"
+        }
+      ],
+      "tasks": [],
+      "prs": [],
+      "ciRunning": false,
+      "orchestrator": {
+        "state": "gone",
+        "kind": "claude"
+      },
+      "workers": [],
+      "tokens": 900000,
+      "startedMs": 1794700000000,
+      "updatedMs": 1794710000000
+    },
+    {
+      "key": ":/home/u/.herdr/hc-orchestration/skills/ship-dark-mode",
+      "name": "#18 · Dark mode",
+      "repo": "shop",
+      "type": "feat",
+      "phase": "finished",
+      "parked": false,
+      "needsYou": false,
+      "need": null,
+      "path": [
+        {
+          "key": "spec",
+          "state": "done"
+        },
+        {
+          "key": "build",
+          "state": "done"
+        },
+        {
+          "key": "proven",
+          "state": "done"
+        },
+        {
+          "key": "review",
+          "state": "done"
+        },
+        {
+          "key": "human",
+          "state": "done"
+        },
+        {
+          "key": "merge",
+          "state": "done"
+        }
+      ],
+      "tasks": [
+        "done",
+        "done",
+        "done",
+        "done",
+        "done",
+        "done"
+      ],
+      "prs": [
+        {
+          "number": 1380,
+          "state": "merged",
+          "checks": "green"
+        },
+        {
+          "number": 1381,
+          "state": "merged",
+          "checks": "green"
+        }
+      ],
+      "ciRunning": false,
+      "orchestrator": {
+        "state": "done",
+        "kind": "claude"
+      },
+      "workers": [
+        {
+          "id": "t6b1",
+          "name": "impl-18-t1",
+          "kind": "claude",
+          "state": "done",
+          "task": 0
+        }
+      ],
+      "tokens": 52000000,
+      "startedMs": 1794900000000,
+      "updatedMs": 1794990000000
+    },
+    {
+      "key": ":/home/u/.herdr/hc-orchestration/skills/stuck-sync",
+      "name": "#20 · Stuck sync",
+      "repo": "shop",
+      "type": "fix",
+      "phase": "running",
+      "parked": false,
+      "needsYou": false,
+      "need": null,
+      "path": [
+        {
+          "key": "spec",
+          "state": "done"
+        },
+        {
+          "key": "build",
+          "state": "current"
+        },
+        {
+          "key": "proven",
+          "state": "todo"
+        }
+      ],
+      "tasks": [
+        "blocked",
+        "fix",
+        "implement",
+        "planned",
+        "planned",
+        "done"
+      ],
+      "prs": [
+        {
+          "number": 1411,
+          "state": "open",
+          "checks": "red"
+        }
+      ],
+      "ciRunning": false,
+      "orchestrator": {
+        "state": "blocked",
+        "kind": "opencode"
+      },
+      "workers": [
+        {
+          "id": "t6c1",
+          "name": "impl-20-t1",
+          "kind": "claude",
+          "state": "blocked",
+          "task": 0
+        },
+        {
+          "id": "t6c2",
+          "name": "impl-20-t2",
+          "kind": "claude",
+          "state": "working",
+          "task": 1
+        },
+        {
+          "id": "t6c3",
+          "name": "impl-20-t3",
+          "kind": "pi",
+          "state": "idle",
+          "task": 2
+        }
+      ],
+      "tokens": 6000000,
+      "startedMs": 1794950000000,
+      "updatedMs": 1794999000000
+    },
+    {
+      "key": ":/home/u/.herdr/hc-orchestration/skills/plan-export",
+      "name": "Plan CSV export",
+      "repo": "shop",
+      "type": "expl",
+      "phase": "planning",
+      "parked": false,
+      "needsYou": false,
+      "need": null,
+      "path": [
+        {
+          "key": "spec",
+          "state": "current"
+        },
+        {
+          "key": "build",
+          "state": "todo"
+        }
+      ],
+      "tasks": [],
+      "prs": [],
+      "ciRunning": false,
+      "orchestrator": {
+        "state": "working",
+        "kind": "claude"
+      },
+      "workers": [],
+      "tokens": 300000,
+      "startedMs": 1794998000000,
+      "updatedMs": 1794999500000
+    }
+  ],
+  "adrift": [
+    {
+      "id": "t68w",
+      "name": "skills · Claude Code",
+      "kind": "claude",
+      "state": "idle"
+    }
+  ]
+}

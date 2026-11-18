@@ -26,7 +26,8 @@ import { taskTone, taskCounts, taskStage } from "./tasks.js";
 export { taskStage };
 export { taskTone, taskCounts };
 import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
-import { NOT_ANSWERS, blockingPending, changesPending, send, writeMessage, wakeRun } from "./inbox.js";
+import { NOT_ANSWERS, blockingPending, changesPending, rereviewPending, send, writeMessage, wakeRun } from "./inbox.js";
+import { reviewerCandidates, reviewersArgs, requestArgs } from "./reviewers.js";
 import { commentsArgs, commentSummary, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { detachedSend } from "./wake.js";
@@ -280,6 +281,8 @@ function parseRun(machine, chunk) {
     changesAsked: changesPending(requests),
     // The PRs an Address comments (comments.js) is still unread for, by URL.
     commentsAsked: pendingComments(requests),
+    // A Re-review first (inbox.js) still unread.
+    rereviewAsked: rereviewPending(requests),
     tasks,
     // How far the branch is past its last Reviewed commit (refreshReviewed), null until read.
     reviewedGap: reviewGaps.get(`${machine ?? ""}:${dir}`) ?? null,
@@ -498,6 +501,8 @@ export const PR_FIELDS = "number,title,state,isDraft,reviewDecision,reviews,revi
 // Run key → when its refresh started. Like a run read, a refresh whose task is cancelled
 // never ends, so one older than PR_STALE no longer holds the run back.
 const prBusy = new Map();
+// Run key → start of the newest read that wrote its PRs: an older read finishing later must not overwrite it.
+const prWritten = new Map();
 const PR_STALE = 5 * 60000;
 
 // A PR's state → a theme tone; the harbor maps the same tones to its own colors. An open PR is
@@ -587,6 +592,8 @@ export function prSummary(p, repo, viewer = null) {
     failed: firstFailing(p.statusCheckRollup),
     ci: ciTimes(p.statusCheckRollup),
     sha: p.headRefOid ?? null,
+    // Who opened it, for the reviewers to ask (reviewers.js leaves them out).
+    author: p.author?.login ?? null,
     // When anything on the PR last changed: its review comments are read again only then (withComments).
     updatedAt: p.updatedAt ?? null,
     url: p.url,
@@ -640,10 +647,12 @@ export function relatedOf(run) {
 // A PR gh could not read keeps its last summary, marked `stale`, or is unknownPr; the
 // entry's `error` says why (null when every PR was read) and `okAt` is the last read
 // that got them all, so a failing gh shows as "can't tell" instead of old data passing as new.
-export async function refreshPrs(run, closed = false) {
+// `force` reads at once, whatever its age or a read in progress (after an action changed a PR).
+export async function refreshPrs(run, closed = false, force = false) {
   const have = withReadTimes((shared("harbormaster.prs") ?? {})[run.key], prReads.get(run.key));
   const ttl = prTtl(closed);
-  if (Date.now() - (prBusy.get(run.key) ?? 0) < PR_STALE || (have && Date.now() - have.at < ttl)) return;
+  if (force) prBusy.delete(run.key);
+  else if (Date.now() - (prBusy.get(run.key) ?? 0) < PR_STALE || (have && Date.now() - have.at < ttl)) return;
   const started = Date.now();
   prBusy.set(run.key, started);
   try {
@@ -667,6 +676,8 @@ export async function refreshPrs(run, closed = false) {
     const relatedError = error;
     error = null;
     const list = await view(run.prs, have?.list, true);
+    if ((prWritten.get(run.key) ?? 0) > started) return;
+    prWritten.set(run.key, started);
     const stored = shared("harbormaster.prs") ?? {};
     const next = { ...stored };
     const at = Date.now();
@@ -684,6 +695,49 @@ export async function refreshPrs(run, closed = false) {
     if (prBusy.get(run.key) === started) prBusy.delete(run.key);
   }
 }
+
+// ---- who could review (reviewers.js) ----
+// Earlier reviewers by "owner/repo", {at, list}: module memory, 30 minutes (a failed read, one).
+const reviewerCache = new Map();
+const reviewerBusy = new Set();
+const REVIEWERS_TTL = 30 * 60000, REVIEWERS_FAILED_TTL = 60000;
+
+// The earlier reviewers of `repo` for a PR by `author` as read, or null while unread or being read.
+export function cachedReviewers(run, repo, author = null) {
+  const e = reviewerCache.get(`${run.machine ?? ""}:${repo}`);
+  return e && Date.now() - e.at < (e.ok ? REVIEWERS_TTL : REVIEWERS_FAILED_TTL) ? reviewerCandidates(e.prs, { viewer: e.viewer, author }) : null;
+}
+
+// Reads the repository's recent PRs (`gh pr list`) and keeps them for cachedReviewers; quietly
+// reads nothing when gh fails. Resolves when done, so the caller can redraw.
+export async function loadReviewers(run, repo) {
+  const id = `${run.machine ?? ""}:${repo}`;
+  if (!repo || reviewerBusy.has(id) || cachedReviewers(run, repo) !== null) return;
+  reviewerBusy.add(id);
+  try {
+    const res = await exec("gh", reviewersArgs(repo), { on: run.machine }).catch(() => null);
+    const prs = res?.code === 0 ? json(res.stdout) : null;
+    reviewerCache.set(id, { at: Date.now(), ok: Array.isArray(prs), prs: Array.isArray(prs) ? prs : [], viewer: await viewerOf(run).catch(() => null) });
+  } finally { reviewerBusy.delete(id); }
+}
+
+// Asks `login` to review the PR at `url` with `gh pr edit --add-reviewer` (a draft is marked ready
+// first). Resolves to {} on success, else {error: gh's first line}. Never throws; the login is
+// checked here too (reviewers.js requestArgs). When the PR was marked ready but the request then
+// failed, the error carries `readied: true`, so the view says the PR left draft.
+export async function requestReview(run, url, login, { draft = false } = {}) {
+  const args = requestArgs(url, login);
+  if (!args) return { error: "not a reviewer to ask" };
+  const gh = (a) => exec("gh", a, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  const why = (res) => (res?.stderr || res?.stdout || `gh exited ${res?.code}`).trim().split("\n")[0].slice(0, 200);
+  if (draft) { const ready = await gh(["pr", "ready", url]); if (ready.code !== 0) return { error: why(ready) }; }
+  const res = await gh(args);
+  if (res.code === 0) return {};
+  return draft ? { error: `Marked ready; requesting review failed: ${why(res)}`, readied: true } : { error: why(res) };
+}
+
+// Whether the repository's earlier reviewers are being read now.
+export const loadingReviewers = (run, repo) => reviewerBusy.has(`${run.machine ?? ""}:${repo}`);
 
 // An approved or changes-requested open PR with its review comments read (comments.js
 // commentSummary) as `comments`; {error} when gh could not read them, so they show as unknown,

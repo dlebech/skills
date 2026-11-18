@@ -233,6 +233,21 @@ export function reviewedLine(md, gap = null, { finished = false, claims = false 
   return { text: `Reviewed at ${at} · ${g.count} ${g.count === 1 ? "commit" : "commits"} since, not reviewed`, tone: "amber", tip, since: g.count };
 }
 
+// The same Reviewed data as reviewedLine, as plain facts for the path-to-merge strip (mergepath.js):
+// {kind: "none" | "task-only" | "current" | "behind", behind (commits since, when kind is behind), sha,
+// compared (false when the branch was not compared yet or could not be)}. Behind only when the gap
+// is read for that sha, says not the same and counts commits, as reviewedLine's amber.
+export function reviewedState(md, gap = null) {
+  const all = md?.reviewed ?? [];
+  const last = [...all].reverse().find((x) => /final/i.test(x.what));
+  if (!all.length) return { kind: "none", behind: null, sha: null, compared: false };
+  if (!last) return { kind: "task-only", behind: null, sha: null, compared: false };
+  const g = gap && (last.sha.startsWith(gap.sha) || gap.sha?.startsWith(last.sha)) ? gap : null;
+  const compared = Boolean(g) && g.same !== null;
+  if (g && g.same === false && g.count > 0) return { kind: "behind", behind: g.count, sha: last.sha, compared: true };
+  return { kind: "current", behind: null, sha: last.sha, compared };
+}
+
 // The verdict on top of the Claims section, and on a run's card: "3 of 4 proven · not yet: Drag to
 // reorder". {parts: [{text, tone, bold?}], text, tone ("done" | "blocked" | "dim"), tip (the tier,
 // the checks, how many are still being proved)}; null without claims. A part's tone is a status

@@ -1,0 +1,209 @@
+import test from "node:test"
+import assert from "node:assert/strict"
+import { sanitize, createSlots } from "../server/sanitize.js"
+import { SEA_NAMES, seaName, hmacId } from "../server/names.js"
+import { fixture, SECRET } from "./helpers.mjs"
+
+const base = { secret: SECRET, now: 1795000000000 }
+const priv = (f, o = {}) => sanitize(f, { ...base, mode: "private", ...o })
+const shared = (f, o = {}) => sanitize(f, { ...base, mode: "shared", ...o })
+const run = (over = {}) => ({ key: "k1", name: "N", repo: "R", ...over })
+
+test("shared scene of the leak fixture contains no LEAK_ marker", () => {
+  const s = JSON.stringify(shared(fixture("facts-leak.json")))
+  assert.ok(!s.includes("LEAK_"), s.match(/LEAK_\d+/)?.[0])
+})
+
+test("private scene of the leak fixture only holds name, repo, worker and adrift name markers", () => {
+  const f = fixture("facts-leak.json")
+  const allowed = new Set()
+  for (const r of f.runs) { allowed.add(r.name); allowed.add(r.repo); for (const w of r.workers) allowed.add(w.name) }
+  for (const a of f.adrift) allowed.add(a.name)
+  const found = JSON.stringify(priv(f)).match(/LEAK_\d+/g) || []
+  assert.ok(found.length >= 8)
+  // a slot is a plain integer and the only new thing a run or an adrift agent carries
+  const sc = priv(f)
+  for (const x of [...sc.runs, ...sc.adrift]) assert.ok(Number.isInteger(x.slot) && x.slot >= -1, "slot")
+  for (const m of found) assert.ok(allowed.has(m), `${m} leaked in private mode`)
+  // every allowed marker really does show up (the fixture exercised the fields)
+  for (const m of allowed) assert.ok(found.includes(m), `${m} missing`)
+})
+
+test("shared mode has no sub, no pr labels, no worker or adrift labels (keys absent)", () => {
+  const s = shared(fixture("facts-basic.json"))
+  for (const r of s.runs) {
+    assert.ok(!("sub" in r))
+    for (const p of r.prs) assert.ok(!("label" in p))
+    for (const w of r.workers) assert.ok(!("label" in w))
+    assert.ok(SEA_NAMES.some(n => r.label.startsWith(n)))
+  }
+  for (const a of s.adrift) assert.ok(!("label" in a))
+  assert.equal(s.mode, "shared")
+})
+
+test("private mode carries the real labels", () => {
+  const s = priv(fixture("facts-basic.json"))
+  assert.equal(s.runs[0].label, "#12 · Checkout page")
+  assert.equal(s.runs[0].sub, "shop")
+  assert.equal(s.runs[0].prs[0].label, "#31")
+  assert.equal(s.runs[0].workers[0].label, "impl-12-t2")
+  assert.equal(s.adrift[0].label, "skills · Claude Code")
+})
+
+test("ids are keyed hashes: same in both modes, never the real key, different with another secret", () => {
+  const f = fixture("facts-basic.json")
+  const a = priv(f), b = shared(f), c = priv(f, { secret: Buffer.from("other") })
+  assert.deepEqual(a.runs.map(r => r.id), b.runs.map(r => r.id))
+  assert.deepEqual(a.runs[0].workers.map(w => w.id), b.runs[0].workers.map(w => w.id))
+  assert.notEqual(a.runs[0].id, c.runs[0].id)
+  assert.match(a.runs[0].id, /^r[0-9a-f]{8}$/)
+  assert.match(a.adrift[0].id, /^a[0-9a-f]{8}$/)
+  const s = JSON.stringify(a)
+  assert.ok(!s.includes("t69c") && !s.includes("t68w") && !s.includes("/home/u"))
+  assert.equal(hmacId(SECRET, "r", "x"), hmacId(SECRET, "r", "x"))
+})
+
+test("sea names: stable per key, collisions get II and III", () => {
+  const used = new Map()
+  const keys = []
+  // find three keys that map to the same sea name
+  const first = seaName(SECRET, "seed")
+  for (let i = 0; keys.length < 3 && i < 5000; i++) if (seaName(SECRET, `k${i}`) === first) keys.push(`k${i}`)
+  const names = keys.map(k => seaName(SECRET, k, used))
+  assert.deepEqual(names, [first, `${first} II`, `${first} III`])
+  const s = shared({ runs: keys.map(key => ({ key })) })
+  assert.deepEqual(s.runs.map(r => r.label), names)
+})
+
+test("sea names stay with their run when the order of the runs changes (a listener's names map only grows)", () => {
+  const first = seaName(SECRET, "seed")
+  const keys = []
+  for (let i = 0; keys.length < 2 && i < 5000; i++) if (seaName(SECRET, `k${i}`) === first) keys.push(`k${i}`)
+  const names = new Map()
+  const label = (order, extra = {}) => Object.fromEntries(shared({ runs: order.map(key => ({ key })) }, { names, ...extra }).runs.map((r, i) => [order[i], r.label]))
+  const a = label(keys), b = label([...keys].reverse())
+  assert.notEqual(a[keys[0]], a[keys[1]])
+  assert.deepEqual(a, b, "the names did not swap")
+  // without the map (a fresh one per call) the order decides, which is what the map prevents
+  assert.notDeepEqual(shared({ runs: keys.map(key => ({ key })) }).runs.map(r => r.label), shared({ runs: [...keys].reverse().map(key => ({ key })) }).runs.map(r => r.label).reverse())
+})
+
+test("size buckets, age (rounded to 5 in shared mode)", () => {
+  const at = base.now
+  const f = { runs: [9e6, 49e6, 149e6, 150e6].map((tokens, i) => run({ key: `s${i}`, tokens, startedMs: at - 188 * 60000 })) }
+  assert.deepEqual(priv(f).runs.map(r => r.size), ["S", "M", "L", "XL"])
+  assert.equal(priv(f).runs[0].ageMinutes, 188)
+  assert.equal(shared(f).runs[0].ageMinutes, 190)
+})
+
+test("every enum falls back to its safe default", () => {
+  const f = {
+    captain: { state: "bogus" },
+    runs: [run({ type: "x", phase: "x", need: "x", path: [{ key: "build", state: "x" }, { key: "x", state: "done" }], tasks: ["x", "done"],
+      prs: [{ state: "x", checks: "x", number: 5 }], orchestrator: { state: "x", kind: "x" }, workers: [{ id: "w", state: "x", kind: "x", task: 0 }] })],
+    adrift: [{ id: "a", state: "x", kind: "x" }],
+  }
+  const s = priv(f), r = s.runs[0]
+  assert.equal(s.captain.state, "none")
+  assert.equal(r.type, null)
+  assert.equal(r.phase, "running")
+  assert.equal(r.need, "other")
+  assert.deepEqual(r.path, [{ key: "build", state: "todo" }])
+  assert.deepEqual(r.tasks, ["planned", "done"])
+  assert.deepEqual(r.prs, [{ state: "unknown", checks: "none", label: "#5" }])
+  assert.deepEqual([r.orchestrator.state, r.orchestrator.kind], ["gone", "other"])
+  assert.deepEqual([r.workers[0].state, r.workers[0].kind], ["idle", "other"])
+  assert.deepEqual([s.adrift[0].state, s.adrift[0].kind], ["idle", "other"])
+})
+
+test("every enum keeps its valid values", () => {
+  const f = fixture("facts-basic.json")
+  const s = priv(f)
+  assert.equal(s.captain.state, "watching")
+  assert.deepEqual(s.runs.map(r => r.type), ["feat", "fix", "expl", "feat", "fix", "expl"])
+  assert.deepEqual(s.runs.map(r => r.need), [null, "request-review", null, null, null, null])
+  assert.deepEqual(s.runs[1].prs[0], { state: "open", checks: "green", label: "#33" })
+  assert.equal(s.runs[0].workers[1].kind, "pi")
+  assert.equal(s.runs[0].workers[1].task, 2)
+  assert.equal(s.runs[2].parked, true)
+})
+
+test("numbers that are not numbers, arrays that are objects, and junk facts", () => {
+  assert.doesNotThrow(() => priv(null))
+  assert.deepEqual(priv("x").runs, [])
+  assert.deepEqual(priv({ runs: { 0: run() }, adrift: "no" }).runs, [])
+  const s = priv({ at: "now", runs: [run({ tokens: "9", startedMs: "x", tasks: { a: 1 }, path: "no", prs: { a: 1 }, workers: { a: 1 }, orchestrator: [], parked: "true", needsYou: 1 }), 5, null, { key: 7 }],
+    captain: [] })
+  assert.equal(s.at, 0)
+  const r = s.runs[0]
+  assert.equal(s.runs.length, 1)
+  assert.deepEqual([r.size, r.ageMinutes, r.tasks, r.path, r.prs, r.workers, r.orchestrator, r.parked, r.needsYou], ["S", 0, [], [], [], [], null, false, false])
+  assert.equal(s.captain.state, "none")
+  // worker task index outside the tasks list
+  assert.equal(priv({ runs: [run({ tasks: ["done"], workers: [{ id: "w", task: 1 }, { id: "x", task: -1 }, { id: "y", task: 1.5 }] })] }).runs[0].workers.every(w => w.task === null), true)
+})
+
+test("labels: control characters stripped, cut to 60", () => {
+  const s = priv({ runs: [run({ name: "a\u0000b\nc‮" + "x".repeat(100), repo: "r\u0007" })] })
+  assert.ok(!/[\u0000-\u001f]/.test(s.runs[0].label))
+  assert.equal([...s.runs[0].label].length, 60)
+  assert.equal(s.runs[0].sub, "r")
+})
+
+test("stale and viewers pass through; the scene never holds __proto__ junk", () => {
+  const s = shared(JSON.parse('{"runs":[{"key":"k","__proto__":{"x":1},"name":"n"}]}'), { stale: true, viewers: 3 })
+  assert.equal(s.stale, true)
+  assert.equal(s.viewers, 3)
+  assert.deepEqual(Object.keys(s.runs[0]).sort(), ["ageMinutes", "ciRunning", "id", "label", "need", "needsYou", "orchestrator", "parked", "path", "phase", "prs", "size", "slot", "tasks", "type", "workers"])
+})
+
+test("the load fixture (10 runs, 40 workers, 6 to 16 tasks each) goes through whole", () => {
+  const s = shared(fixture("facts-load.json"))
+  assert.equal(s.runs.length, 10)
+  assert.equal(s.runs.reduce((n, r) => n + r.workers.length, 0), 40)
+  for (const r of s.runs) assert.ok(r.tasks.length >= 6 && r.tasks.length <= 16)
+  assert.equal(s.runs.filter(r => r.parked).length, 1); assert.equal(s.runs.filter(r => r.needsYou).length, 1)
+  assert.equal(new Set(s.runs.map(r => r.label)).size, 10)
+})
+
+// ---- slots: one order for every viewer ----
+const keysOf = (...ks) => ({ runs: ks.map(key => ({ key })), adrift: ks.map(id => ({ id: "ad" + id })) })
+const slotsOf = sc => Object.fromEntries(sc.runs.map(r => [r.label, r.slot]))
+
+test("slots: the private and the shared scene built from the same facts, with one memory, give every run the same slot", () => {
+  const slots = createSlots(), names = new Map()
+  const f = fixture("facts-basic.json")
+  const a = priv(f, { slots, names }), b = shared(f, { slots, names })
+  assert.deepEqual(a.runs.map(r => r.slot), b.runs.map(r => r.slot))
+  assert.deepEqual(a.adrift.map(r => r.slot), b.adrift.map(r => r.slot))
+  for (const r of a.runs) assert.ok(r.slot >= 0)
+  assert.deepEqual(a.runs.filter(r => !r.parked).map(r => r.slot).sort(), a.runs.filter(r => !r.parked).map((r, i) => i))
+})
+
+test("slots: a run keeps its slot when the order changes, when another run leaves, and when it is the only one left; a new run takes the freed slot", () => {
+  const slots = createSlots()
+  const at = (ks, extra) => Object.fromEntries(shared(keysOf(...ks), { slots, ...extra }).runs.map((r, i) => [ks[i], r.slot]))
+  assert.deepEqual(at(["a", "b", "c"]), { a: 0, b: 1, c: 2 })
+  assert.deepEqual(at(["c", "b", "a"]), { c: 2, b: 1, a: 0 }, "the order of the facts does not matter")
+  assert.deepEqual(at(["c", "a"]), { c: 2, a: 0 }, "b left")
+  assert.deepEqual(at(["c"]), { c: 2 }, "the only one left keeps its slot")
+  assert.deepEqual(at(["c", "d"]), { c: 2, d: 0 }, "a new run takes the lowest free slot")
+  assert.deepEqual(at(["e", "c", "d"]), { e: 1, c: 2, d: 0 })
+  const adrift = shared(keysOf("a", "b"), { slots }).adrift.map(x => x.slot)
+  assert.deepEqual(adrift, [0, 1])
+  assert.deepEqual(shared(keysOf("b"), { slots }).adrift.map(x => x.slot), [1], "a raft keeps its index")
+})
+
+test("slots: parked runs have their own index, a run past the capacity gets -1", () => {
+  const slots = createSlots()
+  const f = { runs: [{ key: "q" }, { key: "p1", parked: true }, { key: "p2", parked: true }, ...Array.from({ length: 12 }, (_, i) => ({ key: "x" + i }))] }
+  const s = shared(f, { slots })
+  assert.deepEqual(s.runs.slice(0, 3).map(r => r.slot), [0, 0, 1])
+  assert.deepEqual(s.runs.slice(3).map(r => r.slot), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1])
+  assert.deepEqual(shared({ runs: [{ key: "p2", parked: true }] }, { slots }).runs.map(r => r.slot), [1])
+})
+
+test("slots: the real key never appears in a scene", () => {
+  const s = JSON.stringify(shared({ runs: [{ key: "SECRETKEY_1" }], adrift: [{ id: "SECRETAD_1" }] }, { slots: createSlots() }))
+  assert.ok(!s.includes("SECRETKEY") && !s.includes("SECRETAD"))
+})

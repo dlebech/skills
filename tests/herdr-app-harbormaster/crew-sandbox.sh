@@ -27,7 +27,7 @@
 #                 ("quiet Nm", Needs you, Ask) 30 minutes after the app started (module memory)
 #                 To shoot it amber, `up` early and keep quiet-run listed (its clock is the app's memory, so a
 #                 run that is hidden or a restarted app starts over); hide the others with role= meanwhile.
-#   busy-run      running, both tasks implementing, its orchestrator reporting working (OSC 7501),
+#   busy-run      running, both tasks implementing, claims C1 proven and C2 not yet (Proven 1/2), its orchestrator reporting working (OSC 7501),
 #                 status.json dated 75 minutes back                      -> Working, spinner, "t1 implementing 1h15m · +1 task"
 #   review-wait   finished, folder "snevagten" (peer), cli/cli#14846 with a reviewer requested
 #                                                                         -> Waiting on others, "review from BagToad"
@@ -41,6 +41,9 @@
 #                   approved by a colleague                               -> approved — merge
 #   approved-plan-open  running, folder "snevagten" (peer), 1/2 tasks done, fake-two/api#44 (approved, no comments)
 #                       -> Needs you "approved · plan open", the box: "merge once the plan is done (1/2 tasks)"
+#   peer-ask      finished, folder "snevagten" (peer), fake-two/api#72 with no reviewer, 5 claims, its Reviewed line two commits
+#                 behind -> request review, the AI-review caveat, Re-review first and the picker (mfalkenbrink, martinioyo,
+#                 anna from fake-gh.sh); a chip's `gh pr edit --add-reviewer` goes to <scratch>/gh-calls.txt only
 #   red-ci        finished, cli/cli#14927 (a public PR with a failing check) -> red CI, then
 #                 review proof → merge
 #   review-proof  finished, dlebech/wapi-beatbox#1, proof.md T2 1/2 pass  -> review proof → merge
@@ -164,6 +167,12 @@ make_runs() {
   hc run --bg --no-notify --parent "$w1" --name x-t1-build --cwd "$S" sh -c 'echo build; exec sleep infinity' >/dev/null
   hc run --bg --no-notify --parent "$w1" --name x-t1-serve --cwd "$S" php -r 'sleep(100000);' >/dev/null
   hc run --bg --no-notify --parent "$w2" --name x-t2-helper --cwd "$S" node -e 'setInterval(()=>{},1e6)' >/dev/null
+  # Claims for busy-run (t1 pane strip): one proven, one still being proved, so its Proven stage is current.
+  local bd=$S/runs/skills/busy-run
+  printf '\nProof tier: T2\n\n## Claims\n- C1 Drag a card to reorder the list — AC 3 — tasks t1\n- C2 The new order is saved across restarts — AC 4 — tasks t2\n' >>"$bd/plan.md"
+  mkdir -p "$bd/shared/proof"
+  convert -size 640x400 xc:'#22324a' -fill '#e8eef7' -pointsize 34 -annotate +40+200 'Card dragged to row 2' "$bd/shared/proof/t1-drag.png"
+  printf '# Proof: busy-run\nTier: T2\nChecks: pending — CI\n\n## C1 Drag a card to reorder the list\nResult: pass — dragging moves the card\nShot: shared/proof/t1-drag.png\nTest: reorder moves the card — pass\n' >"$bd/proof.md"
   # Dated back, so the first sight of its tasks (seeded by status.json's updated) shows an age.
   local sj=$S/runs/skills/busy-run/status.json
   jq --arg u "$(date -u -d '75 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" '.updated = $u' "$sj" >"$sj.tmp" && mv "$sj.tmp" "$sj"
@@ -221,6 +230,8 @@ make_runs() {
   RUN_FOLDER=$S/work/snevagten mkrun claims-merge finished feat "Claims merge" "${day}T08:45:00Z" 2/2 merged merged --progress "PR approved" \
     --pr fake-two/api https://github.com/fake-two/api/pull/65
   printf '\nProof tier: T2\n\n## Claims\n- C1 Drag a card to reorder the list — AC 3 — tasks t1\n- C2 The new order is saved across restarts — AC 4 — tasks t1\n- C3 Undo puts the card back — AC 5 — tasks t2\n- C4 Keyboard reordering with Alt+arrows — AC 6 — tasks t2\n- C5 Screen readers announce the move — AC 7 — tasks t2\n' >>"$cm/plan.md"
+  # Decisions the orchestrator made itself, and one from the user, for a finished run's Decisions lines (rp3d t3).
+  printf -- '- [decided] %sT07:20:00Z Layout: one column — the sidebar is narrow\n- [decided] %sT07:30:00Z Order: by id — stable\n- [user] %sT07:35:00Z Colours: theme only — the user asked\n- [decided] %sT07:40:00Z Tests: node runner — no dependencies\n- [decided] %sT07:50:00Z Undo: one level — keeps the model small\n' "$day" "$day" "$day" "$day" "$day" >"$cm/decisions.md"
   mkdir -p "$cm/shared/proof"
   convert -size 640x400 xc:'#22324a' -fill '#e8eef7' -pointsize 34 -annotate +40+200 'Card dragged to row 2' "$cm/shared/proof/t1-drag.png"
   printf '# Proof: claims-merge\nTier: T2\nChecks: green — 1497 tests, build, lint, CI\n\n## C1 Drag a card to reorder the list\nResult: pass — dragging moves the card\nShot: shared/proof/t1-drag.png\nTest: reorder moves the card — pass\n\n## C2 The new order is saved across restarts\nResult: pass — 2 tests\nTest: order persists — pass\n\n## C3 Undo puts the card back\nResult: partial — undo works once, not twice\nTest: undo once — pass\n\n## C4 Keyboard reordering with Alt+arrows\nResult: pass — 3 tests\nShot: shared/proof/t1-drag.png\n' >"$cm/proof.md"
@@ -234,6 +245,13 @@ make_runs() {
     --pr fake-two/api https://github.com/fake-two/api/pull/66
   cp "$cm/plan.md" "$S/runs/skills/reviewed-current/plan.md"; mkdir -p "$S/runs/skills/reviewed-current/shared/proof"; cp "$cm"/shared/proof/* "$S/runs/skills/reviewed-current/shared/proof/"
   sed "s/^Reviewed: .*/Reviewed: $($g rev-parse --short HEAD) final review — 1 finding, fixed/" "$cm/proof.md" >"$S/runs/skills/reviewed-current/proof.md"
+  # A peer-flow run with no reviewer asked, its AI review two commits behind (t2): Request review.
+  local pa=$S/runs/skills/peer-ask
+  $g checkout -q -B peer-ask "$rsha" && echo a >"$sn/peer-a" && $g add peer-a && $g commit -q -m "after a" && echo b >"$sn/peer-b" && $g add peer-b && $g commit -q -m "after b"
+  RUN_FOLDER=$sn mkrun peer-ask finished feat "Peer ask" "${day}T08:40:00Z" 2/2 merged merged --progress "PR up, nobody asked" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/72
+  cp "$cm/plan.md" "$pa/plan.md"; mkdir -p "$pa/shared/proof"; cp "$cm"/shared/proof/* "$pa/shared/proof/"
+  cp "$cm/proof.md" "$pa/proof.md"
   mkrun report-run finished rev "Report run" "${day}T05:00:00Z" 2/2 merged merged --progress "review written"
   printf '# Review report\n\nAll good.\n' >"$S/runs/skills/report-run/shared/final-report.md"
   printf '# t1 report\n\nA task'"'"'s own report: never the run'"'"'s.\n' >"$S/runs/skills/report-run/shared/t1-report.md"

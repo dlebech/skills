@@ -111,3 +111,10 @@ test("Next for you drops a review request a live run is reviewing, keeps one onl
   const items = [{ kind: "review", url: "a", run: "/runs/x" }, { kind: "review", url: "b", run: null }, { kind: "mine", url: "c", run: null }];
   assert.deepEqual(notReviewing(items).map((i) => i.url), ["b", "c"]);
 });
+
+test("the Needs-you card shows selection by its outline, tint and bar", async () => {
+  const { needCardLook, HOVER_TINT } = await import("../../herdr-app/mods/harbormaster/crewrows.js");
+  assert.deepEqual(needCardLook(true), { tint: "3d", border: "", bar: 5 });
+  assert.deepEqual(needCardLook(false), { tint: "22", border: "00", bar: 3 });
+  assert.equal(HOVER_TINT, "2e");
+});

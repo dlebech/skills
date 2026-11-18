@@ -4,7 +4,7 @@
 //   "run"             one run's card (props().dir and .terminal name it), pinned beside its orchestrator
 //   "crew"            the sidebar: header, Needs-you box, Next for you, runs as one-line rows, agents adrift
 //   "viewer"          a proof screenshot, opened as an overlay by a click on a thumbnail (viewer.js)
-//   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
+//   "harbor"          the harbormaster-sea view; "harbor-rail" its status line
 //   "newrun"          the + New run dialog (newrun.js), an overlay
 //   "stats"           where the time goes, tokens, CPU and memory: per run, task and agent, live, and past runs
 // Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute;
@@ -14,14 +14,17 @@ import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
 import { props, theme, nextCommand, checking, openOverlay, closeOverlay, shared, setShared } from "herdr";
 import { expireNote } from "./note.js";
-import { loadRuns, cachedRuns, refreshPrs, refreshReviewed, isClosed, isParked, newestFirst } from "./data.js";
-import { facts, crewAddresses } from "./live.js";
+import { loadRuns, cachedRuns, refreshPrs, refreshReviewed, isClosed, isParked, newestFirst, stats } from "./data.js";
+import { facts, crewAddresses, captainOf, adrift, agentNames, agentStatus, programOf } from "./live.js";
+import { observeWaits } from "./attend.js";
 import { loadContexts } from "./context.js";
 import { hotSignature, sampleVersion } from "./resources.js";
-import { cards, runPane, submitReply, runProps } from "./overview.js";
+import { cards, runPane, submitReply, runProps, runFacts, pathInput } from "./overview.js";
+import { mergePath } from "./mergepath.js";
+import { sceneFacts, exportFacts } from "./sceneexport.js";
 import { crew } from "./crew.js";
 import { viewer, startCopies } from "./viewer.js";
-import { harbor, rail, paneHeader } from "./harbor.js";
+import { harbor, rail } from "./harbor.js";
 import { statsView } from "./stats.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
 import { observeTelling } from "./telling.js";
@@ -29,7 +32,7 @@ import { parseCommand, runNamed, newRunArgs } from "./commands.js";
 import { openNewRun, initNewRun, newRunView } from "./newrun.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
-const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"]);
+const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "harbor-rail", "stats"]);
 
 // A brief popup of one run's pane, for taking a screenshot of it with `herdr-app shot` without
 // switching the user's space or tab. Commands sent with `herdr-app do 'harbormaster.<command>'`:
@@ -122,13 +125,25 @@ async function listen(view, cx) {
   }
 }
 
+// The facts Harbor 3D is told (sceneexport.js), from the runs the Crew shows and the same live facts.
+function harborFacts(runs, ctx) {
+  const s = stats(runs, ctx);
+  const rows = [...s.shown, ...s.parked].map((r) => { const f = runFacts(r, ctx); return { r, f, path: mergePath(pathInput(r, f, f.stages)) }; });
+  const cap = captainOf(ctx);
+  const drifters = adrift([cap.terminal?.address, ...rows.map(({ r }) => r.terminal)], ctx).slice(0, 12);
+  const names = agentNames(drifters);
+  return sceneFacts(rows, {
+    now: Date.now(), captain: cap, agentState: (t) => agentStatus(t, ctx), programOf: (t) => programOf(t, ctx) ?? t.program,
+    adrift: drifters.map((a, i) => ({ address: a.address, name: names[i], program: a.program, status: agentStatus(a, ctx) })),
+  });
+}
+
 export default class Harbormaster extends View {
   init(_props, cx) {
     const role = props()?.role;
     this.runs = cachedRuns().runs;
     this.decisions = cachedRuns().decisions;
     this.errors = [];
-    this.step = 0;
     this.showDone = false;
     this.contexts = {}; // { [address]: { tokens, model } } for the crew
     this.replying = null; // the id of the queue item being answered inline
@@ -142,8 +157,6 @@ export default class Harbormaster extends View {
     if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards" || role === "crew") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
     this.refresh(cx);
     cx.timer.every(5000, (cx) => this.refresh(cx));
-    // The harbor's scuttle target: data, not frames; .transition does the moving.
-    if (role === "harbor") cx.timer.every(2000, (cx) => { this.step++; cx.notify(); });
     // Run timing is read in the background, one run at a time, each at most every 90 s while
     // open (statsdata.js); the history when a run may have closed. Never blocks drawing.
     if (role === "stats") {
@@ -195,7 +208,7 @@ export default class Harbormaster extends View {
     cx.spawn(async (cx) => {
       const runs = await this.load(cx);
       // The crew and the overview show each crew agent's context size; the harbor and stats do not.
-      if (props()?.role !== "harbor" && props()?.role !== "stats") {
+      if (props()?.role !== "harbor" && props()?.role !== "harbor-rail" && props()?.role !== "stats") {
         const contexts = await loadContexts(crewAddresses(facts()));
         if (JSON.stringify(contexts) !== JSON.stringify(this.contexts)) { this.contexts = contexts; cx.notify(); }
       }
@@ -206,9 +219,15 @@ export default class Harbormaster extends View {
       if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) {
         try { observeTelling(runs, ctx); } catch (e) { console.log(`harbormaster: telling failed: ${e?.message ?? e}`); }
       }
+      // Harbor 3D's facts file, from any copy that polls for the whole window (the Crew block, the overview, the sea
+      // layout's harbor): a layout without a Crew block still feeds it. Two copies may both write; they write the same
+      // facts atomically. exportFacts does nothing without its want file.
+      if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) await exportFacts(() => harborFacts(runs, ctx)).catch((e) => console.log(`harbormaster: harbor3d facts failed: ${e?.message ?? e}`));
       // PRs land in shared state, which re-renders every copy by itself. A parked run's PRs are
       // read as rarely as a closed run's: nobody works on them, they only show what they wait on.
       for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});
+      // The waiting-on marks that let go are deleted here, after the PR reads, never in a render.
+      try { observeWaits(runs, facts(), cachedRuns()); } catch (e) { console.log(`harbormaster: waiting-on marks failed: ${e?.message ?? e}`); }
       // The commits since each run's last review (not for closed runs: their line is never shown): module memory, so a change re-renders by hand.
       let moved = false;
       for (const r of runs) if (!isClosed(r, ctx)) moved = (await refreshReviewed(r, isClosed(r, ctx) || isParked(r)).catch(() => false)) || moved;
@@ -229,9 +248,8 @@ export default class Harbormaster extends View {
       case "crew": return crew(this, t);
       case "run": return runPane(this, t, p);
       case "viewer": return viewer(this, t, p);
-      case "harbor": return harbor(this);
-      case "harbor-rail": return rail(this);
-      case "harbor-pane": return paneHeader(p);
+      case "harbor": return harbor(this, t);
+      case "harbor-rail": return rail(this, t);
       case "stats": return statsView(this, t);
       case "newrun": return newRunView(this, t);
       default: return cards(this, t, this.runs, this.errors, this.decisions);

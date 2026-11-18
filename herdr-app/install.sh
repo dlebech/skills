@@ -8,7 +8,8 @@
 # harbormaster-main calm once and then leaves it alone (except that it swaps the Spaces
 # picker of an earlier version for Herdr's Spaces list), and adds the key only if it is missing. It refuses to
 # replace a mod or layout of the same name that isn't Harbormaster's, and removes the
-# harbormaster-board and harbormaster-needs layouts of earlier versions.
+# harbormaster-board and harbormaster-needs layouts of earlier versions, and the Harbor 3D
+# copy of an earlier version (Harbor 3D is not installed: it runs from the repository).
 #
 # Usage: herdr-app/install.sh
 set -euo pipefail
@@ -118,6 +119,14 @@ else
   jq '.global = ((.global // {}) + {"ctrl-shift-h": "mod.open:harbormaster"})' "$keys" > "$tmp" && cat "$tmp" > "$keys"
   rm -f "$tmp"
   echo "bound ctrl-shift-h to open and close the overview"
+fi
+
+# 3b. Harbor 3D is not installed (it runs from the repository); an earlier version copied it
+#     to <home>/harbor3d. Only ours (package.json named harbor3d): any other folder stays.
+h3="$home/harbor3d"
+if [ -f "$h3/package.json" ] && jq -e '.name == "harbor3d"' "$h3/package.json" >/dev/null 2>&1; then
+  rm -rf "$h3"
+  echo "removed the Harbor 3D copy of an earlier version (it runs from the repository now)"
 fi
 
 # 4. Check the mod.

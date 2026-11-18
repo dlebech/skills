@@ -7,7 +7,7 @@ import { assess, prRead, reviewFlow, stalled, ciState } from "./attention.js";
 import { gatheringStage, proofRead } from "./proof.js";
 import { proofState } from "./claims.js";
 import { proofSeenSig } from "./proofseen.js";
-import { stepSince, stepAges, lastActivity, ciUsualOf, reviewFlows } from "./tracking.js";
+import { stepSince, stepAges, lastActivity, ciUsualOf, reviewFlows, waitingOn, waitingOnOf, pruneWaitingOn } from "./tracking.js";
 import { needLine, needsRun } from "./crewrows.js";
 import { askedPrsOf } from "./inbox.js";
 
@@ -40,7 +40,24 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
     ages: stepAges(run),
     filesOk: filesFresh(run, now),
     askedPrs: askedPrsOf(run, prs, now, working),
+    waitOn: waitingOnOf(run),
   });
+}
+
+// After a poll's PR reads (main.js refresh), never in a render: deletes the waiting-on marks that
+// let go (assess's dropWait: something needs the user again, so the mark never comes back) and
+// those of runs that are closed or no longer listed. `read`: the poll's run read (data.js
+// cachedRuns), its `failed` machines (null for this one) and `errors`: a run missing from a read
+// that failed, or from a machine that did not answer, was not read, so its mark is kept.
+export function observeWaits(runs, ctx, read = {}, now = Date.now()) {
+  const marks = waitingOn();
+  if (!Object.keys(marks).length) return;
+  const keys = new Set(runs.map((r) => r.key));
+  const drop = runs.filter((r) => marks[r.key] && (isClosed(r, ctx) || attentionOf(r, ctx, now).dropWait)).map((r) => r.key);
+  const failed = new Set((read.failed ?? []).map((m) => m ?? ""));
+  // A run key is "<machine>:<dir>", "" for this machine.
+  const unread = (k) => (read.errors ?? []).length > 0 || failed.has(k.slice(0, Math.max(0, k.indexOf(":"))));
+  pruneWaitingOn(keys, drop, unread);
 }
 
 // A run's proof as the box counts it (claims.js proofState: by its claims, or an old run by its

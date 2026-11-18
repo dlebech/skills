@@ -4,18 +4,20 @@ import { div, svg } from "gpui-kit";
 import { openStartCaptain } from "./newrun.js";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, acceptProof, unacceptProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
+import { stats, decisionQueue, acceptProof, unacceptProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, refreshPrs, cachedReviewers, loadReviewers, loadingReviewers, requestReview } from "./data.js";
 import { facts, exactStatus, orchestratorState, agentStatus, workersOf, captainOf, programOf, captainPane, paneBeside, togglePin, needReason, focusAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
-import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
+import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag, TYPE } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, hotText, memText } from "./resources.js";
-import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, worthALook, hasClaims, proofState, withSaid, withAsked } from "./claims.js";
+import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, reviewedState, worthALook, hasClaims, proofState, withSaid, withAsked } from "./claims.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { setNote, noteText } from "./note.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf, needsYouNow as needsYouOf, runlessOrchs } from "./attend.js";
-import { stepText, quietText, flowState, flowSetting, runDot } from "./attention.js";
+import { stepText, quietText, flowState, flowSetting, runDot, ciState, waitSig, ageText, WAIT_LABELS } from "./attention.js";
+import { mergePath } from "./mergepath.js";
+import { paneSections, agentsSummary, auditDecisions } from "./paneorder.js";
 import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } from "./tell.js";
 import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
@@ -24,8 +26,9 @@ import { rowEdge, badgeOf, needLine, closableDone, needCount, needRunsOf, runles
 import { asked as inboxAsked, unmarkAsked, askedLevel } from "./inbox.js";
 import { askClick } from "./askclick.js";
 import { defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
-import { reviewFlows, setReviewFlow } from "./tracking.js";
-import { needActions, ownAddressRows, isPrimary, detailsLabel } from "./needaction.js";
+import { reviewFlows, setReviewFlow, setWaitingOn } from "./tracking.js";
+import { needActions, ownAddressRows, primaryOf, detailsLabel, showsFlow, requestingFor } from "./needaction.js";
+import { canRequest, pickerLabel } from "./reviewers.js";
 
 // How each runPhase() reads on a card. Running is muted, not the working colour: colour means
 // something to look at (see AMBER), and the run's spinning dot already says it works.
@@ -40,10 +43,18 @@ const PHASE = {
   cant: { label: "Can't tell", tone: "dim" },
 };
 
+// Text sizes: the run pane and the overview's cards draw with TYPE's four sizes. The helpers they
+// share with the Crew sidebar (crew.js) read this flag, set only while a card or the pane is drawn,
+// and keep their own sizes otherwise: T(was, role) is `was` in the sidebar and TYPE[role] here.
+let inPane = false;
+const T = (was, role) => (inPane ? TYPE[role] : was);
+// Draws with the card/pane type scale (TYPE) whatever the caller is: the sea's reefs use it so their button matches their text.
+export const drawnInPane = (draw) => { const was = inPane; inPane = true; try { return draw(); } finally { inPane = was; } };
+
 function pill(t, text, tone, solid = false) {
   const c = String(tone ?? "").startsWith("#") ? tone : t[tone] ?? t.dim;
   return div().flex_none().px(7).h(18).rounded(9).flex().items_center()
-    .bg(solid ? c : c + "22").text_size(10.5).font_semibold().text_color(solid ? t.background : c).child(text);
+    .bg(solid ? c : c + "22").text_size(TYPE.meta).font_semibold().text_color(solid ? t.background : c).child(text);
 }
 
 // Adds how full an agent's context is, "144k", with the exact count on hover; nothing
@@ -52,7 +63,7 @@ function pill(t, text, tone, solid = false) {
 const withContext = (view, t, id, address, run = null) => (el) => {
   const c = view.contexts?.[address];
   if (!c) return el;
-  return el.child(div().id(`${id}-ctx`).flex_none().text_size(10.5).text_color(t.dim).child(tokenText(c.tokens))
+  return el.child(div().id(`${id}-ctx`).flex_none().text_size(T(10.5, "meta")).text_color(t.dim).child(`${inPane ? "ctx " : ""}${tokenText(c.tokens)}`)
     .tooltip(contextTip(view, address, run)));
 };
 // What withContext's hover says: the context size, and for an orchestrator the run's total; null without either.
@@ -71,7 +82,7 @@ export const withUsage = (t, id, u, whose, more = null) => (el) => {
   const progs = (u.programs ?? []).slice(0, 4).map((g) => `${g.name}: ${Math.round(g.cpu)}% · ${memText(g.rssKb)}`);
   const tip = [`${whose}: ${Math.round(u.cpu)}% CPU (100% is one core), ${memText(u.rssKb)} memory`,
     u.own ? `the agent itself: ${Math.round(u.own.cpu)}% · ${memText(u.own.rssKb)}` : null, ...progs, more].filter(Boolean).join("\n");
-  return el.child(div().id(`${id}-use`).flex_none().px(5).rounded(4).text_size(10).font_semibold()
+  return el.child(div().id(`${id}-use`).flex_none().px(5).rounded(4).text_size(T(10, "meta")).font_semibold()
     .bg(t.working + "22").text_color(t.working).tooltip(tip).child(text));
 };
 
@@ -92,7 +103,7 @@ export function statusDot(t, status) {
 // A link chip: the run's issues, and PRs it is about but did not open, side by side.
 // A PR chip's icon takes its state's color; its title and state are in the tooltip.
 function linkChip(t, id, url, icon, tip) {
-  return h_flex().id(id).gap(4).px(6).h(20).items_center().rounded(5).bg(t.raised).text_size(11).text_color(t.muted).cursor_pointer()
+  return h_flex().id(id).gap(4).px(6).h(20).items_center().rounded(5).bg(t.raised).text_size(TYPE.meta).text_color(t.muted).cursor_pointer()
     .hover((s) => s.text_color(t.foreground)).tooltip(tip ?? url)
     .on_click((_e, cx) => { cx.stop_propagation(); openUrl(url); })
     .child(icon).child(shortRef(url));
@@ -148,7 +159,7 @@ function taskStrip(t, r, counts, stages, names = true) {
         // An agent is at it: a light edge, still (see statusDot for why not a pulse).
         .when(Boolean(task) && pulse(stages[i].stage, task), (el) => el.border(1).border_color(t.foreground + "88"));
     })))
-    .when(names, (el) => el.child(div().text_size(11).text_color(t.dim).child(tasksText(r, counts, stages))));
+    .when(names, (el) => el.child(div().text_size(TYPE.meta).text_color(t.dim).child(tasksText(r, counts, stages))));
 }
 
 // "21/22 done · 1 in review": the tasks done (data.js taskCounts, as the header counts them),
@@ -190,10 +201,10 @@ function confirmText(r, action, counts) {
 // itself (note.js); an error stays until dismissed, since it needs reading.
 export function noteRows(view, t, fixed) {
   const line = (id, text, color, clear) => {
-    const row = h_flex().id(id).w_full().px(4).gap(6).items_start().text_size(11).text_color(color);
+    const row = h_flex().id(id).w_full().px(4).gap(6).items_start().text_size(T(11, "meta")).text_color(color);
     if (fixed) row.flex_none().pt(4);
     return row.child(div().flex_1().min_w(0).child(text))
-      .child(div().id(`${id}-x`).flex_none().cursor_pointer().px(3).text_size(14).text_color(t.dim).hover((s) => s.text_color(t.foreground)).tooltip("Dismiss")
+      .child(div().id(`${id}-x`).flex_none().cursor_pointer().px(3).text_size(T(14, "strong")).text_color(t.dim).hover((s) => s.text_color(t.foreground)).tooltip("Dismiss")
         .on_click((_e, cx) => { cx.stop_propagation(); clear(); cx.notify(); }).child("×"));
   };
   const note = noteText(view);
@@ -204,7 +215,7 @@ export function noteRows(view, t, fixed) {
 }
 
 export function actionButton(t, id, label, tip, onClick, primary = false) {
-  const b = div().id(id).flex_none().px(9).h(22).rounded(5).flex().items_center().text_size(11.5).font_medium()
+  const b = div().id(id).flex_none().px(9).h(22).rounded(5).flex().items_center().text_size(T(11.5, "body")).font_medium()
     .bg(primary ? t.accent : t.raised).text_color(primary ? t.background : t.muted);
   // No click: an action is already under way on this card.
   // A greyed-out button still takes its click, so a clickable card around it does not.
@@ -227,7 +238,7 @@ function actionRow(view, t, r, orch, closed, counts) {
   const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
   if (busy) {
     return h_flex().gap(6).justify_end().items_center()
-      .child(div().flex_1().text_size(11.5).text_color(t.muted).child(busy.label))
+      .child(div().flex_1().text_size(TYPE.meta).text_color(t.muted).child(busy.label))
       .children(actionsOf(r, orch, closed).map((a) => actionButton(t, `${a}-${r.key}`, ACTION[a].label, null, null, a === "resume")));
   }
   // A Close or Resume asked from the need box confirms there, in sight; the row keeps its buttons.
@@ -269,7 +280,7 @@ function confirmBlock(view, t, r, orch, counts, asking, id) {
     }, { owner: null });
   };
   return v_flex().gap(6).p(8).rounded(7).bg(t.raised)
-    .child(div().text_size(12).text_color(t.foreground).child(confirmText(r, asking, counts)))
+    .child(div().text_size(T(12, "body")).text_color(t.foreground).child(confirmText(r, asking, counts)))
     .child(h_flex().gap(6)
       .child(actionButton(t, `yes-${id}`, ACTION[asking].label, null, yes, true))
       .child(actionButton(t, `no-${id}`, "Cancel", null, (cx) => set(cx, null))));
@@ -307,7 +318,7 @@ const ASK_NOTES = {
 export function blockingAction(view, t, r, att, id, short = false) {
   if (!r?.dir || !r.localTerminal || r.away || !att?.stall) return null;
   if (inboxAsked(r, "blocking", "", r)) {
-    return div().id(`blk-${id}`).flex_none().text_size(11).text_color(AMBER(t))
+    return div().id(`blk-${id}`).flex_none().text_size(T(11, "body")).text_color(AMBER(t))
       .tooltip("Asked its orchestrator what is blocking; waiting for its progress or status to change").child("asked…");
   }
   const quiet = quietText(att.stall).replace(/^quiet /, "");
@@ -323,7 +334,7 @@ export function blockingAction(view, t, r, att, id, short = false) {
 function ciAction(view, t, r, action, id) {
   if (!r?.dir || !r.localTerminal || r.away) return null;
   if (inboxAsked(r, "ci", "", r)) {
-    return div().id(`ci-${id}`).flex_none().text_size(11).text_color(t.muted)
+    return div().id(`ci-${id}`).flex_none().text_size(T(11, "body")).text_color(t.muted)
       .tooltip("Asked its orchestrator to see to the red CI; waiting for its progress or status to change").child("asked…");
   }
   const pr = action.pr;
@@ -357,7 +368,7 @@ function commentsAction(view, t, r, att, id) {
   const rows = prs.map((p, i) => {
     const b = botCount(p.comments.bots);
     const what = `Address ${commentsText(p.comments)}${p.comments.count > 0 && b ? ` (+${b} from bots)` : ""}${prs.length > 1 || p.number ? ` on #${p.number}` : ""}`;
-    const label = div().id(`cmt-${id}-${i}-label`).flex_none().text_size(11.5).text_color(t.muted)
+    const label = div().id(`cmt-${id}-${i}-label`).flex_none().text_size(T(11.5, "meta")).text_color(t.muted)
       .tooltip(commentLines([p], 20).join("\n")).child(what);
     if (addressAsked(r, p, att)) return h_flex().gap(8).items_center().child(label).child(askedNote(t, `cmt-${id}-${i}`));
     return h_flex().gap(6).items_center().child(label)
@@ -373,7 +384,7 @@ function commentsAction(view, t, r, att, id) {
 function addressAsked(r, p, att = null) {
   return att?.askedPrs ? att.askedPrs.has(p.url) : inboxAsked(r, "comments", p.url, p);
 }
-const askedNote = (t, id) => div().id(id).flex_none().text_size(11).text_color(t.muted)
+const askedNote = (t, id) => div().id(id).flex_none().text_size(T(11, "meta")).text_color(t.muted)
   .tooltip("Asked its orchestrator to address these comments; while its orchestrator works on them, or until its open comments change (a comment the reviewer adds later ends it)").child("asked…");
 const modeTip = (r, mode) => `${MODE_TIP[mode]}.${mode === defaultMode(r.autonomy) ? ` The default at ${r.autonomy ?? "L0"}.` : ""}`;
 
@@ -396,21 +407,33 @@ const addressRows = (view, t, r, ctx, f, id) => (ownAddressRows(f.need, f.need ?
 // proof), as a two-way toggle with the folder's default marked. A click sets it for the whole
 // repository folder (tracking.js setReviewFlow), so every run of it changes at once; picking
 // the default removes the setting.
+const flowTip = (st, f) => `${f === "peer" ? "Peer: a colleague reviews on GitHub (request review, review from, approved — merge)" : "Self: you review the proof and merge (review proof → merge)"}.
+`
+  + `For every run in ${st.key}${f === st.fallback ? "; the default for it" : ""}.`;
+
+// The need box's quiet "review: peer · change": who reviews, and a link that switches the folder to
+// the other flow, as flowToggle's segments do.
+function flowChange(t, r, id) {
+  const st = flowState(r, reviewFlows());
+  const other = st.flow === "peer" ? "self" : "peer";
+  return h_flex().id(id).flex_none().gap(3).items_center().text_size(T(11, "meta")).text_color(t.dim).child(`review: ${st.flow} ·`)
+    .child(div().id(`${id}-change`).cursor_pointer().hover((s) => s.text_color(t.foreground)).tooltip(`Switch to ${other}.\n${flowTip(st, other)}`)
+      .on_click((_e, cx) => { cx.stop_propagation(); setReviewFlow(st.key, flowSetting(other, st.fallback)); cx.notify(); }).child("change"));
+}
+
 function flowToggle(t, r, id) {
   const st = flowState(r, reviewFlows());
-  const tip = (f) => `${f === "peer" ? "Peer: a colleague reviews on GitHub (request review, review from, approved — merge)" : "Self: you review the proof and merge (review proof → merge)"}.
-`
-    + `For every run in ${st.key}${f === st.fallback ? "; the default for it" : ""}.`;
+  const tip = (f) => flowTip(st, f);
   const seg = (f) => {
     const on = st.flow === f;
-    return div().id(`flow-${id}-${f}`).flex_none().px(7).h(18).flex().items_center().rounded(4).text_size(10.5)
+    return div().id(`flow-${id}-${f}`).flex_none().px(7).h(18).flex().items_center().rounded(4).text_size(T(10.5, "meta"))
       .bg(on ? t.selected : t.raised).text_color(on ? t.foreground : t.dim).when(on, (e) => e.font_semibold())
       .tooltip(tip(f))
       .when(!on, (e) => e.cursor_pointer().hover((s) => s.text_color(t.foreground))
         .on_click((_e, cx) => { cx.stop_propagation(); setReviewFlow(st.key, flowSetting(f, st.fallback)); cx.notify(); }))
       .child(f === st.fallback ? `${f} (default)` : f);
   };
-  return h_flex().id(`flow-${id}`).flex_none().gap(3).items_center().text_size(10.5).text_color(t.dim)
+  return h_flex().id(`flow-${id}`).flex_none().gap(3).items_center().text_size(T(10.5, "meta")).text_color(t.dim)
     .child(div().flex_none().pr(2).child("Review")).child(seg("self")).child(seg("peer"));
 }
 
@@ -447,7 +470,7 @@ function closeAll(view, runs, ctx, cx) {
 // The Done heading's right side: Close all merged, its question once clicked, or what it is doing.
 export function closeAllControl(view, t, rows, ctx) {
   const busy = view.busy?.[CLOSE_ALL_KEY];
-  if (busy) return { button: div().flex_none().text_size(10.5).font_normal().text_color(t.muted).child(busy.label), confirm: null };
+  if (busy) return { button: div().flex_none().text_size(T(10.5, "meta")).font_normal().text_color(t.muted).child(busy.label), confirm: null };
   const runs = closableDone(rows, view.busy ?? {});
   if (!runs.length) return { button: null, confirm: null };
   const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
@@ -460,7 +483,7 @@ export function closeAllControl(view, t, rows, ctx) {
   return {
     button: null,
     confirm: v_flex().id("close-all-confirm").flex_none().gap(6).p(8).rounded(7).bg(t.raised)
-      .child(div().text_size(12).text_color(t.foreground)
+      .child(div().text_size(T(12, "body")).text_color(t.foreground)
         .child(`Close ${plural(runs.length, "merged run")} (${names})? Each orchestrator pushes what isn't pushed, deletes the worktrees and closes its tab; branches and PRs stay.`))
       .child(h_flex().gap(6)
         .child(actionButton(t, "close-all-yes", `Close ${runs.length}`, null, (cx) => { set(cx, null); closeAll(view, runs, ctx, cx); }, true))
@@ -517,20 +540,20 @@ export function runFacts(r, ctx) {
   };
 }
 
-function cardHeader(view, t, r, f, meta) {
+function cardHeader(view, t, r, f, meta, lead = null) {
   return h_flex().gap(8).items_center()
-    .child(div().flex_none().text_size(15).child(OCTOPUS))
+    .child(div().flex_none().text_size(TYPE.title).child(OCTOPUS))
     .child(v_flex().flex_1().min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)
+        .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(TYPE.title).text_color(t.foreground), runName(r.branch, r.topic)))
         .when(Boolean(r.type), (el) => el.child(runTypeTag(t, r, r.key)))
         .children(levelTags(view, t, r, r.key))
-        .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(13.5).text_color(t.foreground), runName(r.branch, r.topic)))
-        .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(10.5).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
-      .child(metaLine(t, r, meta)))
+        .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(TYPE.meta).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
+      .child(metaLine(t, r, meta, lead)))
     .map(withContext(view, t, `run-${r.key}`, r.terminal))
     .child(runPin(t, `pin-${r.key}`, r, f.orch))
     .child(statusDot(t, f.dot))
-    .when(Boolean(f.parkedNext), (el) => el.child(div().id(`parked-next-${r.key}`).min_w(0).truncate().text_size(11).text_color(t.dim)
+    .when(Boolean(f.parkedNext), (el) => el.child(div().id(`parked-next-${r.key}`).min_w(0).truncate().text_size(TYPE.meta).text_color(t.dim)
       .tooltip("What its pull requests wait on, and how long it has been parked. Parked runs stay out of Needs you.").child(f.parkedNext)))
     .child(f.badge.tip ? div().id(`badge-${r.key}`).flex_none().tooltip(f.badge.tip).child(pill(t, f.badge.label, badgeColor(t, f), f.need))
       : pill(t, f.badge.label, badgeColor(t, f), f.need));
@@ -543,7 +566,7 @@ const badgeColor = (t, f) => (f.badge.ready ? PASS(t) : f.need ? "blocked" : f.b
 // proof and its reports, for the lines that point at them.
 export function needItemsOf(r, ctx, att = attOf(r, ctx)) {
   if (att?.group !== "needs") return [];
-  return needActions(att, { run: r, prs: prsOf(r) ?? [], now: Date.now(), proof: needProof(r, stagesOf(r, ctx)), reports: (r.reports ?? []).map((n) => `shared/${n}`) });
+  return needActions(att, { run: r, prs: prsOf(r) ?? [], reviewed: reviewedOf(r), claims: hasClaims(r), now: Date.now(), proof: needProof(r, stagesOf(r, ctx)), reports: (r.reports ?? []).map((n) => `shared/${n}`) });
 }
 
 // A run's proof in the shape needActions takes ({tier, pass, total, fail, failed, accepted,
@@ -564,7 +587,9 @@ function needProof(r, stages) {
 export function needButton(view, t, r, f, x, id, where, primary) {
   const confirm = (action) => (cx) => { view.confirm = { key: r.key, action, box: where }; view.actionError = null; view.actionNote = null; cx.notify(); };
   switch (x.kind) {
-    case "open": return actionButton(t, id, x.label, x.url, () => openUrl(x.url), primary);
+    case "open": return x.quiet ? textLink(t, id, `${x.label} ↗`, x.url, () => openUrl(x.url)) : actionButton(t, id, x.label, x.url, () => openUrl(x.url), primary);
+    case "request-review": return actionButton(t, id, x.label, "Ask a colleague to review this PR, from the people who reviewed this repository before; GitHub tells them", (cx) => startRequesting(view, r, x.pr, cx), primary);
+    case "rereview": return rereviewAction(view, t, r, x, id);
     // Ask me and Handle them share one "asked…" once either was clicked.
     case "address": return addressAsked(r, x.pr, f.att) ? (x.mode === "ask" ? askedNote(t, id) : null)
       : actionButton(t, id, x.label, modeTip(r, x.mode), addressSend(view, r, x.pr, x.mode), primary);
@@ -591,8 +616,81 @@ export function needButton(view, t, r, f, x, id, where, primary) {
       cx.notify();
     }, primary);
     case "changes": return changesButton(view, t, r, id);
+    case "wait-on": return waitOnButton(view, t, r, id);
     default: return null;
   }
+}
+
+// A small text link: the quiet way to a PR on GitHub, and the picker's Cancel.
+const textLink = (t, id, label, tip, onClick) => div().id(id).flex_none().text_size(T(11.5, "body")).text_color(t.muted).cursor_pointer()
+  .hover((s) => s.text_color(t.foreground)).tooltip(tip).on_click((_e, cx) => { cx.stop_propagation(); onClick(cx); }).child(label);
+
+// "Re-review first" beside Request review: asks the orchestrator to run the final review again
+// (inbox.js rereview); "asked…" while its message is unread or the run's status and Reviewed lines
+// have not moved.
+function rereviewAction(view, t, r, x, id) {
+  if (!r?.dir || !r.localTerminal || r.away) return null;
+  if (inboxAsked(r, "rereview", "", r)) return askedNote(t, id);
+  const behind = x.reviewed?.kind === "behind" ? x.reviewed.behind : null;
+  return actionButton(t, id, x.label, "Before asking a colleague: a message in the run's inbox that wakes its orchestrator to run the final review again on the branch as it is now, fix what it finds and finish again",
+    (cx) => askClick(view, cx, r, "rereview", { behind, sha: x.pr?.sha ?? null }, { asks: [{ key: "", item: r }], notes: ASK_NOTES }));
+}
+
+// Request review was clicked: the box shows the earlier reviewers of the PR's repository to pick
+// from (data.js reads them once per 30 minutes).
+function startRequesting(view, r, pr, cx) {
+  view.requesting = { key: r.key, pr: pr.url, busy: null, error: null };
+  view.actionError = null;
+  if (cachedReviewers(r, pr.repo) === null) {
+    cx.spawn(async (cx) => {
+      await loadReviewers(r, pr.repo).catch(() => {});
+      view.redraw = true;
+      try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+    }, { owner: null });
+  }
+  cx.notify();
+}
+
+// A chip was clicked: ask `login` (one of the candidates, checked here) to review `pr`, marking a
+// draft ready first. Success clears the picker and reads the run's PRs at once, so the run moves to
+// "review from <login>"; failure keeps the picker with gh's first line.
+function pickReviewer(view, r, pr, login, list, cx) {
+  const req = view.requesting;
+  if (!canRequest({ requesting: req, key: r.key, url: pr.url, login, candidates: list })) return;
+  req.busy = login; req.error = null;
+  cx.notify();
+  cx.spawn(async (cx) => {
+    const out = await requestReview(r, pr.url, login, { draft: pr.state === "DRAFT" }).catch((e) => ({ error: e?.message ?? String(e) }));
+    if (out.error) {
+      req.busy = null; req.error = out.error;
+      // Marked ready already: read the PR again, so the box shows it is no draft.
+      if (out.readied) await refreshPrs(r, false, true).catch(() => {});
+    }
+    else {
+      if (view.requesting === req) view.requesting = null;
+      await refreshPrs(r, false, true).catch(() => {});
+    }
+    view.redraw = true;
+    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+    try { await view.load(cx); } catch { /* the next refresh shows it */ }
+  }, { owner: null });
+}
+
+// The picker that takes the place of an item's buttons after Request review: the label, a chip per
+// earlier reviewer and Cancel; "finding reviewers…" while they are read; "requesting…" while gh runs.
+function reviewPicker(view, t, r, x, id) {
+  const req = view.requesting, pr = x.pr;
+  const label = pickerLabel(pr.state === "DRAFT");
+  const dim = (text) => div().flex_none().text_size(T(11.5, "meta")).text_color(t.dim).child(text);
+  const cancel = textLink(t, `${id}-cancel`, "Cancel", "Back to the buttons", (cx) => { view.requesting = null; cx.notify(); });
+  if (req.busy) return [dim("requesting…")];
+  const list = cachedReviewers(r, pr.repo, pr.author ?? null);
+  if (list === null) return [dim("finding reviewers…"), cancel];
+  if (!list.length) return [div().flex_none().text_size(T(11.5, "meta")).text_color(t.muted).child("No earlier reviewers found."),
+    ...(pr.url ? [textLink(t, `${id}-open`, `Open ${pr.number ? `#${pr.number}` : "the PR"} ↗`, pr.url, () => openUrl(pr.url))] : []), cancel];
+  return [div().flex_none().text_size(T(11.5, "meta")).text_color(t.muted).child(label),
+    ...list.map((login) => actionButton(t, `${id}-${login}`, login, `Ask ${login} to review${pr.state === "DRAFT" ? " (the draft is marked ready first)" : ""}: gh pr edit --add-reviewer`, (cx) => pickReviewer(view, r, pr, login, list, cx))),
+    cancel];
 }
 
 // Marks the run's proof, as it shows now, as read (proofseen.js).
@@ -620,29 +718,95 @@ function changesButton(view, t, r, id) {
     } : null);
 }
 
+// Waiting on someone… (a person outside GitHub, say, checking a preview): opens the Reply field
+// under the box; Enter with text marks the run as waiting on them (tracking.js harbormaster.waitingOn,
+// with its step's label and signature, attention.js waitSig) and it moves to Waiting on others.
+// Nothing goes to the run's inbox: the orchestrator has nothing to do about it.
+export const waitOnId = (r) => `wait:${r.key}`;
+export const WAIT_HINT = "Who is it waiting on? (e.g. Kari — preview check) · Enter moves the run to Waiting on others until something needs you";
+function waitOnButton(view, t, r, id) {
+  const open = view.replying === waitOnId(r);
+  return actionButton(t, id, open ? "Cancel" : "Waiting on someone…",
+    "Someone outside GitHub has it (a preview check, say): the run waits in Waiting on others until a reviewer, a review, a push, red CI or a question needs you again", (cx) => {
+      view.replying = open ? null : waitOnId(r);
+      view.reply.set_value("");
+      if (!open) view.reply.focus();
+      cx.notify();
+    });
+}
+
+// The waiting-on field (Waiting on someone…), with what to type under it, while it is open for `r`; else null.
+export const waitOnField = (view, t, r, id) => (view.replying === waitOnId(r)
+  ? v_flex().id(id).gap(4).on_click((_e, cx) => cx.stop_propagation()).child(Input.new(view.reply))
+    .child(div().text_size(T(10.5, "meta")).text_color(t.dim).child(WAIT_HINT))
+  : null);
+
+// Marks the run as waiting on `text` (not blank), with its step as it is now; the field closes.
+// Only while that step is still all the run needs the user for (as needaction.js offers the
+// button): a reviewer requested or red CI since the field opened would let the mark go at the
+// next poll, so nothing is set and a note says why.
+function markWaiting(view, key, text, cx) {
+  if (!text) return;
+  const run = view.runs.find((x) => x.key === key);
+  const a = run ? attOf(run, facts()) : null;
+  const next = a?.next;
+  const can = a?.group === "needs" && a.reasons.length === 1 && WAIT_LABELS.has(a.reasons[0].key) && next?.label === a.reasons[0].key;
+  if (can) setWaitingOn(key, { text, at: Date.now(), label: next.label, sig: waitSig(next) });
+  else setNote(view, `Not marked waiting on ${text}: ${!a ? "the run is gone" : a.group === "needs" ? `it now needs you for ${a.reasons.map((x) => x.text).join(" · ")}` : "it no longer waits on you for that step"}`);
+  view.reply.set_value("");
+  view.replying = null;
+  cx.notify();
+}
+
+// A marked run's line on its card and pane: "Waiting on Kari — preview check · 2h" and Not waiting
+// any more, which clears the mark (back to Needs you). Null for a run the mark does not hold.
+export function waitNote(t, r, f, id) {
+  const w = f.att?.waitingOn;
+  if (!w) return null;
+  return h_flex().id(id).gap(8).items_center().flex_wrap()
+    .child(div().min_w(0).text_size(T(11.5, "body")).text_color(t.ansi6 ?? t.accent).child(`Waiting on ${w.text}${w.at ? ` · ${ageText(Date.now() - w.at)}` : ""}`))
+    .child(actionButton(t, `${id}-clear`, "Not waiting any more", "Clear the mark: the run is back in Needs you", (cx) => { setWaitingOn(r.key, null); cx.notify(); }));
+}
+
 // The need items as lines, each with its buttons; the first item's first button stands out, unless
 // the actions say which does (`primary`). Actions about one PR each (`row`: "#1799 · 15 comments")
 // go in a row per PR, led by it.
-export function needLines(view, t, r, f, items, where, underQuestion = false) {
+export function needLines(view, t, r, f, items, where, underQuestion = false, tail = null) {
+  const open = requestingFor(view, r, items);
+  // One rule for which button stands out (needaction.js primaryOf), the same the sea's reefs use.
+  const main = underQuestion ? null : primaryOf(items);
+  const picking = (x) => x === open;
   return items.map((it, i) => {
-    const buttons = it.actions.map((x, j) => ({ row: x.row ?? null,
-      el: needButton(view, t, r, f, x, `need-${where}-${r.key}-${i}-${j}`, where, isPrimary(x, i, j, underQuestion)) })).filter((b) => b.el);
+    const buttons = it.actions.map((x, j) => ({ row: x.row ?? null, pick: picking(x) ? x : null,
+      el: needButton(view, t, r, f, x, `need-${where}-${r.key}-${i}-${j}`, where, main?.i === i && main?.j === j) })).filter((b) => b.el);
     const rows = [];
     for (const b of buttons) {
-      if (!rows.length || rows[rows.length - 1].row !== b.row) rows.push({ row: b.row, els: [] });
-      rows[rows.length - 1].els.push(b.el);
+      if (!rows.length || rows[rows.length - 1].row !== b.row) rows.push({ row: b.row, els: [], pick: null });
+      const row = rows[rows.length - 1];
+      if (b.pick) row.pick = b.pick;
+      row.els.push(b.el);
     }
     // A ready run: a headline and what is done, in the pass colour (needaction.js readyItem).
     const head = it.ready
       ? v_flex().id(`needt-${where}-${r.key}-${i}`).gap(1)
-        .child(div().text_size(14).font_semibold().text_color(PASS(t)).child(it.headline))
-        .child(div().text_size(12).text_color(PASS(t)).child(oneLine(it.detail, 220)))
-      : div().id(`needt-${where}-${r.key}-${i}`).text_size(12).text_color(t.foreground).when(Boolean(it.tip), (el) => el.tooltip(it.tip)).child(oneLine(it.line, 220));
+        .child(div().text_size(T(14, "strong")).font_semibold().text_color(PASS(t)).child(it.headline))
+        .child(div().text_size(T(12, "body")).text_color(PASS(t)).child(oneLine(it.detail, 220)))
+      : div().id(`needt-${where}-${r.key}-${i}`).text_size(T(12, "body")).text_color(t.foreground).when(Boolean(it.tip), (el) => el.tooltip(it.tip)).child(oneLine(it.line, 220));
+    // The quiet control sits at the right end of the box's last row.
+    const last = tail && i === items.length - 1;
+    if (last && !rows.length) rows.push({ row: null, els: [], pick: null });
     return v_flex().id(`needl-${where}-${r.key}-${i}`).gap(4)
       .child(head)
-      .children(rows.map((x) => h_flex().flex_wrap().gap(6).items_center()
-        .when(Boolean(x.row), (el) => el.child(div().flex_none().min_w(0).pr(2).text_size(11).text_color(t.muted).child(x.row)))
-        .children(x.els)));
+      .when(Boolean(it.caveat), (el) => el.child(div().id(`needc-${where}-${r.key}-${i}`).text_size(T(11.5, "body")).text_color(AMBER(t)).child(it.caveat)))
+      .children(rows.map((x, k) => {
+        const row = h_flex().flex_wrap().gap(6).items_center()
+          .when(Boolean(x.row), (el) => el.child(div().flex_none().min_w(0).pr(2).text_size(T(11, "meta")).text_color(t.muted).child(x.row)))
+          .children(x.pick ? reviewPicker(view, t, r, x.pick, `need-${where}-${r.key}-${i}-pick`) : x.els);
+        if (!last || k !== rows.length - 1) return row;
+        // The picker's chips fill the row: the control goes on its own line, at the right.
+        return x.pick ? v_flex().gap(4).child(row).child(h_flex().justify_end().child(tail)) : row.child(div().flex_1()).child(tail);
+      }))
+      .when(it.actions.some(picking) && view.requesting.error, (el) => el.child(div().id(`needr-${where}-${r.key}-${i}`).text_size(T(11.5, "body")).text_color(t.blocked).child(oneLine(view.requesting.error, 200))));
   });
 }
 
@@ -653,7 +817,7 @@ export const boxConfirm = (view, t, r, f, where) => (view.confirm?.key === r.key
 
 // "Open the orchestrator", small: never the headline, since most reasons are done elsewhere.
 const orchLink = (t, r, f, id) => (f.orch === "gone" || !r.terminal ? null
-  : div().id(id).flex_none().text_size(11).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
+  : div().id(id).flex_none().text_size(T(11, "meta")).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
     .tooltip("Show its orchestrator's terminal").on_click((_e, cx) => { cx.stop_propagation(); focusAgent(r.terminal); }).child("Open the orchestrator"));
 
 // What a run needs you for, on its card and in its pane. Without a question: a line per reason
@@ -681,12 +845,12 @@ export function needBox(view, t, r, f, ctx, where) {
     const link = first?.kind === "focus" && first.address === r.terminal ? null : orchLink(t, r, f, `need-orch-${where}-${r.key}`);
     return box.child(v_flex().flex_1().min_w(0).gap(6)
       // The sidebar's box sits under the red "Needs you · N" heading already; a second label is a line spent on nothing.
-      .when(!ready && where !== "sidebar", (el) => el.child(div().text_size(11).font_semibold().text_color(tint).child("Needs you")))
-      .children(needLines(view, t, r, f, items, where))
+      .when(!ready && where !== "sidebar", (el) => el.child(div().text_size(T(11, "meta")).font_semibold().text_color(tint).child("Needs you")))
+      .children(needLines(view, t, r, f, items, where, false, where !== "sidebar" && showsFlow(items) ? flowChange(t, r, `need-flow-${where}-${r.key}`) : null))
       .when(ready && view.replying === changesId(r), (el) => el.child(v_flex().gap(4)
         .child(Input.new(view.reply))
-        .child(div().text_size(10.5).text_color(t.dim).child("What should change? Enter writes it to the run's inbox and tells its orchestrator"))))
-      .children([boxConfirm(view, t, r, f, where)].filter(Boolean))
+        .child(div().text_size(T(10.5, "meta")).text_color(t.dim).child("What should change? Enter writes it to the run's inbox and tells its orchestrator"))))
+      .children([waitOnField(view, t, r, `need-wait-${where}-${r.key}`), boxConfirm(view, t, r, f, where)].filter(Boolean))
       .when(Boolean(link), (el) => el.child(h_flex().child(link))));
   }
   const head = needHead(r.ask);
@@ -697,7 +861,7 @@ export function needBox(view, t, r, f, ctx, where) {
   // The details, folded: what is long. The options are already above as buttons, so here they are
   // their whole text, a line each, for choosing between them.
   const fold = h_flex().id(`qfold-${where}-${r.key}`).gap(6).items_center().min_w(0).rounded(4).cursor_pointer()
-    .text_size(11.5).text_color(t.foreground).hover((st) => st.bg(t.hover))
+    .text_size(T(11.5, "body")).text_color(t.foreground).hover((st) => st.bg(t.hover))
     .tooltip(open ? "Hide the question's details" : "The whole question, what each option does, the evidence and the risk")
     .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); cx.notify(); })
     .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.muted))
@@ -705,11 +869,11 @@ export function needBox(view, t, r, f, ctx, where) {
     .child(div().flex_none().text_color(t.dim).child(it.since ? `asked ${ago(it.since)}` : ""));
   // A section's text whole, as paragraphs (question.js), under its small label.
   const part = (label, text, color) => v_flex().gap(2)
-    .when(Boolean(label), (el) => el.child(div().text_size(10.5).font_semibold().text_color(color ?? t.dim).child(label)))
-    .children(paragraphs(text).map((l) => div().text_size(11.5).text_color(t.foreground).child(l)));
+    .when(Boolean(label), (el) => el.child(div().text_size(T(10.5, "meta")).font_semibold().text_color(color ?? t.dim).child(label)))
+    .children(paragraphs(text).map((l) => div().text_size(T(11.5, "body")).text_color(t.foreground).child(l)));
   const options = it.options.length > 0 && v_flex().gap(4)
-    .child(div().text_size(10.5).font_semibold().text_color(t.dim).child("What each option does"))
-    .children(it.options.map((o, i) => div().text_size(11.5).text_color(t.muted)
+    .child(div().text_size(T(10.5, "meta")).font_semibold().text_color(t.dim).child("What each option does"))
+    .children(it.options.map((o, i) => div().text_size(T(11.5, "meta")).text_color(t.muted)
       .child(`${i === it.recommended ? "★ " : ""}${o.label}${o.text && o.text !== o.label ? `: ${plain(o.text)}` : ""}`)));
   const tone = { Recommended: t.accent, Risk: t.blocked };
   const details = open && detailsLabel(sections, it.options) && v_flex().id(`qdetail-${where}-${r.key}`).gap(8).pt(4)
@@ -730,15 +894,15 @@ export function needBox(view, t, r, f, ctx, where) {
       .tooltip(f.orch !== "gone" ? "Open the orchestrator" : "The orchestrator is gone: answer here, it waits in the run's inbox")
       .on_click(focus).child(oneLine(head.title, 300)))
     // What waits on the answer, the urgency cue, right under what is asked.
-    .when(Boolean(head.blocks), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(oneLine(head.blocks, 160))))
-    .when(Boolean(head.rec), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(oneLine(head.rec, 200))))
+    .when(Boolean(head.blocks), (el) => el.child(div().text_size(T(11.5, "body")).text_color(t.blocked).child(oneLine(head.blocks, 160))))
+    .when(Boolean(head.rec), (el) => el.child(div().text_size(T(11.5, "meta")).text_color(t.muted).child(oneLine(head.rec, 200))))
     .when(Boolean(answers), (el) => el.child(div().pt(2).child(answers)))
     .when(Boolean(a.input), (el) => el.child(a.input))
     .when(Boolean(a.note), (el) => el.child(a.note))
     .when(Boolean(detailsLabel(sections, it.options)), (el) => el.child(fold))
     .when(Boolean(details), (el) => el.child(details))
     .when(others.length > 0, (el) => el.child(v_flex().id(`qalso-${where}-${r.key}`).gap(6).mt(4).pt(8).border_t(1).border_color(t.border)
-      .child(div().text_size(11).font_semibold().text_color(t.muted).child("Also needs you"))
+      .child(div().text_size(T(11, "meta")).font_semibold().text_color(t.muted).child("Also needs you"))
       .children(needLines(view, t, r, f, others, where, true))))
     .children([boxConfirm(view, t, r, f, where)].filter(Boolean)));
 }
@@ -746,7 +910,7 @@ export function needBox(view, t, r, f, ctx, where) {
 // The one-line notes under the progress: parked or closed, gone, waiting agents, unread messages.
 // `decisions`: false in the pane, whose Decisions heading says what is new itself.
 function cardNotes(t, r, f, decisions = true) {
-  const note = (text, tone = "muted") => div().text_size(11.5).text_color(t[tone]).child(text);
+  const note = (text, tone = "muted") => div().text_size(T(11.5, "meta")).text_color(t[tone]).child(text);
   return [
     r.away && note(`${f.parked ? "Parked" : "Closed"} ${ago(r.away.at)}${r.away.was ? ` · was: ${r.away.was}` : ""}`),
     // The Needs you box says so already when it shows.
@@ -772,10 +936,17 @@ const tokenMeta = (r) => (r.tokens && r.budget && overBudget(r) ? `over budget $
 const runMeta = (r, f) => [r.repo, f.workers.length ? plural(f.workers.length, "agent") : null, tokenMeta(r), unscopedOf(r) ? `${unscopedOf(r)} unscoped` : null, r.updated ? `updated ${ago(r.updated)}` : null].filter(Boolean).join(" · ");
 // The meta line as three texts, around the tokens segment: it has the breakdown on hover, and
 // the blocked colour once over budget.
-const metaLine = (t, r, meta) => {
+const metaLine = (t, r, meta, lead = null) => {
+  // The pane's first segment, when the run started and how long it has gone, with its date in the hover.
+  if (lead) {
+    const rest = meta;
+    return h_flex().min_w(0).text_size(TYPE.meta).text_color(t.dim)
+      .child(div().id(`age-${r.key}`).flex_none().tooltip(startedTip(r.started)).child(lead))
+      .when(Boolean(rest), (el) => el.child(div().flex_none().px(5).child("·")).child(div().min_w(0).flex_1().child(metaLine(t, r, rest))));
+  }
   const tok = tokenMeta(r), at = tok ? meta.indexOf(tok) : -1;
-  const line = h_flex().min_w(0).text_size(11.5).text_color(t.dim);
-  if (at < 0) return div().truncate().text_size(11.5).text_color(t.dim).child(meta);
+  const line = h_flex().min_w(0).text_size(TYPE.meta).text_color(t.dim);
+  if (at < 0) return div().truncate().text_size(TYPE.meta).text_color(t.dim).child(meta);
   const over = overBudget(r);
   const tip = !r.budget ? tokenDetail(r.tokens) : `${tokenDetail(r.tokens)}\n${over ? "Over its" : "Under its"} soft budget of ${r.budget.toLocaleString("en")} tokens`;
   return line.child(div().flex_none().child(meta.slice(0, at)))
@@ -786,7 +957,8 @@ const metaLine = (t, r, meta) => {
 const runEdge = (t, f) => (f.badge.ready ? PASS(t) : f.need ? t.blocked : f.badge.tone === "muted" ? t.border : t[f.badge.tone] ?? t.border);
 const relatedTip = (p) => [p.number ? p.title : null, prStateText(p), p.url].filter(Boolean).join(" · ");
 
-function card(view, t, r, ctx, compact = false) {
+const card = (view, t, r, ctx, compact = false) => drawnInPane(() => drawCard(view, t, r, ctx, compact));
+function drawCard(view, t, r, ctx, compact) {
   const f = runFacts(r, ctx);
   const { orch, closed, need, counts, prs, related } = f;
   const links = [
@@ -795,30 +967,31 @@ function card(view, t, r, ctx, compact = false) {
       svg("mods/harbormaster/pr.svg").size(11).flex_none().text_color(t[PR_TONE[p.state]] ?? t.dim), relatedTip(p))),
   ];
   const focus = () => orch !== "gone" && focusAgent(r.terminal);
-  const facts = factsLine(t, r, prs, 12.5, f.att);
+  const facts = factsLine(t, r, prs, TYPE.body, f.att);
   // Not on a finished or put-away run's smaller card; a live card shows it even when narrow.
   const proof = r.phase !== "finished" && !r.away ? claimsSummary(t, r) : null;
   // A stalled run's Ask what's blocking is in its need box.
   const blocking = need ? null : blockingAction(view, t, r, f.att, `card-${r.key}`);
   const comments = addressRows(view, t, r, ctx, f, `card-${r.key}`);
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(8).p(12).pl(16).rounded(10).bg(t.surface)
-    .border(1).border_color(need ? t.blocked + "88" : t.border).cursor_pointer()
+    .border(1).border_color(t.border).cursor_pointer()
     .hover((s) => s.bg(t.raised)).on_click(focus)
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
     .child(cardHeader(view, t, r, f, runMeta(r, f)))
     .when(need, (el) => el.child(needBox(view, t, r, f, ctx, "card")))
+    .children([waitNote(t, r, f, `wait-card-${r.key}`)].filter(Boolean))
     .when(Boolean(facts), (el) => el.child(facts))
     .when(Boolean(r.progress), (el) => el.child(progressLine(t, r, f.att)))
     .children(cardNotes(t, r, f))
     .when(Boolean(blocking), (el) => el.child(h_flex().child(blocking)))
     .when(Boolean(comments), (el) => el.child(comments))
-    .when(Boolean(proof), (el) => el.child(h_flex().id(`proof-${r.key}`).flex_wrap().items_center().gap(6).px(2).text_size(11.5).when(Boolean(proof.tip), (e) => e.tooltip(proof.tip))
-      .child(div().flex_none().text_size(11).font_semibold().text_color(t.dim).child("Claims"))
+    .when(Boolean(proof), (el) => el.child(h_flex().id(`proof-${r.key}`).flex_wrap().items_center().gap(6).px(2).text_size(TYPE.meta).when(Boolean(proof.tip), (e) => e.tooltip(proof.tip))
+      .child(div().flex_none().text_size(TYPE.meta).font_semibold().text_color(t.dim).child("Claims"))
       .child(h_flex().flex_wrap().items_center().children(joined(t, proof.parts)))))
     .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts, f.stages)))
     .when(links.length > 0, (el) => el.child(h_flex().flex_wrap().gap(6).children(links)))
-    .when(prs.length > 0 && !r.away, (el) => el.child(flowToggle(t, r, `card-${r.key}`)))
-    .when(prs.length === 0 && related.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(11).text_color(t.dim).child("No pull request yet")))
+    .when(prs.length > 0 && !r.away && !(need && showsFlow(needItemsOf(r, ctx, f.att))), (el) => el.child(flowToggle(t, r, `card-${r.key}`)))
+    .when(prs.length === 0 && related.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(TYPE.meta).text_color(t.dim).child("No pull request yet")))
     .child(actionRow(view, t, r, orch, closed, counts));
 }
 
@@ -848,9 +1021,10 @@ function joined(t, items) {
 // The facts line, the one prominent line under the header: when the run started and how
 // long it has gone, then each of its PRs (a link) with its checks, a one-way door, and its review.
 // "Started today 09:28 · finished after 8h 7m · PR #42 open · checks ✓". Null when it has none of them.
-function factsLine(t, r, prs, size = 13, att = null) {
+// `parts: "live"` (the pane) leaves out the start time and the PRs, which its header and the strip say.
+function factsLine(t, r, prs, size = 13, att = null, { parts = "all" } = {}) {
   const items = [];
-  if (r.started) items.push({ el: div().id(`age-${r.key}`).flex_none().tooltip(startedTip(r.started)).child(runAgeText(r)) });
+  if (r.started && parts !== "live") items.push({ el: div().id(`age-${r.key}`).flex_none().tooltip(startedTip(r.started)).child(runAgeText(r)) });
   // The current step and its age, as the Crew shows it, while the run is not finished; the
   // progress line carries its own age (progressLine). A stalled run says so, in amber.
   const live = att && r.phase !== "finished" && !r.away;
@@ -858,7 +1032,7 @@ function factsLine(t, r, prs, size = 13, att = null) {
   if (live && att.step?.text && att.step.text !== r.progress) items.push({ text: stepText(att.step), color: t.muted });
   // Each PR (a link) with its checks, a one-way door and its review; PRs that all say the same
   // as one ("2 PRs open · checks ✓ · Approved by anna"), each one's title and link in its hover.
-  for (const x of prFacts(prs, { away: Boolean(r.away), oneWay })) {
+  for (const x of parts === "live" ? [] : prFacts(prs, { away: Boolean(r.away), oneWay })) {
     if (x.kind === "pr") {
       const p = x.pr;
       items.push({ el: div().id(`fact-pr-${r.key}-${x.i}`).flex_none().cursor_pointer().hover((s) => s.text_color(t.accent)).tooltip(`${p.title ?? ""}\n${p.url}`.trim())
@@ -871,9 +1045,72 @@ function factsLine(t, r, prs, size = 13, att = null) {
   return h_flex().flex_wrap().items_center().text_size(size).font_medium().text_color(t.foreground).children(joined(t, items));
 }
 
+// The run's final AI review against its branch, as plain facts: the one read the path strip and the
+// need box's caveat share (claims.js reviewedState).
+const reviewedOf = (r) => reviewedState(r.proof?.md, r.reviewedGap);
+
+// The strip's input from what runFacts has: plain data for mergepath.js.
+export function pathInput(r, f, stages) {
+  const rows = hasClaims(r) ? claimRowsOf(r, stages) : null;
+  const c = rows ? claimCounts(rows) : null;
+  const md = r.proof?.md;
+  const reviewed = reviewedOf(r);
+  const state = md?.checks?.state;
+  return {
+    phase: r.phase, away: r.away, counts: f.counts, blockedTasks: r.tasks.filter((k) => taskTone(k.state) === "blocked").length,
+    claims: c ? { total: c.total, proven: c.proven, accepted: c.accepted, failed: c.fail, look: c.look } : null,
+    checks: state === "green" || state === "red" ? state : state ? "pending" : null,
+    reviewed, flow: flowState(r, reviewFlows()).flow, prs: f.prs.length,
+    allMerged: f.prs.length > 0 && f.prs.every((p) => p.state === "MERGED"),
+    next: f.att?.next ? { label: f.att.next.label, who: f.att.next.who ?? [] } : null,
+    held: Boolean(f.att?.held), ready: Boolean(f.att?.ready), ci: ciState(f.prs).state,
+    waitingOn: f.att?.waitingOn?.text ?? null,
+  };
+}
+
+// The path-to-merge strip under the pane's header: each stage with its value and mark, a click on
+// one that has a section unfolds it ("Built 3/3 ✓ › Proven 6/6 ✓ › AI review ⚠ 2 behind › Peer review ● you › Merge").
+function pathStrip(view, t, r, f, stages) {
+  // A stage opens the Claims section, which an old run without claims does not have, or the Tasks
+  // section, which only has something to open while it is a single line.
+  const tasksFold = paneSections({ finished: isFinished(r) }).some((x) => x.key === "tasks" && x.compact) && (f.counts.planned > 0 || r.tasks.length > 0);
+  const stops = mergePath(pathInput(r, f, stages)).map((s) => (s.fold === "claims" && !hasClaims(r) || s.fold === "tasks" && !tasksFold ? { ...s, fold: null } : s));
+  const open = (fold) => { view.folds ??= new Map(); if (fold === "claims") view.folds.set(`pf-${r.key}`, true); if (fold === "tasks") view.folds.set(`tk-${r.key}`, true); };
+  const part = (s) => {
+    const ask = s.value === "ask" || s.value === "read the proof";
+    const label = div().flex_none().child(s.label);
+    const value = (c) => (s.value ? div().flex_none().text_color(c).child(s.value) : null);
+    const tone = {
+      done: [t.muted, t.muted], current: [t.foreground, t.muted], you: [t.foreground, t.muted], look: [t.foreground, AMBER(t)],
+      fail: [t.foreground, t.blocked], todo: [t.dim, t.dim],
+    }[s.state];
+    // Each piece sets its own colour, so a clickable stage's hover goes on every piece (a hover on the
+    // stage alone would be overridden by them).
+    const hov = (el, n) => (s.fold ? el.id(`path-${s.key}-${r.key}-${n}`).hover((x) => x.text_color(t.accent)) : el);
+    const mark = (c, text, bold = false) => div().flex_none().text_color(c).when(bold, (e) => e.font_semibold()).child(text);
+    const kids = [label.text_color(tone[0]).when(s.state === "current", (e) => e.font_medium()).when(s.state === "you", (e) => e.font_semibold())];
+    if (s.state === "done") kids.push(s.value ? value(t.muted) : null, mark(PASS(t), "✓"));
+    else if (s.state === "you") kids.push(ask ? null : value(t.muted), mark(t.blocked, ask ? `● you · ${s.value}` : "● you", true));
+    else if (s.state === "look") kids.push(mark(AMBER(t), s.value ? `⚠ ${s.value}` : "⚠"));
+    else if (s.state === "fail") kids.push(mark(t.blocked, s.value ? `✗ ${s.value}` : "✗"));
+    else if (s.value) kids.push(value(tone[1]));
+    return h_flex().id(`path-${s.key}-${r.key}`).flex_none().gap(4).items_center().tooltip(s.tip)
+      .when(Boolean(s.fold), (e) => e.cursor_pointer().on_click((_e, cx) => { cx.stop_propagation(); open(s.fold); cx.notify(); }))
+      .children(kids.map((k, n) => (k ? hov(k, n) : null)).filter(Boolean));
+  };
+  return h_flex().flex_wrap().items_center().gap_y(2).text_size(TYPE.body)
+    .children(stops.flatMap((s, i) => [part(s), i < stops.length - 1 ? div().flex_none().px(6).text_color(t.dim).child("›") : null]).filter(Boolean));
+}
+
+// A red line under the strip while any PR is a one-way door: the warning the facts line used to carry.
+function oneWayLine(t, r, prs) {
+  if (!prs.some((p) => p.danger && oneWay(p.danger))) return null;
+  return div().id(`oneway-${r.key}`).text_size(TYPE.body).font_semibold().text_color(t.blocked).child("one-way door");
+}
+
 // The orchestrator's own progress note: under the facts, smaller and muted, since it is in
 // its words and can lag behind. While it is the run's current step, with that step's age.
-const progressLine = (t, r, att = null) => div().text_size(11.5).text_color(t.muted)
+const progressLine = (t, r, att = null) => div().text_size(TYPE.meta).text_color(t.muted)
   .child(att?.step?.text === r.progress && r.phase !== "finished" && !r.away ? stepText(att.step) : r.progress);
 
 // The claims verdict (claims.js claimsVerdict) as coloured parts, for the card and the Claims
@@ -906,13 +1143,26 @@ const claimRowsOf = (r, stages = null) => withAsked(withSaid(claimRows(r.proof, 
 
 // ---- one run on its own, as the pane pinned beside its orchestrator ----
 
-// Every top-level section of the pane is one lightly raised block, so they read as separate things.
-// The rows inside (claims, PRs) are a shade brighter (raised + "88") and stand out from it.
-const boxed = (t, el) => el.p(8).rounded(8).bg(t.raised + "33");
+// A section of the pane is its title line and its rows, with no box of its own: the pane's gap
+// separates it from the next. The title line starts at the card's content edge (A); the rows under
+// it are indented one step (B, 18 px further), so the pane has two left edges and two surface levels
+// (the card, and its rows in t.raised).
+const ROW_INDENT = 18;
+const rowsAt = (rows) => v_flex().gap(4).pl(ROW_INDENT).children(rows.filter(Boolean));
+const stack = (head, rows = []) => v_flex().gap(4).child(head).when(rows.some(Boolean), (el) => el.child(rowsAt(rows)));
 
-const section = (t, title, ...rest) => boxed(t, v_flex().gap(4))
-  .child(h_flex().gap(6).px(2).items_center().text_size(11).font_semibold().text_color(t.dim).child(title)
-    .children(rest.filter(Boolean).map((x) => div().font_normal().child(x))));
+// The one title style: the section's name in meta size, semibold, muted; what follows ` · `
+// (a count, a summary) in dim, regular weight. `parts` are texts or ready elements; a part with
+// a colour (a verdict) keeps it.
+const titleLine = (t, title, parts = [], tail = null) => h_flex().items_center().min_w(0).text_size(TYPE.meta).text_color(t.dim)
+  .child(h_flex().flex_1().min_w(0).flex_wrap().items_center()
+    .children(joined(t, [{ el: div().flex_none().font_semibold().text_color(t.muted).child(title) }, ...parts.filter(Boolean)])))
+  .when(Boolean(tail), (el) => el.child(tail));
+// A static section: "Pull requests · 1" splits at its first " · " so the count is dim; `rest` follows (a toggle).
+const section = (t, title, rows = [], ...rest) => {
+  const [name, ...count] = String(title).split(" · ");
+  return stack(titleLine(t, name, [count.length ? { text: count.join(" · ") } : null, ...rest.filter(Boolean).map((x) => (typeof x === "string" ? { text: x } : { el: x }))]), rows);
+};
 
 // Folds with a header (Claims, Decisions, Tokens) look the same: a dim chevron, the section's
 // name in semibold, then a one-line summary in normal text; colour only on status words. Open state per key in
@@ -922,12 +1172,19 @@ export const isOpen = (view, key) => Boolean(view.folds?.get(key));
 // with no small grey label above.
 function foldLine(view, t, key, tip, items, onOpen = null, title = null) {
   const open = isOpen(view, key);
-  return h_flex().id(`fold-${key}`).gap(6).px(2).items_center().min_w(0).rounded(4).cursor_pointer().text_size(11.5).text_color(t.foreground)
+  // Colour only on status words: a neutral part is dim and regular, as the title style says.
+  const parts = items.map((x) => (x && !x.el && !x.color ? { ...x, bold: false } : x));
+  // "Agents · 3": the count after the name is a summary like the rest.
+  const [name, ...count] = String(title ?? "").split(" · ");
+  if (count.length) parts.unshift({ text: count.join(" · ") });
+  return h_flex().id(`fold-${key}`).items_center().min_w(0).rounded(4).cursor_pointer()
     .hover((s) => s.bg(t.hover)).tooltip(tip)
     .on_click((_e, cx) => { cx.stop_propagation(); view.folds ??= new Map(); view.folds.set(key, !open); if (!open) onOpen?.(); cx.notify(); })
-    .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
-    .child(h_flex().flex_1().min_w(0).flex_wrap().items_center().children(joined(t, [title && { el: div().flex_none().font_semibold().text_color(t.foreground).child(title) }, ...items])));
+    .child(titleLine(t, name, parts).flex_1())
+    .child(chevron(t, open));
 }
+// The fold's chevron, at the right end of its title line, so every title starts at the same x.
+const chevron = (t, open) => svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().ml(6).text_color(t.dim);
 
 // A PR as a row with room to spare: its whole title, then repo, checks and review.
 // `away`: the run is parked or closed, so failing checks are dim, not red (prfacts.js prFacts).
@@ -942,13 +1199,13 @@ function prDetail(t, pr, i, related = false, away = false) {
     .hover((s) => s.bg(t.hover)).tooltip(pr.url).on_click((_e, cx) => { cx.stop_propagation(); openUrl(pr.url); })
     .child(svg("mods/harbormaster/pr.svg").size(14).flex_none().mt(1).text_color(t[tone] ?? t.dim))
     .child(v_flex().flex_1().min_w(0).gap(3)
-      .child(div().text_size(12.5).text_color(t.foreground).child(pr.title ?? pr.url))
-      .child(h_flex().flex_wrap().gap_x(10).text_size(11).text_color(t.dim)
+      .child(div().text_size(TYPE.body).text_color(t.foreground).child(pr.title ?? pr.url))
+      .child(h_flex().flex_wrap().gap_x(10).text_size(TYPE.meta).text_color(t.dim)
         .child(div().child(`${pr.repo ?? shortRef(pr.url)}${pr.number ? ` #${pr.number}` : ""}`))
         .when(Boolean(checkText), (el) => el.child(div().text_color(checkColor).child(checkText)))
         .when(Boolean(review), (el) => el.child(div().text_color(review[1] === "done" ? PASS(t) : t[review[1]]).child(review[0]))))
       // Merge danger lives here only, in full: red for a one-way door.
-      .when(Boolean(pr.danger), (el) => el.child(div().id(`danger-${pr.url}`).text_size(11).text_color(oneWay(pr.danger) ? t.blocked : t.muted)
+      .when(Boolean(pr.danger), (el) => el.child(div().id(`danger-${pr.url}`).text_size(TYPE.meta).text_color(oneWay(pr.danger) ? t.blocked : t.muted)
         .child(`Merge danger: ${pr.danger}`))))
     .when(Boolean(state), (el) => el.child(pill(t, state, tone)));
 }
@@ -965,7 +1222,7 @@ const PILL_COLOR = { pass: PASS, fail: (t) => t.blocked, amber: AMBER, dim: () =
 // ({type, autonomy} from its terminal's labels): its tags then only say what they are.
 // `short`, for the narrow Crew block, writes a pending request "T3…" instead of "T3 requested…".
 // The type tag on its own, apart from the level tags.
-export const runTypeTag = (t, r, id) => (r.type ? typeTag(t, r.type, `type-${id}`) : null);
+export const runTypeTag = (t, r, id) => (r.type ? typeTag(t, r.type, `type-${id}`, T(10, "meta")) : null);
 export function levelTags(view, t, r, id, short = false) {
   return [
     levelTag(view, t, r, "autonomy", `auto-${id}`, short),
@@ -986,7 +1243,7 @@ function levelTag(view, t, r, kind, id, short = false) {
   // after 15 s (inbox.js askedLevel).
   const pending = askedLevel(r, kind, cur);
   // A request waits on the orchestrator, not on you: no colour, its "requested…" says it.
-  const tag = div().flex_none().text_size(10).font_semibold().px(5).rounded(4).bg(t.raised)
+  const tag = div().flex_none().text_size(T(10, "meta")).font_semibold().px(5).rounded(4).bg(t.raised)
     .text_color(pending !== null ? t.foreground : kind === "autonomy" && cur === "L0" ? t.dim : t.muted)
     .child(pending !== null ? `${label(pending)}${short ? "…" : " requested…"}` : label(cur));
   const canAsk = Boolean(r.dir && r.localTerminal);
@@ -1020,8 +1277,8 @@ function levelTag(view, t, r, kind, id, short = false) {
 // A path under the run as a link that opens on this machine; for a run on another machine
 // it is plain text, since nothing here can open a file there.
 function pathLink(t, r, id, rel, label) {
-  if (r.machine) return div().text_size(11).text_color(t.dim).tooltip(`On ${r.machine}`).child(`${label} (${r.dir}/${rel})`);
-  return h_flex().id(id).gap(4).px(6).h(20).items_center().rounded(5).bg(t.raised).text_size(11).text_color(t.muted).cursor_pointer()
+  if (r.machine) return div().text_size(TYPE.meta).text_color(t.dim).tooltip(`On ${r.machine}`).child(`${label} (${r.dir}/${rel})`);
+  return h_flex().id(id).gap(4).px(6).h(20).items_center().rounded(5).bg(t.raised).text_size(TYPE.meta).text_color(t.muted).cursor_pointer()
     .hover((s) => s.text_color(t.foreground)).tooltip(`Open ${r.dir}/${rel}`)
     .on_click((_e, cx) => { cx.stop_propagation(); openUrl(`${r.dir}/${rel}`); })
     .child(div().child("▤")).child(label);
@@ -1042,13 +1299,15 @@ function decisionsSection(view, t, r) {
   const you = r.decided.filter((d) => d.by === "user").length, orch = r.decided.length - you;
   const counts = [orch > 0 && `${orch} by the orchestrator`, you > 0 && `${you} from you`].filter(Boolean).join(", ");
   const title = (d) => `${d.by === "user" ? "You · " : ""}${d.topic ? `${d.topic}: ${d.decision}` : d.decision}`;
-  const when = (d) => div().flex_none().w(34).text_color(t.dim).child(d.at ? ago(d.at).replace(" ago", "") : "—");
+  // A narrow age column starting at edge B ("12h" plus 10 px); the new-since-last-look dot hangs in the gap before it.
+  const when = (d, isNew) => div().relative().flex_none().w(36).pr(10).text_color(t.dim).child(d.at ? ago(d.at).replace(" ago", "") : "—")
+    .when(isNew, (el) => el.child(div().absolute().left(-9).top(5).w(6).h(6).rounded(3).bg(t.accent).tooltip("New since you last looked")));
   // One line each, cut to fit; a click shows its whole title and its reason under it.
   // Every row clicks, since any title can be cut, reason or not. Keyed on the line itself, not
   // its place: a new decision moves every row down one.
   const line = (d, i) => {
     const id = `${r.key}-${d.raw}`, more = view.decRows?.has(id);
-    return h_flex().id(`decl-${r.key}-${i}`).gap(8).items_start().px(2).rounded(4).text_size(11.5)
+    return h_flex().id(`decl-${r.key}-${i}`).items_start().rounded(4).text_size(TYPE.body)
       .cursor_pointer().hover((st) => st.bg(t.hover)).tooltip(more ? "Show one line" : d.why ? "Show all of it and the reason" : "Show all of it")
       .on_click((_e, cx) => {
         cx.stop_propagation();
@@ -1056,30 +1315,26 @@ function decisionsSection(view, t, r) {
         if (more) view.decRows.delete(id); else view.decRows.add(id);
         cx.notify();
       })
-      .child(fresh.has(d) ? div().flex_none().w(6).h(6).mt(5).rounded(3).bg(t.accent).tooltip("New since you last looked") : div().flex_none().w(6))
-      .child(when(d))
+      .child(when(d, fresh.has(d)))
       .child(v_flex().flex_1().min_w(0)
         .child(div().when(!more, (el) => el.truncate()).text_color(t.foreground).when(fresh.has(d), (el) => el.font_semibold()).child(title(d)))
-        .when(Boolean(more && d.why), (el) => el.child(div().text_size(11).text_color(t.dim).child(d.why))));
+        .when(Boolean(more && d.why), (el) => el.child(div().text_size(TYPE.meta).text_color(t.dim).child(d.why))));
   };
-  return boxed(t, v_flex().gap(4))
-    .child(h_flex().id(`fold-${key}`).gap(6).px(2).items_center().min_w(0).rounded(4).cursor_pointer().text_size(11)
-      .hover((st) => st.bg(t.hover)).tooltip(open ? "Fold the decisions" : "Show every decision")
-      .on_click((_e, cx) => {
-        cx.stop_propagation();
-        view.folds ??= new Map();
-        view.folds.set(key, !open);
-        view.decWas ??= new Map();
-        if (open) view.decWas.delete(key);
-        else { view.decWas.set(key, seen); markDecisionsSeen(r); }
-        cx.notify();
-      })
-      .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
-      .child(div().flex_none().font_semibold().text_color(t.foreground).child("Decisions"))
-      .child(div().flex_none().text_color(t.muted).child(`· ${r.decided.length}`))
-      .when(Boolean(since), (el) => el.child(div().flex_none().text_color(t.accent).font_semibold().child(`· ${since}`)))
-      .child(div().min_w(0).truncate().text_color(t.muted).child(counts ? `· ${counts}` : "")))
-    .when(open, (el) => el.children(r.decided.map(line)));
+  const head = h_flex().id(`fold-${key}`).items_center().min_w(0).rounded(4).cursor_pointer()
+    .hover((st) => st.bg(t.hover)).tooltip(open ? "Fold the decisions" : "Show every decision")
+    .on_click((_e, cx) => {
+      cx.stop_propagation();
+      view.folds ??= new Map();
+      view.folds.set(key, !open);
+      view.decWas ??= new Map();
+      if (open) view.decWas.delete(key);
+      else { view.decWas.set(key, seen); markDecisionsSeen(r); }
+      cx.notify();
+    })
+    .child(titleLine(t, "Decisions", [{ text: String(r.decided.length) }, since && { text: since, color: t.accent, bold: true }, counts && { text: counts }]).flex_1())
+    .child(chevron(t, open));
+  // A finished run shows the newest decisions the orchestrator made itself above the fold: the ones to audit.
+  return stack(head, open ? r.decided.map(line) : isFinished(r) ? auditDecisions(r.decided).map((d) => line(d, r.decided.indexOf(d))) : []);
 }
 
 // "Tokens": what the run has used, across its orchestrator and every agent it ran. One line:
@@ -1095,7 +1350,7 @@ function tokensSection(view, t, r) {
   const tip = (x) => `fresh ${n(fresh(x))} (in ${n(x.input)}, out ${n(x.output)}, cache write ${n(x.cacheWrite)}) · cache read ${n(x.cacheRead)}`;
   const pct = (v) => `${((100 * v) / total).toFixed(2)}%`;
   const key = `tok-${r.key}`, open = isOpen(view, key);
-  const row = (a) => h_flex().id(`tok-${r.key}-${a.name}`).gap(8).items_center().px(2).h(18).text_size(11.5)
+  const row = (a) => h_flex().id(`tok-${r.key}-${a.name}`).gap(8).items_center().h(18).text_size(TYPE.meta)
     .tooltip(a.split ? `${a.name}: ${tip(a)}` : `${a.name}: ${n(a.total)} tokens`)
     .child(div().flex_none().w(96).truncate().text_color(a.name === "orchestrator" ? t.foreground : t.muted).child(a.name))
     .child(div().flex_1().min_w(0).h(5).rounded(3).bg(t.raised).overflow_hidden().flex()
@@ -1107,19 +1362,21 @@ function tokensSection(view, t, r) {
   const split = input + output + cacheWrite + cacheRead > 0;
   const items = !split ? [{ text: `total ${tokenText(total)}`, bold: true }] : [
     { text: `fresh ${tokenText(input + output + cacheWrite)}`, color: FRESH },
-    { text: `of it out ${tokenText(output)}`, color: OUT },
+    { text: `output ${tokenText(output)}`, color: OUT },
     { text: `cache read ${tokenText(cacheRead)}`, color: t.muted },
     { text: `total ${tokenText(total)}`, bold: true },
   ];
-  const head = [updated && { el: div().flex_none().text_color(t.dim).child(`counted ${ago(updated)}`) }];
-  return boxed(t, v_flex().gap(4))
-    .child(byAgent.length > 0 ? foldLine(view, t, key, `${tokenDetail(r.tokens)}\n${open ? "Hide" : "Show"} each agent's tokens`, [...items, ...head], null, "Tokens")
-      : h_flex().id(key).px(2).flex_wrap().items_center().text_size(11.5).text_color(t.foreground).tooltip(tokenDetail(r.tokens))
-        .children(joined(t, [{ text: "Tokens", bold: true }, ...items, ...head])))
-    .when(Boolean(r.budget), (el) => el.child(div().id(`budget-${r.key}`).px(2).text_size(11).text_color(overBudget(r) ? t.blocked : t.dim)
-      .tooltip("A soft budget: crossing it asks you whether to continue, compact or stop; nothing stops by itself")
-      .child(`${overBudget(r) ? "Over" : "Under"} its soft budget of ${tokenText(r.budget)} tokens`)))
-    .when(open, (el) => el.children(byAgent.map(row)));
+  // The fold line is one dim line, total then fresh; the coloured breakdown (and when it was counted) is in the section.
+  const line = [{ text: tokenText(total) }, split && { text: `${tokenText(input + output + cacheWrite)} fresh` }];
+  const breakdown = h_flex().flex_wrap().items_center().text_size(TYPE.meta).text_color(t.dim)
+    .children(joined(t, [...items, updated && { el: div().flex_none().text_color(t.dim).child(`counted ${ago(updated)}`) }]));
+  const budget = r.budget && div().id(`budget-${r.key}`).text_size(TYPE.meta).text_color(overBudget(r) ? t.blocked : t.dim)
+    .tooltip("A soft budget: crossing it asks you whether to continue, compact or stop; nothing stops by itself")
+    .child(`${overBudget(r) ? "Over" : "Under"} its soft budget of ${tokenText(r.budget)} tokens`);
+  const head = byAgent.length > 0 ? foldLine(view, t, key, `${tokenDetail(r.tokens)}\n${open ? "Hide" : "Show"} each agent's tokens`, line, null, "Tokens")
+    : div().id(key).tooltip(tokenDetail(r.tokens)).child(titleLine(t, "Tokens", line));
+  // Without per-agent bars there is nothing to unfold: the breakdown is shown.
+  return stack(head, [byAgent.length === 0 || open ? breakdown : null, budget, ...(open ? byAgent.map(row) : [])]);
 }
 
 // The Claims section: what the run lets you do, each claim with the evidence that shows it.
@@ -1135,18 +1392,15 @@ function tokensSection(view, t, r) {
 function claimsSection(view, t, r, stages) {
   const { md } = r.proof;
   const checks = checksLine(md);
-  const checksRow = checks && div().id(`pf-checks-${r.key}`).px(2).truncate().text_size(11.5)
+  const checksRow = checks && div().id(`pf-checks-${r.key}`).truncate().text_size(TYPE.meta)
     .text_color(checks.tone === "pass" ? PASS(t) : checks.tone === "fail" ? t.blocked : t.dim).tooltip(checks.tip).child(checks.text);
   // Quiet like the checks line; amber once commits came after the last review.
   const rev = reviewedLine(md, r.reviewedGap, { finished: isFinished(r), claims: hasClaims(r) });
-  const reviewRow = rev && div().id(`pf-reviewed-${r.key}`).px(2).truncate().text_size(11.5)
+  const reviewRow = rev && div().id(`pf-reviewed-${r.key}`).truncate().text_size(TYPE.meta)
     .text_color(rev.tone === "amber" ? AMBER(t) : t.dim).tooltip(rev.tip).child(rev.text);
   if (!hasClaims(r)) {
     // No fold, but the same header line as with claims: "Claims · <checks>".
-    return boxed(t, v_flex().gap(4)).child(h_flex().gap(6).px(2).items_center().min_w(0).text_size(11.5).text_color(t.foreground)
-      .child(div().flex_none().font_semibold().child("Claims"))
-      .child(div().flex_none().text_color(t.dim).child("·"))
-      .child(checksRow ?? div().text_color(t.dim).child("No claims: planned before claims")));
+    return titleLine(t, "Claims", [{ el: checksRow ?? div().text_color(t.dim).child("No claims: planned before claims") }]);
   }
   const s = claimsSummary(t, r, stages);
   const finished = isFinished(r);
@@ -1156,7 +1410,7 @@ function claimsSection(view, t, r, stages) {
     const more = view.proofRows?.has(id);
     const p = claimPill(k, finished);
     const failing = k.tests.filter((x) => !x.ok).length;
-    const tests = k.tests.length > 0 && div().id(`pf-tests-${id}`).flex_none().text_size(11)
+    const tests = k.tests.length > 0 && div().id(`pf-tests-${id}`).flex_none().text_size(TYPE.meta)
       // Red only when the pill doesn't already say fail.
       .text_color(failing && k.state !== "fail" ? t.blocked : t.dim).tooltip(k.tests.map((x) => `${x.ok ? "✓" : "✗"} ${x.name}`).join("\n"))
       .child(failing ? `${failing} of ${plural(k.tests.length, "test")} ✗` : `${plural(k.tests.length, "test")} ✓`);
@@ -1170,28 +1424,24 @@ function claimsSection(view, t, r, stages) {
         cx.notify();
       })
       .child(h_flex().gap(8).items_center()
-        .child(div().flex_none().w(22).text_size(11).font_semibold().text_color(t.dim).child(k.id))
-        .child(div().flex_1().min_w(0).when(!more, (e) => e.truncate()).text_size(12).text_color(t.foreground).child(k.name))
+        .child(div().flex_none().w(22).text_size(TYPE.meta).font_semibold().text_color(t.dim).child(k.id))
+        .child(div().flex_1().min_w(0).when(!more, (e) => e.truncate()).text_size(TYPE.body).text_color(t.foreground).child(k.name))
         .when(k.files.length > 0, (e) => e.child(thumbs(view, t, r, k.id, k.files)))
         .when(Boolean(tests), (e) => e.child(tests))
-        .when(k.asked && !more, (e) => e.child(div().flex_none().text_size(10.5).text_color(t.muted).child("asked…")))
+        .when(k.asked && !more, (e) => e.child(div().flex_none().text_size(TYPE.meta).text_color(t.muted).child("asked…")))
         .child(pill(t, p.text, PILL_COLOR[p.tone](t))))
       .when(more, (el) => el
-        .when(Boolean(k.why), (e) => e.child(div().pl(30).text_size(11.5).text_color(t.muted).child(k.why)))
-        .when(Boolean(where), (e) => e.child(div().pl(30).text_size(11).text_color(t.dim).child(where)))
-        .when(Boolean(k.accepted), (e) => e.child(div().pl(30).text_size(11).text_color(t.dim)
+        .when(Boolean(k.why), (e) => e.child(div().pl(30).text_size(TYPE.meta).text_color(t.muted).child(k.why)))
+        .when(Boolean(where), (e) => e.child(div().pl(30).text_size(TYPE.meta).text_color(t.dim).child(where)))
+        .when(Boolean(k.accepted), (e) => e.child(div().pl(30).text_size(TYPE.meta).text_color(t.dim)
           .child(`You accepted it as it is${k.accepted.at ? ` ${ago(Date.parse(k.accepted.at))}` : ""}`)))
         .when(actions.length > 0, (e) => e.child(h_flex().gap(6).pl(30).pt(2).items_center().children(actions.map((a) => proofAction(view, t, r, k, a))))));
   };
   const shown = open ? s.rows : s.rows.filter(worthALook);
-  return boxed(t, v_flex().gap(4))
-    .child(foldLine(view, t, key, `${s.tip ? `${s.tip}\n` : ""}${open ? "Show only the claims worth a look" : `Show every claim (${s.rows.length})`}`, s.parts,
-      // Unfolding the Claims section is reading it.
-      () => markProofRead(r), "Claims"))
-    .children(shown.map(row))
-    .when(Boolean(checksRow), (el) => el.child(checksRow))
-    .when(Boolean(reviewRow), (el) => el.child(reviewRow))
-    .when(open && Boolean(md), (el) => el.child(h_flex().px(2).pt(2).child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md"))));
+  return stack(foldLine(view, t, key, `${s.tip ? `${s.tip}\n` : ""}${open ? "Show only the claims worth a look" : `Show every claim (${s.rows.length})`}`, s.parts,
+    // Unfolding the Claims section is reading it.
+    () => markProofRead(r), "Claims"),
+  [...shown.map(row), checksRow, reviewRow, open && md ? h_flex().pt(2).child(pathLink(t, r, `pf-md-${r.key}`, "proof.md", "proof.md")) : null]);
 }
 
 // A claim row's button: Accept (Harbormaster records it in proof-accepted.json itself, so it works
@@ -1205,7 +1455,7 @@ const PROOF_ACTION = {
 };
 // `button` draws it (actionButton's arguments): the sidebar's box passes a quieter one.
 export function proofAction(view, t, r, k, a, button = actionButton) {
-  if (a === "asked") return div().id(`pfx-${r.key}-${k.id}`).text_size(11).text_color(t.muted).tooltip("Waiting for the orchestrator to prove it").child("asked…");
+  if (a === "asked") return div().id(`pfx-${r.key}-${k.id}`).text_size(T(11, "meta")).text_color(t.muted).tooltip("Waiting for the orchestrator to prove it").child("asked…");
   const line = claimResultLine(k);
   const { label, tip } = PROOF_ACTION[a];
   return button(t, `pf${a}-${r.key}-${k.id}`, label, tip, (cx) => {
@@ -1233,7 +1483,7 @@ function issueRow(t, url) {
   return h_flex().id(`isd-${url}`).gap(8).items_center().h(28).px(8).rounded(7).bg(t.raised + "88").cursor_pointer()
     .hover((s) => s.bg(t.hover)).tooltip(url).on_click((_e, cx) => { cx.stop_propagation(); openUrl(url); })
     .child(div().flex_none().w(14).text_color(t.muted).child("◎"))
-    .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).child(shortRef(url)));
+    .child(div().flex_1().min_w(0).truncate().text_size(TYPE.body).text_color(t.foreground).child(shortRef(url)));
 }
 
 // The connectors before a nested worker, drawn as lines (as Herdr's Agents list does) so they join
@@ -1261,8 +1511,8 @@ function workerRow(t, w, ctx, work, line) {
     .tooltip(work?.task.about ? `${w.name ?? w.address}: ${work.task.about}` : "Show this agent")
     .children(treeLines(t, line))
     .child(programIcon(programOf(w, ctx), 14, nested ? t.muted : t.foreground))
-    .child(div().flex_none().text_size(12).text_color(nested ? t.muted : t.foreground).child(w.name ?? w.address))
-    .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim)
+    .child(div().flex_none().text_size(TYPE.body).text_color(nested ? t.muted : t.foreground).child(w.name ?? w.address))
+    .child(div().flex_1().min_w(0).truncate().text_size(TYPE.meta).text_color(t.dim)
       .child(work ? [work.task.id, work.task.name].filter(Boolean).join(" ") : ""))
     .when(Boolean(color), (el) => el.child(div().flex_none().text_size(11).text_color(color).child(STAGE[work.stage].label)))
     .map(withUsage(t, `wk-${w.address}`, liveUsage(w.address), "This agent and its commands"))
@@ -1272,43 +1522,62 @@ function workerRow(t, w, ctx, work, line) {
 // The run's card laid out for a pane of its own: the same header, need, progress and
 // buttons, then its PRs with their whole titles, issues and related PRs one per row,
 // the tasks as a bar, counted by stage, and the agents working on it.
-function runDetail(view, t, r, ctx) {
+const runDetail = (view, t, r, ctx) => drawnInPane(() => drawRunDetail(view, t, r, ctx));
+function drawRunDetail(view, t, r, ctx) {
   const f = runFacts(r, ctx);
   const { orch, closed, need, counts, prs, related, workers, stages } = f;
   // Each agent's task and that task's stage, by address.
   const workOf = new Map(stages.flatMap(({ agents, stage }, i) => agents.map((a) => [a.agent.address, { task: r.tasks[i], stage }])));
-  const facts = factsLine(t, r, prs, 13, f.att);
+  const facts = factsLine(t, r, prs, TYPE.body, f.att, { parts: "live" });
+  const strip = pathStrip(view, t, r, f, stages);
+  const door = oneWayLine(t, r, prs);
   const notes = cardNotes(t, r, f, false);
   const blocking = need ? null : blockingAction(view, t, r, f.att, `pane-${r.key}`);
   const comments = addressRows(view, t, r, ctx, f, `pane-${r.key}`);
-  // Most important first: who and what, whether it needs you, when and its PR, then the PR
-  // itself, proof, tasks, decisions and agents; tokens last, since they are about cost.
+  // The need box carries the self/peer choice where it applies, so the section header does not.
+  const flowInBox = need && showsFlow(needItemsOf(r, ctx, f.att));
+  // Each section by key, built only when it has something to show; paneorder.js says in which order
+  // and whether as one line (a finished run's Tasks and Agents).
+  const sections = new Map();
+  // Who reviews means nothing before there is a PR to review: the toggle comes with the first. With
+  // no PR it is one dim line, not a box.
+  sections.set("prs", () => (prs.length === 0
+    ? div().text_size(TYPE.meta).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet")
+    : section(t, `Pull requests · ${prs.length}`, prs.map((p, i) => prDetail(t, p, i, false, Boolean(r.away))), r.away || flowInBox ? null : flowToggle(t, r, `pane-${r.key}`))));
+  if (r.issues.length + related.length > 0) sections.set("issues", () => section(t, "Issues and related PRs", [
+    ...r.issues.map((url) => issueRow(t, url)), ...related.map((p, i) => prDetail(t, p, i, true, Boolean(r.away)))]));
+  if (hasClaims(r) || r.proof.md?.checks || r.proof.md?.reviewed?.length) sections.set("claims", () => claimsSection(view, t, r, stages));
+  if (counts.planned > 0 || r.tasks.length > 0) sections.set("tasks", (compact) => {
+    const key = `tk-${r.key}`;
+    const strip = div().pb(2).child(taskStrip(t, r, counts, stages, false));
+    if (!compact) return section(t, "Tasks", [strip], tasksText(r, counts, stages));
+    return stack(foldLine(view, t, key, `${isOpen(view, key) ? "Hide" : "Show"} the tasks`, [{ text: tasksText(r, counts, stages) }], null, "Tasks"),
+      isOpen(view, key) ? [strip] : []);
+  });
+  if (r.decided.length > 0) sections.set("decisions", () => decisionsSection(view, t, r));
+  if (workers.length > 0) sections.set("agents", (compact) => {
+    const key = `ag-${r.key}`, sum = agentsSummary(workers.map((w) => w.name ?? w.address));
+    const tree = () => workerTree(workers, r.terminal).map((line) => workerRow(t, line.w, ctx, workOf.get(line.w.address), line));
+    if (!compact) return section(t, sum.head, tree());
+    return stack(foldLine(view, t, key, `${isOpen(view, key) ? "Hide" : "Show"} the agents`, [{ text: sum.names }], null, sum.head),
+      isOpen(view, key) ? tree() : []);
+  });
+  if (r.tokens) sections.set("tokens", () => tokensSection(view, t, r));
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(14).p(14).pl(18).rounded(10).bg(t.surface)
-    .border(1).border_color(need ? t.blocked + "88" : t.border)
+    .border(1).border_color(t.border)
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
     .child(div().id(`head-${r.key}`).cursor_pointer().on_click(() => orch !== "gone" && focusAgent(r.terminal))
-      .child(cardHeader(view, t, r, f, runMeta(r, f))))
+      .child(cardHeader(view, t, r, f, runMeta(r, f), r.started ? runAgeText(r) : null)))
+    .child(v_flex().gap(4).child(strip).when(Boolean(door), (e) => e.child(door)))
     .when(need, (el) => el.child(needBox(view, t, r, f, ctx, "pane")))
+    .children([waitNote(t, r, f, `wait-pane-${r.key}`)].filter(Boolean))
     .when(Boolean(facts) || Boolean(r.progress) || notes.length > 0 || Boolean(blocking) || Boolean(comments), (el) => el.child(v_flex().gap(4)
       .when(Boolean(facts), (e) => e.child(facts))
       .when(Boolean(r.progress), (e) => e.child(progressLine(t, r, f.att)))
       .children(notes)
       .when(Boolean(blocking), (e) => e.child(h_flex().pt(2).child(blocking)))
       .when(Boolean(comments), (e) => e.child(div().pt(2).child(comments)))))
-    // Who reviews means nothing before there is a PR to review: the toggle comes with the first.
-    .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests", r.away || !prs.length ? null : flowToggle(t, r, `pane-${r.key}`))
-      .children(prs.map((p, i) => prDetail(t, p, i, false, Boolean(r.away))))
-      .when(prs.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet"))))
-    .when(r.issues.length + related.length > 0, (el) => el.child(section(t, "Issues and related PRs")
-      .children(r.issues.map((url) => issueRow(t, url)))
-      .children(related.map((p, i) => prDetail(t, p, i, true, Boolean(r.away))))))
-    .when(hasClaims(r) || Boolean(r.proof.md?.checks) || Boolean(r.proof.md?.reviewed?.length), (el) => el.child(claimsSection(view, t, r, stages)))
-    .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
-      .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
-    .when(r.decided.length > 0, (el) => el.child(decisionsSection(view, t, r)))
-    .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
-      .children(workerTree(workers, r.terminal).map((line) => workerRow(t, line.w, ctx, workOf.get(line.w.address), line)))))
-    .when(Boolean(r.tokens), (el) => el.child(tokensSection(view, t, r)))
+    .children(paneSections({ finished: isFinished(r) }).map(({ key, compact }) => sections.get(key)?.(compact)).filter(Boolean))
     .child(actionRow(view, t, r, orch, closed, counts));
 }
 
@@ -1324,7 +1593,7 @@ function pinButton(t, id, spot, { run = null, labelled = false } = {}) {
     : usable ? `Keep ${what}${run ? " (PRs, related PRs, issues, tasks)" : ""} open as a pane beside the ${who}`
     : `The ${who}'s terminal isn't on screen. Show its tab, then pin.`;
   return h_flex().id(id).flex_none().gap(5).items_center().px(labelled ? 8 : 4).h(22).rounded(5).tooltip(tip)
-    .text_size(11).text_color(spot.pinned ? t.accent : t.dim).opacity(usable ? 1 : 0.45)
+    .text_size(TYPE.meta).text_color(spot.pinned ? t.accent : t.dim).opacity(usable ? 1 : 0.45)
     .when(usable, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)))
     .on_click((_e, cx) => { cx.stop_propagation(); togglePin(spot, run ? runProps(run) : undefined); })
     .child(svg("mods/harbormaster/pin.svg").size(13))
@@ -1397,6 +1666,8 @@ export function submitReply(view, cx) {
   const text = view.reply.value().trim();
   // Ask for changes on a ready run (changesButton): its own message, not an answer.
   if (view.replying?.startsWith("changes:")) return sendChanges(view, view.replying.slice(8), text, cx);
+  // Waiting on someone… (waitOnButton): a mark in Harbormaster, not a message.
+  if (view.replying?.startsWith("wait:")) return markWaiting(view, view.replying.slice(5), text, cx);
   // A need box's Reply answers the same item (question.js replyId).
   const id = replyItem(view.replying);
   const it = decisionQueue(view.runs, view.decisions, facts()).find((x) => x.id === id);
@@ -1717,7 +1988,7 @@ export function runPane(view, t, p) {
     if (k) { view.proofRows ??= new Set(); view.proofRows.add(`${r.key}-${k.id}`); }
     view.proofShown = true;
   }
-  return v_flex().id("run-pane").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(13)
+  return v_flex().id("run-pane").size_full().min_h(0).bg(t.canvas ?? t.chrome).text_size(TYPE.body)
     .child(v_flex().id("run-pane-list").flex_1().min_h(0).p(10).gap(8).overflow_y_scrollbar()
       .child(r ? runDetail(view, t, r, ctx) : view.runs.length
         ? v_flex().p(12).gap(8).items_start().text_size(12).text_color(t.dim)

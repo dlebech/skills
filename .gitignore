@@ -4,3 +4,9 @@ voice-samples/
 # Written by `herdr-app check` into a mod folder
 herdr-app/mods/*/jsconfig.json
 herdr-app/mods/*/*.d.ts
+
+# Harbor 3D dependencies
+herdr-app/harbor3d/node_modules/
+
+# Captured proof is never committed (it lives in the run folder)
+/proof/

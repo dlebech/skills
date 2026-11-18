@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harbor 3D</title>
+<link rel="stylesheet" href="./assets/style.css">
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/examples/jsm/"}}</script>
+</head>
+<body>
+<canvas id="view" aria-label="A 3D harbor of runs"></canvas>
+<div id="labels" aria-hidden="true"></div>
+<div id="banner" hidden></div>
+<div id="status" role="status"></div>
+<div id="stats" hidden></div>
+<aside id="card" hidden aria-label="Run details"></aside>
+<nav id="toolbar" aria-label="Harbor controls"></nav>
+<script type="module" src="./assets/app.js"></script>
+</body>
+</html>
