@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 import { withRoot } from "./root.mjs";
 import { acceptedFile, withAcceptance } from "../../herdr-app/mods/harbormaster/proof.js";
 import { claimRows, claimsVerdict } from "../../herdr-app/mods/harbormaster/claims.js";
-import { loadRuns, acceptProof, unacceptProof, askProof, WRITE_ACCEPTED } from "../../herdr-app/mods/harbormaster/data.js";
+import { loadRuns, acceptProof, unacceptProof, WRITE_ACCEPTED } from "../../herdr-app/mods/harbormaster/data.js";
+import { send, legacyOutcome } from "../../herdr-app/mods/harbormaster/inbox.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MD = `# Proof
@@ -138,7 +139,7 @@ test("Accept, Unaccept and Ask to prove write the run's files, and the next read
     // The orchestrator t99 is not running here, so the ask only waits in the inbox.
     r = await read(dir);
     k = rowsOf(r)[1];
-    assert.deepEqual(await askProof(r, k), { blocked: false, waits: true });
+    assert.deepEqual(legacyOutcome(await send(r, "proof", { row: k })), { blocked: false, waits: true });
     const [msg] = readdirSync(join(dir, "inbox"));
     assert.match(msg, /^\d{8}T\d{6}Z-\d{3}-harbormaster-proof\.message$/);
     log(`inbox/${msg} after Ask to prove on C2`, readFileSync(join(dir, "inbox", msg), "utf8"));

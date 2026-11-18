@@ -837,20 +837,6 @@ export const dropDecision = (d) => exec("sh", ["-c", DROP, "sh", d.id], { on: d.
 const sendLegacy = async (run, kind, payload) => legacyOutcome(await send(run, kind, payload));
 export const answerRun = (run, title, answer, free = "") => sendLegacy(run, "answer", { title, answer, free });
 
-// Asks the orchestrator to change the run's autonomy ("L2") or proof tier (2), from a tag's
-// popover. The orchestrator applies it to status.json or plan.md; until then the tag shows it as requested.
-export const requestLevel = (run, kind, level) => sendLegacy(run, "level", { kind, level });
-
-// Asks the orchestrator to prove one claim (a Claims row's Ask to prove). The row reads "asked…"
-// while it is unhandled and the result line is the same.
-export const askProof = (run, row) => sendLegacy(run, "proof", { row });
-
-// Asks the orchestrator to address the review comments on one of its PRs (Address comments on
-// its card or pane), and the same for several PRs at once (Ask me about all / Handle all): one
-// message covering them all, so the orchestrator is woken once and, for ask, writes one question.
-export const askComments = (run, pr, mode) => sendLegacy(run, "comments", { pr, mode });
-export const askCommentsAll = (run, prs, mode) => sendLegacy(run, "comments-all", { prs, mode });
-
 // proof-accepted.json in the run directory, which Harbormaster owns: read on the run's machine,
 // changed here, and written back only if it still holds what was read (else exit 3, and it is
 // read again), under a mkdir lock, through a temporary file of its own and mv, so two windows

@@ -2,13 +2,23 @@
 // run; their rows read "asked…"; Handle all asks the rest; the asked state holds while the PR's
 // comments are unchanged.
 // Run: node --import ./loader.mjs --test asked.test.mjs
-import { test } from "node:test";
+import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { assess, nextStepText } from "../../herdr-app/mods/harbormaster/attention.js";
 import { needActions } from "../../herdr-app/mods/harbormaster/needaction.js";
 import { rowLead, badgeOf } from "../../herdr-app/mods/harbormaster/crewrows.js";
 import { toastParts, parkedLabel } from "../../herdr-app/mods/harbormaster/tell.js";
-import { commentSummary, commentsSig, askedAmong, askedEntry, askedUrls, markAsked, unmarkAsked, prunedAsked, offersAll, askAllLabel, ASKED_KEEP_MS } from "../../herdr-app/mods/harbormaster/comments.js";
+import { resetShared } from "herdr";
+import { commentSummary, commentsSig, offersAll, askAllLabel, ASKED_KEEP_MS } from "../../herdr-app/mods/harbormaster/comments.js";
+import { asked, markAsked, unmarkAsked, pruneAsked, askedStore, askedPrsOf } from "../../herdr-app/mods/harbormaster/inbox.js";
+
+beforeEach(() => resetShared());
+
+// The Address comments marks of the shared asked store (inbox.js), for the PRs `prs` of `r`.
+const mark = (r, prs, at) => prs.forEach((p) => markAsked(r, "comments", p.url, p, at));
+const isAsked = (r, p, at, working = false) => asked(r, "comments", p.url, p, { now: at, working });
+const prune = (prs, at, busy = new Set()) => pruneAsked([run()], { now: at, busy, lookup: (_r, _f, key) => prs.find((p) => p.url === key) });
+const left = () => Object.keys(askedStore()).map((k) => k.split("\u001f")[2]).sort();
 
 const MIN = 60000;
 const now = Date.parse("2026-11-17T12:00:00Z");
@@ -65,25 +75,27 @@ test("nobody asked and working: Working, as before", () => {
 
 test("#1799's comments change while the run works: still asked, the run stays in Needs you over #1372", () => {
   const l = list();
-  const store = markAsked({}, run(), [l[0]], now);
+  mark(run(), [l[0]], now);
   const moved = [pr(1799, 1), l[1]];
-  assert.ok(!askedEntry(store, moved[0], now));
-  assert.ok(askedEntry(store, moved[0], now, true));
-  const a = at(run(), moved, { askedPrs: askedUrls(store, moved, now, true) });
+  assert.ok(!isAsked(run(), moved[0], now));
+  assert.ok(isAsked(run(), moved[0], now, true));
+  const a = at(run(), moved, { askedPrs: askedPrsOf(run(), moved, now, true) });
   assert.equal(a.group, "needs");
   assert.deepEqual(a.next.prs.map((p) => p.number), [1372]);
   assert.deepEqual(a.next.asked.map((p) => p.number), [1799]);
   // The prune keeps it while the run works.
-  assert.equal(prunedAsked(store, moved, now, new Set([moved[0].url])), store);
+  prune(moved, now, new Set([moved[0].url]));
+  assert.deepEqual(left(), [l[0].url]);
 });
 
 test("#1799's comments change and the run is idle: the ask ends and it is offered again", () => {
   const l = list();
-  const store = markAsked({}, run(), [l[0]], now);
+  mark(run(), [l[0]], now);
   const moved = [pr(1799, 1), l[1]];
-  assert.ok(!askedEntry(store, moved[0], now, false));
-  assert.deepEqual(prunedAsked(store, moved, now, new Set()), {});
-  const [it] = box(run(), moved, { working: false, orch: "idle", askedPrs: askedUrls(store, moved, now, false) });
+  assert.ok(!isAsked(run(), moved[0], now, false));
+  prune(moved, now);
+  assert.deepEqual(left(), []);
+  const [it] = box(run(), moved, { working: false, orch: "idle", askedPrs: askedPrsOf(run(), moved, now, false) });
   assert.ok(it.actions.some((x) => x.kind === "address" && x.pr.number === 1799));
   assert.ok(!it.actions.some((x) => x.kind === "asked"));
 });
@@ -131,20 +143,23 @@ test("an AI reply changes the sig, for a person's thread and for a bot's", () =>
 test("a bot-only ask ends once the orchestrator is idle and its thread is answered", () => {
   const mk = (threads) => ({ ...pr(1799, 0), comments: commentSummary(graph(threads)) });
   const before = mk([{ id: "B1", bot: true }]), after = mk([{ id: "B1", bot: true, reply: true }]);
-  const store = markAsked({}, run(), [before], now);
-  assert.ok(askedEntry(store, before, now));
-  assert.ok(!askedEntry(store, after, now));
-  assert.deepEqual(prunedAsked(store, [after], now), {});
+  mark(run(), [before], now);
+  assert.ok(isAsked(run(), before, now));
+  assert.ok(!isAsked(run(), after, now));
+  prune([after], now);
+  assert.deepEqual(left(), []);
 });
 
 test("the asks of the store and the run's unread asks together drive the step", () => {
   const l = list();
-  const store = markAsked({}, run(), [l[0]], now);
+  mark(run(), [l[0]], now);
   // From the store only (the message was read), and from the unread message only (a fresh copy).
-  assert.deepEqual([...askedAmong(store, run(), l, now, true)], [l[0].url]);
-  assert.deepEqual([...askedAmong({}, run({ commentsAsked: [l[0].url] }), l, now, true)], [l[0].url]);
-  assert.deepEqual([...askedAmong(store, run({ commentsAsked: [l[1].url] }), l, now, true)].sort(), [l[0].url, l[1].url].sort());
-  const a = at(run(), l, { askedPrs: askedAmong(store, run(), l, now, true) });
+  assert.deepEqual([...askedPrsOf(run(), l, now, true)], [l[0].url]);
+  resetShared();
+  assert.deepEqual([...askedPrsOf(run({ commentsAsked: [l[0].url] }), l, now, true)], [l[0].url]);
+  mark(run(), [l[0]], now);
+  assert.deepEqual([...askedPrsOf(run({ commentsAsked: [l[1].url] }), l, now, true)].sort(), [l[0].url, l[1].url].sort());
+  const a = at(run(), l, { askedPrs: askedPrsOf(run(), l, now, true) });
   assert.equal(a.group, "needs");
   assert.deepEqual(a.next.asked.map((p) => p.number), [1799]);
   assert.ok(a.askedPrs.has(l[0].url) && a.working === true);
@@ -175,20 +190,30 @@ test("a single PR run has no Handle all, and its box is as before", () => {
 
 test("marking all asks each PR; a failed send unmarks only that PR", () => {
   const l = list();
-  const store = markAsked({}, run(), l, now);
-  assert.deepEqual([...askedUrls(store, l, now)].sort(), l.map((p) => p.url).sort());
-  const less = unmarkAsked(store, l[0].url);
-  assert.deepEqual([...askedUrls(less, l, now)], [l[1].url]);
-  assert.equal(unmarkAsked(less, "nope"), less);
+  mark(run(), l, now);
+  assert.deepEqual([...askedPrsOf(run(), l, now)].sort(), l.map((p) => p.url).sort());
+  unmarkAsked(run(), "comments", l[0].url);
+  assert.deepEqual([...askedPrsOf(run(), l, now)], [l[1].url]);
+  const before = askedStore();
+  unmarkAsked(run(), "comments", "nope");
+  assert.equal(askedStore(), before);
 });
 
 test("asks older than a week, or for a merged PR, are pruned; unread comments never prune", () => {
   const l = list();
-  const store = markAsked({}, run(), l, now);
-  assert.equal(prunedAsked(store, l, now), store);
-  assert.deepEqual(Object.keys(prunedAsked(store, l, now + ASKED_KEEP_MS + 1)), []);
-  assert.deepEqual(Object.keys(prunedAsked(store, [{ ...l[0], state: "MERGED" }, l[1]], now)), [l[1].url]);
-  assert.equal(prunedAsked(store, [{ ...l[0], comments: { error: "x" } }, l[1]], now), store);
+  mark(run(), l, now);
+  const store = askedStore();
+  prune(l, now);
+  assert.equal(askedStore(), store);
+  prune(l, now + ASKED_KEEP_MS + 1);
+  assert.deepEqual(left(), []);
+  resetShared(); mark(run(), l, now);
+  prune([{ ...l[0], state: "MERGED" }, l[1]], now);
+  assert.deepEqual(left(), [l[1].url]);
+  resetShared(); mark(run(), l, now);
+  const kept = askedStore();
+  prune([{ ...l[0], comments: { error: "x" } }, l[1]], now);
+  assert.equal(askedStore(), kept);
 });
 
 test("the pill, the Crew lead, the parked label and the toast say the same", () => {

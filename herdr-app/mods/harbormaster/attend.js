@@ -9,7 +9,7 @@ import { proofState } from "./claims.js";
 import { proofSeenSig } from "./proofseen.js";
 import { stepSince, stepAges, lastActivity, ciUsualOf, reviewFlows } from "./tracking.js";
 import { needLine, needsRun } from "./crewrows.js";
-import { askedPrsOf } from "./asked.js";
+import { askedPrsOf } from "./inbox.js";
 
 // Whether a run's files are a fresh read: data.js filesFresh, here where it has always been.
 export { filesFresh };

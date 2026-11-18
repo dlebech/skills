@@ -8,6 +8,7 @@
 import { isImage, isVideo } from "./media.js";
 import { gatheringStage, emptyClaim } from "./proof.js";
 import { taskStage } from "./tasks.js";
+import { asked } from "./inbox.js";
 
 // ---- plan.md ----
 
@@ -152,20 +153,30 @@ export { claimProveRequest } from "./inbox.js";
 
 // ---- clicks the files don't show yet ----
 
-// The user's Accept, Unaccept or Ask to prove shows at once, before the next read of the run's
-// files: `said` maps "<run key>:<claim id>" → {kind: "accept" | "unaccept" | "ask", line, at}.
+// The user's Accept or Unaccept shows at once, before the next read of the run's files: `said`
+// maps "<run key>:<claim id>" → {kind: "accept" | "unaccept", line, at}. (An Ask to prove is an
+// inbox message: inbox.js keeps its asked state, and withAsked puts it on the rows.)
 // Each entry goes once the files show it, once the claim's result line changed, or after
 // `keepMs`. Changes `rows` in place (and drops spent entries from `said`); returns them.
 export function withSaid(rows, said, runKey, proof, now = Date.now(), keepMs = 15000) {
   for (const k of rows) {
     const key = `${runKey}:${k.id}`, s = said?.get(key);
     if (!s) continue;
-    const shown = s.kind === "accept" ? proof?.accepted?.[k.id]?.result === s.line
-      : s.kind === "unaccept" ? !proof?.accepted?.[k.id] : proof?.asks?.get?.(k.id) === s.line;
+    const shown = s.kind === "accept" ? proof?.accepted?.[k.id]?.result === s.line : !proof?.accepted?.[k.id];
     if (shown || now - s.at > keepMs || claimResultLine(k) !== s.line) { said.delete(key); continue; }
     if (s.kind === "accept") { k.accepted = { at: new Date(s.at).toISOString(), result: s.line }; k.asked = false; }
-    else if (s.kind === "unaccept") k.accepted = null;
-    else k.asked = true;
+    else k.accepted = null;
+    k.state = stateOf(k);
+  }
+  return rows;
+}
+
+// Marks the rows whose Ask to prove reads "asked…" (inbox.js asked: unread in the run's inbox, or
+// clicked under 15 s ago with the result line unchanged). Changes `rows` in place; returns them.
+export function withAsked(rows, run, now = Date.now()) {
+  for (const k of rows) {
+    if (k.asked || k.accepted || isProven(k) || !asked(run, "proof", k.id, k, { now })) continue;
+    k.asked = true;
     k.state = stateOf(k);
   }
   return rows;

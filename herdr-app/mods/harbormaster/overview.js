@@ -4,12 +4,12 @@ import { div, svg } from "gpui-kit";
 import { openStartCaptain } from "./newrun.js";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askComments, askCommentsAll } from "./data.js";
+import { stats, decisionQueue, answerRun, acceptProof, unacceptProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, exactStatus, orchestratorState, agentStatus, workersOf, captainOf, programOf, captainPane, paneBeside, togglePin, needReason, focusAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, hotText, memText } from "./resources.js";
-import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, worthALook, hasClaims, proofState, withSaid } from "./claims.js";
+import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, worthALook, hasClaims, proofState, withSaid, withAsked } from "./claims.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { setNote, noteText } from "./note.js";
@@ -20,11 +20,10 @@ import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } 
 import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
 import { markProofSeen } from "./proofseen.js";
-import { askedStore, markPrsAsked, unmarkPrAsked } from "./asked.js";
 import { rowEdge, badgeOf, needLine, closableDone, needCount, needRunsOf, runlessNeeds, watchingText, workerTree } from "./crewrows.js";
-import { asked as inboxAsked } from "./inbox.js";
+import { asked as inboxAsked, askedLevel } from "./inbox.js";
 import { askClick } from "./askclick.js";
-import { commentsAsked, defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
+import { defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
 import { needActions, ownAddressRows, isPrimary, detailsLabel } from "./needaction.js";
 
@@ -334,7 +333,7 @@ function ciAction(view, t, r, action, id) {
     (cx) => askClick(view, cx, r, "ci", { pr: pr?.number ?? null, check: action.check, url }, { asks: [{ key: "", item: r }], notes: ASK_NOTES }));
 }
 
-// PRs asked to address their comments, by PR URL: {sig, at} in shared state (asked.js), so every
+// PRs asked to address their comments are kept in the shared asked store (inbox.js), so every
 // copy and a reload know; the unread message (run.commentsAsked) says it too until it is read.
 
 const MODE_TIP = {
@@ -345,7 +344,7 @@ const MODE_TIP = {
 // Address comments, on a run's card and pane: for each of its approved or changes-requested PRs
 // with open review comments, "Address 9 threads on #42" and two buttons, Ask me and Handle them,
 // the run's autonomy's default (comments.js defaultMode) highlighted; a click writes an inbox
-// message for that PR (data.js askComments) and the row reads "asked…" while the message is
+// message for that PR (inbox.js) and the row reads "asked…" while the message is
 // unread and, once read, until the PR's open comments change (while the run works, until a new
 // one appears). Null when there are none, the run
 // is put away, or its orchestrator is not known here; and while the run has an open question
@@ -368,42 +367,25 @@ function commentsAction(view, t, r, att, id) {
   return v_flex().gap(4).children(rows);
 }
 
-// Whether a PR's Address comments was asked and is still being handled (comments.js askedEntry).
+// Whether a PR's Address comments was asked and is still being handled (inbox.js asked).
 // The run's assessment (`att`) has the PRs asked about, judged with whether the run is working
 // (a moving comment list under a working orchestrator is its own doing); without one, the store.
 function addressAsked(r, p, att = null) {
-  return att?.askedPrs ? att.askedPrs.has(p.url) : commentsAsked(r, p, askedStore()[p.url]);
+  return att?.askedPrs ? att.askedPrs.has(p.url) : inboxAsked(r, "comments", p.url, p);
 }
 const askedNote = (t, id) => div().id(id).flex_none().text_size(11).text_color(t.muted)
   .tooltip("Asked its orchestrator to address these comments; while its orchestrator works on them, or until its open comments change (a comment the reviewer adds later ends it)").child("asked…");
 const modeTip = (r, mode) => `${MODE_TIP[mode]}.${mode === defaultMode(r.autonomy) ? ` The default at ${r.autonomy ?? "L0"}.` : ""}`;
 
-// The click of an Ask me or Handle them: writes the run's inbox message for the PR (data.js
-// askComments); the button reads "asked…" until the PR's open comments change.
+// The click of an Ask me or Handle them: writes the run's inbox message for the PR (inbox.js);
+// the button reads "asked…" until the PR's open comments change.
 const addressSend = (view, r, p, mode) => addressSendAll(view, r, [p], mode);
 
-// The click of Ask me about all / Handle all: one message for all the PRs (data.js askCommentsAll),
-// so the orchestrator is woken once. Each PR reads "asked…" at once; all are unmarked if the
-// message did not reach the inbox.
-const addressSendAll = (view, r, prs, mode) => (cx) => {
-  markPrsAsked(r, prs);
-  view.actionError = null;
-  cx.notify();
-  cx.spawn(async (cx) => {
-    try {
-      const out = await askCommentsAll(r, prs, mode);
-      if (out?.waits) setNote(view, `${r.branch}: the ask waits in its inbox until the run is resumed`);
-      else if (out?.blocked) setNote(view, `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`);
-    } catch (e) {
-      // Written but not woken: the ask is in the inbox, so it stays asked.
-      if (!e?.inInbox) for (const p of prs) unmarkPrAsked(p.url);
-      view.actionError = `${r.branch}: ${e?.message ?? e}`;
-    }
-    view.redraw = true;
-    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
-    try { await view.load(cx); } catch { /* the next refresh shows it */ }
-  }, { owner: null });
-};
+// The click of Ask me about all / Handle all: one message for all the PRs (inbox.js), so the
+// orchestrator is woken once. Each PR reads "asked…" at once; all are unmarked if the message
+// did not reach the inbox.
+const addressSendAll = (view, r, prs, mode) => (cx) => askClick(view, cx, r, "comments-all", { prs, mode },
+  { asks: prs.map((p) => ({ key: p.url, item: p })), notes: ASK_NOTES });
 
 // The card's and pane's own Address rows, only while the run is in Needs you and its box does
 // not carry them (needaction.js ownAddressRows).
@@ -909,8 +891,9 @@ function claimsSummary(t, r, stages = null) {
   return { parts: v.parts.map(paint), rows, tip: v.tip || null };
 }
 
-// What was clicked on a claim row (Accept, Unaccept, Ask to prove) and not read back from the
-// run's files yet (claims.js withSaid). Shared by the pane and the card, so both show it at once.
+// What was clicked on a claim row (Accept, Unaccept) and not read back from the run's files yet
+// (claims.js withSaid). Shared by the pane and the card, so both show it at once. An Ask to prove
+// is an inbox message: its "asked…" comes from inbox.js (claims.js withAsked).
 export const said = new Map();
 
 const isFinished = (r) => r.phase === "finished" || Boolean(r.away);
@@ -919,7 +902,7 @@ const isFinished = (r) => r.phase === "finished" || Boolean(r.away);
 const stageNames = (r, stages) => (stages ? r.tasks.map((_, i) => stages[i]?.stage ?? null) : null);
 
 // The run's claims (claims.js claimRows) with the clicks its files don't show yet.
-const claimRowsOf = (r, stages = null) => withSaid(claimRows(r.proof, r, stageNames(r, stages), isFinished(r)), said, r.key, r.proof);
+const claimRowsOf = (r, stages = null) => withAsked(withSaid(claimRows(r.proof, r, stageNames(r, stages), isFinished(r)), said, r.key, r.proof), r);
 
 // ---- one run on its own, as the pane pinned beside its orchestrator ----
 
@@ -992,18 +975,16 @@ export function levelTags(view, t, r, id, short = false) {
 
 // An autonomy ("L1") or proof tier ("T2") tag. Resting the pointer on it opens a card that
 // lists every level with its definition, the run's own highlighted; clicking another asks the
-// orchestrator to change it (data.js requestLevel: a message in the run's inbox). Until
+// orchestrator to change it (inbox.js: a message in the run's inbox). Until
 // status.json or plan.md shows the new level, the tag reads "T3 requested…": from the request
 // still unread in the inbox (r.pending), so it survives a reload, and from the click itself
 // until the next read sees that message (at most 15 s, should the orchestrator be quicker).
 function levelTag(view, t, r, kind, id, short = false) {
   const cur = kind === "autonomy" ? r.autonomy : r.proof.tier.tier;
   const label = (l) => (kind === "autonomy" ? l : `T${l}`);
-  const key = `${r.key}:${kind}`;
-  let asked = view.levelAsked?.get(key)?.level;
-  // The click's own note goes once the run's files show the request, or the level itself.
-  if (asked !== undefined && (r.pending?.[kind] === asked || cur === asked || Date.now() - view.levelAsked.get(key).at > 15000)) { view.levelAsked.delete(key); asked = undefined; }
-  const pending = asked ?? r.pending?.[kind] ?? null;
+  // The click's own mark goes once the run's files show the request, or the level itself, or
+  // after 15 s (inbox.js askedLevel).
+  const pending = askedLevel(r, kind, cur);
   // A request waits on the orchestrator, not on you: no colour, its "requested…" says it.
   const tag = div().flex_none().text_size(10).font_semibold().px(5).rounded(4).bg(t.raised)
     .text_color(pending !== null ? t.foreground : kind === "autonomy" && cur === "L0" ? t.dim : t.muted)
@@ -1016,20 +997,8 @@ function levelTag(view, t, r, kind, id, short = false) {
       .when(c.current, (el) => el.bg(t.selected))
       .when(ask, (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click((_e, cx) => {
         cx.stop_propagation();
-        view.levelAsked ??= new Map();
-        view.levelAsked.set(key, { level: c.level, at: Date.now() });
-        view.actionError = null;
-        cx.notify();
-        cx.spawn(async (cx) => {
-          try { await requestLevel(r, kind, c.level); } catch (e) {
-            // Written but not woken: the request is in the inbox, so it stays requested.
-            if (!e?.inInbox) view.levelAsked.delete(key);
-            view.actionError = `${r.branch}: ${e?.message ?? e}`;
-          }
-          view.redraw = true;
-          try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
-          try { await view.load(cx); } catch { /* the next refresh shows it */ }
-        }, { owner: null });
+        // Written but not woken: the request is in the inbox, so it stays requested.
+        askClick(view, cx, r, "level", { kind, level: c.level }, { asks: [{ key: kind, item: { level: c.level, current: cur } }] });
       }))
       .child(div().flex_none().w(20).font_semibold().text_color(c.current ? t.foreground : t.muted).child(c.label))
       .child(v_flex().flex_1().min_w(0)
@@ -1227,8 +1196,8 @@ function claimsSection(view, t, r, stages) {
 
 // A claim row's button: Accept (Harbormaster records it in proof-accepted.json itself, so it works
 // with the orchestrator gone), Unaccept, Ask to prove (a "prove C<n> to T<n>: …" message in the
-// run's inbox), or "asked…" while that waits. The click shows at once (`said`), before the next
-// read of the run's files.
+// run's inbox), or "asked…" while that waits. An Accept or Unaccept shows at once (`said`), before
+// the next read of the run's files; an ask is marked asked in inbox.js.
 const PROOF_ACTION = {
   accept: { label: "Accept", tip: "Accept this claim as it is: it stops needing a look, until its result changes" },
   unaccept: { label: "Unaccept", tip: "Take the acceptance back: it needs a look again" },
@@ -1240,6 +1209,7 @@ export function proofAction(view, t, r, k, a, button = actionButton) {
   const line = claimResultLine(k);
   const { label, tip } = PROOF_ACTION[a];
   return button(t, `pf${a}-${r.key}-${k.id}`, label, tip, (cx) => {
+    if (a === "ask") return askClick(view, cx, r, "proof", { row: k }, { asks: [{ key: k.id, item: k }] });
     const key = `${r.key}:${k.id}`;
     said.set(key, { kind: a, line, at: Date.now() });
     view.actionError = null;
@@ -1247,11 +1217,9 @@ export function proofAction(view, t, r, k, a, button = actionButton) {
     cx.spawn(async (cx) => {
       try {
         if (a === "accept") await acceptProof(r, k);
-        else if (a === "unaccept") await unacceptProof(r, k);
-        else await askProof(r, k);
+        else await unacceptProof(r, k);
       } catch (e) {
-        // Written but not woken: the ask is in the inbox, so it stays asked.
-        if (!e?.inInbox) said.delete(key);
+        said.delete(key);
         view.actionError = `${r.branch}: ${e?.message ?? e}`;
       }
       view.redraw = true;

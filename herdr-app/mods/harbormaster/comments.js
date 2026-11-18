@@ -250,15 +250,11 @@ export const pendingComments = (lines) => (lines ?? "").split("\n").flatMap((l) 
 // to "answered") changes it even when the ids and counts do not; so does the bots' total.
 export const commentsSig = (run, pr) => `${(pr?.comments?.items ?? []).map((x) => `${x.kind ?? ""}:${x.thread ?? x.url ?? x.text}`).join("\n")}\n${pr?.comments?.count ?? ""}\n${botCount(pr?.comments?.bots)}`;
 
-// Whether a PR's Address comments shows "asked…": its message is unread (run.commentsAsked has
-// its URL), or it was asked from here (`asked`: {sig} at the click) and nothing has moved since.
-export const commentsAsked = (run, pr, asked = null) => (run?.commentsAsked ?? []).includes(pr?.url) || (asked != null && asked.sig === commentsSig(run, pr));
-
 // ---- The asked state, kept across reloads ----
 // What the user asked to be handled, per PR URL: {sig, ids, at} (commentsSig at the click, the ids
-// of the counted comments then, and when), kept in shared state harbormaster.commentsAsked
-// (asked.js). The unread inbox message alone is not enough: the orchestrator renames it once it
-// reads it, long before the threads are done.
+// of the counted comments then, and when), kept in the shared asked store (inbox.js). The unread
+// inbox message alone is not enough: the orchestrator renames it once it reads it, long before
+// the threads are done.
 
 export const ASKED_KEEP_MS = 7 * 24 * 3600 * 1000;
 
@@ -270,55 +266,6 @@ export const countedIds = (pr) => (pr?.comments?.items ?? []).filter(isOpen).map
 // Whether the PR has a counted comment the ask did not list (`e.ids` at the click): a reviewer wrote
 // more since. An ask stored without ids (before they were kept) has no such comment.
 export const hasNewCounted = (e, pr) => Array.isArray(e?.ids) && countedIds(pr).some((id) => !e.ids.includes(id));
-
-// Whether `store` holds a live ask for the PR: not older than a week and, while the run is at work
-// (`working`: its orchestrator is handling the comments, so they change under it), with no new
-// counted comment since the click; otherwise with its comments unmoved.
-export const askedEntry = (store, pr, now = Date.now(), working = false) => {
-  const e = store?.[pr?.url];
-  if (!e || now - (e.at ?? 0) > ASKED_KEEP_MS) return false;
-  return working ? !hasNewCounted(e, pr) : e.sig === commentsSig(null, pr);
-};
-
-// The URLs among `prs` with a live ask in `store`.
-export const askedUrls = (store, prs, now = Date.now(), working = false) => new Set((prs ?? []).filter((p) => p?.url && askedEntry(store, p, now, working)).map((p) => p.url));
-
-// The PRs of a run asked about: its live asks in `store` and its unread asks (`run.commentsAsked`).
-export const askedAmong = (store, run, prs, now = Date.now(), working = false) => new Set([...askedUrls(store, prs, now, working), ...(run?.commentsAsked ?? [])]);
-
-// `store` with each of `prs` marked asked now (a new object; the click of Ask me / Handle them,
-// or of the ones for all).
-export const markAsked = (store, run, prs, now = Date.now()) => ({
-  ...(store ?? {}),
-  ...Object.fromEntries(prs.filter((p) => p?.url).map((p) => [p.url, { sig: commentsSig(run, p), ids: countedIds(p), at: now }])),
-});
-
-// `store` without the PR (a failed send), or the same object when it was not there.
-export function unmarkAsked(store, url) {
-  if (!store || !(url in store)) return store;
-  const { [url]: _gone, ...rest } = store;
-  return rest;
-}
-
-// `store` without what no longer holds: asks older than a week, and asks for a PR now merged or
-// closed, or whose open comments moved once its run stopped working (the PR's comments unread
-// are not "moved"; `busy`: a Set of the URLs of PRs whose run is working, kept while it does, unless
-// a counted comment the ask did not list has appeared).
-// `prs` are the PRs as read. The same object when nothing goes, so the caller writes only on a change.
-export function prunedAsked(store, prs, now = Date.now(), busy = new Set()) {
-  if (!store) return store;
-  const byUrl = new Map((prs ?? []).filter((p) => p?.url).map((p) => [p.url, p]));
-  const keep = Object.entries(store).filter(([url, e]) => {
-    if (now - (e?.at ?? 0) > ASKED_KEEP_MS) return false;
-    const p = byUrl.get(url);
-    if (!p) return true;
-    if (p.state === "MERGED" || p.state === "CLOSED") return false;
-    if (!p.comments || commentsUnknown(p.comments)) return true;
-    if (busy.has(url)) return !hasNewCounted(e, p);
-    return e.sig === commentsSig(null, p);
-  });
-  return keep.length === Object.keys(store).length ? store : Object.fromEntries(keep);
-}
 
 // What "Ask me about all" / "Handle all" label as, and whether the box offers them: with two or
 // more PRs that can still be asked.

@@ -7,7 +7,9 @@ import assert from "node:assert/strict";
 import { assess } from "../../herdr-app/mods/harbormaster/attention.js";
 import { needActions } from "../../herdr-app/mods/harbormaster/needaction.js";
 import { toastParts, nextToasts, TOAST_HOLD } from "../../herdr-app/mods/harbormaster/tell.js";
-import { commentSummary, markAsked, askedEntry, prunedAsked, countedIds } from "../../herdr-app/mods/harbormaster/comments.js";
+import { resetShared, setShared } from "herdr";
+import { commentSummary, countedIds } from "../../herdr-app/mods/harbormaster/comments.js";
+import { asked, markAsked, pruneAsked, askedStore } from "../../herdr-app/mods/harbormaster/inbox.js";
 import { planOpen } from "../../herdr-app/mods/harbormaster/tasks.js";
 
 const MIN = 60000;
@@ -121,20 +123,29 @@ test("changes requested on a PR being handled and on one without comments: the h
 
 test("while the run works, an ask ends when a counted comment appears that the ask did not list", () => {
   const before = pr(1799, 2);
-  const store = markAsked({}, run(), [before], now);
-  assert.deepEqual(store[before.url].ids, ["t1799-0", "t1799-1"]);
-  assert.ok(askedEntry(store, before, now, true));
+  resetShared();
+  const isAsked = (p, working = true) => asked(run(), "comments", p.url, p, { now, working });
+  const prune = (p, busy) => pruneAsked([run()], { now, busy, lookup: () => p });
+  markAsked(run(), "comments", before.url, before, now);
+  const store = askedStore();
+  assert.deepEqual(Object.values(store)[0].ids, ["t1799-0", "t1799-1"]);
+  assert.ok(isAsked(before));
   // A new thread by the reviewer: the ask ends, even while the run works.
   const more = { ...before, comments: cm(3, ["t1799-0", "t1799-1", "t1799-new"]) };
-  assert.ok(!askedEntry(store, more, now, true));
-  assert.deepEqual(prunedAsked(store, [more], now, new Set([more.url])), {});
+  assert.ok(!isAsked(more));
+  prune(more, new Set([more.url]));
+  assert.deepEqual(askedStore(), {});
+  resetShared(); markAsked(run(), "comments", before.url, before, now);
   // An answered thread changes its kind, not its id: the ask holds.
   const answered = { ...before, comments: { count: 1, bots: {}, items: [{ thread: "t1799-0", kind: "thread", text: "x" }, { thread: "t1799-1", kind: "answered", text: "x" }] } };
-  assert.ok(askedEntry(store, answered, now, true));
-  assert.equal(prunedAsked(store, [answered], now, new Set([answered.url])), store);
+  assert.ok(isAsked(answered));
+  const kept = askedStore();
+  prune(answered, new Set([answered.url]));
+  assert.equal(askedStore(), kept);
   // An ask stored before ids were kept is not ended by the new rule.
-  const old = { [before.url]: { sig: store[before.url].sig, at: now } };
-  assert.ok(askedEntry(old, more, now, true));
+  const [id, e] = Object.entries(store)[0];
+  resetShared(); setShared("harbormaster.asked", { [id]: { sig: e.sig, at: now } });
+  assert.ok(isAsked(more));
   assert.deepEqual(countedIds({ comments: { items: [{ kind: "summary", text: "s" }, { kind: "note", url: "n" }] } }), ["n"]);
 });
 

@@ -16,7 +16,7 @@ import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
 import { openNewRun, openStartCaptain, startReview, reviewStarting } from "./newrun.js";
 import { primaryOf, isMergeAsk } from "./needaction.js";
-import { claimsAsk, checksLine, reviewedLine, withSaid, claimActions } from "./claims.js";
+import { claimsAsk, checksLine, reviewedLine, withSaid, withAsked, claimActions } from "./claims.js";
 import {
   attOf, runStatus, levelTags, runTypeTag, statusDot, actionButton, closeAllControl, runFacts, needItemsOf,
   newDecisionsNote, noteRows, watchedText, edgeColor, cardBesideOrchestrator, AMBER, PASS, SELECTED, withUsage, runProps,
@@ -311,7 +311,7 @@ function mergeClaims(m, r) {
   const { view, t } = m;
   const ask = boxClaims(r, stagesOf(r, m.ctx));
   // A click shows at once, before the next read of the run's files (overview.js said).
-  const rows = withSaid(ask.rows.map((k) => ({ ...k })), said, r.key, r.proof);
+  const rows = withAsked(withSaid(ask.rows.map((k) => ({ ...k })), said, r.key, r.proof), r);
   const checks = checksLine(r.proof?.md);
   const reviewed = boxReviewed(r);
   if (!rows.length && !checks && !reviewed) return null;

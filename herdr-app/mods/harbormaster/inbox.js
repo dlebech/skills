@@ -300,13 +300,16 @@ export async function send(run, kind, payload = {}, { asks = [], now = Date.now(
   }
 }
 
-// The level the tag shows as asked for `kind` ("autonomy" | "tier"), or null: the unread request, else a
-// click mark the run has not caught up with. `current` is the run's level of that kind.
+// The level the tag shows as asked for `kind` ("autonomy" | "tier"), or null: a click mark the run has
+// not caught up with (under 15 s old, and neither the run's level nor the unread request yet), else
+// the unread request (run.pending). `current` is the run's level of that kind.
 export function askedLevel(run, kind, current, now = Date.now()) {
-  if (run.pending?.[kind] != null) return run.pending[kind];
+  const pending = run.pending?.[kind] ?? null;
   const e = askedStore()[entryKey(run, "level", kind)];
-  if (!e || now - (e.at ?? 0) > KINDS.level.keep || String(current ?? "") === e.sig) return null;
-  return kind === "tier" ? Number(e.sig) : e.sig;
+  if (e && now - (e.at ?? 0) <= KINDS.level.keep && String(current ?? "") !== e.sig && String(pending) !== e.sig) {
+    return kind === "tier" ? Number(e.sig) : e.sig;
+  }
+  return pending;
 }
 
 // The shape the views have always been given: {blocked, waits?}.
@@ -351,6 +354,44 @@ export function asked(run, kind, key, item = null, { now = Date.now(), working =
   return k.lives ? k.lives(e, run, item, { working }) : e.sig === k.sig(run, item);
 }
 
+// The PR URLs among `prs` that read asked (Address comments), and every URL the run's unread asks
+// name. `working`: the run's orchestrator is at work, so the comments change under it.
+// Until the old harbormaster.commentsAsked store is migrated (below), its marks count too, read only,
+// so a copy that does not migrate shows no flicker.
+export const askedPrsOf = (run, prs, now = Date.now(), working = false) => {
+  const old = shared(OLD_COMMENTS_KEY);
+  const oldLives = (p) => {
+    const e = old && typeof old === "object" ? old[p.url] : null;
+    return Boolean(e) && now - (e.at ?? 0) <= ASKED_KEEP_MS && KINDS.comments.lives(e, run, p, { working });
+  };
+  return new Set([
+    ...(prs ?? []).filter((p) => p?.url && (asked(run, "comments", p.url, p, { now, working }) || oldLives(p))).map((p) => p.url),
+    ...(run?.commentsAsked ?? []),
+  ]);
+};
+
+// Address comments kept its asks in harbormaster.commentsAsked, {[PR url]: {sig, ids, at}}, before
+// the shared asked store. Moves each into the store under the run that owns the PR (`prsOf(run)`
+// gives its PRs), then drops the old key. An entry whose PR no run has is dropped, unless a run
+// is stale or has no PR list yet (its PRs are not known now): those stay in the old key for the
+// next read, until a week old. Call it only
+// from a copy that polls the whole window (telling.js), so one copy writes.
+const OLD_COMMENTS_KEY = "harbormaster.commentsAsked";
+export function migrateCommentsAsked(runs, prsOf) {
+  const old = shared(OLD_COMMENTS_KEY);
+  if (!old || typeof old !== "object") return;
+  const store = askedStore(), next = { ...store }, left = {};
+  const unknown = (runs ?? []).some((r) => r.stale || prsOf(r) == null);
+  const owner = (url) => (runs ?? []).find((r) => !r.stale && (prsOf(r) ?? []).some((p) => p?.url === url));
+  for (const [url, e] of Object.entries(old)) {
+    const run = owner(url);
+    if (run) { const id = entryKey(run, "comments", url); if (!(id in next)) next[id] = e; }
+    else if (unknown && Date.now() - (e?.at ?? 0) <= ASKED_KEEP_MS) left[url] = e;
+  }
+  if (Object.keys(next).length !== Object.keys(store).length) write(next);
+  setShared(OLD_COMMENTS_KEY, Object.keys(left).length ? left : null);
+}
+
 // Drops the marks that no longer hold: the signature moved, the run is gone or closed, or a week
 // has passed (a level's or proof's, 15 s). `closed(run)` says the run is closed (t3+ passes isClosed). `lookup(run, family, key)` gives the item a signature is read from (a PR, a claim
 // row, a queue item) where the run alone does not; a mark whose item it cannot give is kept (it
@@ -368,6 +409,9 @@ export function pruneAsked(runs, { now = Date.now(), lookup = () => undefined, b
     if (now - (e?.at ?? 0) > (k.keep ?? ASKED_KEEP_MS)) return false;
     const item = lookup(run, fam, key) ?? (fam === "blocking" ? run : fam === "level" ? { current: currentLevel(run, key) } : undefined);
     if (item === undefined) return true;
+    // A click mark of a level or proof ask goes once the run shows the request unread: from then
+    // the unread message carries it, and reading it ends it (as the views' own marks did).
+    if ((fam === "level" || fam === "proof") && k.unread(run, key, item)) return false;
     if (fam === "comments") {
       if (item.state === "MERGED" || item.state === "CLOSED") return false;
       if (!item.comments || commentsUnknown(item.comments)) return true;
