@@ -211,6 +211,33 @@ export function checksLine(md) {
     tip: `Whole-branch checks: ${c.state}${c.text ? ` — ${c.text}` : ""}` };
 }
 
+// Only whole-branch reviews measure the gap: a task review's sha sits on the task branch, which a squash never makes an ancestor.
+export const finalReviews = (md) => (md?.reviewed ?? []).filter((x) => /final/i.test(x.what));
+
+// Which final review is "the" review, for a proof.md whose lines may be in any order. data.js
+// refreshReviewed measures every final sha in one git call and picks with pickFinal; the gap it
+// stores names the pick, so this finds the line by that sha. Without a gap (not read yet, or
+// git could not tell) the last in file order, as before.
+export function finalReview(md, gap = null) {
+  const finals = finalReviews(md);
+  const sha = gap?.sha;
+  return (sha && finals.find((x) => x.sha.startsWith(sha) || sha.startsWith(x.sha))) || finals[finals.length - 1];
+}
+
+// The newest final review on the branch, from `measured` ({sha → {count, anc, same} | null}, what git
+// said about each): the ancestor of the branch with the fewest commits since. A sha that is no
+// ancestor (a task or squashed commit) or unknown to git measures only when nothing else does, then
+// by fewest commits; a tie goes to the later line, and nothing measured gives the last line.
+export function pickFinal(finals, measured) {
+  const rank = (x) => { const m = measured[x.sha]; return m ? [m.anc ? 0 : 1, m.count] : [2, 0]; };
+  let best = null, bestRank = null;
+  for (const x of finals) {
+    const r = rank(x);
+    if (!best || r[0] < bestRank[0] || (r[0] === bestRank[0] && r[1] <= bestRank[1])) { best = x; bestRank = r; }
+  }
+  return best;
+}
+
 // The branch's last review as one quiet line under the checks line, from proof.md's `Reviewed:`
 // lines (the latest final, whole-branch review, else the latest one) and `gap`, how far the
 // branch has moved since ({sha, count, same}, from data.js refreshReviewed; null when not read yet):
@@ -221,8 +248,7 @@ export function checksLine(md) {
 // an old run shows nothing.
 export function reviewedLine(md, gap = null, { finished = false, claims = false } = {}) {
   const all = md?.reviewed ?? [];
-  // Only whole-branch reviews measure the gap: a task review's sha sits on the task branch, which a squash never makes an ancestor.
-  const last = [...all].reverse().find((x) => /final/i.test(x.what));
+  const last = finalReview(md, gap);
   const tasks = all.length;
   if (!last && tasks) return { text: "not reviewed (branch)", tone: "dim", tip: `No final review recorded; ${tasks} task ${tasks === 1 ? "review" : "reviews"}`, since: 0 };
   if (!last) return finished && claims ? { text: "not reviewed", tone: "dim", tip: "proof.md has no Reviewed line", since: 0 } : null;
@@ -239,7 +265,7 @@ export function reviewedLine(md, gap = null, { finished = false, claims = false 
 // is read for that sha, says not the same and counts commits, as reviewedLine's amber.
 export function reviewedState(md, gap = null) {
   const all = md?.reviewed ?? [];
-  const last = [...all].reverse().find((x) => /final/i.test(x.what));
+  const last = finalReview(md, gap);
   if (!all.length) return { kind: "none", behind: null, sha: null, compared: false };
   if (!last) return { kind: "task-only", behind: null, sha: null, compared: false };
   const g = gap && (last.sha.startsWith(gap.sha) || gap.sha?.startsWith(last.sha)) ? gap : null;

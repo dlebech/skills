@@ -18,7 +18,7 @@ import { pendingLevels } from "./levels.js";
 import { tokenText } from "./context.js";
 import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, withAcceptance } from "./proof.js";
-import { parsePlanClaims, claimResultLine } from "./claims.js";
+import { parsePlanClaims, claimResultLine, finalReviews, pickFinal } from "./claims.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
 import { taskTone, taskCounts, taskStage } from "./tasks.js";
@@ -1106,20 +1106,27 @@ async function askToClose(run) {
 
 // ---- reviewed ----
 
-// For proof.md's `Reviewed: <sha> …`: how many commits the run's branch has past that sha, and
-// whether its tree is still that commit's. Looked up in the run's folder or its repositories,
-// on the run's machine; prints "<count> <1 when the trees match>", or "?" when git cannot tell.
+// For proof.md's `Reviewed: <sha> …` lines: for each sha given, how many commits the run's branch has
+// past it, whether the sha is an ancestor of the branch, and whether the branch's tree is still that
+// commit's. One git pass for all shas, in the run's folder or its repositories, on the run's machine;
+// prints one line per sha: "<sha> <count> <1 when the trees match> <1 when an ancestor>", or "<sha> ?"
+// when git cannot tell (a sha unknown to it). claims.js pickFinal chooses among them.
 const SINCE = [
-  'folder=$1 branch=$2 sha=$3',
+  'folder=$1 branch=$2; shift 2; shas=" $* "; seen=" "',
   'for r in "$folder" "$folder"/*/; do',
   '  [ -e "$r/.git" ] || continue',
   '  git -C "$r" rev-parse -q --verify "$branch^{commit}" >/dev/null || continue',
-  '  git -C "$r" rev-parse -q --verify "$sha^{commit}" >/dev/null || continue',
-  '  n=$(git -C "$r" rev-list --count "$sha..$branch") || { echo "?"; exit 0; }',
-  '  if git -C "$r" diff --quiet "$sha" "$branch"; then echo "$n 1"; else echo "$n 0"; fi',
-  '  exit 0',
+  '  for sha in $shas; do',
+  '    case "$seen" in *" $sha "*) continue;; esac',
+  '    git -C "$r" rev-parse -q --verify "$sha^{commit}" >/dev/null || continue',
+  '    seen="$seen$sha "',
+  '    n=$(git -C "$r" rev-list --count "$sha..$branch") || { echo "$sha ?"; continue; }',
+  '    if git -C "$r" diff --quiet "$sha" "$branch"; then s=1; else s=0; fi',
+  '    if git -C "$r" merge-base --is-ancestor "$sha" "$branch"; then a=1; else a=0; fi',
+  '    echo "$sha $n $s $a"',
+  '  done',
   'done',
-  'echo "?"',
+  'for sha in $shas; do case "$seen" in *" $sha "*) ;; *) echo "$sha ?";; esac; done',
 ].join("\n");
 
 const reviewGaps = new Map(); // run key → {sha, count, same, at}
@@ -1130,18 +1137,23 @@ const REVIEW_TTL = 15_000, REVIEW_TTL_DONE = 5 * 60_000;
 // finished); one cheap git call with a timeout. Unreadable: same is null (shown dim as unknown, never as current).
 // True when what the line shows changed.
 export async function refreshReviewed(run, done = false) {
-  const all = run.proof?.md?.reviewed ?? [];
-  const last = [...all].reverse().find((x) => /final/i.test(x.what)); // task shas are not on the branch (claims.js reviewedLine)
-  if (!last || !run.folder) { reviewGaps.delete(run.key); return false; }
+  const finals = finalReviews(run.proof?.md); // task shas are not on the branch (claims.js finalReviews)
+  if (!finals.length || !run.folder) { reviewGaps.delete(run.key); return false; }
   const have = reviewGaps.get(run.key);
+  const key = finals.map((x) => x.sha).join(" ");
   if (Date.now() - (reviewBusy.get(run.key) ?? 0) < 30_000) return false;
-  if (have && have.sha === last.sha && Date.now() - have.at < (done ? REVIEW_TTL_DONE : REVIEW_TTL)) return false;
+  if (have && have.key === key && Date.now() - have.at < (done ? REVIEW_TTL_DONE : REVIEW_TTL)) return false;
   const started = Date.now();
   reviewBusy.set(run.key, started);
   try {
-    const out = await exec("sh", ["-c", SINCE, "sh", run.folder, run.branch, last.sha], { on: run.machine, timeout: 8000 }).catch(() => null);
-    const m = out?.code === 0 ? /^(\d+) ([01])$/.exec(out.stdout.trim()) : null;
-    const next = { sha: last.sha, count: m ? Number(m[1]) : 0, same: m ? m[2] === "1" : null, at: Date.now() };
+    const out = await exec("sh", ["-c", SINCE, "sh", run.folder, run.branch, ...new Set(finals.map((x) => x.sha))], { on: run.machine, timeout: 8000 }).catch(() => null);
+    const measured = {};
+    if (out?.code === 0) for (const line of out.stdout.split("\n")) {
+      const m = /^(\S+) (\d+) ([01]) ([01])$/.exec(line.trim());
+      if (m) measured[m[1]] = { count: Number(m[2]), same: m[3] === "1", anc: m[4] === "1" };
+    }
+    const last = pickFinal(finals, measured), m = measured[last.sha];
+    const next = { sha: last.sha, key, count: m ? m.count : 0, same: m ? m.same : null, at: Date.now() };
     reviewGaps.set(run.key, next);
     run.reviewedGap = next;
     return !have || have.sha !== next.sha || have.count !== next.count || have.same !== next.same;

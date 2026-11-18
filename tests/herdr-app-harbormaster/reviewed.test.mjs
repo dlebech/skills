@@ -77,3 +77,75 @@ test("reviewedState: the same rules as reviewedLine, as plain facts", () => {
   assert.equal(reviewedState(fin, { sha: "abc1234", count: 0, same: null }).compared, false);
   assert.equal(reviewedState(fin, { sha: "ffff", count: 3, same: false }).kind, "current");
 });
+
+// ---- which final review is "the" review: the newest on the branch, whatever the line order (t6) ----
+import { execFileSync, execFile } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { refreshReviewed } from "../../herdr-app/mods/harbormaster/data.js";
+
+// A real repo: main has c1..c5; "side" is a commit on another branch (not an ancestor of main).
+function repo() {
+  const dir = mkdtempSync(join(tmpdir(), "reviewed-"));
+  const git = (...a) => execFileSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...a], { encoding: "utf8" }).trim();
+  git("init", "-q", "-b", "main");
+  const shas = [];
+  for (let i = 1; i <= 5; i++) { writeFileSync(join(dir, "f"), String(i)); git("add", "."); git("commit", "-q", "-m", `c${i}`); shas.push(git("rev-parse", "--short", "HEAD")); }
+  git("checkout", "-q", "-b", "side", shas[0]);
+  writeFileSync(join(dir, "g"), "x"); git("add", "."); git("commit", "-q", "-m", "side");
+  const side = git("rev-parse", "--short", "HEAD");
+  git("checkout", "-q", "main");
+  return { dir, shas, side };
+}
+const asRun = (dir, lines, n) => ({ key: `k${n}`, folder: dir, branch: "main", proof: { md: md(lines.join("\n")) } });
+globalThis.__herdrExec = (cmd, args) => new Promise((res) => execFile(cmd, args, (e, stdout, stderr) => res({ code: e ? (e.code ?? 1) : 0, stdout, stderr })));
+
+test("final lines newest-first and oldest-first pick the same review, and the same count", async () => {
+  const { dir, shas } = repo();
+  const line = (s) => `Reviewed: ${s} final review — ok`;
+  const asc = asRun(dir, [line(shas[1]), line(shas[3])], 1), desc = asRun(dir, [line(shas[3]), line(shas[1])], 2);
+  await refreshReviewed(asc); await refreshReviewed(desc);
+  for (const r of [asc, desc]) {
+    assert.equal(r.reviewedGap.sha, shas[3]);
+    assert.equal(r.reviewedGap.count, 1);
+    const l = reviewedLine(r.proof.md, r.reviewedGap);
+    assert.equal(l.text, `Reviewed at ${shas[3]} · 1 commit since, not reviewed`);
+    assert.equal(reviewedState(r.proof.md, r.reviewedGap).sha, shas[3]);
+  }
+});
+
+test("a final review sha not on the branch is skipped when another is on it", async () => {
+  const { dir, shas, side } = repo();
+  // The foreign sha is last in the file, which used to win.
+  const r = asRun(dir, [`Reviewed: ${shas[1]} final review — ok`, `Reviewed: ${side} final review — ok`], 3);
+  await refreshReviewed(r);
+  assert.equal(r.reviewedGap.sha, shas[1]);
+  assert.equal(r.reviewedGap.count, 3);
+  assert.equal(reviewedLine(r.proof.md, r.reviewedGap).tip.startsWith(`Reviewed: ${shas[1]}`), true);
+  // Alone, it still measures (nothing else does).
+  const only = asRun(dir, [`Reviewed: ${side} final review — ok`], 4);
+  await refreshReviewed(only);
+  assert.equal(only.reviewedGap.sha, side);
+});
+
+test("one final line, an unknown sha, or no gap keeps the last line in file order", async () => {
+  const { dir, shas } = repo();
+  const r = asRun(dir, [`Reviewed: ${shas[2]} final review — ok`, "Reviewed: deadbee final review — ok"], 5);
+  await refreshReviewed(r);
+  assert.equal(r.reviewedGap.sha, shas[2]); // the unknown one cannot measure while another can
+  const none = asRun(dir, ["Reviewed: deadbee final review — ok", "Reviewed: cafe123 final review — ok"], 6);
+  await refreshReviewed(none);
+  assert.deepEqual([none.reviewedGap.sha, none.reviewedGap.same], ["cafe123", null]);
+  const m = md("Reviewed: 1111111 final review — a\nReviewed: 2222222 final review — b");
+  assert.match(reviewedLine(m, null).text, /2222222/);
+});
+
+test("one git call per refresh, however many final lines", async () => {
+  const { dir, shas } = repo();
+  const calls = []; const real = globalThis.__herdrExec;
+  globalThis.__herdrExec = (...a) => { calls.push(a); return real(...a); };
+  await refreshReviewed(asRun(dir, shas.map((s) => `Reviewed: ${s} final review — ok`), 7));
+  globalThis.__herdrExec = real;
+  assert.equal(calls.length, 1);
+});

@@ -131,7 +131,9 @@ ran. `Checks: green — …` or `Checks: red — …` in the header is the whole
 CI): one line under the claims, `Checks ✓ 1497 tests, build, lint, CI`, red on failure, dim for
 any other word (`Checks: pending — CI`, still running). `Reviewed: <short sha> <which review> — <result>`
 (`Reviewed: 3def855 task t9b — 3 must-fix fixed`) is repeatable and says what was reviewed at which
-commit; the latest final (whole-branch) review is the one Harbormaster reports, as `Reviewed · final
+commit; the newest final (whole-branch) review on the branch is the one Harbormaster reports (the one with the
+fewest commits from its sha to the branch, whatever the order of the lines; a sha that is not on the branch is
+used only when no other final line is), as `Reviewed · final
 review at 4ad8528`, or amber `Reviewed at 4ad8528 · 5 commits since, not reviewed` once the integration
 branch has moved on (its tree differing). Task reviews never measure that gap (their sha is on the task branch); with only task lines the line is a dim `not reviewed (branch)`. When git cannot compare, it is a dim `Reviewed at 4ad8528`, never `Reviewed ·`. A finished run with claims and no `Reviewed:` line shows a
 dim `not reviewed`; an old run shows nothing. `## C1: …` and `## C1. …` are C1 too.
