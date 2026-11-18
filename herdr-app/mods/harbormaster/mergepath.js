@@ -6,7 +6,7 @@
 //   { phase, away, counts: {done, planned}, blockedTasks, claims: null | {total, proven, accepted, failed, look},
 //     checks: null | "green" | "red" | "pending", reviewed: {kind: "none" | "current" | "behind" | "task-only", behind, sha},
 //     flow: "self" | "peer", prs, allMerged, next: null | {label, who}, held, ready, ci: null | "green" | "red" | "running" }
-// `fold` is the pane fold the stage opens ("claims"), or null.
+// `fold` is the pane fold the stage opens ("claims", "tasks"), or null.
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -19,7 +19,7 @@ function buildStage({ phase, counts, blockedTasks }) {
     : state === "done" ? (planned > 0 ? `All ${plural(planned, "task")} ${planned === 1 ? "is" : "are"} merged into the run's branch` : "The run is finished")
     : state === "todo" ? "No tasks are planned yet"
     : `${done} of ${plural(planned, "task")} merged into the run's branch`;
-  return { key: "build", label: state === "done" ? "Built" : "Build", value: planned > 0 ? `${done}/${planned}` : null, state, tip, fold: null };
+  return { key: "build", label: state === "done" ? "Built" : "Build", value: planned > 0 ? `${done}/${planned}` : null, state, tip, fold: "tasks" };
 }
 
 // The Proven stage: claims proven or accepted, else the checks line of an old run; null with neither.

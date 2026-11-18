@@ -40,7 +40,7 @@ test("finished, 6/6 proven, AI review 2 behind, peer, request review", () => {
   assert.equal(by(s, "human").tip, "No reviewer has been asked yet");
   assert.equal(by(s, "proven").fold, "claims");
   assert.equal(by(s, "review").fold, "claims");
-  assert.equal(by(s, "build").fold, null);
+  assert.equal(by(s, "build").fold, "tasks");
 });
 
 test("peer review from anna", () => {

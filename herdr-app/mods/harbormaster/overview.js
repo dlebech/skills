@@ -17,6 +17,7 @@ import { levelChoices } from "./levels.js";
 import { attentionOf, needsYouNow as needsYouOf, runlessOrchs } from "./attend.js";
 import { stepText, quietText, flowState, flowSetting, runDot, ciState } from "./attention.js";
 import { mergePath } from "./mergepath.js";
+import { paneSections, agentsSummary, auditDecisions } from "./paneorder.js";
 import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } from "./tell.js";
 import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
@@ -1006,9 +1007,11 @@ export function pathInput(r, f, stages) {
 // The path-to-merge strip under the pane's header: each stage with its value and mark, a click on
 // one that has a section unfolds it ("Built 3/3 ✓ › Proven 6/6 ✓ › AI review ⚠ 2 behind › Peer review ● you › Merge").
 function pathStrip(view, t, r, f, stages) {
-  // A stage opens the Claims section, which an old run without claims does not have.
-  const stops = mergePath(pathInput(r, f, stages)).map((s) => (s.fold && !hasClaims(r) ? { ...s, fold: null } : s));
-  const open = (fold) => { view.folds ??= new Map(); if (fold === "claims") view.folds.set(`pf-${r.key}`, true); };
+  // A stage opens the Claims section, which an old run without claims does not have, or the Tasks
+  // section, which only has something to open while it is a single line.
+  const tasksFold = paneSections({ finished: isFinished(r) }).some((x) => x.key === "tasks" && x.compact) && (f.counts.planned > 0 || r.tasks.length > 0);
+  const stops = mergePath(pathInput(r, f, stages)).map((s) => (s.fold === "claims" && !hasClaims(r) || s.fold === "tasks" && !tasksFold ? { ...s, fold: null } : s));
+  const open = (fold) => { view.folds ??= new Map(); if (fold === "claims") view.folds.set(`pf-${r.key}`, true); if (fold === "tasks") view.folds.set(`tk-${r.key}`, true); };
   const part = (s) => {
     const ask = s.value === "ask" || s.value === "read the proof";
     const label = div().flex_none().child(s.label);
@@ -1249,7 +1252,8 @@ function decisionsSection(view, t, r) {
       .child(div().flex_none().text_color(t.muted).child(`· ${r.decided.length}`))
       .when(Boolean(since), (el) => el.child(div().flex_none().text_color(t.accent).font_semibold().child(`· ${since}`)))
       .child(div().min_w(0).truncate().text_color(t.muted).child(counts ? `· ${counts}` : "")))
-    .when(open, (el) => el.children(r.decided.map(line)));
+    // A finished run shows the newest decisions the orchestrator made itself above the fold: the ones to audit.
+    .children(open ? r.decided.map(line) : isFinished(r) ? auditDecisions(r.decided).map((d) => line(d, r.decided.indexOf(d))) : []);
 }
 
 // "Tokens": what the run has used, across its orchestrator and every agent it ran. One line:
@@ -1455,8 +1459,37 @@ function runDetail(view, t, r, ctx) {
   const comments = addressRows(view, t, r, ctx, f, `pane-${r.key}`);
   // The need box carries the self/peer choice where it applies, so the section header does not.
   const flowInBox = need && showsFlow(needItemsOf(r, ctx, f.att));
-  // Most important first: who and what, whether it needs you, when and its PR, then the PR
-  // itself, proof, tasks, decisions and agents; tokens last, since they are about cost.
+  // Each section by key, built only when it has something to show; paneorder.js says in which order
+  // and whether as one line (a finished run's Tasks and Agents).
+  const sections = new Map();
+  // Who reviews means nothing before there is a PR to review: the toggle comes with the first. With
+  // no PR it is one dim line, not a box.
+  sections.set("prs", () => (prs.length === 0
+    ? div().px(2).text_size(11.5).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet")
+    : section(t, `Pull requests · ${prs.length}`, r.away || flowInBox ? null : flowToggle(t, r, `pane-${r.key}`))
+      .children(prs.map((p, i) => prDetail(t, p, i, false, Boolean(r.away))))));
+  if (r.issues.length + related.length > 0) sections.set("issues", () => section(t, "Issues and related PRs")
+    .children(r.issues.map((url) => issueRow(t, url)))
+    .children(related.map((p, i) => prDetail(t, p, i, true, Boolean(r.away)))));
+  if (hasClaims(r) || r.proof.md?.checks || r.proof.md?.reviewed?.length) sections.set("claims", () => claimsSection(view, t, r, stages));
+  if (counts.planned > 0 || r.tasks.length > 0) sections.set("tasks", (compact) => {
+    const key = `tk-${r.key}`;
+    const strip = div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false));
+    if (!compact) return section(t, "Tasks", tasksText(r, counts, stages)).child(strip);
+    return boxed(t, v_flex().gap(4))
+      .child(foldLine(view, t, key, `${isOpen(view, key) ? "Hide" : "Show"} the tasks`, [{ text: tasksText(r, counts, stages), color: t.muted }], null, "Tasks"))
+      .when(isOpen(view, key), (el) => el.child(strip));
+  });
+  if (r.decided.length > 0) sections.set("decisions", () => decisionsSection(view, t, r));
+  if (workers.length > 0) sections.set("agents", (compact) => {
+    const key = `ag-${r.key}`, sum = agentsSummary(workers.map((w) => w.name ?? w.address));
+    const tree = () => workerTree(workers, r.terminal).map((line) => workerRow(t, line.w, ctx, workOf.get(line.w.address), line));
+    if (!compact) return section(t, sum.head).children(tree());
+    return boxed(t, v_flex().gap(4))
+      .child(foldLine(view, t, key, `${isOpen(view, key) ? "Hide" : "Show"} the agents`, [{ text: sum.names, color: t.dim }], null, sum.head))
+      .when(isOpen(view, key), (el) => el.children(tree()));
+  });
+  if (r.tokens) sections.set("tokens", () => tokensSection(view, t, r));
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(14).p(14).pl(18).rounded(10).bg(t.surface)
     .border(1).border_color(need ? t.blocked + "88" : t.border)
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
@@ -1470,20 +1503,7 @@ function runDetail(view, t, r, ctx) {
       .children(notes)
       .when(Boolean(blocking), (e) => e.child(h_flex().pt(2).child(blocking)))
       .when(Boolean(comments), (e) => e.child(div().pt(2).child(comments)))))
-    // Who reviews means nothing before there is a PR to review: the toggle comes with the first.
-    .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests", r.away || !prs.length || flowInBox ? null : flowToggle(t, r, `pane-${r.key}`))
-      .children(prs.map((p, i) => prDetail(t, p, i, false, Boolean(r.away))))
-      .when(prs.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet"))))
-    .when(r.issues.length + related.length > 0, (el) => el.child(section(t, "Issues and related PRs")
-      .children(r.issues.map((url) => issueRow(t, url)))
-      .children(related.map((p, i) => prDetail(t, p, i, true, Boolean(r.away))))))
-    .when(hasClaims(r) || Boolean(r.proof.md?.checks) || Boolean(r.proof.md?.reviewed?.length), (el) => el.child(claimsSection(view, t, r, stages)))
-    .when(counts.planned > 0 || r.tasks.length > 0, (el) => el.child(section(t, "Tasks", tasksText(r, counts, stages))
-      .child(div().px(2).pb(2).child(taskStrip(t, r, counts, stages, false)))))
-    .when(r.decided.length > 0, (el) => el.child(decisionsSection(view, t, r)))
-    .when(workers.length > 0, (el) => el.child(section(t, `Agents · ${workers.length}`)
-      .children(workerTree(workers, r.terminal).map((line) => workerRow(t, line.w, ctx, workOf.get(line.w.address), line)))))
-    .when(Boolean(r.tokens), (el) => el.child(tokensSection(view, t, r)))
+    .children(paneSections({ finished: isFinished(r) }).map(({ key, compact }) => sections.get(key)?.(compact)).filter(Boolean))
     .child(actionRow(view, t, r, orch, closed, counts));
 }
 
