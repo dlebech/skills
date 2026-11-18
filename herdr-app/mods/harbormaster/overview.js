@@ -15,7 +15,7 @@ import { thumbs } from "./viewer.js";
 import { setNote, noteText } from "./note.js";
 import { levelChoices } from "./levels.js";
 import { attentionOf, needsYouNow as needsYouOf, runlessOrchs } from "./attend.js";
-import { stepText, quietText, flowState, flowSetting, runDot, ciState } from "./attention.js";
+import { stepText, quietText, flowState, flowSetting, runDot, ciState, waitSig, ageText, WAIT_LABELS } from "./attention.js";
 import { mergePath } from "./mergepath.js";
 import { paneSections, agentsSummary, auditDecisions } from "./paneorder.js";
 import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } from "./tell.js";
@@ -26,7 +26,7 @@ import { rowEdge, badgeOf, needLine, closableDone, needCount, needRunsOf, runles
 import { asked as inboxAsked, unmarkAsked, askedLevel } from "./inbox.js";
 import { askClick } from "./askclick.js";
 import { defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
-import { reviewFlows, setReviewFlow } from "./tracking.js";
+import { reviewFlows, setReviewFlow, setWaitingOn } from "./tracking.js";
 import { needActions, ownAddressRows, isPrimary, detailsLabel, showsFlow, requestingFor } from "./needaction.js";
 import { canRequest, pickerLabel } from "./reviewers.js";
 
@@ -608,6 +608,7 @@ export function needButton(view, t, r, f, x, id, where, primary) {
       cx.notify();
     }, primary);
     case "changes": return changesButton(view, t, r, id);
+    case "wait-on": return waitOnButton(view, t, r, id);
     default: return null;
   }
 }
@@ -709,6 +710,56 @@ function changesButton(view, t, r, id) {
     } : null);
 }
 
+// Waiting on someone… (a person outside GitHub, say, checking a preview): opens the Reply field
+// under the box; Enter with text marks the run as waiting on them (tracking.js harbormaster.waitingOn,
+// with its step's label and signature, attention.js waitSig) and it moves to Waiting on others.
+// Nothing goes to the run's inbox: the orchestrator has nothing to do about it.
+export const waitOnId = (r) => `wait:${r.key}`;
+export const WAIT_HINT = "Who is it waiting on? (e.g. Kari — preview check) · Enter moves the run to Waiting on others until something needs you";
+function waitOnButton(view, t, r, id) {
+  const open = view.replying === waitOnId(r);
+  return actionButton(t, id, open ? "Cancel" : "Waiting on someone…",
+    "Someone outside GitHub has it (a preview check, say): the run waits in Waiting on others until a reviewer, a review, a push, red CI or a question needs you again", (cx) => {
+      view.replying = open ? null : waitOnId(r);
+      view.reply.set_value("");
+      if (!open) view.reply.focus();
+      cx.notify();
+    });
+}
+
+// The waiting-on field (Waiting on someone…), with what to type under it, while it is open for `r`; else null.
+export const waitOnField = (view, t, r, id) => (view.replying === waitOnId(r)
+  ? v_flex().id(id).gap(4).on_click((_e, cx) => cx.stop_propagation()).child(Input.new(view.reply))
+    .child(div().text_size(10.5).text_color(t.dim).child(WAIT_HINT))
+  : null);
+
+// Marks the run as waiting on `text` (not blank), with its step as it is now; the field closes.
+// Only while that step is still all the run needs the user for (as needaction.js offers the
+// button): a reviewer requested or red CI since the field opened would let the mark go at the
+// next poll, so nothing is set and a note says why.
+function markWaiting(view, key, text, cx) {
+  if (!text) return;
+  const run = view.runs.find((x) => x.key === key);
+  const a = run ? attOf(run, facts()) : null;
+  const next = a?.next;
+  const can = a?.group === "needs" && a.reasons.length === 1 && WAIT_LABELS.has(a.reasons[0].key) && next?.label === a.reasons[0].key;
+  if (can) setWaitingOn(key, { text, at: Date.now(), label: next.label, sig: waitSig(next) });
+  else setNote(view, `Not marked waiting on ${text}: ${!a ? "the run is gone" : a.group === "needs" ? `it now needs you for ${a.reasons.map((x) => x.text).join(" · ")}` : "it no longer waits on you for that step"}`);
+  view.reply.set_value("");
+  view.replying = null;
+  cx.notify();
+}
+
+// A marked run's line on its card and pane: "Waiting on Kari — preview check · 2h" and Not waiting
+// any more, which clears the mark (back to Needs you). Null for a run the mark does not hold.
+export function waitNote(t, r, f, id) {
+  const w = f.att?.waitingOn;
+  if (!w) return null;
+  return h_flex().id(id).gap(8).items_center().flex_wrap()
+    .child(div().min_w(0).text_size(11.5).text_color(t.ansi6 ?? t.accent).child(`Waiting on ${w.text}${w.at ? ` · ${ageText(Date.now() - w.at)}` : ""}`))
+    .child(actionButton(t, `${id}-clear`, "Not waiting any more", "Clear the mark: the run is back in Needs you", (cx) => { setWaitingOn(r.key, null); cx.notify(); }));
+}
+
 // The need items as lines, each with its buttons; the first item's first button stands out, unless
 // the actions say which does (`primary`). Actions about one PR each (`row`: "#1799 · 15 comments")
 // go in a row per PR, led by it.
@@ -789,7 +840,7 @@ export function needBox(view, t, r, f, ctx, where) {
       .when(ready && view.replying === changesId(r), (el) => el.child(v_flex().gap(4)
         .child(Input.new(view.reply))
         .child(div().text_size(10.5).text_color(t.dim).child("What should change? Enter writes it to the run's inbox and tells its orchestrator"))))
-      .children([boxConfirm(view, t, r, f, where)].filter(Boolean))
+      .children([waitOnField(view, t, r, `need-wait-${where}-${r.key}`), boxConfirm(view, t, r, f, where)].filter(Boolean))
       .when(Boolean(link), (el) => el.child(h_flex().child(link))));
   }
   const head = needHead(r.ask);
@@ -917,6 +968,7 @@ function card(view, t, r, ctx, compact = false) {
     .child(div().absolute().left(0).top(0).bottom(0).w(4).bg(runEdge(t, f)))
     .child(cardHeader(view, t, r, f, runMeta(r, f)))
     .when(need, (el) => el.child(needBox(view, t, r, f, ctx, "card")))
+    .children([waitNote(t, r, f, `wait-card-${r.key}`)].filter(Boolean))
     .when(Boolean(facts), (el) => el.child(facts))
     .when(Boolean(r.progress), (el) => el.child(progressLine(t, r, f.att)))
     .children(cardNotes(t, r, f))
@@ -1001,6 +1053,7 @@ export function pathInput(r, f, stages) {
     allMerged: f.prs.length > 0 && f.prs.every((p) => p.state === "MERGED"),
     next: f.att?.next ? { label: f.att.next.label, who: f.att.next.who ?? [] } : null,
     held: Boolean(f.att?.held), ready: Boolean(f.att?.ready), ci: ciState(f.prs).state,
+    waitingOn: f.att?.waitingOn?.text ?? null,
   };
 }
 
@@ -1497,6 +1550,7 @@ function runDetail(view, t, r, ctx) {
       .child(cardHeader(view, t, r, f, runMeta(r, f), r.started ? runAgeText(r) : null)))
     .child(v_flex().gap(4).child(strip).when(Boolean(door), (e) => e.child(door)))
     .when(need, (el) => el.child(needBox(view, t, r, f, ctx, "pane")))
+    .children([waitNote(t, r, f, `wait-pane-${r.key}`)].filter(Boolean))
     .when(Boolean(facts) || Boolean(r.progress) || notes.length > 0 || Boolean(blocking) || Boolean(comments), (el) => el.child(v_flex().gap(4)
       .when(Boolean(facts), (e) => e.child(facts))
       .when(Boolean(r.progress), (e) => e.child(progressLine(t, r, f.att)))
@@ -1592,6 +1646,8 @@ export function submitReply(view, cx) {
   const text = view.reply.value().trim();
   // Ask for changes on a ready run (changesButton): its own message, not an answer.
   if (view.replying?.startsWith("changes:")) return sendChanges(view, view.replying.slice(8), text, cx);
+  // Waiting on someone… (waitOnButton): a mark in Harbormaster, not a message.
+  if (view.replying?.startsWith("wait:")) return markWaiting(view, view.replying.slice(5), text, cx);
   // A need box's Reply answers the same item (question.js replyId).
   const id = replyItem(view.replying);
   const it = decisionQueue(view.runs, view.decisions, facts()).find((x) => x.id === id);

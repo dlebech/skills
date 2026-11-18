@@ -77,6 +77,24 @@ const NEEDS_LABELS = new Set(["changes requested", "approved — merge", "review
 const AFTER_PLAN = new Set(["review proof → merge", "request review"]);
 const rank = (label) => LABELS.indexOf(label);
 
+// ---- waiting on someone (the user's mark) ----
+
+// The Needs-you steps the user may mark "waiting on <someone>" (a person outside GitHub, say,
+// checking a preview): the run then sits in Waiting on others until something needs the user again.
+export const WAIT_LABELS = new Set(["request review", "review proof → merge"]);
+
+// What a next step's PRs look like, as far as a waiting-on mark cares: its label and, per PR, its
+// state, requested reviewers, standing reviews, the latest review's time, head commit and review
+// comments. A reviewer requested, a review or comment arriving, a push or a merge changes it, and
+// the mark lets go. Not `updatedAt`: a preview bot editing its comment would let it go for nothing.
+export function waitSig(next) {
+  if (!next) return "";
+  const sorted = (xs) => [...(xs ?? [])].sort();
+  const prs = [...(next.prs ?? [])].sort((a, b) => String(a.url).localeCompare(String(b.url)))
+    .map((p) => [p.url, p.number, p.state, sorted(p.requested), sorted(p.approvedBy), sorted(p.changesBy), p.reviewedAt ?? null, p.sha ?? null]);
+  return JSON.stringify([next.label, next.count, prs, next.comments?.count ?? null]);
+}
+
 // Whether the run's next step is held back by its open plan (tasks.js planOpen): a self-flow PR
 // is not the user's to review or merge yet. The one check every view that words the step shares.
 export const heldByPlan = (run, next) => Boolean(next) && AFTER_PLAN.has(next.label) && planOpen(run);
@@ -377,23 +395,30 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 //   proofFailed  a proof task failed (attend.js): the review-proof step reads "proof failed"
 //   proofRead, proofClean  the user opened the proof as it is now; every claim is proven or accepted (attend.js):
 //             together with green or no checks and nothing else needing the user, the run is `ready`
+//   waitOn    the user's waiting-on mark of the run ({text, at, label, sig}, tracking.js), or null
 //   now
 // Returns {group: "needs" | "working" | "waiting" | "cant" | "done", cantTell, why, held (the plan holds
 // the step back), planOpen (an approval whose plan is still open: told without "merge"), reasons: [{key, text, since}],
 // next (nextStep), step (stepOf), stall, proofFailed, proofRead, ready (ready to merge), waitSince (ms: the longest-waiting reason's anchor,
-// for sorting; oldest first)}. Reason keys: question, gone (an unfinished run whose
+// for sorting; oldest first), waitingOn ({text, at} while the user's mark holds the run in
+// Waiting on others), dropWait (true when the mark no longer applies and should be deleted)}. Reason keys: question, gone (an unfinished run whose
 // orchestrator is gone or lost: Resume is what it needs), stalled, red-ci, and the next-step
 // labels in Needs you, and finished (a finished run with no PR: its report is read and the
 // run closed); working, ci-running, idle in Working (idle: briefly quiet, not
-// stalled yet); waiting-for in Waiting on others; cant-tell in Can't tell. A Needs you run
+// stalled yet); waiting-for and waiting-on in Waiting on others; cant-tell in Can't tell. A Needs you run
 // may still have cantTell: a question read from its files, its PRs unreadable.
-export function assess(run, { related = null, orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, proofFailed = false, proofRead = false, proofClean = false, changesAsked = false, askedPrs = null, now = Date.now() } = {}) {
+export function assess(run, { related = null, orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, proofFailed = false, proofRead = false, proofClean = false, changesAsked = false, askedPrs = null, waitOn = null, now = Date.now() } = {}) {
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
   const step = stepOf(run, { prs, stages, since, ages });
   const base = { held: false, planOpen: false, cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), proofRead: Boolean(proofRead), changesAsked: Boolean(changesAsked), tasksShort: false, ready: false, working: Boolean(working), askedPrs: askedPrs ?? new Set() };
+  // Whether the mark is judged: only once the PRs were read, and then on PR grounds only while
+  // nothing works on the run or its CI (a working run is in Working whatever the mark says, and
+  // keeps it for when it settles); a question or a gone orchestrator lets it go even while agents work.
+  let judgeWait = false;
   const out = (group, extra) => {
     const r = { ...base, ...extra, group };
+    if (waitOn && judgeWait && !r.waitingOn) r.dropWait = true;
     const anchors = r.reasons.map((x) => x.since).filter(Boolean);
     // Done waits since the run last changed (its closing, or its last status update).
     r.waitSince = anchors.length ? Math.min(...anchors)
@@ -419,6 +444,10 @@ export function assess(run, { related = null, orch = null, working = false, pr =
   }
   // PRs whose comments are being handled leave the step while the others wait on you (nextStepAsking).
   const { next, partial } = nextStepAsking(prs, flow, askedPrs);
+  const ci = ciState(prs);
+  judgeWait = reasons.some((x) => x.key === "question" || x.key === "gone") || (!working && ci.state !== "running");
+  // The user's mark holds while the step and its PRs are as they were when it was set.
+  const marked = Boolean(waitOn) && WAIT_LABELS.has(waitOn.label) && next?.label === waitOn.label && waitSig(next) === waitOn.sig;
   base.next = next;
   base.held = heldByPlan(run, next);
   // An approval stays (a reviewer acted) but is not told to merge while the run's own plan is open.
@@ -437,10 +466,9 @@ export function assess(run, { related = null, orch = null, working = false, pr =
     return out("done", { next: { label, rank: rank(label), who: [], count: 1, same: 1, pr: reviewed.pr, prs: [reviewed.pr], comments: null, draft: false } });
   }
   if (reviewed?.kind === "pending") reasons.push({ key: "review-pending", text: PENDING_LABEL, pr: reviewed.pr, since: run.updated ?? null });
-  const ci = ciState(prs);
-  // Waiting on a reviewer is a wait on a person, not a stall (only CI past its usual time
-  // stalls while CI runs).
-  if (stall && stall.by !== "ci" && (next?.label === "review from" || ci.state === "running")) stall = false;
+  // Waiting on a reviewer, or on whoever the user's mark names, is a wait on a person, not a
+  // stall (only CI past its usual time stalls while CI runs).
+  if (stall && stall.by !== "ci" && (next?.label === "review from" || ci.state === "running" || marked)) stall = false;
   if (stall) reasons.push({ key: "stalled", text: quietText(stall), since: now - stall.quietMs });
   // PR grounds only once nothing works on the run any more and CI is not running: while it
   // works, it is the run's turn, not the user's. The exception: PRs of an approval or change
@@ -468,6 +496,11 @@ export function assess(run, { related = null, orch = null, working = false, pr =
   // A finished run with no PR (a review or an exploration) leaves a report: reading it and
   // closing the run is the user's to do. Not Done: Done is merged PRs, which it has none of.
   if (run.phase === "finished" && !prs.length && !working && !closed && !reviewed) reasons.push({ key: "finished", text: FINISHED_LABEL, since: run.updated ?? null });
+  // Marked "waiting on <someone>": while its step is the only thing it needs the user for, it waits on them.
+  if (marked && reasons.length === 1 && reasons[0].key === waitOn.label) {
+    const waitingOn = { text: waitOn.text, at: waitOn.at ?? null };
+    return out("waiting", { reasons: [{ key: "waiting-on", text: `waiting on ${waitOn.text}`, since: waitingOn.at }], next, waitingOn, ready: false });
+  }
   if (reasons.length) return out("needs", { reasons, next, stall });
   const why = working ? { key: "working", text: "agents working" }
     : ci.state === "running" ? { key: "ci-running", text: "CI running" }

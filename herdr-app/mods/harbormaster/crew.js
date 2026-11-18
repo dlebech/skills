@@ -21,6 +21,7 @@ import {
   attOf, runStatus, levelTags, runTypeTag, statusDot, actionButton, closeAllControl, runFacts, needItemsOf,
   newDecisionsNote, noteRows, watchedText, edgeColor, cardBesideOrchestrator, AMBER, PASS, SELECTED, withUsage, runProps,
   needButton, needLines, answerParts, boxConfirm, proofAction, said, stagesOf,
+  waitOnField,
 } from "./overview.js";
 
 // A run's title as the sidebar shows it: a review's "<repo>#<n> · <topic>", else runName's; with
@@ -257,6 +258,8 @@ function boxActions(m, x, f, items) {
   const confirm = boxConfirm(view, t, r, f, "sidebar");
   const changes = view.replying === `changes:${r.key}` ? v_flex().id(`${key}-changes`).gap(4).on_click((_e, cx) => cx.stop_propagation()).child(Input.new(view.reply))
     .child(div().text_size(10.5).text_color(t.dim).child("What should change? Enter writes it to the run's inbox and tells its orchestrator")) : null;
+  // Waiting on someone…'s field (overview.js waitOnButton), under the box's buttons like Ask for changes'.
+  const wait = waitOnField(view, t, r, `${key}-wait`);
   if (it) {
     // A question: its recommended option is the button (else Reply); the other options, Reply
     // and anything else it needs you for under "more".
@@ -284,13 +287,13 @@ function boxActions(m, x, f, items) {
   // A merge ask's claims and checks line are unfolded with the rest, so they count too.
   const claimLines = isMergeAsk(items) ? boxClaims(r, stagesOf(r, m.ctx)).rows.length + (checksLine(r.proof?.md) ? 1 : 0) + (boxReviewed(r) ? 1 : 0) : 0;
   const extra = drawn - (main ? 1 : 0) + claimLines;
-  if (more) return [...needLines(view, t, r, f, items, "sidebar"), claimLines ? mergeClaims(m, r) : null, h_flex().child(moreLink(0)), changes, confirm].filter(Boolean);
+  if (more) return [...needLines(view, t, r, f, items, "sidebar"), claimLines ? mergeClaims(m, r) : null, h_flex().child(moreLink(0)), changes, wait, confirm].filter(Boolean);
   // The button's own line when it is not the first item's (the first was asked about), so it never
   // stands without its reason; with no button at all, the first line says what is under way.
   const lineOf = main && p.i > 0 ? items[p.i] : !main ? items[0] : null;
   const line = lineOf ? div().text_size(11.5).text_color(main ? t.foreground : t.muted).child(lineOf.line) : null;
   return [line, (main || extra > 0) && h_flex().gap(10).items_center().flex_wrap().when(Boolean(main), (el) => el.child(main)).when(extra > 0, (el) => el.child(moreLink(extra))),
-    changes, confirm].filter(Boolean);
+    changes, wait, confirm].filter(Boolean);
 }
 
 // The claims the box shows: those worth a look. The proven ones stay in the run's pane (the box

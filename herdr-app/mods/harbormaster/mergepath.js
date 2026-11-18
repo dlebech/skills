@@ -5,7 +5,8 @@
 // mergePath(input) → [{ key, label, value, state, tip, fold }]. `input` is plain data:
 //   { phase, away, counts: {done, planned}, blockedTasks, claims: null | {total, proven, accepted, failed, look},
 //     checks: null | "green" | "red" | "pending", reviewed: {kind: "none" | "current" | "behind" | "task-only", behind, sha},
-//     flow: "self" | "peer", prs, allMerged, next: null | {label, who}, held, ready, ci: null | "green" | "red" | "running" }
+//     flow: "self" | "peer", prs, allMerged, next: null | {label, who}, held, ready, ci: null | "green" | "red" | "running",
+//     waitingOn: null | "<who and why, the user's words>" }
 // `fold` is the pane fold the stage opens ("claims", "tasks"), or null.
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -53,10 +54,12 @@ function reviewStage({ phase, reviewed }) {
 }
 
 // The human review stage, from the run's next step (attention.js LABELS).
-function humanStage({ flow, prs, next, held, ready }) {
+function humanStage({ flow, prs, next, held, ready, waitingOn }) {
   const label = flow === "self" ? "Your review" : "Peer review";
   const st = (state, value, tip) => ({ key: "human", label, value, state, tip, fold: null });
   if (held || !prs || !next) return st("todo", null, !prs ? "There is no pull request to review yet" : held ? "The run's plan still holds the review back" : "Nothing waits on a review yet");
+  // The user marked the run as waiting on someone outside GitHub (attention.js waitingOn): not theirs to act on.
+  if (waitingOn) return st("current", `waiting on ${waitingOn}`, `You marked this run as waiting on ${waitingOn}`);
   const who = (next.who ?? []).join(", ");
   switch (next.label) {
     case "request review": return st("you", "ask", "No reviewer has been asked yet");

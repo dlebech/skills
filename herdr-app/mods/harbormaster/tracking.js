@@ -25,6 +25,9 @@
 //     run's duration, and it counts only CI an agent watched.
 //   - the review flow per repository folder: shared state harbormaster.reviewFlows,
 //     {[folder name]: "peer" | "self"}, the user's choices over attention.js DEFAULT_FLOWS.
+//   - the user's "waiting on someone…" marks: shared state harbormaster.waitingOn, {[run key]:
+//     {text, at, label, sig}}: who the run waits on in the user's words, when it was marked, and the
+//     next step's label and signature then (attention.js waitSig), so a change on the PR lets it go.
 
 import { exec, shared, setShared } from "herdr";
 import { STALL_MS, stepSig, trackSince, trackParts, stepParts, usualCi } from "./attention.js";
@@ -34,6 +37,7 @@ import { workersOf, exactStatus, orchestratorState } from "./live.js";
 const STEPS_KEY = "harbormaster.steps";
 const CI_KEY = "harbormaster.ci";
 const FLOWS_KEY = "harbormaster.reviewFlows";
+const WAITS_KEY = "harbormaster.waitingOn";
 export const CI_KEEP = 20;
 const PROBE_EVERY = 60000;
 // Once a run is stalled, its screens are read only this often, until its agents change.
@@ -219,4 +223,50 @@ export function withFlow(store, key, flow) {
 // run of that folder reads it at its next render.
 export function setReviewFlow(key, flow) {
   if (key) setShared(FLOWS_KEY, withFlow(reviewFlows(), key, flow));
+}
+
+// ---- waiting on someone ----
+
+// The user's waiting-on marks: {[run key]: {text, at, label, sig}}.
+export const waitingOn = () => shared(WAITS_KEY) ?? {};
+
+// A run's mark, or null.
+export const waitingOnOf = (run) => (run?.key ? waitingOn()[run.key] ?? null : null);
+
+// The marks store with a run's mark set (`mark`: {text, at, label, sig}, the text not blank), or
+// with null removed. The same store when nothing changes.
+export function withWait(store, key, mark) {
+  if (!key) return store;
+  const text = String(mark?.text ?? "").trim();
+  if (mark && text) return { ...(store ?? {}), [key]: { text, at: mark.at ?? null, label: mark.label ?? null, sig: mark.sig ?? "" } };
+  if (!store?.[key]) return store;
+  const next = { ...store };
+  delete next[key];
+  return next;
+}
+
+// The marks store without the keys in `drop`, nor marks of runs no longer listed (`keys`: the run
+// keys a poll listed), but for those `unread(key)` says were not read (their machine did not
+// answer: the run may well still be there). The same store when nothing goes.
+export function prunedWaits(store, keys, drop = [], unread = () => false) {
+  const gone = Object.keys(store ?? {}).filter((k) => drop.includes(k) || (!keys.has(k) && !unread(k)));
+  if (!gone.length) return store;
+  const next = { ...store };
+  for (const k of gone) delete next[k];
+  return next;
+}
+
+// Sets a run's mark, or with null clears it. Every view reads it at its next render.
+export function setWaitingOn(key, mark) {
+  const store = waitingOn();
+  const next = withWait(store, key, mark);
+  if (next !== store) setShared(WAITS_KEY, next);
+}
+
+// Deletes the marks of `drop` (run keys) and of runs not among `keys` but for unread ones, in one write.
+export function pruneWaitingOn(keys, drop = [], unread = () => false) {
+  const store = shared(WAITS_KEY);
+  if (!store) return;
+  const next = prunedWaits(store, keys, drop, unread);
+  if (next !== store) setShared(WAITS_KEY, next);
 }

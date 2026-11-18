@@ -51,11 +51,11 @@ test("approved with open comments says to address them, then merge", () => {
 test("review proof → merge points at the proof first, then the PR", () => {
   const [it] = items(run(), [pr()], { flow: "self" }, { proof: { tier: 2, pass: 5, total: 10 } });
   assert.equal(it.line, "Read the proof (T2 · 5/10 proven), then merge #42");
-  assert.deepEqual(it.actions.map((a) => a.label), ["Proof", "Open #42"]);
+  assert.deepEqual(it.actions.map((a) => a.label), ["Proof", "Open #42", "Waiting on someone…"]);
   // Without proof to read, the PR is what there is to review.
   const [bare] = items(run(), [pr()], { flow: "self" });
   assert.equal(bare.line, "Review #42, then merge it");
-  assert.deepEqual(kinds(bare), ["open"]);
+  assert.deepEqual(kinds(bare), ["open", "wait-on"]);
 });
 
 test("review proof never says merge while CI is red, and a draft is marked ready first", () => {
@@ -78,6 +78,7 @@ test("request review names one action: Request review, then a quiet link to the 
   assert.deepEqual(none.actions, [
     { kind: "request-review", label: "Request review", pr: pr(), primary: true },
     { kind: "open", label: "Open #42", url: pr().url, quiet: true },
+    { kind: "wait-on", label: "Waiting on someone…", primary: false },
   ]);
   assert.equal(primaryOf([none]).j, 0);
 });
@@ -86,7 +87,7 @@ test("request review with several PRs: a row per PR, the caveat's button on the 
   const two = [pr(), pr({ number: 43, url: "https://github.com/o/skills/pull/43" })];
   const [it] = items(run({ prs: [{ url: "u1" }, { url: "u2" }] }), two, { flow: "peer" }, { reviewed: { kind: "behind", behind: 1 }, claims: true });
   assert.equal(it.line, "Ask a peer to review #42 and #43");
-  assert.deepEqual(it.actions.map((a) => [a.kind, a.row]), [["request-review", "#42"], ["rereview", "#42"], ["open", "#42"], ["request-review", "#43"], ["open", "#43"]]);
+  assert.deepEqual(it.actions.map((a) => [a.kind, a.row]), [["request-review", "#42"], ["rereview", "#42"], ["open", "#42"], ["request-review", "#43"], ["open", "#43"], ["wait-on", undefined]]);
   assert.equal(it.caveat, "AI review is 1 commit behind.");
 });
 
@@ -94,7 +95,7 @@ test("the AI-review caveat: behind with a count, behind without, none on a finis
   const at = (ctx, r = run()) => items(r, [pr()], { flow: "peer" }, ctx)[0];
   const behind = at({ reviewed: { kind: "behind", behind: 2, sha: "abc" }, claims: true });
   assert.equal(behind.caveat, "AI review is 2 commits behind.");
-  assert.deepEqual(kinds(behind), ["request-review", "rereview", "open"]);
+  assert.deepEqual(kinds(behind), ["request-review", "rereview", "open", "wait-on"]);
   assert.equal(behind.actions[1].primary, false);
   assert.equal(at({ reviewed: { kind: "behind", behind: null }, claims: true }).caveat, "AI review is behind the branch.");
   const fin = run({ phase: "finished" });
@@ -211,7 +212,7 @@ test("several PRs: at most MAX_OPEN Open buttons", () => {
   const list = [1, 2, 3, 4, 5].map((n) => pr({ number: n, url: `https://github.com/o/skills/pull/${n}` }));
   const [it] = items(run(), list, { flow: "self" });
   assert.equal(it.line, "Review #1, #2, #3, #4 and #5, then merge them");
-  assert.equal(it.actions.length, MAX_OPEN);
+  assert.equal(it.actions.filter((a) => a.kind === "open").length, MAX_OPEN);
 });
 
 test("a run not in Needs you has no items; the Crew hover's line is the first item's", () => {
@@ -289,7 +290,7 @@ test("a failed proof task is named and read before any merge", () => {
   assert.equal(proofText(proof), "T1 · 1/2 proven · 1 fail");
   const [it] = items(run(), [pr({ number: 1 })], { flow: "self" }, { proof });
   assert.equal(it.line, "Proof: t2 polish failed — read it before merging #1");
-  assert.deepEqual(it.actions.map((a) => a.label), ["Proof", "Open #1"]);
+  assert.deepEqual(it.actions.map((a) => a.label), ["Proof", "Open #1", "Waiting on someone…"]);
   const [two] = items(run(), [pr({ number: 1 })], { flow: "self" }, { proof: { ...proof, fail: 2, pass: 0 } });
   assert.equal(two.line, "Proof: t2 polish and 1 more failed — read it before merging #1");
   const [draft] = items(run(), [pr({ number: 1, state: "DRAFT" })], { flow: "self" }, { proof });
@@ -383,4 +384,29 @@ test("requestReview: a draft is marked ready first; ready ok then edit failing s
     globalThis.__herdrExec = answer({ code: 0, stdout: "", stderr: "" });
     assert.deepEqual(await requestReview({}, url, "anna", { draft: true }), {});
   } finally { delete globalThis.__herdrExec; }
+});
+
+// ---- Waiting on someone… ----
+
+test("Waiting on someone… comes last and plain on request review and review proof → merge, alone", () => {
+  const wait = (it) => it.actions.filter((a) => a.kind === "wait-on");
+  const [req] = items(run({ phase: "finished" }), [pr()], { flow: "peer" });
+  assert.equal(req.key, "request review");
+  assert.deepEqual(wait(req), [{ kind: "wait-on", label: "Waiting on someone…", primary: false }]);
+  assert.equal(req.actions.at(-1).kind, "wait-on");
+  const [proof] = items(run({ phase: "finished" }), [pr()], { flow: "self" }, { proof: { tier: 1, pass: 1, total: 2 } });
+  assert.equal(proof.key, "review proof → merge");
+  assert.equal(wait(proof).length, 1);
+  // Never on other reasons.
+  const others = [
+    items(run(), [pr({ approvedBy: ["anna"], review: "APPROVED" })], { flow: "peer" }),
+    items(run(), [pr({ changesBy: ["anna"], review: "CHANGES_REQUESTED" })], { flow: "peer" }),
+    items(run({ phase: "finished", prs: [] }), [], { flow: "peer" }),
+  ].flat();
+  assert.ok(others.length > 0);
+  for (const it of others) assert.equal(wait(it).length, 0, it.key);
+  // Not while something else needs the user too (red CI, a question): the mark would not hold.
+  const red = items(run(), [pr({ checks: checks(2, 1), failed: { name: "lint", url: null } })], { flow: "self" });
+  assert.deepEqual(red.map((x) => x.key), ["red-ci", "review proof → merge"]);
+  assert.equal(red.flatMap(wait).length, 0);
 });

@@ -144,3 +144,11 @@ test("AI review not compared with the branch yet is current, without a tick", ()
   assert.equal(r.tip, "Reviewed at abcdef1, not compared with the branch yet");
   assert.equal(by(mergePath(finished({ reviewed: { kind: "current", behind: null, sha: "abc", compared: true } })), "review").state, "done");
 });
+
+test("a run the user marked as waiting on someone shows the review stage as a wait, not as theirs", () => {
+  const stages = mergePath({ phase: "finished", counts: { done: 2, planned: 2 }, flow: "peer", prs: 1, next: { label: "request review", who: [] }, waitingOn: "Kari — preview check" });
+  const human = stages.find((s) => s.key === "human");
+  assert.equal(human.state, "current");
+  assert.equal(human.value, "waiting on Kari — preview check");
+  assert.ok(!stages.some((s) => s.state === "you"));
+});

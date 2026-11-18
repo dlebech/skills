@@ -6,7 +6,7 @@
 // "Open the orchestrator" is never the headline: the box offers it as a small link of its own,
 // since most reasons are done elsewhere (on GitHub, in the proof, with Close).
 
-import { ageText, ciState } from "./attention.js";
+import { ageText, ciState, WAIT_LABELS } from "./attention.js";
 import { andList, plural } from "./words.js";
 import { taskCounts } from "./tasks.js";
 import { hasComments, commentsText, defaultMode, askAllLabel, offersAll } from "./comments.js";
@@ -128,6 +128,8 @@ function readyItem(a, ctx, prs) {
 //   request-review {pr} Request review: opens the picker of earlier reviewers for the PR (reviewers.js)
 //   rereview {reviewed} Re-review first: asks the orchestrator to run the final review again (inbox.js)
 //   changes             Ask for changes on a ready run: opens a field, its text goes to the inbox (inbox.js)
+//   wait-on             Waiting on someone…: opens a field, its text marks the run as waiting on them
+//                       (tracking.js harbormaster.waitingOn; nothing goes to the inbox)
 //   ask-ci {pr, check}  asks the orchestrator to see to the red CI (an inbox message)
 //   ask-blocking        a stalled run's Ask what's blocking
 //   report {path}       opens the run's report
@@ -271,8 +273,14 @@ export function needActions(a, ctx = {}) {
   const now = ctx.now ?? Date.now();
   const rank = (k) => { const i = ORDER.indexOf(k); return i < 0 ? ORDER.length : i; };
   return [...a.reasons].sort((x, y) => rank(x.key) - rank(y.key))
-    .map((r) => ({ key: r.key, tip: null, ...reasonItem(r, a, { ...ctx, now }) }));
+    .map((r) => withWaitOn(r, a, { key: r.key, tip: null, ...reasonItem(r, a, { ...ctx, now }) }));
 }
+
+// "Waiting on someone…", a plain button after the others, on a PR step the user may hand to someone
+// outside GitHub (attention.js WAIT_LABELS). Only when it is all the run needs the user for: with
+// anything else beside it the mark would not hold (attention.js assess) and would go at once.
+const WAIT_ACTION = { kind: "wait-on", label: "Waiting on someone…", primary: false };
+const withWaitOn = (r, a, item) => (WAIT_LABELS.has(r.key) && a.reasons.length === 1 ? { ...item, actions: [...item.actions, WAIT_ACTION] } : item);
 
 // Whether a run's card and pane draw their own Address comments rows (overview.js
 // commentsAction): only while the run is in Needs you (`need`) and its box's items do not carry
