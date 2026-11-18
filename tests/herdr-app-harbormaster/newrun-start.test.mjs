@@ -3,7 +3,7 @@
 // as Herdr's does ("stale context"), so Start's awaits must not use it.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { initNewRun, newRunView } from "../../herdr-app/mods/harbormaster/newrun.js";
+import { initNewRun, newRunView, installedAgents } from "../../herdr-app/mods/harbormaster/newrun.js";
 import { find } from "./gpui-stub.mjs";
 
 const T = new Proxy({}, { get: () => "#000000" }); // any theme colour
@@ -162,4 +162,27 @@ test("Crew's one-click Review redraws from a task, not the click's stale cx", as
   await settle();
   assert.deepEqual(rejections, []);
   assert.ok(cx.tasks.some((t) => t.cx.notified > 0), "the row was redrawn after the start");
+});
+
+// With more than one agent installed the dialog offers them; the one picked is what starts.
+test("Agent: found on the login shell's PATH, a row only when more than one, and the pick is the --kind", async () => {
+  const base = globalThis.__herdrExec;
+  let installed = "claude\n";
+  globalThis.__herdrExec = async (cmd, args) => (cmd === "sh" && args[1].includes("__PATH__") ? { code: 0, stdout: installed, stderr: "" } : base(cmd, args));
+  const open = async () => { const v = dialog(noSpace); v.nr.agents = await installedAgents(); v.nr.agent = "claude"; return v; };
+  let view = await open();
+  assert.deepEqual(view.nr.agents, ["claude"]);
+  assert.equal(find(newRunView(view, T), "nr-a-claude"), null, "one agent: no choice");
+  installed = "pi\nbash: no job control\nclaude\n";
+  view = await open();
+  assert.deepEqual(view.nr.agents, ["claude", "pi"], "in the dialog's order, noise ignored");
+  const pi = find(newRunView(view, T), "nr-a-pi");
+  assert.ok(pi?.click, "pi is offered");
+  pi.click({}, callCx());
+  assert.equal(view.nr.profile.value(), "autonomy=L1", "Claude's models are not prefilled for pi");
+  clickStart(view);
+  await settle();
+  assert.deepEqual(rejections, []);
+  const run = execs.find(([cmd]) => cmd === "bash");
+  assert.equal(run[run.indexOf("--kind") + 1], "pi");
 });

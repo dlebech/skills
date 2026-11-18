@@ -71,11 +71,15 @@ fi
 [ -r "$task_file" ] || { echo "cannot read $task_file" >&2; exit 2; }
 task=$(cat "$task_file")
 
+# The program by its absolute path: hc run looks it up on Herdr's own PATH, which can lack the
+# folder an installer added in ~/.bashrc (agent-path.sh). Not found anywhere: hc run says so.
+bin=$("$(dirname "$0")/agent-path.sh" "$kind" 2>/dev/null) || bin=$kind
+
 [ "$kind" = claude ] || [ ${#allow[@]} -eq 0 ] ||
   echo "start-agent.sh: --allow is ignored for kind $kind" >&2
 case $kind in
   claude)
-    argv=(claude ${model:+--model "$model"})
+    argv=("$bin" ${model:+--model "$model"})
     # In --settings, since --add-dir and --allowedTools take every argument after them.
     # additionalDirectories only brings a folder into reach; writing still prompts.
     extra_allow=$(printf '%s\n' ${allow[@]+"${allow[@]}"} | jq -R . | jq -sc 'map(select(. != ""))')
@@ -85,17 +89,17 @@ case $kind in
     [ -z "$print_settings" ] || { echo "$settings"; exit 0; }
     argv+=(--settings "$settings")
     prompt_arg=1 ;;
-  pi) argv=(pi ${model:+--model "$model"}) ;;
+  pi) argv=("$bin" ${model:+--model "$model"}) ;;
   opencode)
-    argv=(opencode)
+    argv=("$bin")
     # Its full-screen interface has no --model flag, and `opencode mini`, which
     # has, reports no status. Config from the environment needs a private server,
     # since the background service ignores it, and hc run does not pass on the
     # caller's environment, so the variable goes in the command.
     [ -z "$model" ] ||
-      argv=(env "OPENCODE_CONFIG_CONTENT=$(jq -cn --arg m "$model" '{model: $m}')" opencode --standalone) ;;
-  codex) argv=(codex --no-daemon ${model:+--model "$model"}) ;; # hc --skill requires --no-daemon
-  *) argv=("$kind" ${model:+--model "$model"}) ;;
+      argv=(env "OPENCODE_CONFIG_CONTENT=$(jq -cn --arg m "$model" '{model: $m}')" "$bin" --standalone) ;;
+  codex) argv=("$bin" --no-daemon ${model:+--model "$model"}) ;; # hc --skill requires --no-daemon
+  *) argv=("$bin" ${model:+--model "$model"}) ;;
 esac
 argv+=(${extra[@]+"${extra[@]}"})
 [ -z "$prompt_arg" ] || argv+=(-- "$task")
