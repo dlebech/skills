@@ -6,14 +6,11 @@
 // running, plans the work as tasks and finishes again. Like a level request or an ask to prove,
 // it answers no question (data.js NOT_ANSWERS, the captain's lib.sh answer_messages).
 
-export const CHANGES = /^changes asked from Harbormaster: /;
+// The message builder and the unread prefix live in inbox.js; re-exported so imports keep working.
+export { CHANGES, changesRequest } from "./inbox.js";
+import { CHANGES } from "./inbox.js";
 
 // Whether an "Ask for changes" message is among the first lines of the run's unhandled inbox
 // messages (data.js reads them with the level requests): the run is being changed, not ready.
 export const changesPending = (lines) => (lines ?? "").split("\n").some((l) => CHANGES.test(l.trim()));
 
-// The message for the user's `text` (one line or several), or null for an empty one.
-export function changesRequest(text) {
-  const t = String(text ?? "").trim();
-  return t ? `changes asked from Harbormaster: ${t}` : null;
-}

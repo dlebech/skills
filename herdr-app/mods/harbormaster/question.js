@@ -200,11 +200,8 @@ export function paragraphs(text) {
 // part of file names and identifiers (__init__.py, foo__bar__baz).
 export const plain = (s) => (s ?? "").replace(/\*\*(.+?)\*\*/g, "$1");
 
-// The message an answer writes to a run's inbox (run-files.md): the answer to the question
-// by its title, then any free text. `answer` is an option's label or the person's own words.
-export function answerMessage(title, answer, free = "") {
-  return `Answer to "${title}": ${answer}${free ? `\n${free}` : ""}`;
-}
+// The answer message lives in inbox.js; re-exported so imports keep working.
+export { answerMessage } from "./inbox.js";
 
 // A decision (the captain's, or a question.md read as one) squeezed to a line for the queue.
 export const oneLine = (s, max = 160) => {

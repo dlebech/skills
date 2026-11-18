@@ -147,13 +147,8 @@ export function claimActions(k) {
   return ["accept", k.asked ? "asked" : "ask"];
 }
 
-// The Ask to prove message for a claim: "prove C2 to T2: <result line>", then what to do. Its
-// first line is the one proof.js pendingProofs() reads back.
-export function claimProveRequest(k) {
-  const t = k.tier !== null && k.tier !== undefined ? ` to T${k.tier}` : "";
-  return `prove ${k.id}${t}: ${claimResultLine(k)}\n`
-    + `Asked from Harbormaster: prove claim ${k.id} ("${k.name}")${t}, with ${k.tier !== null && k.tier !== undefined ? BAR_NEEDS[k.tier] : "evidence"} that shows it, and update its ## ${k.id} section in proof.md.`;
-}
+// The Ask to prove message lives in inbox.js; re-exported so imports keep working.
+export { claimProveRequest } from "./inbox.js";
 
 // ---- clicks the files don't show yet ----
 
