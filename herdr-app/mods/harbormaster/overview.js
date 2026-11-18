@@ -207,7 +207,8 @@ export function actionButton(t, id, label, tip, onClick, primary = false) {
   const b = div().id(id).flex_none().px(9).h(22).rounded(5).flex().items_center().text_size(11.5).font_medium()
     .bg(primary ? t.accent : t.raised).text_color(primary ? t.background : t.muted);
   // No click: an action is already under way on this card.
-  if (!onClick) return b.opacity(0.45).child(label);
+  // A greyed-out button still takes its click, so a clickable card around it does not.
+  if (!onClick) return b.opacity(0.45).on_click((_e, cx) => cx.stop_propagation()).child(label);
   return b.cursor_pointer().tooltip(tip ?? label)
     .hover((s) => s.opacity(0.85).text_color(primary ? t.background : t.foreground))
     .on_click((_e, cx) => { cx.stop_propagation(); onClick(cx); })

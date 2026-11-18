@@ -255,7 +255,7 @@ function boxActions(m, x, f, items) {
   const it = r.ask ? decisionQueue([r], [], ctx).find((q) => q.kind === "run") : null;
   const moreLink = (n) => quietLink(t, `${key}-toggle`, more ? "less" : `${n} more`, more ? "Show only the main button" : "Every option, and what else it needs you for", toggleFold(view, key, more));
   const confirm = boxConfirm(view, t, r, f, "sidebar");
-  const changes = view.replying === `changes:${r.key}` ? v_flex().gap(4).child(Input.new(view.reply))
+  const changes = view.replying === `changes:${r.key}` ? v_flex().id(`${key}-changes`).gap(4).on_click((_e, cx) => cx.stop_propagation()).child(Input.new(view.reply))
     .child(div().text_size(10.5).text_color(t.dim).child("What should change? Enter writes it to the run's inbox and tells its orchestrator")) : null;
   if (it) {
     // A question: its recommended option is the button (else Reply); the other options, Reply
@@ -271,7 +271,9 @@ function boxActions(m, x, f, items) {
       .children(needLines(view, t, r, f, others, "sidebar", true))
       .child(h_flex().gap(10).child(quietLink(t, `${key}-details`, "Details", "The whole question, what each option does, the evidence and the risk, in the run's pane",
         () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) }))).child(moreLink(0)));
-    return [more ? all : folded, a.input || null, a.note || null, confirm].filter(Boolean);
+    // A click in the reply field is typing, not a wish to open the orchestrator (the box's own click).
+    const input = a.input && div().id(`${key}-reply`).on_click((_e, cx) => cx.stop_propagation()).child(a.input);
+    return [more ? all : folded, input || null, a.note || null, confirm].filter(Boolean);
   }
   const p = primaryOf(items);
   const main = p ? needButton(view, t, r, f, items[p.i].actions[p.j], `need-sidebar-${r.key}-${p.i}-${p.j}`, "sidebar", true) : null;
@@ -334,7 +336,7 @@ function mergeClaims(m, r) {
 }
 
 // The open item of the Needs-you box: its name and level tags, why it waits (in its colour, with
-// its age), then its buttons. A click on its name shows its orchestrator.
+// its age), then its buttons. A click anywhere but a button or a field shows its orchestrator.
 function needCard(m, x) {
   const { view, t, ctx, now, narrow } = m;
   const r = x.r;
@@ -349,7 +351,7 @@ function needCard(m, x) {
   const focus = (_e, cx) => { cx.stop_propagation(); if (x.term) go(); };
   return v_flex().id("crew-needs-box").relative().overflow_hidden().flex_none().min_w(0).gap(6).pl(PAD + 3).pr(PAD).pt(7).pb(8).rounded(6)
     // The selected one: a stronger tint, an edge-coloured outline and a wider bar; the rows are quieter.
-    .bg(edge + "33").border(1).border_color(edge).on_click((_e, cx) => cx.stop_propagation())
+    .bg(edge + "33").border(1).border_color(edge).when(Boolean(x.term), (el) => el.cursor_pointer()).on_click(focus)
     .child(div().absolute().left(0).top(0).bottom(0).w(5).bg(edge))
     .child(v_flex().gap(1).min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)

@@ -17,40 +17,150 @@ export const DRAFTS = [
   { id: "direct", label: "Post review directly", tip: "Submitted at once, in your name" },
 ];
 
+// The agents an orchestrator can be (start-agent.sh --kind), in the order the dialog offers them.
+// The dialog offers those installed (newrun.js installedAgents); with only one, no choice.
+export const AGENTS = [
+  { id: "claude", label: "Claude Code" },
+  { id: "pi", label: "pi" },
+  { id: "opencode", label: "opencode" },
+  { id: "codex", label: "Codex", tip: "Untested with the orchestrator" },
+];
+export const agentLabel = (id) => AGENTS.find((a) => a.id === id)?.label ?? id;
+
+// The agent a start uses: the remembered one while it is installed, else Claude Code, else the first installed.
+export function agentFor(prefs, installed) {
+  const have = installed?.length ? installed : ["claude"];
+  return [prefs?.agent, "claude"].find((a) => a && have.includes(a)) ?? have[0];
+}
+
 // What a run uses until the user changes it; a review always starts from Opus and L1 (the preset).
+// Model names are Claude's: another agent's models are provider/id, so its roles start empty (its own default).
 export const DEFAULT_PROFILE = { implementer: "sonnet", reviewer: "opus", specialist: "opus", autonomy: "L1" };
 export const REVIEW_PROFILE = { reviewer: "opus", autonomy: "L1" };
+const OTHER_PROFILE = { implementer: "", reviewer: "", specialist: "", autonomy: "L1" };
 
 const ROLES = ["implementer", "reviewer", "specialist"];
+// The roles the line can set: the run's agents, and the orchestrator's own model (start-agent.sh --model).
+const LINE_ROLES = ["orchestrator", ...ROLES];
 
 // "implementer=sonnet reviewer=opus specialist=opus autonomy=L1": the line the user edits.
-export const profileText = (p) => `${ROLES.map((r) => `${r}=${p[r]}`).join(" ")} autonomy=${p.autonomy}`;
+// A role with no model (another agent's default) is left out. A role's value is a model of the
+// run's agent, or `<agent>:<model>` for another agent (`implementer=opencode:strata/qwen3`), or an agent alone.
+export const profileText = (p) => [...LINE_ROLES.filter((r) => p[r]).map((r) => `${r}=${p[r]}`), `autonomy=${p.autonomy}`].join(" ");
+
+const AGENT_IDS = new Set(["claude", "pi", "opencode", "codex"]);
+
+// A role's value → {kind, model}: "opencode:strata/x" → opencode's strata/x; "pi" → pi's default;
+// anything else a model of the run's agent (a "/" is a provider, as in opencode/big-pickle, never an agent).
+export function roleValue(value, agent = "claude") {
+  const v = String(value ?? "");
+  const m = /^([a-z]+):(.*)$/.exec(v);
+  if (m && AGENT_IDS.has(m[1])) return { kind: m[1], model: m[2] };
+  if (AGENT_IDS.has(v)) return { kind: v, model: "" };
+  return { kind: agent, model: v };
+}
+
+// Claude Code takes these names, or a full claude-* id; it has no list to ask.
+const CLAUDE_MODELS = ["sonnet", "opus", "haiku", "fable", "opusplan", "default"];
+const claudeModel = (m) => CLAUDE_MODELS.includes(m.toLowerCase().replace(/\[1m\]$/, "")) || /^claude-[\w.-]+(\[1m\])?$/i.test(m);
+
+const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+const subsequence = (q, s) => { let i = 0; for (const c of s) if (c === q[i]) i++; return i === q.length; };
+
+// The models that match what was typed, best first, as role values for a run of `agent`: from each
+// installed agent's list (`models`: {opencode: [...], pi: [...]}) and Claude's names. Typing
+// "qwen3.8flash" finds strata/qwen3.8-flash-next-coder-iq1_m; "opencode:qwen" looks only in opencode's.
+export function matchModels(typed, { agent = "claude", models = {}, installed = ["claude"], max = 4 } = {}) {
+  const { kind: only, model } = /^[a-z]+:/.test(typed) ? roleValue(typed, agent) : { kind: null, model: typed };
+  const q = norm(model);
+  // A provider-looking prefix that is wrong ("opencode/qwen…" for a strata model) should not hide the rest.
+  const qTail = model.includes("/") ? norm(model.slice(model.indexOf("/") + 1)) : null;
+  if (!q) return [];
+  const pool = [];
+  for (const kind of installed) {
+    if (only && kind !== only) continue;
+    const list = kind === "claude" ? CLAUDE_MODELS.slice(0, 4) : models[kind] ?? [];
+    for (const m of list) pool.push({ kind, m });
+  }
+  const score = ({ kind, m }) => {
+    const n = norm(m);
+    const s = n.includes(q) ? 0 : qTail && n.includes(qTail) ? 1 : subsequence(q, n) ? 2 : qTail && subsequence(qTail, n) ? 3 : 9;
+    return s + (kind === agent ? 0 : 0.5);
+  };
+  return pool.map((x) => ({ ...x, s: score(x) })).filter((x) => x.s < 9).sort((a, b) => a.s - b.s || a.m.length - b.m.length)
+    .slice(0, max).map(({ kind, m }) => (kind === agent ? m : `${kind}:${m}`));
+}
+
+// What is wrong with the line's roles, given what is installed and each agent's model list
+// (a list that could not be read is not checked): [{role, value, why, suggestions}].
+export function modelProblems(profile, { agent = "claude", models = {}, installed = ["claude"] } = {}) {
+  const out = [];
+  for (const role of LINE_ROLES) {
+    const value = profile?.[role];
+    if (!value) continue;
+    const { kind, model } = roleValue(value, agent);
+    if (role === "orchestrator" && kind !== agent) { out.push({ role, value, why: `the orchestrator is the Agent above; give it a ${agent} model`, suggestions: [] }); continue; }
+    if (!installed.includes(kind)) { out.push({ role, value, why: `${kind} is not installed`, suggestions: matchModels(model, { agent, models, installed }) }); continue; }
+    if (!model) continue;
+    const known = kind === "claude" ? claudeModel(model) : !models[kind] || models[kind].includes(model);
+    if (!known) out.push({ role, value, why: `${kind} has no model ${model}`, suggestions: matchModels(kind === agent ? model : `${kind}:${model}`, { agent, models, installed }) });
+  }
+  return out;
+}
+
+// The line with one role's value replaced (a suggestion clicked); `<role>-model=` counts as the role.
+export function setRole(text, role, value) {
+  const parts = String(text).split(/\s+/).filter(Boolean);
+  const i = parts.findIndex((p) => new RegExp(`^${role}(?:-model)?=`, "i").test(p));
+  if (i >= 0) parts[i] = `${role}=${value}`; else parts.unshift(`${role}=${value}`);
+  return parts.join(" ");
+}
+
+// `pi --list-models`' table → provider/model ids.
+export const parsePiModels = (text) => String(text).split("\n").slice(1).map((l) => l.trim().split(/\s+/)).filter((c) => c.length >= 2 && c[0] && c[1]).map(([p, m]) => `${p}/${m}`);
+// `opencode models`: one id per line.
+export const parseOpencodeModels = (text) => String(text).split("\n").map((l) => l.trim()).filter((l) => /^[\w.-]+\/\S+$/.test(l));
 
 // Reads the line back over `base`; a part it cannot read leaves the base's, and says so.
 export function parseProfile(text, base = DEFAULT_PROFILE) {
   const p = { ...base }, bad = [];
   for (const part of String(text).split(/[\s,]+/).filter(Boolean)) {
     const [, key, val] = /^([a-z-]+?)(?:-model)?=(\S+)$/i.exec(part) ?? [];
-    if (ROLES.includes(key?.toLowerCase())) p[key.toLowerCase()] = val;
+    if (LINE_ROLES.includes(key?.toLowerCase())) p[key.toLowerCase()] = val;
     else if (key?.toLowerCase() === "autonomy" && /^L[0-3]$/i.test(val)) p.autonomy = val.toUpperCase();
     else bad.push(part);
   }
   return { profile: p, bad };
 }
 
-// The profile a start of this kind prefills: the last one, a review's preset on top.
-export const profileFor = (kind, last) => ({ ...DEFAULT_PROFILE, ...(last ?? {}), ...(kind === "review" ? REVIEW_PROFILE : {}) });
+// The profile a start of this kind prefills: the last one, a review's preset on top. `last` is
+// that agent's (prefs.profiles[agent]); the Opus preset is Claude's only.
+export const profileFor = (kind, last, agent = "claude") => agent === "claude"
+  ? { ...DEFAULT_PROFILE, ...(last ?? {}), ...(kind === "review" ? REVIEW_PROFILE : {}) }
+  : { ...OTHER_PROFILE, ...(last ?? {}), ...(kind === "review" ? { autonomy: "L1" } : {}) };
+
+// How each agent runs a skill: Claude Code by its slash command, pi by /skill:, the others asked in words.
+export function skillPrompt(agent, skill, args) {
+  if (agent === "claude") return `/${skill} ${args}`;
+  if (agent === "pi") return `/skill:${skill} ${args}`;
+  return `Use the ${skill} skill with these arguments: ${args}`;
+}
 
 const oneLine = (s) => String(s).replace(/\s+/g, " ").trim();
 
 // The orchestrator's first prompt: `/herdr-app-orchestrator <work> <options>`; a review is
 // `review <pr> review-drafts=<mode>` (herdr-app-orchestrator's review preset).
-export function buildPrompt({ kind, input, profile, drafts = "herdr" }) {
-  // Words the profile or drafts own would override them: the text keeps only its own.
-  const work = oneLine(input).split(" ").filter((w) => !/^(?:type|review-drafts|autonomy|(?:implementer|reviewer|specialist)-model)=/i.test(w)).join(" ");
-  const opts = `${ROLES.map((r) => `${r}-model=${profile[r]}`).join(" ")} autonomy=${profile.autonomy}`;
-  if (kind === "review") return `/herdr-app-orchestrator review ${work} type=rev review-drafts=${drafts} ${opts}`;
-  return `/herdr-app-orchestrator ${work} ${opts}`;
+// Another agent than Claude Code also gets agent=<it>, so the run's own agents are that kind too.
+export function buildPrompt({ kind, input, profile, drafts = "herdr", agent = "claude" }) {
+  // Words the profile, drafts or agent own would override them: the text keeps only its own.
+  const work = oneLine(input).split(" ").filter((w) => !/^(?:type|review-drafts|autonomy|agent|(?:implementer|reviewer|specialist)(?:-model)?)=/i.test(w)).join(" ");
+  // A role on another agent says so (implementer=opencode), then its model: the skill's own form.
+  const roles = ROLES.filter((r) => profile[r]).flatMap((r) => {
+    const { kind, model } = roleValue(profile[r], agent);
+    return [...(kind !== agent ? [`${r}=${kind}`] : []), ...(model ? [`${r}-model=${model}`] : [])];
+  });
+  const opts = [...(agent === "claude" ? [] : [`agent=${agent}`]), ...roles, `autonomy=${profile.autonomy}`].join(" ");
+  return skillPrompt(agent, "herdr-app-orchestrator", kind === "review" ? `review ${work} type=rev review-drafts=${drafts} ${opts}` : `${work} ${opts}`);
 }
 
 // "123", "#123" or a PR URL; the text back, or null.
@@ -76,8 +186,8 @@ export function runAgentName(repo, kind, input, now = Date.now()) {
 
 // The start-agent.sh arguments: a new tab in the repository's own space, no parent (the run must
 // outlive whoever started it, here nobody), the role that lets runs.sh list it until it has a run directory.
-export function startArgs({ name, cwd, taskFile, spaceId, kind = "claude" }) {
-  return ["--name", name, "--cwd", cwd, "--kind", kind, "--task-file", taskFile, "--no-parent",
+export function startArgs({ name, cwd, taskFile, spaceId, kind = "claude", model = "" }) {
+  return ["--name", name, "--cwd", cwd, "--kind", kind, ...(model ? ["--model", model] : []), "--task-file", taskFile, "--no-parent",
     "--label", "role=orchestrator", "--label", `herdr.space=${spaceId}`, "--label", `herdr.tab=tb-${name}`];
 }
 
@@ -123,10 +233,13 @@ export function parsePrefs(text) {
   try {
     const j = JSON.parse(text);
     const profile = j?.profile && typeof j.profile === "object" ? j.profile : null;
+    // Each other agent's last profile; Claude Code's stays in `profile`, as before there was a choice.
+    const profiles = j?.profiles && typeof j.profiles === "object" ? j.profiles : {};
+    const agent = typeof j?.agent === "string" && j.agent ? j.agent : null;
     const drafts = j?.drafts && typeof j.drafts === "object" ? j.drafts : {};
     const folders = Array.isArray(j?.folders) ? j.folders.filter((f) => typeof f === "string" && f) : [];
-    return { profile, drafts, folders };
-  } catch { return { profile: null, drafts: {}, folders: [] }; }
+    return { profile, profiles, agent, drafts, folders };
+  } catch { return { profile: null, profiles: {}, agent: null, drafts: {}, folders: [] }; }
 }
 
 // The review-drafts mode a repository starts with: its remembered one, never "direct".
@@ -135,14 +248,20 @@ export const draftsFor = (prefs, repo) => (["herdr", "pending"].includes(prefs?.
 // The prefs after a start. A review does not touch the profile (its preset is not the user's
 // habit); "direct" is never remembered, and leaves what the repository had.
 // The folder goes first in the recents (newest first, each once, at most RECENT_MAX).
-export function remember(prefs, { kind, profile, repo, drafts }) {
+// The agent is remembered from any run's start; the profile under that agent.
+export function remember(prefs, { kind, profile, repo, drafts, agent = "claude" }) {
   const folders = [repo, ...(prefs?.folders ?? []).filter((f) => f !== repo)].slice(0, RECENT_MAX);
-  const next = { profile: prefs?.profile ?? null, drafts: { ...(prefs?.drafts ?? {}) }, folders };
+  const next = { profile: prefs?.profile ?? null, profiles: { ...(prefs?.profiles ?? {}) }, agent: prefs?.agent ?? null, drafts: { ...(prefs?.drafts ?? {}) }, folders };
   if (kind === "captain") return next; // only the folder is remembered
+  next.agent = agent;
   if (kind === "review") { if (drafts !== "direct") next.drafts[repo] = drafts; }
-  else next.profile = profile;
+  else if (agent === "claude") next.profile = profile;
+  else next.profiles[agent] = profile;
   return next;
 }
+
+// The last profile used with this agent.
+export const lastProfile = (prefs, agent) => (agent === "claude" ? prefs?.profile : prefs?.profiles?.[agent]) ?? null;
 
 // The reviews started from here, by PR URL → when the click was. A review's orchestrator writes
 // the run files that name the PR (reviews.js runReviewing) a while after it takes its task, so

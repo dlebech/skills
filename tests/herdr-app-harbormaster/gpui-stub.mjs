@@ -20,7 +20,7 @@ function el() {
 }
 export const div = el, v_flex = el, h_flex = el, svg = el, image = el;
 export const View = class {}, HoverCard = { new: () => el() };
-export const Input = { new: () => el() };
+export const Input = { new: () => el() }, Textarea = { new: () => el() };
 
 // The element with this id in a drawing, or null.
 export function find(e, id) {
@@ -38,3 +38,6 @@ export const InputState = {
     return { value: () => v, set_value: (x) => { v = String(x); }, on: (ev, fn) => { on[ev] = fn; }, handlers: on, focus() {}, set_selected_range() {} };
   },
 };
+
+// A textarea: an input that also takes its rows.
+export const TextareaState = { new: () => Object.assign(InputState.new(), { set_rows() {}, set_auto_grow() {}, set_soft_wrap() {} }) };
