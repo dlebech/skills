@@ -49,8 +49,8 @@ npm test                        # node --test test/*.test.mjs
 ### The octopus directs its crabs
 
 - **Working.** While the orchestrator works, one tentacle beats slowly (every 2.4 s) and the working crabs walk in step with it: they turn round when the tentacle reaches the end of its stroke.
-- **Roll call.** When a worker joins or leaves, or a task changes stage, the octopus points at the pier for 1.5 s. The crabs stop, turn to face it, and go back to work.
-- **Waiting on it.** Crabs that are idle or done while the run is not finished gather at the pier's tip, facing the octopus.
+- **Roll call.** When a worker joins or leaves, or a task changes stage, the octopus points at the pier for 1.5 s. The crabs stop where they are, turn to face it, and go back to work.
+- **Checking in.** A crab that has just gone idle or done (or joins idle) walks to the pier's tip and faces the octopus for 4 seconds, then goes back to its lane and potters there at its own pace, claws busy, until the run is finished. Helpers that are not agents (a dev server, a test script) count as idle, so they potter too. Crabs already resting when the page opens skip the check-in.
 - **Needs you.** All the crabs stop and face the camera side with the waving octopus.
 - **Blocked crab.** The octopus leans and looks towards it; the crab hops.
 - **Task done.** The octopus claps two tentacles once and each crab does one small hop, 80 ms after the one before.

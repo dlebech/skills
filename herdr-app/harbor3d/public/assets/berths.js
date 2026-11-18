@@ -10,7 +10,7 @@ import {
 } from "./layout.js"
 import { berthLook, workerLook, containerPlan, flagLook, stageOf } from "./look.js"
 import { deckOverflow } from "./layout.js"
-import { crewEvents, crewStances, blockedWorker, faceOctopus, beat, walk, cheer, clap, ROLL_CALL, WAVE_OFF } from "./crew.js"
+import { crewEvents, crewStances, checksIn, blockedWorker, faceOctopus, beat, walk, cheer, clap, ROLL_CALL, WAVE_OFF, CHECK_IN } from "./crew.js"
 import { nextBlink, lidClosed, headTarget, flickerOn, lightDelay } from "./life.js"
 
 const TAU = Math.PI * 2
@@ -232,6 +232,7 @@ export class Berth {
       const ev = crewEvents(this.run, run)
       if (ev.rollCall || ev.done.length || ev.castOff) { const p = this.pending || (this.pending = { rollCall: false, done: false, castOff: false }); p.rollCall ||= ev.rollCall; p.done ||= ev.done.length > 0; p.castOff ||= ev.castOff }
     }
+    const fresh = !!this.run && !snap
     this.run = run; this.look = look
     const o = look.orchestrator
     this.octoRoot.userData.petId = run.orchestrator && typeof run.orchestrator.id === "string" ? run.orchestrator.id : null
@@ -239,7 +240,7 @@ export class Berth {
     const sp = shipPosition(look.castOff, look.scale); this.shipGoal = { x: sp.x, z: sp.z }
     if (snap) this.ship.group.position.set(sp.x, 0, sp.z)
     this.ship.setLook(look, run.prs || [], snap)
-    this.syncWorkers(run.workers || [], snap)
+    this.syncWorkers(run.workers || [], snap, fresh)
     const plan = containerPlan(run.tasks || [], look.castOff, this.deckSlots)
     this.deckSlots = plan.map(p => (p.zone === "deck" ? p.index : null))
     this.ship.setMore(deckOverflow((run.tasks || []).map(stageOf)) > 0)
@@ -249,7 +250,9 @@ export class Berth {
 
   // What each crab does (from crew.js), by its place in the run's worker list.
   refreshStances() {
-    this.stances = crewStances(this.run, this.rolling)
+    const checking = new Set()
+    for (const e of this.workers.values()) if (e.checkUntil !== null) checking.add(e.id)
+    this.stances = crewStances(this.run, this.rolling, checking)
     for (const e of this.workers.values()) e.st = this.stances[e.idx] || { stance: "stand" }
   }
 
@@ -289,7 +292,8 @@ export class Berth {
     })
   }
 
-  syncWorkers(list, snap) {
+  // `fresh`: the berth was already on screen, so a crab that has just gone idle or done checks in with the octopus.
+  syncWorkers(list, snap, fresh = false) {
     const seen = new Set()
     list.slice(0, MAX_WORKERS).forEach((w, i) => {
       if (typeof w.id !== "string") return
@@ -299,9 +303,13 @@ export class Berth {
       if (!e) {
         const root = new THREE.Group(), tilt = new THREE.Group(), model = this.kit.make("crab")
         tilt.add(model); root.add(tilt); this.stuff.add(root)
-        e = { id: w.id, root, tilt, claws: [part(model, "Claw.L"), part(model, "Claw.R")], home: new THREE.Vector3(p.x, p.y, p.z), target: new THREE.Vector3(), scale: snap ? 1 : 0, goal: 1, ph: seed(w.id) * TAU, waveUntil: -1, tiltAmt: 0, yaw: Math.PI / 2, oz: 0, idx: i, st: { stance: "stand" } }
+        e = { id: w.id, root, tilt, claws: [part(model, "Claw.L"), part(model, "Claw.R")], home: new THREE.Vector3(p.x, p.y, p.z), target: new THREE.Vector3(), scale: snap ? 1 : 0, goal: 1, ph: seed(w.id) * TAU, waveUntil: -1, tiltAmt: 0, yaw: Math.PI / 2, oz: 0, idx: i, st: { stance: "stand" }, state: undefined, checkUntil: null }
         this.workers.set(w.id, e)
       }
+      // a check-in starts on the next frame (update has the clock): Infinity until then
+      if (checksIn(e.state, w.state, fresh)) e.checkUntil = Infinity
+      else if (w.state !== "idle" && w.state !== "done") e.checkUntil = null
+      e.state = w.state
       e.goal = 1; e.target.set(p.x, p.y, p.z); e.look = workerLook(w.state); e.idx = i; e.st = this.stances[i] || { stance: "stand" }
       e.root.userData.petId = w.id
       if (snap) e.home.copy(e.target)
@@ -394,22 +402,31 @@ export class Berth {
       this.octoLean.quaternion.setFromAxisAngle(this.tmp.set(dz / n, 0, -dx / n), this.leanAmt)
     } else this.octoLean.quaternion.identity()
 
-    // crabs: what each does comes from crew.js (work in step with the beat, gather, roll call, face the camera, hop)
+    // check-ins: start the clock of the new ones, end the ones whose time is up
+    let checks = false
+    for (const e of this.workers.values()) {
+      if (e.checkUntil === Infinity) { e.checkUntil = t + CHECK_IN; checks = true }
+      else if (e.checkUntil !== null && t >= e.checkUntil) { e.checkUntil = null; checks = true }
+    }
+    if (checks) this.refreshStances()
+
+    // crabs: what each does comes from crew.js (work in step with the beat, check in, potter, roll call, face the camera, hop)
     for (const [id, e] of this.workers) {
       e.scale += (e.goal - e.scale) * damp(dt, 8)
       if (!e.goal && e.scale < 0.03) { this.stuff.remove(e.root); this.workers.delete(id); continue }
       const st = e.st, stance = st.stance
-      if (stance === "gather" && st.spot) e.target.set(st.spot.x, e.target.y, st.spot.z)
+      if (st.spot) e.target.set(st.spot.x, e.target.y, st.spot.z)
       else { const p = crabLane(e.idx); e.target.set(p.x, p.y, p.z) }
       ease(e.home, e.target, dt)
       const l = e.look, tau = TAU / l.period
       let oy = 0, clawA = 0.2, yaw = Math.PI / 2, goalOz = 0
       if (stance === "work") { const w = walk(t, ph, l.amp); goalOz = w.oz * m; yaw = m ? w.yaw : Math.PI / 2; clawA = 0.25 + Math.sin(t * 9 + e.ph) * 0.15 * m }
+      else if (stance === "busy") { const w = walk(t * 0.7, e.ph, 1.4); goalOz = w.oz * m; yaw = m ? w.yaw : Math.PI / 2; clawA = 0.25 + (0.5 + 0.5 * Math.sin(t * 5 + e.ph)) * 0.35 * m }
       else if (stance === "roll" || stance === "facing") goalOz = e.oz
       if (stance === "roll") yaw = faceOctopus(e.home.x, e.home.z + e.oz)
       else if (stance === "facing") yaw = 0
       else if (stance === "gather") yaw = faceOctopus(e.home.x, e.home.z)
-      if (stance === "work") e.oz = goalOz
+      if (stance === "work" || stance === "busy") e.oz += (goalOz - e.oz) * damp(dt, 8) // eased, so a crab that starts walking does not jump to its place in the stroke
       else e.oz += (goalOz - e.oz) * damp(dt, 6)
       if (stance === "hop" || (stance === "facing" && st.hop)) oy = Math.abs(Math.sin(t * tau * 0.5 + e.ph)) * 0.25 * m
       else if (stance === "roll" || stance === "gather" || stance === "facing") clawA = 0.25 + (0.5 + 0.5 * Math.sin(t * 2.4 + e.ph)) * 0.2 * m
@@ -421,7 +438,7 @@ export class Berth {
       let dy = yaw - e.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); e.yaw += dy * damp(dt, 10)
       e.root.rotation.y = e.yaw
       e.root.scale.setScalar(CRAB_SCALE * Math.max(e.scale, 0.001))
-      e.tiltAmt += ((l.tilt * Math.PI) / 180 - e.tiltAmt) * damp(dt, 5)
+      e.tiltAmt += ((stance === "stand" ? (l.tilt * Math.PI) / 180 : 0) - e.tiltAmt) * damp(dt, 5)
       e.tilt.rotation.z = e.tiltAmt
       e.claws[0].rotation.y = -clawA; e.claws[1].rotation.y = clawA
       if (w) { e.claws[0].rotation.z = Math.abs(clawA) * 0.8; e.claws[1].rotation.z = -Math.abs(clawA) * 0.8 } else { e.claws[0].rotation.z = 0; e.claws[1].rotation.z = 0 }
