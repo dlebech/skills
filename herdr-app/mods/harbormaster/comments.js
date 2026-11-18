@@ -5,7 +5,7 @@
 // A reviewer often approves with comments, to spare a review round. Those comments still want
 // an answer: a fix, a reply or a reason to leave them. The orchestrator does that on an
 // "address comments on <PR url>: ask|handle" message (skills/herdr-app-orchestrator/references/inbox.md),
-// which, like an ask what is blocking, answers no question (data.js NOT_ANSWERS).
+// which, like an ask what is blocking, answers no question (inbox.js NOT_ANSWERS).
 
 // One gh call per PR (data.js withComments): its review threads with their first comment (who,
 // with their standing on the repository) and the text of their last five (is one an agent's answer?),

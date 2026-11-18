@@ -221,6 +221,11 @@ click an option or Reply; the captain relays the same way. The orchestrator read
 message, renames it `.handled`, deletes `question.md` and carries on. While `question.md` is still there and
 a message is unhandled, Harbormaster shows "answered, waiting for the orchestrator".
 
+Harbormaster writes every such message from one module, `herdr-app/mods/harbormaster/inbox.js`: its kind table holds each
+message's text, its source name and the first-line prefix by which an unread ask is told from an answer
+(`NOT_ANSWERS`). `answer_messages` in `skills/herdr-app-captain/scripts/lib.sh` keeps a copy of those prefixes,
+and `tests/herdr-app-harbormaster/inbox.test.mjs` fails if the two differ.
+
 ### Changing a level
 
 Hovering a run's autonomy (`L1`) or proof tier (`T2`) tag in Harbormaster lists every level;
