@@ -6,9 +6,9 @@
 
 import { div } from "gpui-kit";
 import { InputState, Input, TextareaState, Textarea, v_flex, h_flex } from "gpui-base";
-import { exec, focused, terminals, openOverlay, closeOverlay, props, notify, readTextFile, writeTextFile, spaces, home, checking } from "herdr";
+import { exec, focused, terminals, openOverlay, closeOverlay, props, notify, readTextFile, writeTextFile, spaces, panes, home, checking } from "herdr";
 import { repoRoot, openFolders, runFolders, scanFolders, isFolder } from "./repospaces.js";
-import { recentFolders, listFolders, matchFolders, literalFolder, tilde, base, newSpaceId } from "./folders.js";
+import { recentFolders, listFolders, matchFolders, literalFolder, tilde, base, newSpaceId, spaceAt } from "./folders.js";
 import {
   KINDS, DRAFTS, profileText, parseProfile, profileFor, buildPrompt, inputProblem, runAgentName, startArgs,
   startOutcome, parsePrefs, AGENTS, agentFor, agentLabel, lastProfile, prefillProfile, roleValue, modelProblems, setRole, parsePiModels, parseOpencodeModels, CAPTAIN_PROMPT, captainProblem, captainName, captainArgs, draftsFor, remember, markReviewStarted, clearReviewStarted, reviewStarting,
@@ -335,7 +335,9 @@ async function startNow(view, cx, { pick, profile, kind, input, drafts, agent, o
     // A space opened meanwhile counts; and a new space's id must not be another folder's.
     const open = spaces();
     if (!pick.space) pick = (await openFolders().catch(() => [])).find((e) => e.folder === pick.folder && e.space && !e.machine) ?? pick;
-    const repo = { space: pick.space, name: base(pick.folder), root: pick.folder, spaceId: pick.space ? null : newSpaceId(pick.folder, open) };
+    // A space whose folder is stale still has the folder's terminal: that is the space the tab goes in.
+    const space = pick.space || spaceAt(pick.folder, open, panes());
+    const repo = { space, name: base(pick.folder), root: pick.folder, spaceId: space ? null : newSpaceId(pick.folder, open) };
     const go = () => launch({ repo, kind, input, profile, drafts, agent });
     out = kind === "captain" ? await launchCaptain({ repo })
       : kind === "review" && url ? await guardReview({ id: url, url, run: go }) : await go();
@@ -412,7 +414,7 @@ export function newRunView(view, t) {
     : `Models as provider/id; a role left out uses ${agentLabel(nr.agent)}'s default, which can change between runs`);
   const startable = Boolean(target(nr));
   const note = !nr.open && (startable
-    ? !target(nr).space && !target(nr).machine && div().text_size(11).text_color(t.dim).child("No space for it yet: Herdr opens one in the background")
+    ? !target(nr).space && !target(nr).machine && !spaceAt(target(nr).folder, spaces(), panes()) && div().text_size(11).text_color(t.dim).child("No space for it yet: Herdr opens one in the background")
     : nr.where.value().trim() && div().text_size(11).text_color(t.dim).child("Pick a folder from the list"));
   return v_flex().size_full().p(20).gap(16).bg(t.background)
     .child(div().text_size(15).font_semibold().text_color(t.foreground).child(captain ? "Start captain" : "New run"))

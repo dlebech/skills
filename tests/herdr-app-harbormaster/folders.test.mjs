@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  spaceFolders, newSpaceId, recentFolders, listFolders, fuzzyScore, matchFolders, literalFolder, scanParents, parseFound, tilde,
+  spaceFolders, newSpaceId, spaceAt, recentFolders, listFolders, fuzzyScore, matchFolders, literalFolder, scanParents, parseFound, tilde,
 } from "../../herdr-app/mods/harbormaster/folders.js";
 import { parsePrefs, remember } from "../../herdr-app/mods/harbormaster/startrun.js";
 
@@ -97,4 +97,28 @@ test("remembering a folder: newest first, once, capped; old prefs have none", ()
   assert.equal(p.folders.length, 8);
   assert.equal(p.folders[0], "/h/p5");
   assert.equal(p.folders.filter((f) => f === "/h/p5").length, 1);
+});
+
+test("New run finds the open space on its folder: its own folder, else a terminal live there", () => {
+  const tabbed = (id, name, folder, tabs, machine = null) => ({ ...sp(id, name, folder, machine), tabs: tabs.map((t) => ({ id: t })) });
+  const pane = (tab, cwd) => ({ tab, cwd });
+  // stale folder, its only terminal live in the picked folder
+  const stale = [tabbed("sp840046", "skills", "/h/worktrees/snevagten-api/issue-1235", ["t1"])];
+  assert.equal(spaceAt("/h/projects/skills", stale, [pane("t1", "/h/projects/skills")]), "sp840046");
+  assert.equal(spaceAt("/h/projects/skills", stale, [pane("t1", "/h/worktrees/snevagten-api/issue-1235")]), null);
+  // a space whose own folder matches wins over another space with a live pane there
+  const both = [tabbed("other", "a", "/h/x", ["t2"]), tabbed("own", "b", "/h/projects/skills", ["t3"])];
+  assert.equal(spaceAt("/h/projects/skills", both, [pane("t2", "/h/projects/skills")]), "own");
+  // a remote space with a live pane there is not chosen
+  const remote = [tabbed("r1", "r", "/h/elsewhere", ["t4"], "box")];
+  assert.equal(spaceAt("/h/projects/skills", remote, [pane("t4", "/h/projects/skills")]), null);
+  // a pane of another space's tab does not count
+  assert.equal(spaceAt("/h/projects/skills", [tabbed("s9", "z", "", ["t5"])], [pane("t6", "/h/projects/skills")]), null);
+  // nothing matches, exact folder only (no subfolder or parent matching)
+  assert.equal(spaceAt("/h/projects/skills", [tabbed("other", "a", "/h/x", ["t2"])], [pane("t2", "/h/projects/skills/sub"), pane("t2", "/h/projects")]), null);
+  assert.equal(spaceAt("/h/projects/skills", [], []), null);
+  // trailing slashes on either side still match
+  assert.equal(spaceAt("/h/projects/skills/", [sp("s1", "a", "/h/projects/skills")], []), "s1");
+  assert.equal(spaceAt("/h/projects/skills", [sp("s2", "a", "/h/projects/skills/")], []), "s2");
+  assert.equal(spaceAt("/h/projects/skills", [tabbed("s3", "a", "", ["t7"])], [pane("t7", "/h/projects/skills/")]), "s3");
 });
