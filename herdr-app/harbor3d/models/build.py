@@ -19,19 +19,27 @@ import lib  # noqa: E402
 SPEC = {
     "octopus": (900, ["Body"] + [f"Tentacle.{i}" for i in range(8)] + ["EyeLid.L", "EyeLid.R"]),
     "crab": (500, ["Body", "Claw.L", "Claw.R", "Legs"]),
-    "boat": (900, ["Body", "Captain", "Sail", "Anchor"]),
-    "reef": (700, ["Body"]),
-    "dock": (400, ["Body", "Lantern.L", "Lantern.R"]),
     "buoy": (150, ["Body", "Float"]),
-    "flagpole": (80, ["Body"]),
     "flag": (40, ["Flag"]),
-    "lighthouse": (900, ["Body", "Lamp"]),
     "gull": (200, ["Body", "Wing.L", "Wing.R"]),
-    "palm": (400, ["Body"]),
-    "crane": (300, ["Body", "Arm"]),
     "driftwood": (150, ["Body"]),
+    "ship": (1000, ["Body", "Funnel", "Mast", "Lights"]),
+    "container": (60, ["Body"]),
+    "crane": (500, ["Body", "Trolley", "Hook"]),
+    "pier": (500, ["Body"]),
+    "quay": (300, ["Body"]),
+    "signal": (200, ["Body", "Red", "Amber", "Green"]),
+    "tug": (700, ["Body", "Captain", "Light"]),
+    "office": (500, ["Body", "Radar", "Windows"]),
+    "warehouse": (150, ["Body"]),
+    "silo": (250, ["Body"]),
+    "floodlight": (120, ["Body", "Lamp"]),
+    "marker": (120, ["Body", "Daymark", "Lamp"]),
+    "rock": (60, ["Body"]),
 }
-MAX_FILE, MAX_ALL, MAX_MATS = 100_000, 600_000, 5
+# `signal` would shadow the stdlib module, so its part file has another name.
+MODULE = {"signal": "signal_mast"}
+MAX_FILE, MAX_ALL, MAX_MATS = 100_000, 700_000, 5
 
 
 def main():
@@ -41,7 +49,7 @@ def main():
     rows, bad, total = [], [], 0
     for name in names:
         lib.clear()
-        rt = importlib.import_module(name).build()
+        rt = importlib.import_module(MODULE.get(name, name)).build()
         rt.name = name
         kids = lib.family(rt)
         path = os.path.join(HERE, "out", name + ".glb")

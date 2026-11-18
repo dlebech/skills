@@ -14,9 +14,13 @@ PALETTE = dict(
     sail="fbf7ee", navy="264a6b", rope="e6cf98", brass="f2c94c", leaf="4f9d69",
     leaf_dark="37774d", white="ffffff", ink="1d2b3a", skin="f3c7a6", metal="9aa7b1",
     red="d4553e", lamp="fff3b0",
+    concrete="a3a9ad", concrete_dark="787f84", asphalt="4b5257", steel="5f6b75", crane_yellow="f2b632",
+    hull_red="b5412f", hull_blue="2f4f6f", deck="7f8a93", glass="9fd3e6", rubber="2a2d30",
+    line_yellow="e8c547", tug_dark="2b3440", sig_red="6e2a24", sig_amber="6e5418", sig_green="24583a",
 )
 # Materials the scene recolours: their own name, a palette colour.
-SPECIAL = dict(BuoyColor="brass", FlagColor="navy")
+SPECIAL = dict(BuoyColor="brass", FlagColor="navy", ContainerColor="metal", MarkerColor="red", ShipLights="glass",
+               OfficeLights="glass", SignalRed="sig_red", SignalAmber="sig_amber", SignalGreen="sig_green")
 
 
 def _lin(c):
@@ -104,6 +108,18 @@ class Builder:
         res = bmesh.ops.create_uvsphere(self.bm, u_segments=segs, v_segments=rings, radius=r,
                                         matrix=xform(loc, rot, scale))
         self._tag(res, mat)
+        return self
+
+    def prism(self, outline, z0, z1, mat):
+        """Straight prism: an (x, y) outline, counter-clockwise from above, between heights z0 and z1."""
+        lo = [self.bm.verts.new((x, y, z0)) for x, y in outline]
+        hi = [self.bm.verts.new((x, y, z1)) for x, y in outline]
+        n = len(outline)
+        fs = [self.bm.faces.new(lo[::-1]), self.bm.faces.new(hi)]
+        fs += [self.bm.faces.new([lo[k], lo[(k + 1) % n], hi[(k + 1) % n], hi[k]]) for k in range(n)]
+        for f in fs:
+            f.material_index = self._mi(mat)
+        bmesh.ops.triangulate(self.bm, faces=fs[:2], quad_method="BEAUTY", ngon_method="EAR_CLIP")
         return self
 
     def poly(self, pts, mat):

@@ -11,13 +11,13 @@ blender -b --factory-startup -P herdr-app/harbor3d/models/build.py -- crab  # ju
 ```
 
 It prints triangles, materials, size and object names per model, and exits non-zero if a triangle,
-file-size (100 kB each, 600 kB total) or material (5) budget is exceeded or a required part is missing.
+file-size (100 kB each, 700 kB total) or material (5) budget is exceeded or a required part is missing.
 `node --test herdr-app/harbor3d/test/models.test.mjs` checks the committed files without Blender.
 `sheet.py` renders a contact sheet (`... -P sheet.py -- /path/sheet.png`) for looking at them; the PNG is not committed.
 
 ## Layout
 
-`lib.py` (palette, materials, a bmesh `Builder`, export) and `parts/<name>.py` (`build()` returns the root).
+`lib.py` (palette, materials, a bmesh `Builder`, export) and `parts/<name>.py` (`build()` returns the root). The `signal` model's part file is `parts/signal_mast.py`, because `signal` would shadow the Python standard library.
 
 ## Conventions
 
@@ -26,8 +26,12 @@ file-size (100 kB each, 600 kB total) or material (5) budget is exceeded or a re
   the palette and shared by name (`lamp` is emissive, strength 2). The scene recolours `BuoyColor` and `FlagColor`.
 - The root node has the model's name; named children are the parts the scene animates; everything else is `Body`.
   `.L` is +X (the creature's own left), `.R` is -X. `EyeLid.*` are full size and meant to be scaled to 0 by default.
-- Origins: `Tentacle.i` where it joins the head, `Claw.*` and `Wing.*` at the shoulder, `Arm` and `Lamp` on the axis,
-  `Sail` on the mast axis at boom height, `Anchor` at its ring, `Flag` at the middle of the hoist edge.
+- Origins: `Tentacle.i` where it joins the head, `Claw.*` and `Wing.*` at the shoulder, `Lamp` on the axis. Industrial models:
+  `ship` at the waterline centre (bow -Y, bridge at the stern, deck z 1.6), `Funnel` at its top centre, `Mast` at its foot;
+  `container` at the centre of its base (2.4 long along Y, doors at the -Y end); `crane` at the centre of its base, boom along +X,
+  `Trolley` on the boom axis at x 0, `Hook` (child of `Trolley`, origin at the trolley, spreader hangs just below it with short slings);
+  `pier` at the centre of its landward end, running to -Y; `quay` at the centre of its edge, land at +Y; `Radar` on its axis.
+- Kept from before: `octopus`, `crab`, `gull`, `buoy`, `flag`, `driftwood`. Removed: lighthouse, reef, palm, dock, flagpole, boat, old crane.
 
 ## Sizes
 
@@ -35,16 +39,22 @@ file-size (100 kB each, 600 kB total) or material (5) budget is exceeded or a re
 | --- | --- | --- | --- | --- |
 | octopus | 776 | 900 | 55640 | 1.56x1.56x1.38 |
 | crab | 424 | 500 | 31296 | 0.98x0.96x0.48 |
-| boat | 354 | 900 | 26236 | 1.70x4.06x3.41 (z up to 3.20 + anchor below) |
-| reef | 416 | 700 | 27268 | 7.95x7.97x2.41 (z -1.50..0.91; flat top 0.6) |
-| dock | 312 | 400 | 20368 | 1.26x4.00x2.30 |
 | buoy | 96 | 150 | 8012 | 0.47x0.54x1.08 |
-| flagpole | 44 | 80 | 4348 | 0.09x0.10x3.50 |
 | flag | 36 | 40 | 2456 | 1.00x0.01x0.60 |
-| lighthouse | 438 | 900 | 27232 | 3.00x3.00x9.00 |
 | gull | 164 | 200 | 15540 | 1.20x0.98x0.25 |
-| palm | 212 | 400 | 16100 | 1.93x1.93x3.00 |
-| crane | 116 | 300 | 10952 | 0.70x1.70x2.50 |
 | driftwood | 108 | 150 | 8204 | 1.30x2.05x0.51 |
+| ship | 387 | 1000 | 26504 | 5.00x18.00x9.20 |
+| container | 60 | 60 | 4208 | 1.10x2.45x1.10 |
+| crane | 396 | 500 | 26744 | 11.05x3.10x12.08 |
+| pier | 468 | 500 | 28176 | 4.25x26.00x4.60 |
+| quay | 166 | 300 | 12448 | 22.00x14.30x4.45 |
+| signal | 200 | 200 | 13860 | 0.50x0.50x4.80 |
+| tug | 448 | 700 | 29328 | 3.35x7.20x4.50 |
+| office | 224 | 500 | 16604 | 8.40x6.65x11.00 |
+| warehouse | 68 | 150 | 6708 | 16.20x9.13x6.00 |
+| silo | 232 | 250 | 14272 | 7.95x3.94x9.00 |
+| floodlight | 116 | 120 | 9036 | 2.90x0.80x12.00 |
+| marker | 94 | 120 | 8980 | 0.87x1.00x4.00 |
+| rock | 28 | 60 | 3940 | 4.00x3.00x2.50 |
 
-Total 253 kB.
+Total 321 kB (limit 700 kB). Sizes are in Blender axes (z is height).

@@ -8,11 +8,11 @@ import path from 'node:path'
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'models', 'out')
 const PARTS = {
   octopus: ['Body', ...Array.from({ length: 8 }, (_, i) => `Tentacle.${i}`), 'EyeLid.L', 'EyeLid.R'],
-  crab: ['Body', 'Claw.L', 'Claw.R', 'Legs'],
-  boat: ['Body', 'Captain', 'Sail', 'Anchor'],
-  reef: ['Body'], dock: ['Body', 'Lantern.L', 'Lantern.R'], buoy: ['Body', 'Float'], flagpole: ['Body'],
-  flag: ['Flag'], lighthouse: ['Body', 'Lamp'], gull: ['Body', 'Wing.L', 'Wing.R'], palm: ['Body'],
-  crane: ['Body', 'Arm'], driftwood: ['Body'],
+  crab: ['Body', 'Claw.L', 'Claw.R', 'Legs'], buoy: ['Body', 'Float'], flag: ['Flag'], gull: ['Body', 'Wing.L', 'Wing.R'],
+  driftwood: ['Body'], ship: ['Body', 'Funnel', 'Mast', 'Lights'], container: ['Body'], crane: ['Body', 'Trolley', 'Hook'],
+  pier: ['Body'], quay: ['Body'], signal: ['Body', 'Red', 'Amber', 'Green'], tug: ['Body', 'Captain', 'Light'],
+  office: ['Body', 'Radar', 'Windows'], warehouse: ['Body'], silo: ['Body'], floodlight: ['Body', 'Lamp'],
+  marker: ['Body', 'Daymark', 'Lamp'], rock: ['Body'],
 }
 
 // Reads a GLB: 12-byte header, then the JSON chunk.
@@ -38,12 +38,22 @@ test('every model is present, within size, and has its named parts', () => {
     assert.ok(!json.cameras && !json.animations && !json.textures, `${name}: has cameras, animations or textures`)
     assert.ok(!(json.extensionsUsed || []).includes('KHR_draco_mesh_compression'), `${name}: Draco`)
   }
-  assert.ok(total < 600_000, `total ${total} bytes`)
+  assert.ok(total < 700_000, `total ${total} bytes`)
 })
 
-test('recoloured parts have their own materials', () => {
+test('recoloured and lit parts have their own materials', () => {
   const mats = (n) => readGlb(path.join(dir, n + '.glb')).json.materials.map((m) => m.name)
   assert.ok(mats('buoy').includes('BuoyColor'))
   assert.deepEqual(mats('flag'), ['FlagColor'])
-  assert.ok(mats('lighthouse').includes('lamp') && mats('dock').includes('lamp'))
+  assert.ok(mats('container').includes('ContainerColor'))
+  assert.ok(mats('marker').includes('MarkerColor') && mats('marker').includes('lamp') && mats('marker').includes('steel'))
+  assert.ok(mats('ship').includes('ShipLights') && mats('office').includes('OfficeLights'))
+  for (const m of ['SignalRed', 'SignalAmber', 'SignalGreen']) assert.ok(mats('signal').includes(m), m)
+  assert.ok(mats('tug').includes('lamp') && mats('floodlight').includes('lamp'))
+})
+
+test('the trolley carries the hook', () => {
+  const { json } = readGlb(path.join(dir, 'crane.glb'))
+  const t = json.nodes.findIndex((n) => n.name === 'Trolley')
+  assert.ok(json.nodes[t].children.some((c) => json.nodes[c].name === 'Hook'))
 })
