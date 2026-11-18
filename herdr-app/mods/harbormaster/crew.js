@@ -375,13 +375,13 @@ function needCard(m, x) {
 }
 
 // Needs you: the entries in their stable order, the open one (the first, or the one clicked) drawn
-// as the box in its place, the others as compact rows, at most four before "+ n more". Nothing waiting: one calm line.
+// as the box in its place, the others as compact rows, at most four before "+ n more". Nothing waiting: one calm line, with a little room above it.
 function needsSection(m) {
   const { view, t, groups, needs, entries, asks } = m;
   const g = GROUPS[0];
   const none = emptyNote(g, needs, entries.length);
-  if (none) return [h_flex().id("crew-group-needs").flex_none().h(22).px(PAD).gap(6).items_center().text_size(10.5)
-    .child(div().flex_none().font_semibold().text_color(t.dim).child(g.title)).child(div().min_w(0).truncate().text_color(t.muted).child(none))];
+  if (none) return [h_flex().id("crew-group-needs").flex_none().pt(10).pb(4).px(PAD).gap(6).items_center().text_size(10.5)
+    .child(div().flex_none().font_semibold().text_color(t.dim).child(g.title)).child(div().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(none))];
   if (!needs) return [];
   const list = groups.needs;
   const expanded = expandedNeed(list, view.needsOpen);
