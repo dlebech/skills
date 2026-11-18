@@ -10,6 +10,12 @@ import { askClick } from "./askclick.js";
 import { actionButton } from "./cardparts.js";
 import { needItemsOf, markWaiting } from "./needitems.js";
 
+// The captain decisions answered from here, by id and time asked, until the file drops them.
+const toCaptain = new Set();
+const sentKey = (it) => `${it.id}@${it.since ?? ""}`;
+export const sentToCaptain = (it) => it.kind === "decision" && toCaptain.has(sentKey(it));
+export const forgetSentToCaptain = () => toCaptain.clear();
+
 // Sends an answer to an item of the queue. A captain decision goes to the captain, typed
 // into its input, when it is there; otherwise, and for a run's question, to the run's inbox
 // (inbox.js, the answer kind), which wakes its orchestrator. Marks the item answered (inbox.js
@@ -18,7 +24,11 @@ import { needItemsOf, markWaiting } from "./needitems.js";
 export function sendAnswer(view, it, text, cx, option = false) {
   const cap = captainOf(facts()).terminal;
   if (it.kind === "decision" && cap) {
+    // Sent once: the decision stays in the file until the captain drops it, so it is marked here.
+    if (toCaptain.has(sentKey(it))) return true;
     replyToCaptain(cap.address, it.decision, text);
+    toCaptain.add(sentKey(it));
+    cx?.notify?.();
     return true;
   }
   const run = it.run;
@@ -101,7 +111,7 @@ export function answerParts(view, t, it, ctx, slot = "") {
   const open = view.replying === rid;
   // A message waiting in the run's inbox counts too: someone else (the captain, by hand) answered.
   const sent = it.run ? inboxAsked(it.run, "answer", it.id, it) : false;
-  const answered = sent || Boolean(it.answered);
+  const answered = sent || Boolean(it.answered) || sentToCaptain(it);
   const why = noAnswer(it);
   const replyBtn = it.kind !== "attention" && h_flex().id(rid + "-reply").flex_none().items_center().px(8).h(22).rounded(5)
     .text_size(11).text_color(open ? t.accent : t.dim)
@@ -131,7 +141,7 @@ export function answerParts(view, t, it, ctx, slot = "") {
       off ? null : (cx) => { sendAnswer(view, it, o.label, cx, true); }, i === it.recommended);
     return off ? b.tooltip(off) : b;
   };
-  const note = answered && div().text_size(11).text_color(t.muted).child(it.run && runGone(it.run) ? "Waits in its inbox until the run is resumed" : sent ? "Answered, waiting for the orchestrator" : "Message waiting for the orchestrator");
+  const note = answered && div().text_size(11).text_color(t.muted).child(sentToCaptain(it) ? "Sent to the captain" : it.run && runGone(it.run) ? "Waits in its inbox until the run is resumed" : sent ? "Answered, waiting for the orchestrator" : "Message waiting for the orchestrator");
   const input = open && v_flex().gap(4)
     .child(Input.new(view.reply))
     .child(div().text_size(10.5).text_color(t.dim).child(it.kind === "decision" && cap.terminal ? "Enter sends it to the captain, with this decision attached" : it.run && runGone(it.run) ? "Enter writes it to the run's inbox, where it waits until the run is resumed" : "Enter writes it to the run's inbox and tells its orchestrator"));

@@ -30,7 +30,7 @@ export function groupRows(rows) {
 }
 
 // How important a Needs-you run is: its most urgent reason's place in needaction.js ORDER (0 first).
-const importance = (a) => Math.min(REASON_ORDER.length, ...(a?.reasons ?? []).map((r) => { const i = REASON_ORDER.indexOf(r.key); return i < 0 ? REASON_ORDER.length : i; }));
+export const importance = (a) => Math.min(REASON_ORDER.length, ...(a?.reasons ?? []).map((r) => { const i = REASON_ORDER.indexOf(r.key); return i < 0 ? REASON_ORDER.length : i; }));
 
 // Needs-you order, which only real changes move: most important first, then longest waiting,
 // then by key so equals never swap. Nothing about which entry is open, seen or hovered is in it.
@@ -203,15 +203,9 @@ export function crewEntries(orchs, needRuns, attOf) {
 // A Needs-you entry's key: its run's, else its orchestrator's address (no run directory).
 export const needKey = (x) => x.r?.key ?? x.term?.address ?? null;
 
-// Which Needs-you entry the sidebar's Needs-you box draws open (props needs: "box"): the one
-// clicked (`openKey`) while it still needs you, else the first, longest wait first. Only
-// entries with a run directory can be drawn as a box; the rest stay compact rows. Null for none.
+// Whether a Needs-you entry can be drawn as the sidebar's box: only with a run directory; the rest stay
+// compact rows (queue.js expandedItem picks the open one).
 export const canExpand = (x) => Boolean(x.r?.dir);
-
-export function expandedNeed(entries, openKey) {
-  const can = entries.filter(canExpand);
-  return can.find((x) => needKey(x) === openKey) ?? can[0] ?? null;
-}
 
 // Orchestrators without a run directory that need you (blocked on a dialog): the overview has
 // no run for them, so it adds these to its count.
@@ -221,12 +215,6 @@ export const runlessNeeds = (orchs) => orchs.filter((x) => !x.r && x.a?.group ==
 // the runs that need you, orchestrators without a run blocked on a dialog, and the captain's
 // open decisions.
 export const needCount = (needRuns, orchs, decisions) => needRuns.length + runlessNeeds(orchs).length + decisions;
-
-// The line under Needs you while the captain has open decisions: they count in the heading,
-// and the captain's own row (above, where it always is) is where to answer them; with no
-// captain running, the ⚓+ pill above is where to start one.
-export const captainNeedNote = (decisions, running = true) => (decisions > 0
-  ? `+ the captain's ${decisions === 1 ? "decision" : `${decisions} decisions`}${running ? ", above" : ": no captain running, start one with ⚓+ above"}` : null);
 
 // What the captain's row says it watches, from stats(): "watching 2 runs · 1 finished", every
 // run it keeps an eye on (running and finished but open), then how many of them are finished.

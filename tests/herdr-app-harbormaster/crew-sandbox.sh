@@ -14,6 +14,11 @@
 #   click <x> <y>   left click at screen coordinates on the Xvfb display (XTest; never the user's)
 #   hover <x> <y>   move the pointer there (tooltips)
 #   scroll <x> <y> [n]  wheel down n notches (default 10) with the pointer there
+#   decisions [none]  write .captain-decisions.json in the scratch runs root: two open captain decisions, one naming no run
+#                   (board-1068, recommended Yes) and one about the run asks-you (recommended Not yet), asked 40 and
+#                   12 minutes ago; `none` removes the file. The sidebar shows them as rows in Needs you (#50)
+#   captain on|off  start a fake captain (a tab in the focused space labelled role=captain, reporting idle),
+#                   or kill it; with none the decisions' button is Start captain
 #   hc <args>       hc against the scratch session (e.g. hc label t4 role=)
 #   env             print the environment lines (eval them to run herdr-app/hc by hand)
 #   down            stop the scratch app, its Xvfb and the scratch hc session; the scratch dir stays
@@ -330,6 +335,27 @@ case $cmd in
     herdr-app status | jq -c '{layout, overlays, errors}'
     ;;
   runs) make_runs ;;
+  decisions)
+    f=$S/runs/.captain-decisions.json
+    if [ "${1:-}" = none ]; then rm -f "$f"; exit 0; fi
+    ago() { date -u -d "$1 minutes ago" +%Y-%m-%dT%H:%M:%SZ; }
+    jq -n --arg a1 "$(ago 40)" --arg a2 "$(ago 12)" --arg run "$S/runs/skills/asks-you" '[
+      {id: "board-1068", question: "Move #1068 to In Progress?", run: null, asked: $a1,
+       options: [{label: "Yes", text: "move it"}, {label: "No", text: "leave it"}], recommended: "Yes: it is started",
+       evidence: "A branch for it exists.", risk: "None.", blocks: "the board stays out of date until then"},
+      {id: "asks-you-park", question: "Park asks-you until Monday?", run: $run, asked: $a2,
+       options: [{label: "Not yet", text: "keep it running"}, {label: "Park it", text: "park the run"}], recommended: "Not yet: it is waiting on you",
+       evidence: "It has waited a while.", risk: "A parked run stops.", blocks: ""}]' >"$f"
+    ;;
+  captain)
+    sandbox_env
+    if [ "${1:-}" = off ]; then
+      for t in $(hc ls --json | jq -r '.terminals[] | select(.labels.role == "captain") | .address'); do hc kill "$t" >/dev/null 2>&1 || true; hc rm "$t" >/dev/null 2>&1 || true; done
+      exit 0
+    fi
+    out=$(herdr-app do tab.new --name captain --argv "[\"sh\",\"$S/fake-orch.sh\",\"captain\",\"idle\"]" --focus false)
+    hc label "$(jq -r .terminal <<<"$out")" role=captain >/dev/null
+    ;;
   do) sandbox_env; herdr-app do "$@" ;;
   shot) sandbox_env; herdr-app shot "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")" ;;
   root) sandbox_env; import -window root "$1" ;;
