@@ -16,6 +16,7 @@ import { props, theme, nextCommand, checking, openOverlay, closeOverlay, shared,
 import { expireNote } from "./note.js";
 import { loadRuns, cachedRuns, refreshPrs, refreshReviewed, isClosed, isParked, newestFirst } from "./data.js";
 import { facts, crewAddresses } from "./live.js";
+import { observeWaits } from "./attend.js";
 import { loadContexts } from "./context.js";
 import { hotSignature, sampleVersion } from "./resources.js";
 import { cards, runPane, submitReply, runProps } from "./overview.js";
@@ -209,6 +210,8 @@ export default class Harbormaster extends View {
       // PRs land in shared state, which re-renders every copy by itself. A parked run's PRs are
       // read as rarely as a closed run's: nobody works on them, they only show what they wait on.
       for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});
+      // The waiting-on marks that let go are deleted here, after the PR reads, never in a render.
+      try { observeWaits(runs, facts(), cachedRuns()); } catch (e) { console.log(`harbormaster: waiting-on marks failed: ${e?.message ?? e}`); }
       // The commits since each run's last review (not for closed runs: their line is never shown): module memory, so a change re-renders by hand.
       let moved = false;
       for (const r of runs) if (!isClosed(r, ctx)) moved = (await refreshReviewed(r, isClosed(r, ctx) || isParked(r)).catch(() => false)) || moved;

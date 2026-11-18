@@ -5,8 +5,9 @@ import assert from "node:assert/strict";
 import {
   reviewFlow, flowKey, prStep, nextStep, nextStepText, prRead, ciState, ciTimes, usualCi, ageText, stepOf, stepText,
   trackSince, stepSig, stalled, quietText, assess, byWait, STALL_MS, prMaxAge, prTtl, trackParts, stepParts, taskKey, progressKey, reviewRunStep,
+  waitSig,
 } from "../../herdr-app/mods/harbormaster/attention.js";
-import { addCiSample, nextSteps, screenSig, CI_KEEP, probeEvery } from "../../herdr-app/mods/harbormaster/tracking.js";
+import { addCiSample, nextSteps, screenSig, CI_KEEP, probeEvery, withWait, prunedWaits } from "../../herdr-app/mods/harbormaster/tracking.js";
 import { prSummary, viewerReview, PR_FIELDS, carryRuns, withReadTimes, prEntrySame } from "../../herdr-app/mods/harbormaster/data.js";
 import { filesFresh } from "../../herdr-app/mods/harbormaster/attend.js";
 
@@ -543,4 +544,128 @@ test("a review run whose PR is merged or closed is Done whatever the review; no 
   assert.deepEqual([none.group, none.reasons[0].text], ["needs", "finished — read and close"]);
   assert.equal(reviewRunStep(revRun(), [{ state: "UNKNOWN", number: null }]), null);
   assert.equal(reviewRunStep(run({ prs: [] }), [revPr(1394)]), null);
+});
+
+// ---- waiting on someone (the user's mark) ----
+
+// A finished peer-flow run with one open PR and no reviewer: `request review`, as in the user's world.
+const peerRun = (o = {}) => run({ phase: "finished", statusLine: "finished", progress: "", folder: "/home/u/projects/snevagten", repo: "snevagten", ...o });
+const peer = (r, list, o = {}) => settled(r, list, { flow: "peer", ...o });
+// The mark as Waiting on someone… sets it: the step's label and signature as they are now.
+const markOf = (a, text = "Kari — preview check", at = ago(120)) => ({ text, at, label: a.next.label, sig: waitSig(a.next) });
+
+test("a run marked waiting on someone is in Waiting on others, with the text and its age", () => {
+  const before = peer(peerRun(), [pr()]);
+  assert.equal(before.group, "needs");
+  assert.deepEqual(before.reasons.map((x) => x.key), ["request review"]);
+  const a = peer(peerRun(), [pr()], { waitOn: markOf(before) });
+  assert.equal(a.group, "waiting");
+  assert.deepEqual(a.reasons, [{ key: "waiting-on", text: "waiting on Kari — preview check", since: ago(120) }]);
+  assert.deepEqual(a.waitingOn, { text: "Kari — preview check", at: ago(120) });
+  assert.equal(a.dropWait, undefined);
+  assert.equal(a.waitSince, ago(120));
+  // Review proof → merge too (self flow), and a ready run is no longer drawn as ready.
+  const self = settled(run({ phase: "finished" }), [pr()], { proofRead: true, proofClean: true });
+  assert.equal(self.reasons[0].key, "review proof → merge");
+  const s = settled(run({ phase: "finished" }), [pr()], { proofRead: true, proofClean: true, waitOn: markOf(self) });
+  assert.deepEqual([s.group, s.ready, s.reasons[0].key], ["waiting", false, "waiting-on"]);
+});
+
+test("each let-go event drops the mark and puts the run back where the rules say", () => {
+  const mark = markOf(peer(peerRun(), [pr()]));
+  const back = (list, o = {}, r = peerRun()) => peer(r, list, { waitOn: mark, ...o });
+  const cases = {
+    "reviewer requested": [back([pr({ requested: ["anna"] })]), "waiting"],
+    "approval": [back([pr({ approvedBy: ["anna"], reviewedAt: ago(5) })]), "needs"],
+    "change request": [back([pr({ changesBy: ["anna"], reviewedAt: ago(5) })]), "needs"],
+    "a review comment": [back([pr({ reviewedAt: ago(5) })]), "needs"],
+    "a new push": [back([pr({ sha: "beef" })]), "needs"],
+    "red CI": [back([pr({ checks: checks(2, 1), ci: { startedAt: ago(20), finishedAt: ago(10) } })]), "needs"],
+    "a question": [back([pr()], {}, peerRun({ phase: "waiting", question: "q.md", statusLine: "waiting for user" })), "needs"],
+    "merged": [back([pr({ state: "MERGED" })]), "done"],
+    "closed": [back([pr({ state: "CLOSED" })]), "done"],
+  };
+  for (const [what, [a, group]] of Object.entries(cases)) {
+    assert.equal(a.dropWait, true, what);
+    assert.equal(a.waitingOn, undefined, what);
+    assert.equal(a.group, group, what);
+  }
+  // A reviewer requested lets go into review from, as without a mark.
+  assert.equal(cases["reviewer requested"][0].reasons[0].key, "waiting-for");
+  // An orchestrator gone on an unfinished run.
+  const r = run({ phase: "running" });
+  const own = markOf(peer(r, [pr()], { orch: "idle" }));
+  assert.equal(peer(r, [pr()], { orch: "gone", waitOn: own }).dropWait, true);
+});
+
+test("the mark is never revived: a let-go is a delete, and the same step without it is Needs you", () => {
+  const before = peer(peerRun(), [pr()]);
+  const store = withWait({}, peerRun().key, markOf(before));
+  // The reviewer request comes and goes again: the poll deleted the mark at the first read.
+  const gone = peer(peerRun(), [pr({ requested: ["anna"] })], { waitOn: store[peerRun().key] });
+  assert.equal(gone.dropWait, true);
+  const after = prunedWaits(store, new Set([peerRun().key]), [peerRun().key]);
+  assert.deepEqual(after, {});
+  assert.equal(peer(peerRun(), [pr()], { waitOn: after[peerRun().key] ?? null }).group, "needs");
+});
+
+test("an unreadable PR read neither applies nor drops the mark; nor does a working run", () => {
+  const mark = markOf(peer(peerRun(), [pr()]));
+  const cant = peer(peerRun(), [], { pr: { list: [], readable: false, why: "gh failed" }, waitOn: mark });
+  assert.deepEqual([cant.group, cant.dropWait, cant.waitingOn], ["cant", undefined, undefined]);
+  // A question read from the files, PRs unreadable: Needs you, the mark kept for later.
+  const q = peer(peerRun({ phase: "waiting", question: "q.md", statusLine: "waiting for user" }), [], { pr: { list: [], readable: false, why: "gh failed" }, waitOn: mark });
+  assert.deepEqual([q.group, q.dropWait], ["needs", undefined]);
+  // Stale run files: nothing is judged either.
+  assert.equal(peer(peerRun(), [pr()], { filesOk: false, waitOn: mark }).dropWait, undefined);
+  // Agents working, or CI running: Working, mark kept, even when the PR changed meanwhile.
+  const w = peer(peerRun(), [pr({ sha: "beef" })], { working: true, waitOn: mark });
+  assert.deepEqual([w.group, w.dropWait], ["working", undefined]);
+  const ci = peer(peerRun(), [pr({ checks: checks(1, 0, 2), ci: { startedAt: ago(2), finishedAt: null } })], { waitOn: mark });
+  assert.deepEqual([ci.group, ci.dropWait], ["working", undefined]);
+});
+
+test("a question or a gone orchestrator lets the mark go even while agents still work", () => {
+  const r = run({ phase: "running" });
+  const mark = markOf(peer(r, [pr()]));
+  const asking = run({ phase: "running", question: "q.md", statusLine: "waiting for user" });
+  const q = peer(asking, [pr()], { working: true, waitOn: mark });
+  assert.deepEqual([q.group, q.dropWait], ["needs", true]);
+  assert.equal(peer(r, [pr()], { orch: "blocked", working: true, waitOn: mark }).dropWait, true);
+  assert.equal(peer(r, [pr()], { orch: "gone", working: true, waitOn: mark }).dropWait, true);
+  // PR-ground changes still wait for the run to settle.
+  assert.equal(peer(r, [pr({ sha: "beef" })], { working: true, waitOn: mark }).dropWait, undefined);
+});
+
+test("a question or red CI wins over the mark; a quiet stall does not", () => {
+  const r = run({ phase: "running" });
+  const mark = markOf(peer(r, [pr()]));
+  const q = peer(run({ phase: "running", question: "q.md", statusLine: "waiting for user" }), [pr()], { waitOn: mark });
+  assert.equal(q.group, "needs");
+  assert.ok(q.reasons.some((x) => x.key === "question"));
+  const red = peer(r, [pr({ checks: checks(1, 1), ci: { startedAt: ago(20), finishedAt: ago(10) } })], { waitOn: mark });
+  assert.ok(red.reasons.some((x) => x.key === "red-ci"));
+  // Waiting on a person is not a stall.
+  const quiet = { quietMs: 40 * MIN, by: "quiet" };
+  assert.equal(peer(r, [pr()], { stall: quiet }).reasons.some((x) => x.key === "stalled"), true);
+  const held = peer(r, [pr()], { stall: quiet, waitOn: mark });
+  assert.deepEqual([held.group, held.reasons[0].key], ["waiting", "waiting-on"]);
+});
+
+test("the waiting-on store: set, clear, prune unlisted and dropped runs", () => {
+  const m = { text: "  Kari — preview check ", at: 5, label: "request review", sig: "s" };
+  const one = withWait({}, "a", m);
+  assert.deepEqual(one, { a: { text: "Kari — preview check", at: 5, label: "request review", sig: "s" } });
+  assert.deepEqual(withWait(one, "a", { ...m, text: "   " }), {});
+  assert.deepEqual(withWait(one, "a", null), {});
+  const none = {};
+  assert.equal(withWait(none, "b", null), none);
+  assert.equal(withWait(one, "", m), one);
+  const two = withWait(one, "b", m);
+  assert.equal(prunedWaits(two, new Set(["a", "b"])), two);
+  assert.deepEqual(Object.keys(prunedWaits(two, new Set(["a"]))), ["a"]);
+  assert.deepEqual(Object.keys(prunedWaits(two, new Set(["a", "b"]), ["a"])), ["b"]);
+  // An unread run (its machine did not answer) keeps its mark though it is not listed; a drop still goes.
+  assert.equal(prunedWaits(two, new Set(), [], () => true), two);
+  assert.deepEqual(Object.keys(prunedWaits(two, new Set(), ["a"], () => true)), ["b"]);
 });

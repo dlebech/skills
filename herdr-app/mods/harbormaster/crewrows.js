@@ -63,7 +63,8 @@ export function cantWhy(a) {
 //     time being its age.
 //   Working: the step and its own age ("CI on #42 · 34m", "t3 implementing 1h12m · +1 task");
 //     for a briefly idle run too, so the age shows how quiet it is.
-//   Waiting on others: the label ("review from anna"), then the step.
+//   Waiting on others: the label ("review from anna"), then the step; a run the user marked
+//     waiting on someone says on whom and since when ("waiting on Kari — preview check · 2h").
 //   Can't tell: "can't tell: machine offline", grey.
 //   Done: the label ("merged — close run · 2 PRs"), or "closed".
 // `narrow` (the sidebar): a label without its comment count ("approved · 2 PRs · 1h25m"), so
@@ -81,6 +82,10 @@ export function rowLead(a, now = Date.now(), { narrow = false } = {}) {
   }
   if (a.group === "done") return { lead: a.next ? nextStepText(a.next) : "closed", rest: null, tone: "muted" };
   if (a.group === "cant" || a.cantTell) return { lead: `can't tell: ${cantWhy(a)}`, rest: null, tone: "dim" };
+  if (a.group === "waiting" && a.waitingOn) {
+    const w = a.reasons[0];
+    return { lead: w.since ? `${w.text} · ${ageText(now - w.since)}` : w.text, rest: step, tone: "muted" };
+  }
   if (a.group === "waiting") return { lead: a.reasons[0]?.text ?? (a.next ? nextStepText(a.next) : "waiting"), rest: step, tone: "muted" };
   return { lead: step ?? a.reasons[0]?.text ?? (a.next ? nextStepText(a.next) : null) ?? "idle", rest: null, tone: "muted" };
 }
@@ -143,7 +148,8 @@ export function badgeOf(a, finished = false) {
   const tone = a.group === "needs" ? "blocked" : a.group === "done" ? "done" : finished ? "muted" : null;
   // With review comments, a `tip` saying who said what.
   const tip = reviewCommentLines(a.next).join("\n");
-  const label = pillReason(a)?.text ?? nextStepText(a.next);
+  // Marked waiting on someone: the pill says on whom, not the step it was marked on.
+  const label = pillReason(a)?.text ?? (a.waitingOn ? `waiting on ${a.waitingOn.text}` : nextStepText(a.next));
   return tone ? { label, tone, ...(a.ready && a.group === "needs" ? { ready: true } : {}), ...(tip ? { tip } : {}) } : null;
 }
 
