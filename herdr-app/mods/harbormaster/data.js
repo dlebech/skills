@@ -25,7 +25,7 @@ import { taskTone, taskCounts, taskStage } from "./tasks.js";
 // taskStage moved to tasks.js (claims.js reads it without herdr); still exported from here.
 export { taskStage };
 export { taskTone, taskCounts };
-import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
+import { checkKind, ciTimes, prTtl, isOpenPr, prOffset, PR_EVENT_FLOOR_MS, PR_OPENED_MS } from "./attention.js";
 import { NOT_ANSWERS, blockingPending, changesPending, rereviewPending, send, writeMessage, wakeRun } from "./inbox.js";
 import { reviewerCandidates, reviewersArgs, requestArgs } from "./reviewers.js";
 import { commentsArgs, commentSummary, pendingComments } from "./comments.js";
@@ -77,6 +77,24 @@ const SCRIPT = [
   "done",
   SAMPLER,
 ].join("\n");
+
+// A short hash of a text (FNV-1a), to tell that it changed without keeping it.
+export function textSig(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return `${text.length}:${h.toString(36)}`;
+}
+
+// A fingerprint of what in a run's files bears on its PRs: status.json's prs, related, status and
+// task counts, plan.md's Status line and proof.md's Checks line. Not its progress, waiting, tokens or
+// `updated`: set-status.sh stamps those at every step of a busy run, and reading its PRs each time
+// would cost more than the backstop saves (prpolling.test.mjs, the active budget).
+export function prFilesSig(status, plan, proofFile) {
+  const s = status ?? {};
+  const line = (re, text) => re.exec(text ?? "")?.[1]?.trim() ?? "";
+  return textSig(JSON.stringify([s.prs ?? [], s.related ?? [], s.status ?? null, s.tasks?.merged ?? null, s.tasks?.planned ?? null,
+    line(/^Status:(.*)$/m, plan), line(/^Checks:(.*)$/m, proofFile)]));
+}
 
 const json = (s) => {
   try { return JSON.parse(s); } catch { return null; }
@@ -268,6 +286,9 @@ function parseRun(machine, chunk) {
     // The budget the question was answered for (set-status.sh --budget-answered).
     budgetAnswered: Number(status.budget_answered) || null,
     updated: status.updated ? Date.parse(status.updated) : null,
+    // What of the run's files bears on its PRs (prFilesSig): when it changes, its PRs are read soon
+    // (refreshPrs), not at the backstop.
+    filesSig: prFilesSig(status, plan, proofFile),
     // When the run was created (init-run.sh); null for runs from before it recorded that.
     started: Date.parse(orch.started ?? "") || null,
     question: question?.trim() || null,
@@ -504,6 +525,10 @@ const prBusy = new Map();
 // Run key → start of the newest read that wrote its PRs: an older read finishing later must not overwrite it.
 const prWritten = new Map();
 const PR_STALE = 5 * 60000;
+// Run key → {files, heads}: the run's filesSig and moved local heads (headsMoved) when its PRs were
+// last read, so refreshPrs reads again only when they change. Module memory, like prReads: every
+// Harbormaster copy shares this module, so the floor holds across copies.
+const prSeen = new Map();
 
 // A PR's state → a theme tone; the harbor maps the same tones to its own colors. An open PR is
 // muted: no colour means fine (see overview.js AMBER); what it waits on has a colour of its own.
@@ -592,6 +617,8 @@ export function prSummary(p, repo, viewer = null) {
     failed: firstFailing(p.statusCheckRollup),
     ci: ciTimes(p.statusCheckRollup),
     sha: p.headRefOid ?? null,
+    // The head branch: its local refs tell a push before GitHub is asked (refreshPrs headsMoved).
+    head: p.headRefName ?? null,
     // Who opened it, for the reviewers to ask (reviewers.js leaves them out).
     author: p.author?.login ?? null,
     // When anything on the PR last changed: its review comments are read again only then (withComments).
@@ -642,20 +669,116 @@ export function relatedOf(run) {
   return shared("harbormaster.prs")?.[run.key]?.related ?? run.related.map((p) => unknownPr(p.url, p.repo));
 }
 
-// Refreshes a run's PRs when stale: every 5 min while the run is open, every 15 min once closed
-// or parked (`closed`).
+// The local head commits of the run's open PRs, from its repositories: for each head branch, the
+// remote-tracking ref (moves on a push or fetch) and the local branch (moves on a commit). One line
+// per branch and repository, "<repo>\t<branch>\t<origin sha or ->\t<local sha or ->". One cheap git call, no gh.
+const HEADS = [
+  'folder=$1; shift',
+  'for r in "$folder" "$folder"/*/; do',
+  '  [ -e "$r/.git" ] || continue',
+  '  for b in "$@"; do',
+  '    o=$(git -C "$r" rev-parse -q --verify "refs/remotes/origin/$b^{commit}" 2>/dev/null || echo -)',
+  '    l=$(git -C "$r" rev-parse -q --verify "refs/heads/$b^{commit}" 2>/dev/null || echo -)',
+  '    [ "$o$l" = "--" ] || printf "%s\\t%s\\t%s\\t%s\\n" "$r" "$b" "$o" "$l"',
+  '  done',
+  'done',
+].join("\n");
+const HEADS_TTL = 15_000;
+const headChecks = new Map(); // run key → when its heads were last looked at
+const headsNow = new Map(); // run key → what headsMoved last found
+
+// The open PRs of a read list whose head branch is known: the ones a push can move.
+const movable = (list) => (list ?? []).filter((p) => (p.state === "OPEN" || p.state === "DRAFT") && p.head && p.sha);
+
+// Looks at the local head commits of the run's open PRs, at most every HEADS_TTL: the sorted list
+// of the local refs at a sha other than the ones last read from GitHub, each named with its ref
+// ("<repo>/<branch>@origin:<sha>", "…@local:<sha>"), as one string ("" when none differs), or null
+// when it was not looked at (too soon, nothing to look at, git failed). Naming the ref makes a push
+// after a local commit a new state (the origin ref joins the local one), while a commit that is
+// never pushed stays one state.
+export async function headsMoved(run, list) {
+  const open = movable(list);
+  if (!open.length || !run.folder) return null;
+  if (Date.now() - (headChecks.get(run.key) ?? 0) < HEADS_TTL) return null;
+  headChecks.set(run.key, Date.now());
+  const branches = [...new Set(open.map((p) => p.head))];
+  const out = await exec("sh", ["-c", HEADS, "sh", run.folder, ...branches], { on: run.machine, timeout: 8000 }).catch(() => null);
+  if (out?.code !== 0) return null;
+  const read = new Set(open.map((p) => p.sha));
+  const moved = new Set();
+  for (const line of out.stdout.split("\n")) {
+    const [repo, b, origin, local] = line.split("\t").map((x) => x?.trim());
+    if (!b || !branches.includes(b)) continue;
+    for (const [ref, sha] of [["origin", origin], ["local", local]]) {
+      if (/^[0-9a-f]{40}$/.test(sha ?? "") && !read.has(sha)) moved.add(`${repo.replace(/\/+$/, "")}/${b}@${ref}:${sha}`);
+    }
+  }
+  const found = [...moved].sort().join(",");
+  headsNow.set(run.key, found);
+  return found;
+}
+
+// First and backstop reads started lately, so at most PR_BACKSTOP_CAP of them start per poll
+// (PR_BACKSTOP_WINDOW_MS). After a reload every run's read is due at once (the mod's memory is gone,
+// and the shared entry's `at` is its last change), and 20 runs would read in one pass; capped, they
+// take a few polls. The run's own events and force are not capped: they are few and floored.
+export const PR_BACKSTOP_CAP = 3, PR_BACKSTOP_WINDOW_MS = 5000;
+let backstopStarts = [];
+function backstopSlot() {
+  const now = Date.now();
+  backstopStarts = backstopStarts.filter((t) => now - t < PR_BACKSTOP_WINDOW_MS && t <= now);
+  if (backstopStarts.length >= PR_BACKSTOP_CAP) return false;
+  backstopStarts.push(now);
+  return true;
+}
+
+// Why a run's PRs are read now, or null when not: "forced" (after an action), "first" (no read yet),
+// "backstop" (prTtl plus the run's prOffset; both capped per poll, backstopSlot), "opened" (the run pane asked, wantPrs, and the last read
+// is over PR_OPENED_MS), "files" (the run's files changed since the last read) or "head" (a head commit
+// moved locally, and that state of the refs was not read yet). The run's own events and "opened" wait
+// out PR_EVENT_FLOOR_MS since the last read, whatever fires. A local commit that is never pushed
+// differs from GitHub's for good, so "head" fires once per state of the refs (`last.heads`), not on
+// every look; its push later is a new state (headsMoved).
+export async function prTrigger(run, closed, have, last, { force = false, reason = null } = {}) {
+  if (force) return "forced";
+  if (!have) return backstopSlot() ? "first" : null;
+  const age = Date.now() - (have.at ?? 0);
+  if (age >= prTtl(closed) + prOffset(run.key) && backstopSlot()) return "backstop";
+  if (age < PR_EVENT_FLOOR_MS) return null;
+  if (reason === "opened" && age >= PR_OPENED_MS) return "opened";
+  if (run.filesSig && last?.files && last.files !== run.filesSig) return "files";
+  if (closed) return null;
+  const heads = await headsMoved(run, have.list);
+  if (heads && heads !== (last?.heads ?? "")) return "head";
+  return null;
+}
+
+// Refreshes a run's PRs when something calls for it (prTrigger): its own events within ~30 s
+// (PR_EVENT_FLOOR_MS), else the backstop: every 5 min while the run is open, every 30 min once
+// closed or parked (`closed`), each put off by the run's prOffset. On a closed or parked run a PR
+// last read as merged or closed keeps its summary and is not read again: a run whose PRs are all
+// done makes no gh calls once put away. An open run still reads them (a PR may be reopened).
 // A PR gh could not read keeps its last summary, marked `stale`, or is unknownPr; the
 // entry's `error` says why (null when every PR was read) and `okAt` is the last read
 // that got them all, so a failing gh shows as "can't tell" instead of old data passing as new.
-// `force` reads at once, whatever its age or a read in progress (after an action changed a PR).
-export async function refreshPrs(run, closed = false, force = false) {
+// `opts`: `true` (or {force: true}) reads at once, whatever its age or a read in progress (after an
+// action changed a PR); {reason: "opened"} is wantPrs.
+export async function refreshPrs(run, closed = false, opts = false) {
+  const { force = false, reason = null } = opts === true ? { force: true } : (opts || {});
   const have = withReadTimes((shared("harbormaster.prs") ?? {})[run.key], prReads.get(run.key));
-  const ttl = prTtl(closed);
+  const last = prSeen.get(run.key);
+  // The first look after a reload knows no earlier files: they are taken as read.
+  if (!last && run.filesSig) prSeen.set(run.key, { files: run.filesSig, heads: "" });
   if (force) prBusy.delete(run.key);
-  else if (Date.now() - (prBusy.get(run.key) ?? 0) < PR_STALE || (have && Date.now() - have.at < ttl)) return;
+  else if (Date.now() - (prBusy.get(run.key) ?? 0) < PR_STALE) return;
+  // Claimed before deciding: deciding may wait on git, and another copy must not start a read meanwhile.
   const started = Date.now();
   prBusy.set(run.key, started);
   try {
+    const why = await prTrigger(run, closed, have, last ?? prSeen.get(run.key), { force, reason });
+    if (!why) return;
+    // What this read has seen, so the same files or local heads do not fire it again.
+    prSeen.set(run.key, { files: run.filesSig ?? null, heads: headsNow.get(run.key) ?? prSeen.get(run.key)?.heads ?? "" });
     let error = null;
     // Only a review run's related PR needs the viewer: whether their review there is submitted.
     const viewer = run.type === "rev" ? await viewerOf(run) : null;
@@ -663,6 +786,8 @@ export async function refreshPrs(run, closed = false, force = false) {
       const out = [];
       for (const pr of recorded) {
         if (!pr.url) continue;
+        const done = closed ? before?.find((x) => x.url === pr.url && (x.state === "MERGED" || x.state === "CLOSED")) : null;
+        if (done) { const { stale, ...kept } = done; out.push(kept); continue; }
         const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
         const p = res?.code === 0 ? json(res.stdout) : null;
         if (p) { out.push(own ? await withComments(prSummary(p, pr.repo), run, before?.find((x) => x.url === pr.url)) : prSummary(p, pr.repo, own ? null : viewer)); continue; }
@@ -687,7 +812,7 @@ export async function refreshPrs(run, closed = false, force = false) {
     if (changed) next[run.key] = entry;
     // Forget runs that are gone.
     for (const key of Object.keys(next)) {
-      if (cache.runs.length && !cache.runs.some((r) => r.key === key)) { delete next[key]; prReads.delete(key); changed = true; }
+      if (cache.runs.length && !cache.runs.some((r) => r.key === key)) { delete next[key]; for (const m of [prReads, prSeen, headChecks, headsNow]) m.delete(key); changed = true; }
     }
     if (changed) setShared("harbormaster.prs", next);
     recordCi(list);
@@ -695,6 +820,12 @@ export async function refreshPrs(run, closed = false, force = false) {
     if (prBusy.get(run.key) === started) prBusy.delete(run.key);
   }
 }
+
+// For the run pane when the user opens a run: reads its PRs when the last read is over
+// PR_OPENED_MS old (and PR_EVENT_FLOOR_MS has passed), else does nothing. Resolves when done.
+// `closed` defaults to the run's own state, as main.js passes it, so a parked or closed run's
+// merged PRs are not read again.
+export const wantPrs = (run, closed = isClosed(run, facts()) || isParked(run)) => refreshPrs(run, closed, { reason: "opened" });
 
 // ---- who could review (reviewers.js) ----
 // Earlier reviewers by "owner/repo", {at, list}: module memory, 30 minutes (a failed read, one).

@@ -7,7 +7,7 @@ import { exec } from "herdr";
 import { knownRepos } from "./repospaces.js";
 
 export const FIELDS = "number,title,url,author,updatedAt,repository";
-// Every 5 minutes, like a run's PRs (attention.js prTtl), to stay clear of GitHub's API rate limits.
+// Every 5 minutes, like an open run's PRs at the latest (attention.js prTtl), to stay clear of GitHub's API rate limits.
 export const POLL_MS = 5 * 60000;
 
 // gh's JSON → [{repo: "owner/name", number, title, url, author, updated}], newest first.
