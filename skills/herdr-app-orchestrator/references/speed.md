@@ -43,7 +43,7 @@ works as before.
 A grunt is named `grunt-<prefix>-<task>` (`-<n>` for more than one), starts in the task's worktree
 (or the integration worktree) and only:
 
-- runs and watches commands: tests, lint, type checks, builds, CI (`gh pr checks --watch`);
+- runs and watches commands: tests, lint, type checks, builds, CI (`gh pr checks --watch --interval 60`);
 - boils a failure down to the failing test or file, the message, and the likely cause, in a file in
   `shared/` for the implementer;
 - gathers proof: records `Ran:` lines and output in `shared/proof/`.
