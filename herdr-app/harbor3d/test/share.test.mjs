@@ -147,3 +147,86 @@ test("CLI: --help, unknown command, and cloudflared missing exits 1", async () =
   assert.equal(miss.code, 1)
   assert.match(miss.err, /cloudflared is not installed/)
 })
+
+// Read the SSE stream of a url into a list of parsed events; waitFor polls it.
+async function events(url) {
+  const ac = new AbortController(), list = []
+  const res = await fetch(url, { signal: ac.signal })
+  ;(async () => {
+    let buf = ""
+    try {
+      for await (const c of res.body) {
+        buf += Buffer.from(c).toString()
+        let i
+        while ((i = buf.indexOf("\n\n")) >= 0) {
+          const b = buf.slice(0, i); buf = buf.slice(i + 2)
+          const ev = /^event: (.*)$/m.exec(b), d = /^data: (.*)$/m.exec(b)
+          if (ev) list.push({ event: ev[1], data: JSON.parse(d[1]) })
+        }
+      }
+    } catch {}
+  })()
+  const waitFor = async pred => { for (let i = 0; i < 100; i++) { const e = list.find(pred); if (e) return e; await new Promise(r => setTimeout(r, 30)) } throw new Error("timed out") }
+  return { list, waitFor, close: () => ac.abort() }
+}
+
+test("pokes cross between the private and the shared listener; viewers counts both; labels do not cross", async () => {
+  const app = mkApp()
+  const priv = app.listener({ mode: "private", base: "/" }); const pport = await priv.listen(0)
+  const sh = await startShare(app, { tunnel: false })
+  const purl = `http://127.0.0.1:${pport}/`
+  const post = (url, body, id) => fetch(url + "poke", { method: "POST", headers: { "content-type": "application/json", "x-viewer": id.repeat(16) }, body: JSON.stringify(body) })
+  const p = await events(purl + "events"), s = await events(sh.localUrl + "events")
+  try {
+    const ps = (await p.waitFor(e => e.event === "scene")).data
+    // both counts reach both pages
+    await p.waitFor(e => e.event === "scene" && e.data.viewers === 2)
+    await s.waitFor(e => e.event === "scene" && e.data.viewers === 2)
+    // shared -> private, and private -> shared
+    assert.equal((await post(sh.localUrl, { kind: "horn", target: "harbor" }, "a")).status, 204)
+    const got = await p.waitFor(e => e.event === "poke")
+    assert.deepEqual(Object.keys(got.data).sort(), ["at", "kind", "target"])
+    await s.waitFor(e => e.event === "poke")
+    const target = ps.runs[0].id
+    assert.equal((await post(purl, { kind: "wave", target }, "b")).status, 204)
+    const back = await s.waitFor(e => e.event === "poke" && e.data.kind === "wave")
+    assert.equal(back.data.target, target)
+    // a shared scene carries no private text at all after a private viewer joined: no sub, no worker, adrift or PR
+    // label, and no run label that is a real name
+    const facts = fixture("facts-basic.json")
+    const secret = [...facts.runs.flatMap(r => [r.name, r.repo, ...r.workers.map(w => w.name), ...r.prs.map(p => "#" + p.number)]), ...facts.adrift.map(a => a.name)]
+    for (const e of s.list.filter(e => e.event === "scene")) {
+      const t = JSON.stringify(e.data)
+      for (const x of secret) assert.ok(!t.includes(x), `private text ${x} in a shared scene`)
+      for (const r of e.data.runs) {
+        assert.ok(!("sub" in r), "no sub"); assert.ok(typeof r.label === "string" && r.label.length > 0)
+        for (const w of r.workers) assert.ok(!("label" in w), "no worker label")
+        for (const q of r.prs) assert.ok(!("label" in q), "no PR label")
+      }
+      for (const a of e.data.adrift) assert.ok(!("label" in a), "no adrift label")
+      assert.equal(e.data.mode, "shared")
+    }
+    assert.ok(s.list.some(e => e.event === "scene" && e.data.viewers === 2), "the scenes were seen with both viewers")
+    // leaving lowers the count on the other listener
+    p.close()
+    await s.waitFor(e => e.event === "scene" && e.data.viewers === 1 && s.list.at(-1) === e)
+  } finally { p.close(); s.close(); await sh.stop(); await priv.close(); app.stop() }
+})
+
+test("rate limits stay per listener: the shared limit does not use up the private one, and each accepted poke reaches both streams", async () => {
+  const app = mkApp()
+  const priv = app.listener({ mode: "private", base: "/" }); const pport = await priv.listen(0)
+  const sh = await startShare(app, { tunnel: false })
+  const purl = `http://127.0.0.1:${pport}/`
+  const post = (url, id) => fetch(url + "poke", { method: "POST", headers: { "content-type": "application/json", "x-viewer": id.repeat(16) }, body: JSON.stringify({ kind: "horn", target: "harbor" }) })
+  const p = await events(purl + "events"), s = await events(sh.localUrl + "events")
+  try {
+    await p.waitFor(e => e.event === "scene")
+    const codes = []
+    for (const id of "abcdef") codes.push((await post(sh.localUrl, id)).status)   // six different viewers within one second
+    assert.deepEqual(codes, [204, 204, 204, 204, 204, 429], "5 per second on the shared listener, then 429")
+    assert.equal((await post(purl, "9")).status, 204, "the private listener has its own count")
+    await p.waitFor(e => e.event === "poke" && p.list.filter(x => x.event === "poke").length === 6)
+    await s.waitFor(e => e.event === "poke" && s.list.filter(x => x.event === "poke").length === 6)
+  } finally { p.close(); s.close(); await sh.stop(); await priv.close(); app.stop() }
+})

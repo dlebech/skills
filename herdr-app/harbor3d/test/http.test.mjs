@@ -3,9 +3,10 @@ import assert from "node:assert/strict"
 import fs from "node:fs"
 import path from "node:path"
 import http from "node:http"
+import zlib from "node:zlib"
 import { createHash } from "node:crypto"
 import { start, sse, fixture, tmp } from "./helpers.mjs"
-import { createRateLimiter, writeTo } from "../server/http.js"
+import { createRateLimiter, writeTo, acceptsGzip } from "../server/http.js"
 
 const TOKEN = "0123456789abcdef0123456789abcdef"
 const post = (url, body, headers = {}) => fetch(url + "poke", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: typeof body === "string" ? body : JSON.stringify(body) })
@@ -348,4 +349,67 @@ test("models are served from models/out at assets/models/<name>.glb, and nothing
     assert.equal((await fetch(t.url + "assets/models/ok.glb")).status, 200)
     assert.equal((await fetch(t.url + "assets/models/link.glb")).status, 404)
   } finally { await t.close() }
+})
+
+test("gzip: text files are compressed when accepted, with Vary; SSE and plain requests are not", async () => {
+  const s = await start()
+  try {
+    const raw = await fetch(s.url + "assets/look.js", { headers: { "accept-encoding": "identity" } })
+    assert.equal(raw.headers.get("content-encoding"), null)
+    assert.equal(raw.headers.get("vary"), "Accept-Encoding")
+    const plain = await raw.text()
+    const gz = await new Promise((ok, bad) => http.get({ host: "127.0.0.1", port: s.port, path: "/assets/look.js", headers: { "accept-encoding": "gzip" } }, r => {
+      const ch = []; r.on("data", c => ch.push(c)); r.on("end", () => ok({ r, body: Buffer.concat(ch) })); r.on("error", bad)
+    }))
+    assert.equal(gz.r.headers["content-encoding"], "gzip")
+    assert.equal(gz.r.headers.vary, "Accept-Encoding")
+    assert.equal(Number(gz.r.headers["content-length"]), gz.body.length)
+    assert.ok(gz.body.length < plain.length)
+    assert.equal(zlib.gunzipSync(gz.body).toString(), plain)
+    const ev = await new Promise(ok => http.get({ host: "127.0.0.1", port: s.port, path: "/events", headers: { "accept-encoding": "gzip" } }, r => { ok(r.headers); r.destroy() }))
+    assert.equal(ev["content-encoding"], undefined)
+  } finally { await s.close() }
+})
+
+test("accept-encoding: gzip;q=0 refuses, a q above 0 or * accepts, gzip named beats *", () => {
+  for (const [h, want] of [["gzip", true], ["gzip, deflate, br", true], ["GZIP;q=0.5", true], ["gzip;q=0", false], ["gzip; q=0.0, deflate", false], ["*", true], ["*;q=0", false], ["gzip;q=0, *", false], ["gzip, *;q=0", true], ["deflate", false], ["", false], [undefined, false]]) assert.equal(acceptsGzip(h), want, String(h))
+})
+
+// Get a url with raw http (fetch would decode gzip and hide the headers), optionally HEAD.
+const rawGet = (port, p, headers, method = "GET") => new Promise((ok, bad) => http.request({ host: "127.0.0.1", port, path: p, method, headers }, r => {
+  const ch = []; r.on("data", c => ch.push(c)); r.on("end", () => ok({ r, body: Buffer.concat(ch) })); r.on("error", bad)
+}).on("error", bad).end())
+
+test("gzip: gzip;q=0 gets the plain file; the cache follows a changed file; .glb only when it shrinks; HEAD says so without a body", async () => {
+  const pub = tmp(), models = tmp()
+  fs.mkdirSync(path.join(pub, "assets"))
+  fs.writeFileSync(path.join(pub, "index.html"), "<!doctype html><title>x</title>")
+  const js = path.join(pub, "assets", "x.js")
+  fs.writeFileSync(js, "const a = 1\n".repeat(200))
+  fs.writeFileSync(path.join(models, "squash.glb"), Buffer.alloc(20000, 7))
+  fs.writeFileSync(path.join(models, "noise.glb"), (await import("node:crypto")).randomBytes(20000))
+  const s = await start({ publicDir: pub, modelsDir: models })
+  try {
+    const gz = { "accept-encoding": "gzip" }
+    assert.equal((await rawGet(s.port, "/assets/x.js", { "accept-encoding": "gzip;q=0" })).r.headers["content-encoding"], undefined)
+    const a = await rawGet(s.port, "/assets/x.js", gz)
+    assert.equal(zlib.gunzipSync(a.body).toString(), "const a = 1\n".repeat(200))
+    // the file changes (new size and mtime): the next gzip response is the new content
+    fs.writeFileSync(js, "const b = 2\n".repeat(300))
+    fs.utimesSync(js, new Date(Date.now() + 5000), new Date(Date.now() + 5000))
+    const b = await rawGet(s.port, "/assets/x.js", gz)
+    assert.equal(zlib.gunzipSync(b.body).toString(), "const b = 2\n".repeat(300))
+    // concurrent first requests all get a good body
+    const many = await Promise.all(Array.from({ length: 5 }, () => rawGet(s.port, "/assets/x.js", gz)))
+    for (const m of many) assert.equal(zlib.gunzipSync(m.body).toString(), "const b = 2\n".repeat(300))
+    // .glb: compressed when it shrinks a lot, plain when it does not
+    const sq = await rawGet(s.port, "/assets/models/squash.glb", gz)
+    assert.equal(sq.r.headers["content-encoding"], "gzip"); assert.equal(zlib.gunzipSync(sq.body).length, 20000)
+    const nz = await rawGet(s.port, "/assets/models/noise.glb", gz)
+    assert.equal(nz.r.headers["content-encoding"], undefined); assert.equal(nz.body.length, 20000)
+    // HEAD: the same headers, no body
+    const h = await rawGet(s.port, "/assets/x.js", gz, "HEAD")
+    assert.equal(h.r.headers["content-encoding"], "gzip"); assert.equal(h.body.length, 0)
+    assert.equal(Number(h.r.headers["content-length"]), zlib.gzipSync(Buffer.from("const b = 2\n".repeat(300)), { level: 9 }).length)
+  } finally { await s.close() }
 })

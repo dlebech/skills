@@ -1,14 +1,15 @@
 // What a scene fact looks like. Pure: scene model in, plain descriptions out (numbers, colours as hex,
-// and short strings built only from fixed tables). reefs.js and world.js apply them. Every function has
+// and short strings built only from fixed tables). berths.js and world.js apply them. Every function has
 // a safe default for a value outside its enum, and none throws on odd input.
+import { containerSlots, CARGO_COLORS, MAX_WORKERS } from "./layout.js"
 
 const has = (t, k) => typeof k === "string" && Object.prototype.hasOwnProperty.call(t, k)
 const pick = (t, k, d) => (has(t, k) ? t[k] : d)
 
-export const BUOY_COLORS = { planned: "#c9cfd4", implement: "#f2c94c", review: "#3f8fd2", fix: "#f08a5d", done: "#3fa66b", blocked: "#d4553e" }
+export const STAGE_COLORS = { planned: "#9aa7b1", implement: "#f2c94c", review: "#3f8fd2", fix: "#f08a5d", blocked: "#d4553e" }
 export const PR_COLORS = { open: "#3f8fd2", draft: "#9aa1a8", merged: "#8256d0", closed: "#5d6770", unknown: "#9aa1a8" }
 export const RED = "#d4553e"
-export const SIZE_SCALE = { S: 0.7, M: 1.0, L: 1.3, XL: 1.6 }
+export const SIZE_SCALE = { S: 0.8, M: 1.0, L: 1.2, XL: 1.4 }
 export const NEED_TEXT = {
   question: "has a question", gone: "orchestrator gone", stalled: "stalled", "red-ci": "CI is red", "request-review": "request review",
   "changes-requested": "changes requested", merge: "ready to merge", "review-proof": "review the proof", finished: "read and close", other: "needs a look",
@@ -29,17 +30,34 @@ export function orchestratorLook(run) {
   return { ...base, bob: { amp: 0.08, period: 3.2 } }
 }
 
-// A worker crab.
+// A worker crab. Working: walks along its lane on the pier (2 m each way, one lap in 2.4 s).
 export function workerLook(state) {
-  if (state === "working") return { motion: "scuttle", amp: 0.5, period: 0.9, tilt: 0 }
+  if (state === "working") return { motion: "walk", amp: 2, period: 2.4, tilt: 0 }
   if (state === "blocked") return { motion: "hop", amp: 0.25, period: 0.8, tilt: 0 }
   if (state === "done") return { motion: "still", amp: 0, period: 1, tilt: 12 }
   return { motion: "claws", amp: 0, period: 2.4, tilt: 0 }
 }
 
-// A buoy for one task: its colour, and whether it bobs faster (active work or trouble).
-export function buoyLook(task) {
-  return { color: pick(BUOY_COLORS, task, BUOY_COLORS.planned), fast: task === "implement" || task === "review" || task === "fix" || task === "blocked" }
+// A task's stage, with anything unknown read as planned.
+export const stageOf = t => (has(STAGE_COLORS, t) || t === "done" ? t : "planned")
+
+// One container for one task: its colour and tilt (radians) from its stage. `index` is the task's place
+// in the run's task list (done containers take a cargo colour from it).
+export function containerLook(stage, index = 0) {
+  const s = stageOf(stage)
+  if (s === "done") return { color: CARGO_COLORS[(Number.isInteger(index) && index >= 0 ? index : 0) % CARGO_COLORS.length], tilt: 0 }
+  return { color: STAGE_COLORS[s], tilt: s === "blocked" ? (8 * Math.PI) / 180 : 0 }
+}
+
+// Where each task's container goes and what it looks like: [{ zone, index, x, y, z, angle, color, tilt }].
+// zone: yard (planned), pier (implement, review, fix, blocked), deck (done) or none (over a cap).
+// With `castOff` the pier shows no containers.
+export function containerPlan(tasks, castOff = false) {
+  const stages = (Array.isArray(tasks) ? tasks : []).map(stageOf)
+  return containerSlots(stages).map((slot, i) => {
+    const l = containerLook(stages[i], i)
+    return { ...slot, color: l.color, tilt: l.tilt, zone: castOff && slot.zone === "pier" ? "none" : slot.zone }
+  })
 }
 
 // A flag for one PR. Red checks make it red; running checks make it wave twice as fast.
@@ -50,35 +68,61 @@ export function flagLook(pr) {
 
 export const sizeScale = size => pick(SIZE_SCALE, size, 1)
 
-// Everything about one reef that is not a creature: opacity, fog, flare, lanterns, crane, flags, palm.
-export function reefLook(run) {
+const busyStages = ["implement", "review", "fix"]
+const isWorking = s => s === "working"
+
+// The signal lamp (the page blinks the red one): red when the run needs you; green while the orchestrator or any worker is
+// working or CI runs; dark when parked, or finished with every stage of the path done; amber otherwise.
+export function signalLook(run) {
+  const r = run || {}
+  const path = Array.isArray(r.path) ? r.path : []
+  if (r.parked === true) return { lamp: "dark" }
+  if (r.needsYou === true) return { lamp: "red" }
+  const workers = Array.isArray(r.workers) ? r.workers : []
+  if (isWorking(r.orchestrator && r.orchestrator.state) || workers.some(w => w && isWorking(w.state)) || r.ciRunning === true) return { lamp: "green" }
+  if (r.phase === "finished" && path.length > 0 && path.every(p => p && p.state === "done")) return { lamp: "dark" }
+  return { lamp: "amber" }
+}
+
+// The ship's state: anchored (parked), castoff (it has PRs and all are merged) or berthed.
+export function shipState(run) {
+  const r = run || {}
+  if (r.parked === true) return "anchored"
+  const prs = Array.isArray(r.prs) ? r.prs : []
+  return prs.length > 0 && prs.every(p => p && p.state === "merged") ? "castoff" : "berthed"
+}
+
+// Everything about one berth that is not a creature or a container: the ship's state and size, lights,
+// smoke, the crane, the signal, flags, opacity, and the octopus.
+export function berthLook(run) {
   const r = run || {}
   const parked = r.parked === true
-  const prs = Array.isArray(r.prs) ? Math.min(r.prs.length, 4) : 0
+  const state = shipState(r)
+  const tasks = Array.isArray(r.tasks) ? r.tasks : []
+  const workers = Array.isArray(r.workers) ? r.workers : []
   const orch = orchestratorLook(r)
   const o = parked ? { ...orch, bob: null, sway: false, wave: false, lean: false } : orch
   return {
-    parked,
-    opacity: parked ? 0.55 : 1,
-    still: parked,
-    fog: parked,
-    flare: r.needsYou === true && !parked,
-    lanterns: r.phase === "finished",
-    hasPr: prs > 0,
-    flags: prs,
-    crane: Array.isArray(r.prs) && r.prs.length > 0,
-    craneSpin: r.ciRunning === true && !parked,
-    palm: sizeScale(r.size),
+    parked, state,
+    castOff: state === "castoff",
+    scale: sizeScale(r.size),
+    lights: r.phase === "finished",
+    smoke: r.ciRunning === true && !parked,
+    craneBusy: state === "berthed" && tasks.some(t => busyStages.includes(t)) && workers.some(w => w && isWorking(w.state)),
+    signal: signalLook(r),
+    beacon: r.needsYou === true && !parked,
+    flags: Array.isArray(r.prs) ? Math.min(r.prs.length, 4) : 0,
     orchestrator: o,
   }
 }
 
-// The boat. `none`: faint, sail down. `watching`/`working`: anchor lowered 2 m (working rocks more). `idle`: anchor up.
+// The tug. `none`: moored and 40 % opaque; `idle`: moored; `watching`: patrols (one lap in 90 s);
+// `working`: patrols at double speed (45 s).
 export function captainLook(state) {
-  if (state === "watching") return { opacity: 1, sail: true, anchor: 2, rock: 0.03 }
-  if (state === "working") return { opacity: 1, sail: true, anchor: 2, rock: 0.08 }
-  if (state === "idle") return { opacity: 1, sail: true, anchor: 0, rock: 0.03 }
-  return { opacity: 0.4, sail: false, anchor: 0, rock: 0.02 }
+  if (state === "watching") return { opacity: 1, patrol: true, period: 90 }
+  if (state === "working") return { opacity: 1, patrol: true, period: 45 }
+  if (state === "idle") return { opacity: 1, patrol: false, period: 90 }
+  return { opacity: 0.4, patrol: false, period: 90 }
 }
 
 export const gullCount = viewers => (Number.isFinite(viewers) ? Math.max(0, Math.min(20, Math.floor(viewers))) : 0)
@@ -91,7 +135,7 @@ const KEYS = [
   [0, "night"], [6, "dawn"], [8, "day"], [17, "day"], [19, "dusk"], [21, "night"], [24, "night"],
 ]
 const SKY = {
-  night: { sky: "#0b1530", ground: "#101c33", sun: "#8fa8e6", sunI: 0.6, hemiI: 0.75, night: 1 },
+  night: { sky: "#0b1530", ground: "#101c33", sun: "#8fa8e6", sunI: 0.9, hemiI: 1.5, night: 1 },
   dawn: { sky: "#f0b58f", ground: "#6d7c91", sun: "#ffc490", sunI: 1.0, hemiI: 0.75, night: 0.2 },
   day: { sky: "#9fd2f0", ground: "#6f8fa8", sun: "#fff4dc", sunI: 2.2, hemiI: 1.1, night: 0 },
   dusk: { sky: "#e48a6b", ground: "#5b5f82", sun: "#ffa66f", sunI: 1.1, hemiI: 0.7, night: 0.35 },
@@ -126,25 +170,6 @@ export function skyLook(hour, mode = "auto", stale = false) {
   return { sky: toHex(sky), ground: toHex(ground), sun: toHex(sun), sunIntensity: sunI, hemiIntensity: hemiI, night, grey: stale ? 0.45 : 0, sunDir: sunDir.map(v => v / n) }
 }
 
-// The lighthouse beam: sweeps a full turn every `period` s and holds `pause` s on each target angle it
-// reaches (the reefs that need you). state { theta, hold, last } in, the next state out. Angles are
-// radians in [0, 2π) in the (x, z) plane. A target the beam is resting on is not caught again at once.
-export function stepBeam(state, targets, dt, period = 12, pause = 1.5) {
-  const TAU = Math.PI * 2
-  const { theta, hold, last } = state
-  if (hold > 0) return { theta, hold: Math.max(0, hold - dt), last }
-  const dn = (TAU / period) * dt
-  let best = null, bestD = Infinity
-  for (const t of targets) {
-    const a = ((t % TAU) + TAU) % TAU
-    const d = (a - theta + TAU) % TAU
-    if (d === 0 && last === a) continue
-    if (d <= dn && d < bestD) { best = a; bestD = d }
-  }
-  if (best !== null) return { theta: best, hold: pause, last: best }
-  return { theta: (theta + dn) % TAU, hold: 0, last: null }
-}
-
 // ---- text ----
 // Counts of tasks per state.
 export function taskCounts(tasks) {
@@ -153,7 +178,7 @@ export function taskCounts(tasks) {
   return c
 }
 
-// The short line under a reef's name, built only from fixed tables and counts.
+// The short line under a berth's name, built only from fixed tables and counts.
 export function labelLine(run) {
   const r = run || {}
   if (r.needsYou === true) return `Needs you · ${pick(NEED_TEXT, r.need, NEED_TEXT.other)}`
@@ -199,8 +224,9 @@ export function cardModel(run) {
   const prs = Array.isArray(r.prs) ? r.prs : []
   const counts = taskCounts(r.tasks)
   const notes = []
-  if (workers.length > 16) notes.push(`${workers.length - 16} more workers are not drawn`)
-  if ((Array.isArray(r.tasks) ? r.tasks.length : 0) > 16) notes.push(`${r.tasks.length - 16} more tasks are not drawn`)
+  if (workers.length > MAX_WORKERS) notes.push(`${workers.length - MAX_WORKERS} more workers are not drawn`)
+  const undrawn = containerSlots((Array.isArray(r.tasks) ? r.tasks : []).map(stageOf)).filter(s => s.zone === "none").length
+  if (undrawn > 0) notes.push(`${undrawn} more task${undrawn === 1 ? " is" : "s are"} not drawn`)
   if (prs.length > 4) notes.push(`${prs.length - 4} more PRs are not drawn`)
   return {
     title: typeof r.label === "string" ? r.label : "",

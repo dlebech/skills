@@ -20,10 +20,10 @@ test("reads good facts; fresh until 45 s after `at`, then stale", () => {
   put(dir, JSON.stringify(f))
   assert.equal(r.poll(), true)
   assert.equal(r.snapshot().stale, false)
-  assert.equal(r.snapshot().facts.runs.length, 3)
+  assert.equal(r.snapshot().facts.runs.length, 6)
   t = f.at + 45001
   assert.equal(r.snapshot().stale, true)
-  assert.equal(r.snapshot().facts.runs.length, 3, "last known facts are kept")
+  assert.equal(r.snapshot().facts.runs.length, 6, "last known facts are kept")
 })
 
 test("parses only when mtime or size changed", () => {
@@ -41,7 +41,7 @@ test("a file over 1 MB is refused and the last good facts stay", () => {
   put(dir, JSON.stringify({ ...f, runs: [], pad: "x".repeat(5 * 1024 * 1024) }))
   assert.ok(fs.statSync(path.join(dir, ".harbor3d.json")).size > MAX_BYTES)
   assert.equal(r.poll(), false)
-  assert.equal(r.snapshot().facts.runs.length, 3)
+  assert.equal(r.snapshot().facts.runs.length, 6)
 })
 
 test("invalid JSON or the wrong shape keeps the last good facts, which go stale after 45 s", () => {
@@ -52,7 +52,7 @@ test("invalid JSON or the wrong shape keeps the last good facts, which go stale 
   for (const bad of ["{not json", "[]", "null", JSON.stringify({ v: 2, at: 1 }), JSON.stringify({ v: 1, at: "x" }), ""]) {
     put(dir, bad)
     assert.equal(r.poll(), false, bad)
-    assert.equal(r.snapshot().facts.runs.length, 3)
+    assert.equal(r.snapshot().facts.runs.length, 6)
   }
   assert.equal(r.snapshot().stale, false)
   t = f.at + 46000

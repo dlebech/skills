@@ -1,4 +1,4 @@
-// The page's DOM: reef labels, the info card and the toolbar. Every string reaches the DOM through
+// The page's DOM: berth labels, the info card and the toolbar. Every string reaches the DOM through
 // textContent (or a fixed attribute); nothing here builds markup.
 import { labelLine, cardModel } from "./look.js"
 
@@ -12,38 +12,53 @@ function el(tag, cls, text, attrs) {
   return e
 }
 
-// Reef labels: the name over a short line, one per reef, placed each frame by the page.
+// Berth labels: the name over a short line, one per berth or parked ship, placed each frame by the page.
 export class Labels {
   constructor(root) { this.root = root; this.items = new Map() }
   // Add, update and remove labels to match the runs that are drawn.
   sync(runs) {
     const keep = new Set(runs.map(r => r.id))
-    for (const [id, it] of this.items) if (!keep.has(id)) { it.root.remove(); this.items.delete(id) }
+    for (const [id, it] of this.items) if (!keep.has(id)) { it.root.remove(); it.tether.remove(); this.items.delete(id) }
     for (const r of runs) {
       let it = this.items.get(r.id)
-      if (!it) { it = { root: el("div", "label"), name: el("div", "name"), line: el("div", "line"), last: "" }; it.root.append(it.name, it.line); this.root.append(it.root); this.items.set(r.id, it) }
+      if (!it) { it = { root: el("div", "label"), name: el("div", "name"), line: el("div", "line"), tether: el("div", "tether"), last: "", w: 0, h: 0 }; it.root.append(it.name, it.line); this.root.append(it.root, it.tether); this.items.set(r.id, it) }
       const line = labelLine(r), kind = r.needsYou ? "needs" : r.parked ? "parked" : r.phase === "finished" ? "finished" : "run"
-      if (it.name.textContent !== r.label) it.name.textContent = r.label
-      if (it.line.textContent !== line) it.line.textContent = line
+      if (it.name.textContent !== r.label) { it.name.textContent = r.label; it.w = 0 }
+      if (it.line.textContent !== line) { it.line.textContent = line; it.w = 0 }
       if (it.kind !== kind) { it.kind = kind; it.root.className = `label ${kind}` }
     }
   }
-  // Put a label at a screen point (or hide it); `alpha` fades it.
-  place(id, x, y, alpha) {
+  // A label's size in pixels (measured again only after its text changed).
+  size(id) {
+    const it = this.items.get(id)
+    if (!it) return { w: 0, h: 0 }
+    if (!it.w) { it.w = it.root.offsetWidth || 120; it.h = it.root.offsetHeight || 32 }
+    return { w: it.w, h: it.h }
+  }
+  // Put a label at a screen point (or hide it); `alpha` fades it. A raised label (anchorY below y) gets a
+  // 1 px line down to its anchor.
+  place(id, x, y, alpha, anchorY = y) {
     const it = this.items.get(id)
     if (!it) return
-    if (alpha <= 0.01) { if (!it.hidden) { it.hidden = true; it.root.style.opacity = "0"; it.root.style.visibility = "hidden" } return }
+    if (alpha <= 0.01) { if (!it.hidden) { it.hidden = true; it.root.style.opacity = "0"; it.root.style.visibility = "hidden"; it.tether.style.visibility = "hidden" } return }
     if (it.hidden) { it.hidden = false; it.root.style.visibility = "visible" }
     it.root.style.opacity = String(Math.round(alpha * 100) / 100)
     it.root.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(-50%, -100%)`
+    const raised = anchorY - y > 1
+    it.tether.style.visibility = raised ? "visible" : "hidden"
+    if (raised) { it.tether.style.opacity = String(Math.round(alpha * 70) / 100); it.tether.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`; it.tether.style.height = `${Math.round(anchorY - y)}px` }
   }
 }
 
 // The info card for the selected run: a right-hand panel, a bottom sheet on narrow screens.
 export class Card {
   constructor(root, onClose) { this.root = root; this.onClose = onClose; this.id = null }
+  // Show a run's card. The same card again (same run, same content) leaves the DOM alone, so a scene push that
+  // changes nothing in it does not take away keyboard focus or the scroll position.
   show(run) {
-    const m = cardModel(run), r = this.root
+    const m = cardModel(run), r = this.root, key = JSON.stringify([run.id, m])
+    if (!r.hidden && key === this.key) return
+    this.key = key
     this.id = run.id
     r.replaceChildren()
     const head = el("div", "head")
@@ -62,7 +77,7 @@ export class Card {
     r.append(path)
     r.append(this.row("Tasks", m.tasks))
     if (m.prs.length) r.append(this.list("Pull requests", m.prs.slice(0, 4)))
-    if (m.workers.length) r.append(this.list("Crabs", m.workers.slice(0, 16)))
+    if (m.workers.length) r.append(this.list("Crabs", m.workers.slice(0, 12)))
     r.append(this.row("Age", m.age), this.row("Size", m.size))
     for (const n of m.notes) r.append(el("p", "note", n))
     r.hidden = false
@@ -70,7 +85,7 @@ export class Card {
   }
   row(k, v) { const d = el("div", "row"); d.append(el("span", "k", k), el("span", "v", v)); return d }
   list(title, items) { const d = el("div", "list"); d.append(el("h3", null, title)); for (const i of items) d.append(el("div", "item", i)); return d }
-  hide() { this.id = null; this.root.hidden = true; this.root.replaceChildren(); document.body.classList.remove("card-open") }
+  hide() { this.id = null; this.key = null; this.root.hidden = true; this.root.replaceChildren(); document.body.classList.remove("card-open") }
   // The card's box on screen (to keep labels from overlapping it), or null.
   rect() { return this.root.hidden ? null : this.root.getBoundingClientRect() }
 }

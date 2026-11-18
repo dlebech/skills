@@ -6,6 +6,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd2f0; fon
 
 #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
 .label { position: absolute; left: 0; top: 0; text-align: center; white-space: nowrap; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75), 0 0 6px rgba(0, 0, 0, 0.5); color: #fff; transition: opacity 0.15s; will-change: transform; }
+.tether { position: absolute; left: 0; top: 0; width: 1px; background: rgba(255, 255, 255, 0.7); pointer-events: none; visibility: hidden; }
 .label .name { font-size: 13px; font-weight: 600; }
 .label .line { font-size: 11px; opacity: 0.92; }
 .label.needs .line { color: #ffb0a6; font-weight: 600; }

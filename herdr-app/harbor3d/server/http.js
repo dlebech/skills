@@ -5,6 +5,8 @@ import fs from "node:fs"
 import path from "node:path"
 import { timingSafeEqual, createHash } from "node:crypto"
 import { fileURLToPath } from "node:url"
+import zlib from "node:zlib"
+import { promisify } from "node:util"
 import { sanitize } from "./sanitize.js"
 
 export const POKE_KINDS = ["horn", "wave", "feed", "fireworks"]
@@ -62,6 +64,42 @@ function sceneIds(scene) {
   return ids
 }
 
+const GZIP_TYPES = new Set([".html", ".js", ".css", ".json", ".svg"])
+const gzip = promisify(zlib.gzip)
+// Compress each file once: path -> { mtime, size, p } where p is the promise of the gzip body (null when it is
+// not worth sending compressed). Concurrent first requests share one compression, off the event loop.
+const gzCache = new Map()
+
+// The gzip body for a file, or null when the type is not compressed or (for .glb) it shrinks by 10 % or less.
+async function gzipped(real, st) {
+  const ext = path.extname(real).toLowerCase()
+  if (!GZIP_TYPES.has(ext) && ext !== ".glb") return null
+  let hit = gzCache.get(real)
+  if (!hit || hit.mtime !== st.mtimeMs || hit.size !== st.size) {
+    const p = fs.promises.readFile(real).then(async raw => {
+      const gz = await gzip(raw, { level: 9 })
+      return ext === ".glb" && gz.length > raw.length * 0.9 ? null : gz
+    })
+    hit = { mtime: st.mtimeMs, size: st.size, p }
+    gzCache.set(real, hit)
+    p.catch(() => { if (gzCache.get(real) === hit) gzCache.delete(real) })
+  }
+  return hit.p
+}
+
+// Does an Accept-Encoding header allow gzip? An explicit gzip;q=0 refuses it, and "*" allows it unless gzip is named.
+export function acceptsGzip(header) {
+  let star = null, gz = null
+  for (const part of String(header || "").split(",")) {
+    const [name, ...params] = part.trim().toLowerCase().split(";")
+    const q = params.map(x => x.trim()).find(x => x.startsWith("q="))
+    const v = q === undefined ? 1 : Number(q.slice(2))
+    if (name === "gzip") gz = v
+    else if (name === "*") star = v
+  }
+  return (gz ?? star ?? 0) > 0
+}
+
 // A path inside `root` for a request-relative path, or null. Strict: no %-escapes, no backslashes, no
 // empty or dot segments (so no `..` and no dotfiles), and only the listed extensions.
 function resolveStatic(root, rel) {
@@ -74,19 +112,22 @@ function resolveStatic(root, rel) {
 }
 
 // Create a listener. `snapshot()` gives { facts, stale }. mode "private" or "shared"; base "/" or "/s/<token>/".
-export function createListener({ base = "/", mode, secret, snapshot, now = Date.now, publicDir, vendorDir, modelsDir = MODELS_DIR, maxSse = mode === "shared" ? 20 : 8, keepAliveMs = 20000, maxBuffer = 256 * 1024 }) {
+export function createListener({ base = "/", mode, secret, snapshot, now = Date.now, publicDir, vendorDir, modelsDir = MODELS_DIR, hub, maxSse = mode === "shared" ? 20 : 8, keepAliveMs = 20000, maxBuffer = 256 * 1024 }) {
   const hash = importMapHash(publicDir)
   const HEAD = { ...HEADERS, "Content-Security-Policy": HEADERS["Content-Security-Policy"].replace("script-src 'self'", `script-src 'self'${hash ? " " + hash : ""}`) }
   const clients = new Set()
   const allow = createRateLimiter({ now })
   const baseBuf = Buffer.from(base)
+  // Pokes and viewer counts cross listeners through the hub; alone, a listener is its own hub.
+  const self = { deliver: data => broadcast("poke", data) }
+  hub ??= { broadcastPoke: data => self.deliver(data), viewerCount: () => clients.size, refreshAll() {} }
   let scene = null, json = ""
   let timer = null
 
   // Rebuild the scene; true when it differs from the last one sent.
   function rebuild() {
     const { facts, stale } = snapshot()
-    scene = sanitize(facts, { mode, secret, now: now(), viewers: clients.size, stale })
+    scene = sanitize(facts, { mode, secret, now: now(), viewers: hub.viewerCount(), stale })
     const next = JSON.stringify(scene)
     const changed = next !== json
     json = next
@@ -107,10 +148,11 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
     res.writeHead(200, { ...HEAD, "Content-Type": "text/event-stream", Connection: "keep-alive" })
     res.write("retry: 3000\n\n")
     clients.add(res)
-    res.on("close", () => { clients.delete(res); refresh() })
+    res.on("close", () => { clients.delete(res); refresh(); hub.refreshAll() })
     const changed = rebuild()
     send(res, "scene", json)
     if (changed) broadcast("scene", json, res)
+    hub.refreshAll()
   }
 
   function poke(req, res) {
@@ -135,7 +177,7 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
       const { kind, target } = b
       if (typeof kind !== "string" || !POKE_KINDS.includes(kind)) return reply(res, 400)
       if (typeof target !== "string" || !sceneIds(scene).has(target)) return reply(res, 400)
-      broadcast("poke", JSON.stringify({ kind, target, at: now() }))
+      hub.broadcastPoke(JSON.stringify({ kind, target, at: now() }))
       reply(res, 204)
     })
   }
@@ -152,8 +194,13 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
       const realRoot = await fs.promises.realpath(root)
       if (!real.startsWith(realRoot + path.sep)) return reply(res, 404)
       if (!(await fs.promises.stat(real)).isFile()) return reply(res, 404)
-      res.writeHead(200, { ...HEAD, "Content-Type": TYPES[path.extname(real).toLowerCase()] })
+      const st = await fs.promises.stat(real)
+      const headers = { ...HEAD, "Content-Type": TYPES[path.extname(real).toLowerCase()], Vary: "Accept-Encoding" }
+      const gz = acceptsGzip(req.headers["accept-encoding"]) ? await gzipped(real, st) : null
+      if (gz) { headers["Content-Encoding"] = "gzip"; headers["Content-Length"] = gz.length }
+      res.writeHead(200, headers)
       if (req.method === "HEAD") return res.end()
+      if (gz) return res.end(gz)
       fs.createReadStream(real).on("error", () => res.destroy()).pipe(res)
     } catch { reply(res, 404) }
   }
@@ -196,7 +243,7 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
   server.headersTimeout = 5000
 
   return {
-    server, refresh,
+    server, refresh, deliver: self.deliver,
     scene: () => scene,
     viewers: () => clients.size,
     // Listen on 127.0.0.1; with `tries` > 1 a taken port moves on to the next one.

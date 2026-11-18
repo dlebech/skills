@@ -1,13 +1,13 @@
 // Things that happen for a moment: the horn's ring and tone, fireworks, and the gulls (one per viewer).
 import * as THREE from "three"
-import { part, waveHeight } from "./world.js"
-import { BOAT } from "./layout.js"
+import { part } from "./world.js"
+import { OFFICE } from "./layout.js"
 import { gullCount } from "./look.js"
 
 const TAU = Math.PI * 2
 const COLORS = ["#ff5d5d", "#ffd24a", "#5de08a", "#5db7ff", "#c58bff", "#ff9a4a"]
 
-// White rings that spread on the water from the boat, and a short synthesised tone (WebAudio, off until
+// White rings that spread on the water from the tug (or the quay, with no captain), and a short synthesised tone (WebAudio, off until
 // the viewer turns Sound on).
 export class Horn {
   constructor(scene) {
@@ -28,9 +28,9 @@ export class Horn {
     if (on && !this.audio) { try { this.audio = new (window.AudioContext || window.webkitAudioContext)() } catch { this.audio = null } }
     if (on && this.audio && this.audio.state === "suspended") this.audio.resume().catch(() => {})
   }
-  play(t) {
+  play(t, x, z) {
     const r = this.rings[this.next++ % this.rings.length]
-    r.userData.at = t; r.position.set(BOAT.x, 0.08, BOAT.z); r.visible = true
+    r.userData.at = t; r.position.set(x, 0.08, z); r.visible = true
     if (this.sound && this.audio) this.tone()
   }
   tone() {
@@ -49,7 +49,7 @@ export class Horn {
   }
 }
 
-// Fireworks: three coloured bursts over a reef within 3 s, as points (one buffer, 600 particles).
+// Fireworks: three coloured bursts over a berth's ship within 3 s, as points (one buffer, 600 particles).
 export class Fireworks {
   constructor(scene) {
     this.N = 600
@@ -95,8 +95,8 @@ export class Fireworks {
   }
 }
 
-// Gulls: one per viewer (at most 20) circling the lighthouse at 12 m. Feeding makes them dive to the water
-// near the lighthouse and climb back.
+// Gulls: one per viewer (at most 20) circling the harbour office's radar at 16 m. Feeding makes them dive to
+// the water at (0, 0, 30) and climb back.
 export class Gulls {
   constructor(kit, scene) {
     this.kit = kit; this.scene = scene
@@ -108,7 +108,7 @@ export class Gulls {
     n = gullCount(n)
     while (this.gulls.length < n) {
       const i = this.gulls.length, o = this.kit.make("gull")
-      const g = { obj: o, wl: part(o, "Wing.L"), wr: part(o, "Wing.R"), i, phase: i * 2.4, r: 14 + (i % 4) * 2.5, speed: (0.32 + (i % 3) * 0.05) * (i % 2 ? 1 : -1) }
+      const g = { obj: o, wl: part(o, "Wing.L"), wr: part(o, "Wing.R"), i, phase: i * 2.4, r: 16 + (i % 4) * 2.5, speed: (0.32 + (i % 3) * 0.05) * (i % 2 ? 1 : -1) }
       o.raycast = () => {}
       this.group.add(o); this.gulls.push(g)
     }
@@ -119,9 +119,10 @@ export class Gulls {
     for (const g of this.gulls) {
       const fp = (t - this.feedAt - g.i * 0.12) / 3.6, dive = fp > 0 && fp < 1 ? Math.sin(fp * Math.PI) : 0
       const a = g.phase + t * g.speed * motion
-      const r = g.r - dive * (g.r - 7)
-      const x = Math.cos(a) * r, z = Math.sin(a) * r
-      g.obj.position.set(x, 12 - dive * 10.8 + (motion ? Math.sin(t * 0.8 + g.i) * 0.5 : 0), z)
+      // the circle round the radar, pulled towards a smaller circle over the feeding spot as it dives
+      const ox = OFFICE.x + Math.cos(a) * g.r, oz = OFFICE.z + Math.sin(a) * g.r, oy = 15 + (motion ? Math.sin(t * 0.8 + g.i) * 0.5 : 0)
+      const fx = Math.cos(a * 2) * 4, fz = 30 + Math.sin(a * 2) * 4
+      g.obj.position.set(ox + (fx - ox) * dive, oy + (1.4 - oy) * dive, oz + (fz - oz) * dive)
       const dir = Math.sign(g.speed)
       g.obj.rotation.y = Math.atan2(-Math.sin(a) * dir, Math.cos(a) * dir)
       g.obj.rotation.z = -dir * 0.25

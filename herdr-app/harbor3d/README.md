@@ -21,7 +21,7 @@ Facts: `<runs root>/.harbor3d.json` (runs root: `$HERDR_ORCHESTRATION_ROOT` or `
 3. Shared mode shows sea names only: no repo, PR number or agent name; ids are keyed hashes that change on every restart.
 4. The shared listener serves only `/s/<128-bit token>/`, compares the token in constant time, and is the only thing the tunnel points at.
 5. The private listener rejects any `Host` or POST `Origin` that is not localhost (DNS rebinding, cross-site POST).
-6. Pokes carry only an enum `kind` and a scene id; the body is capped at 200 bytes; the broadcast is rebuilt from validated values; rate limits 1/s per viewer, 5/s in all.
+6. Pokes carry only an enum `kind` and a scene id; the body is capped at 200 bytes; the broadcast is rebuilt from validated values; rate limits 1/s per viewer, 5/s in all (per listener). An accepted poke reaches the viewers of both listeners through one small hub in `server/app.js`; only that rebuilt `{kind, target, at}` crosses (scene ids are the same in both modes), never a label, and the shared listener holds no reference to private facts. `viewers` in the scene is the sum of both listeners' connections.
 7. Static files: no `%`-escapes, no dotfiles or `..`, an extension allow-list, and a realpath check against symlink escapes.
 8. The CSP forbids inline script and style; the page draws labels with `textContent`.
 9. The server writes one file (`.harbor3d.want`) and runs one program (cloudflared, argv array); `test/security.test.mjs` scans the source for anything else.
