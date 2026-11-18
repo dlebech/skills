@@ -536,7 +536,7 @@ const prSeen = new Map();
 const opened = new Map();
 
 // A PR's state → a theme tone; the harbor maps the same tones to its own colors. An open PR is
-// muted: no colour means fine (see overview.js AMBER); what it waits on has a colour of its own.
+// muted: no colour means fine (see cardparts.js AMBER); what it waits on has a colour of its own.
 export const PR_TONE = { OPEN: "muted", DRAFT: "dim", MERGED: "done", CLOSED: "blocked" };
 
 function checks(rollup) {

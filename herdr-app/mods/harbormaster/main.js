@@ -20,7 +20,11 @@ import { facts, crewAddresses, captainOf, adrift, agentNames, agentStatus, progr
 import { observeWaits } from "./attend.js";
 import { loadContexts } from "./context.js";
 import { hotSignature, sampleVersion } from "./resources.js";
-import { cards, runPane, runOfProps, submitReply, runProps, runFacts, pathInput } from "./overview.js";
+import { cards } from "./overview.js";
+import { runPane, runOfProps, pathInput } from "./runpane.js";
+import { submitReply } from "./answers.js";
+import { runProps } from "./cardparts.js";
+import { runFacts } from "./needbox.js";
 import { mergePath } from "./mergepath.js";
 import { sceneFacts, exportFacts } from "./sceneexport.js";
 import { crew } from "./crew.js";

@@ -444,7 +444,13 @@ Harbor 3D is a page in your browser that shows the runs as a working port, one b
 | `herdr-app/mods/harbormaster/levels.js` | What the header tags mean, as definitions: autonomy levels, proof tiers (`TIER_TEXT`, kept equal to `skills/proving/SKILL.md`), run type; the level popover's list, the level-request message and what is pending |
 | `herdr-app/mods/harbormaster/proof.js` | Proof lines and tier, `proof.md` (claim sections, the checks line, and old task sections, read but no longer shown), `proof-accepted.json` and the `prove …` line |
 | `herdr-app/mods/harbormaster/claims.js` | Claims: plan.md's `## Claims`, each claim against its bar, the verdict, the checks line, Accept / Ask to prove on a claim, and the merge ask (`claimsAsk`) |
-| `herdr-app/mods/harbormaster/overview.js` | The runs overview (totals, captain, run cards), the run pane and the Crew block |
+| `herdr-app/mods/harbormaster/overview.js` | The runs overview itself: the captain strip, the totals, what is waiting on you, the closed runs' header and bulk delete, and the list of run cards |
+| `herdr-app/mods/harbormaster/runcard.js` | One run's card in the overview list |
+| `herdr-app/mods/harbormaster/runpane.js` | One run on its own, as the pane pinned beside its orchestrator, with the header, path strip, claims, decisions and tokens sections the card and the pane share |
+| `herdr-app/mods/harbormaster/needbox.js` | What a run needs from you and the box that shows it: the blocking ask, the review flow, the wait-on field, the need lines and the close-all control |
+| `herdr-app/mods/harbormaster/needitems.js` | A run's attention and its need items, with the claim rows they read from and the wait-on write |
+| `herdr-app/mods/harbormaster/answers.js` | Sending an answer to a run's question or a captain decision, and the answer controls |
+| `herdr-app/mods/harbormaster/cardparts.js` | The small drawing helpers every card and pane shares: text sizes, pills, the task strip, the action buttons and the status colours |
 | `herdr-app/mods/harbormaster/mergepath.js` | The path to merge: a run's stages and their states from plain data, shared by the pane's strip, the sea's buoys and the Harbor 3D facts |
 | `herdr-app/mods/harbormaster/paneorder.js` | The run pane's sections in the order and size that fit the run's state, the Agents summary line and the decisions a finished run shows folded |
 | `herdr-app/mods/harbormaster/reviewers.js` | Who a PR could ask for a review (the repository's recent reviewers), and the checked `gh pr edit --add-reviewer` arguments |

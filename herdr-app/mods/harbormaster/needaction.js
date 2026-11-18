@@ -1,6 +1,6 @@
 // What a Needs-you box asks the user to do: one short line per reason a run needs them, saying
 // what to do and why (with names and ages where known), and the buttons that do it. Pure, so
-// the tests drive every reason; overview.js draws the lines on the card, in the pane and in the
+// the tests drive every reason; needbox.js and runpane.js draw the lines on the card, in the pane and in the
 // Crew row's hover, and wires each action kind to its click.
 //
 // "Open the orchestrator" is never the headline: the box offers it as a small link of its own,
@@ -119,7 +119,7 @@ function readyItem(a, ctx, prs) {
     actions: [...mergePrs(prs), { kind: "proof", label: "Proof", primary: false }, { kind: "changes", label: "Ask for changes", primary: false }] };
 }
 
-// One reason's {key, line, tip, actions}. Action kinds (overview.js clicks them):
+// One reason's {key, line, tip, actions}. Action kinds (needbox.js clicks them):
 //   open {url}          opens a PR or check on GitHub
 //   address {pr, mode}  Address comments on a PR: Ask me ("ask") or Handle them ("handle")
 //   address-all {prs, mode}  the same for every PR in `prs` at once (Ask me about all, Handle all)
@@ -144,7 +144,7 @@ function reasonItem(r, a, ctx) {
   const same = next?.prs ?? [];
   switch (r.key) {
     case "question": {
-      // A question.md has its own box (overview.js needBox); this is a dialog or a plan that waits.
+      // A question.md has its own box (needbox.js needBox); this is a dialog or a plan that waits.
       if (r.text === "blocked on a dialog") {
         const who = blocked?.name ?? "The orchestrator";
         return { line: `${who} is waiting on a prompt`, tip: "A dialog or permission prompt waits in its terminal; answer it there",
@@ -232,7 +232,7 @@ function reasonItem(r, a, ctx) {
         actions: [...(p ? [{ kind: "proof", label: "Proof" }] : []), ...openPrs(same)] };
     }
     case "request review": {
-      // One action: ask a peer to review, from inside Herdr (overview.js picks the person). The PR link
+      // One action: ask a peer to review, from inside Herdr (needbox.js picks the person). The PR link
       // is a quiet text link after it; the AI-review caveat that bears on the ask comes with its button.
       const prs = same.filter((p) => p?.url).slice(0, MAX_OPEN);
       const several = same.length > 1;
@@ -289,7 +289,7 @@ export function needActions(a, ctx = {}) {
 const WAIT_ACTION = { kind: "wait-on", label: "Waiting on someone…", primary: false };
 const withWaitOn = (r, a, item) => (WAIT_LABELS.has(r.key) && a.reasons.length === 1 ? { ...item, actions: [...item.actions, WAIT_ACTION] } : item);
 
-// Whether a run's card and pane draw their own Address comments rows (overview.js
+// Whether a run's card and pane draw their own Address comments rows (needbox.js
 // commentsAction): only while the run is in Needs you (`need`) and its box's items do not carry
 // them. Outside Needs you its orchestrator is working, often on the comments it was just asked
 // about, and Ask me / Handle them again would invite a second, duplicate ask.

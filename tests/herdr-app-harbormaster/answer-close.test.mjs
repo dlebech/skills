@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { resetShared } from "herdr";
 import { askClick } from "../../herdr-app/mods/harbormaster/askclick.js";
 import { asked, unmarkAsked, markAsked, pruneAsked, askedStore, NOT_ANSWERS } from "../../herdr-app/mods/harbormaster/inbox.js";
-import { sendAnswer } from "../../herdr-app/mods/harbormaster/overview.js";
+import { sendAnswer } from "../../herdr-app/mods/harbormaster/answers.js";
 import { compactRun, putAway } from "../../herdr-app/mods/harbormaster/data.js";
 import { noteText } from "../../herdr-app/mods/harbormaster/note.js";
 import { withRoot } from "./root.mjs";
@@ -39,7 +39,7 @@ const live = (status, wake = 0) => {
   };
 };
 const IT = (o = {}) => ({ id: "need-:x", kind: "run", title: "Q?", since: 1000, run: null, ...o });
-// The real sendAnswer (overview.js) with a fake view and cx: `dropped` collects dropDecision's calls
+// The real sendAnswer (answers.js) with a fake view and cx: `dropped` collects dropDecision's calls
 // through the DROP script (a decision's answer drops it from .captain-decisions.json).
 const answer = async (run, it, { text = "Yes", option = false } = {}) => {
   const view = { actionError: "old", redraw: false, load: async () => {} };

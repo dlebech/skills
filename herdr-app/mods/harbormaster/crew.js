@@ -18,12 +18,12 @@ import { SNOOZE_CHOICES, snoozed, splitSnoozed, loadSnoozed, setSnooze, wakeSnoo
 import { openNewRun, openStartCaptain, reviewStarting } from "./newrun.js";
 import { primaryOf, isMergeAsk, requestingFor } from "./needaction.js";
 import { claimsAsk, checksLine, reviewedLine, withSaid, withAsked, claimActions } from "./claims.js";
-import {
-  attOf, runStatus, levelTags, runTypeTag, statusDot, actionButton, closeAllControl, runFacts, needItemsOf,
-  newDecisionsNote, noteRows, watchedText, edgeColor, cardBesideOrchestrator, AMBER, PASS, SELECTED, withUsage, runProps,
-  needButton, needLines, answerParts, boxConfirm, proofAction, said, stagesOf,
-  waitOnField,
-} from "./overview.js";
+import { attOf, needItemsOf, said } from "./needitems.js";
+import { runStatus, closeAllControl, runFacts, newDecisionsNote, needButton, needLines, boxConfirm, waitOnField } from "./needbox.js";
+import { levelTags, runTypeTag, cardBesideOrchestrator, proofAction } from "./runpane.js";
+import { statusDot, actionButton, noteRows, edgeColor, AMBER, PASS, SELECTED, withUsage, runProps, stagesOf } from "./cardparts.js";
+import { watchedText } from "./overview.js";
+import { answerParts } from "./answers.js";
 
 // A run's title as the sidebar shows it: a review's "<repo>#<n> · <topic>", else runName's; with
 // the repository's name, muted, before it when another live row would read the same
@@ -262,7 +262,7 @@ function boxActions(m, x, f, items) {
   const confirm = boxConfirm(view, t, r, f, "sidebar");
   const changes = view.replying === `changes:${r.key}` ? v_flex().id(`${key}-changes`).gap(4).on_click((_e, cx) => cx.stop_propagation()).child(Input.new(view.reply))
     .child(div().text_size(10.5).text_color(t.dim).child("What should change? Enter writes it to the run's inbox and tells its orchestrator")) : null;
-  // Waiting on someone…'s field (overview.js waitOnButton), under the box's buttons like Ask for changes'.
+  // Waiting on someone…'s field (needbox.js waitOnButton), under the box's buttons like Ask for changes'.
   const wait = waitOnField(view, t, r, `${key}-wait`);
   if (it) {
     // A question: its recommended option is the button (else Reply); the other options, Reply
@@ -302,7 +302,7 @@ function boxActions(m, x, f, items) {
 
 // The claims the box shows: those worth a look. The proven ones stay in the run's pane (the box
 // is for what needs you), so "+ n more" counts them with the rest. `stages` as the pane judges
-// "still being proved" (overview.js stagesOf).
+// "still being proved" (cardparts.js stagesOf).
 function boxClaims(r, stages) {
   const ask = claimsAsk(r, stages);
   const rows = ask.worthALook.filter((k) => k.look);
@@ -319,7 +319,7 @@ const boxReviewed = (r) => reviewedLine(r.proof?.md, r.reviewedGap, { finished: 
 function mergeClaims(m, r) {
   const { view, t } = m;
   const ask = boxClaims(r, stagesOf(r, m.ctx));
-  // A click shows at once, before the next read of the run's files (overview.js said).
+  // A click shows at once, before the next read of the run's files (needitems.js said).
   const rows = withAsked(withSaid(ask.rows.map((k) => ({ ...k })), said, r.key, r.proof), r);
   const checks = checksLine(r.proof?.md);
   const reviewed = boxReviewed(r);
