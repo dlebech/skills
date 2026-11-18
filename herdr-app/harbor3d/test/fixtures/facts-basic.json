@@ -1,0 +1,56 @@
+{
+  "v": 1,
+  "at": 1795000000000,
+  "captain": { "state": "watching" },
+  "runs": [
+    {
+      "key": ":/home/u/.herdr/hc-orchestration/skills/ruter-steder",
+      "name": "#1371 · Ruter steder", "repo": "snevagten",
+      "type": "feat", "phase": "running", "parked": false,
+      "needsYou": false, "need": null,
+      "path": [
+        { "key": "spec", "state": "done" }, { "key": "build", "state": "current" }, { "key": "proven", "state": "todo" },
+        { "key": "review", "state": "todo" }, { "key": "human", "state": "todo" }, { "key": "merge", "state": "todo" }
+      ],
+      "tasks": ["done", "implement", "implement", "review", "planned"],
+      "prs": [ { "number": 1397, "state": "draft", "checks": "running" } ],
+      "ciRunning": true,
+      "orchestrator": { "state": "working", "kind": "claude" },
+      "workers": [
+        { "id": "t69c", "name": "impl-1371-t2", "kind": "claude", "state": "working", "task": 1 },
+        { "id": "t69d", "name": "impl-1371-t3", "kind": "pi", "state": "working", "task": 2 }
+      ],
+      "tokens": 121500000, "startedMs": 1794990000000, "updatedMs": 1794999900000
+    },
+    {
+      "key": ":/home/u/.herdr/hc-orchestration/skills/fix-login-loop",
+      "name": "#1402 · Fix login loop", "repo": "snevagten",
+      "type": "fix", "phase": "finished", "parked": false,
+      "needsYou": true, "need": "request-review",
+      "path": [
+        { "key": "spec", "state": "done" }, { "key": "build", "state": "done" }, { "key": "proven", "state": "done" },
+        { "key": "review", "state": "you" }, { "key": "human", "state": "todo" }, { "key": "merge", "state": "todo" }
+      ],
+      "tasks": ["done", "done", "done"],
+      "prs": [ { "number": 1405, "state": "open", "checks": "green" } ],
+      "ciRunning": false,
+      "orchestrator": { "state": "idle", "kind": "claude" },
+      "workers": [ { "id": "t6a1", "name": "impl-1402-t1", "kind": "claude", "state": "done", "task": 0 } ],
+      "tokens": 8200000, "startedMs": 1794980000000, "updatedMs": 1794998000000
+    },
+    {
+      "key": ":/home/u/.herdr/hc-orchestration/skills/explore-offline",
+      "name": "Explore offline maps", "repo": "snevagten",
+      "type": "expl", "phase": "planning", "parked": true,
+      "needsYou": false, "need": null,
+      "path": [ { "key": "spec", "state": "current" }, { "key": "build", "state": "todo" } ],
+      "tasks": [],
+      "prs": [],
+      "ciRunning": false,
+      "orchestrator": { "state": "gone", "kind": "claude" },
+      "workers": [],
+      "tokens": 900000, "startedMs": 1794700000000, "updatedMs": 1794710000000
+    }
+  ],
+  "adrift": [ { "id": "t68w", "name": "skills · Claude Code", "kind": "claude", "state": "idle" } ]
+}

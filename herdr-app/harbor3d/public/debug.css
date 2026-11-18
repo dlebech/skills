@@ -1,0 +1,4 @@
+body { font: 14px/1.4 ui-monospace, monospace; margin: 1rem; background: #10202c; color: #dbe8f0; }
+h1 small { font-size: 12px; font-weight: normal; opacity: 0.7; }
+button { font: inherit; margin-right: 0.5rem; }
+pre { white-space: pre-wrap; word-break: break-word; }
