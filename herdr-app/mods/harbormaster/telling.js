@@ -13,8 +13,9 @@
 // toast in the shared store (`by`) and posts it only if its claim still stands after writing.
 
 import { shared, setShared, notify } from "herdr";
-import { cachedRuns, prsOf } from "./data.js";
+import { cachedRuns, prsOf, isClosed } from "./data.js";
 import { pruneAsked } from "./asked.js";
+import { pruneAsked as pruneInboxAsked } from "./inbox.js";
 import { attentionOf } from "./attend.js";
 import { orchestratorState } from "./live.js";
 import { runName } from "./ui.js";
@@ -90,4 +91,7 @@ export function observeTelling(runs, ctx, now = Date.now()) {
   // Asks for Address comments that no longer hold go from their store (asked.js).
   const busy = new Set(live.filter((r) => atts.get(r).working).flatMap((r) => (prsOf(r) ?? []).map((p) => p.url)));
   pruneAsked(live.flatMap((r) => prsOf(r) ?? []), busy);
+  // And the marks of the shared asked store (inbox.js): the signature moved, the run is closed or gone, or a week passed.
+  // The kinds not yet read from it (comments, proof, answers) give no item, so their marks only age out.
+  pruneInboxAsked(runs, { now, closed: (r) => isClosed(r, ctx), busy });
 }

@@ -21,6 +21,14 @@ import { AUTONOMY, TIER_TEXT, requestLine } from "./levels.js";
 export const BLOCKING = /^what is blocking\?/;
 export const CHANGES = /^changes asked from Harbormaster: /;
 
+// Whether a "what is blocking?" message is among the first lines of the run's unhandled
+// inbox messages (data.js reads them with the level requests).
+export const blockingPending = (lines) => (lines ?? "").split("\n").some((l) => BLOCKING.test(l.trim()));
+
+// Whether an "Ask for changes" message is among those first lines: the run is being changed,
+// not ready.
+export const changesPending = (lines) => (lines ?? "").split("\n").some((l) => CHANGES.test(l.trim()));
+
 // The message, in the user's voice: what Harbormaster sees, then what to do.
 // `quiet` is how long the run has been quiet ("34m"), `step` its current step with its age
 // ("CI on #42 · 50m"), or null.

@@ -115,7 +115,7 @@ function readyItem(a, ctx, prs) {
 //   address-all {prs, mode}  the same for every PR in `prs` at once (Ask me about all, Handle all)
 //   asked {pr}          a PR whose comments were asked about: "asked…", no buttons
 //   proof               unfolds the run's proof (and marks it read, proofseen.js)
-//   changes             Ask for changes on a ready run: opens a field, its text goes to the inbox (changes.js)
+//   changes             Ask for changes on a ready run: opens a field, its text goes to the inbox (inbox.js)
 //   ask-ci {pr, check}  asks the orchestrator to see to the red CI (an inbox message)
 //   ask-blocking        a stalled run's Ask what's blocking
 //   report {path}       opens the run's report

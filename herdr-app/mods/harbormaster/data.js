@@ -26,9 +26,7 @@ import { taskTone, taskCounts, taskStage } from "./tasks.js";
 export { taskStage };
 export { taskTone, taskCounts };
 import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
-import { blockingPending } from "./blocking.js";
-import { changesPending } from "./changes.js";
-import { NOT_ANSWERS, send, legacyOutcome, tellOrchestrator, writeInbox, wakeOrchestrator, answerMessage } from "./inbox.js";
+import { NOT_ANSWERS, blockingPending, changesPending, send, legacyOutcome, tellOrchestrator, writeInbox, wakeOrchestrator, answerMessage } from "./inbox.js";
 import { commentsArgs, commentSummary, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { detachedSend } from "./wake.js";
@@ -63,7 +61,7 @@ const SCRIPT = [
   '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
   // decisions.md: the last 60 lines of its own decisions and the user's, capped.
   '  grep -a -E "^- \\[(decided|user)\\] " "$d/decisions.md" 2>/dev/null | tail -n 60 | tail -c 20000; printf \'\\037\'',
-  // Level requests (levels.js), asks to prove (proof.js), asks what is blocking (blocking.js) and
+  // Level requests (levels.js), asks to prove (proof.js), asks what is blocking (inbox.js) and
   // asks to address comments (comments.js) in the inbox's unhandled messages,
   // oldest first: what is pending. Only a message's first line, so an answer's free text that
   // reads like one is not one.
@@ -276,9 +274,9 @@ function parseRun(machine, chunk) {
     ask: parseQuestion(question),
     askedAt: Number(asked?.trim()) * 1000 || null,
     unhandled: Number(inbox?.trim() || 0),
-    // An ask what is blocking (blocking.js) still unread in the inbox.
+    // An ask what is blocking (inbox.js) still unread in the inbox.
     blockingAsked: blockingPending(requests),
-    // An Ask for changes (changes.js) still unread: the run is not ready to merge until it is handled.
+    // An Ask for changes (inbox.js) still unread: the run is not ready to merge until it is handled.
     changesAsked: changesPending(requests),
     // The PRs an Address comments (comments.js) is still unread for, by URL.
     commentsAsked: pendingComments(requests),
@@ -846,18 +844,6 @@ export const requestLevel = (run, kind, level) => sendLegacy(run, "level", { kin
 // Asks the orchestrator to prove one claim (a Claims row's Ask to prove). The row reads "asked…"
 // while it is unhandled and the result line is the same.
 export const askProof = (run, row) => sendLegacy(run, "proof", { row });
-
-// Asks the orchestrator of a stalled run what is blocking it (Ask what's blocking on its Crew row
-// or pane). `quiet` and `step` are the texts the row shows.
-export const askBlocking = (run, { quiet, step = null }) => sendLegacy(run, "blocking", { quiet, step });
-
-// Asks the orchestrator to see to a red CI (Ask the orchestrator in a Needs-you box): the same
-// "what is blocking?" message, saying which PR and check failed.
-export const askCi = (run, { pr, check = null, url = null }) => sendLegacy(run, "ci", { pr, check, url });
-
-// Asks the orchestrator for changes to a run that was ready to merge (Ask for changes in its
-// box): the user's words. Throws without text.
-export const askChanges = (run, text) => sendLegacy(run, "changes", { text });
 
 // Asks the orchestrator to address the review comments on one of its PRs (Address comments on
 // its card or pane), and the same for several PRs at once (Ask me about all / Handle all): one

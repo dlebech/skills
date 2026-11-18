@@ -1,13 +1,13 @@
 // What a Needs-you box says to do (needaction.js needActions), one line and its buttons per
 // reason, from real assess() results; the first failing check data.js keeps for it; and the
-// red-CI ask's message (blocking.js ciRequest).
+// red-CI ask's message (inbox.js ciRequest).
 // Run: node --import ./loader.mjs --test needaction.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assess } from "../../herdr-app/mods/harbormaster/attention.js";
 import { needActions, doLine, proofText, runReports, MAX_OPEN, ownAddressRows } from "../../herdr-app/mods/harbormaster/needaction.js";
 import { firstFailing, prSummary } from "../../herdr-app/mods/harbormaster/data.js";
-import { ciRequest, BLOCKING } from "../../herdr-app/mods/harbormaster/blocking.js";
+import { ciRequest, BLOCKING } from "../../herdr-app/mods/harbormaster/inbox.js";
 
 const MIN = 60000;
 const now = Date.parse("2026-11-16T12:00:00Z");
