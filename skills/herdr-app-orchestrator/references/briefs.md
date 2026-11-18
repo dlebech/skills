@@ -15,7 +15,7 @@ Read this before you write the run's `common.md`, a task brief, or the review te
 - one brief per task: scope, acceptance criteria, what other agents are doing in parallel and which files to avoid, decisions already made, and how to measure success. Where quality is measurable (evals, benchmarks), say how to measure before and after and what counts as not regressing. The brief stands on its own: the implementer reads it first and opens only the `spec.md` sections it names (“spec.md: Del 1”), so restate whatever of the spec the task needs. It also has:
   - **Known locations**: the exact paths and symbols you already checked while planning (`formatCurrency` in `src/lib/util/numbers.ts`, a modal's props, how a hook builds its query), with “do not search again for these”. Do not leave “find the existing helper” for something you already found.
   - **Still to find**: the few things you did not check, kept short.
-- one review template.
+- one review template, with a slot for the code-review skill line from `<skill-dir>/scripts/review-skill.sh` (SKILL.md section 4); leave it out when the script prints nothing.
 
 When a lesson applies to everyone, amend `common.md` once and tell the running agents with `hc send`.
 

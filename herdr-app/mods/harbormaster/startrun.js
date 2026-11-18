@@ -133,11 +133,19 @@ export function parseProfile(text, base = DEFAULT_PROFILE) {
   return { profile: p, bad };
 }
 
-// The profile a start of this kind prefills: the last one, a review's preset on top. `last` is
-// that agent's (prefs.profiles[agent]); the Opus preset is Claude's only.
-export const profileFor = (kind, last, agent = "claude") => agent === "claude"
-  ? { ...DEFAULT_PROFILE, ...(last ?? {}), ...(kind === "review" ? REVIEW_PROFILE : {}) }
-  : { ...OTHER_PROFILE, ...(last ?? {}), ...(kind === "review" ? { autonomy: "L1" } : {}) };
+// The profile a start of this kind prefills: the last one for a run. A review never implements, so its
+// profile holds only what it uses (reviewer, autonomy; the orchestrator if a line gives one): the agent's
+// remembered review profile (`lastReview`), else the preset. `last` is that agent's (prefs.profiles[agent]);
+// the Opus preset is Claude's only.
+export const profileFor = (kind, last, agent = "claude", lastReview = null) => kind === "review"
+  ? { ...(agent === "claude" ? REVIEW_PROFILE : { reviewer: "", autonomy: "L1" }), ...reviewPart(lastReview) }
+  : agent === "claude" ? { ...DEFAULT_PROFILE, ...(last ?? {}) } : { ...OTHER_PROFILE, ...(last ?? {}) };
+
+// The review's own roles of a profile: reviewer, autonomy and the orchestrator, when set.
+const reviewPart = (p) => Object.fromEntries(["orchestrator", "reviewer", "autonomy"].filter((k) => p?.[k] != null && (p[k] || k === "reviewer")).map((k) => [k, p[k]]));
+
+// The profile the dialog prefills for a kind and agent, from the remembered prefs.
+export const prefillProfile = (prefs, kind, agent) => profileFor(kind, lastProfile(prefs, agent), agent, lastReviewProfile(prefs, agent));
 
 // How each agent runs a skill: Claude Code by its slash command, pi by /skill:, the others asked in words.
 export function skillPrompt(agent, skill, args) {
@@ -238,27 +246,35 @@ export function parsePrefs(text) {
     const agent = typeof j?.agent === "string" && j.agent ? j.agent : null;
     const drafts = j?.drafts && typeof j.drafts === "object" ? j.drafts : {};
     const folders = Array.isArray(j?.folders) ? j.folders.filter((f) => typeof f === "string" && f) : [];
-    return { profile, profiles, agent, drafts, folders };
-  } catch { return { profile: null, profiles: {}, agent: null, drafts: {}, folders: [] }; }
+    // Each agent's last review profile ({reviewer, autonomy, orchestrator?}); old files have none.
+    const reviewProfiles = j?.reviewProfiles && typeof j.reviewProfiles === "object" && !Array.isArray(j.reviewProfiles) ? j.reviewProfiles : {};
+    return { profile, profiles, reviewProfiles, agent, drafts, folders };
+  } catch { return { profile: null, profiles: {}, reviewProfiles: {}, agent: null, drafts: {}, folders: [] }; }
 }
 
 // The review-drafts mode a repository starts with: its remembered one, never "direct".
 export const draftsFor = (prefs, repo) => (["herdr", "pending"].includes(prefs?.drafts?.[repo]) ? prefs.drafts[repo] : "herdr");
 
-// The prefs after a start. A review does not touch the profile (its preset is not the user's
-// habit); "direct" is never remembered, and leaves what the repository had.
+// The prefs after a start. A review never touches the feature profile (its preset is not the user's
+// habit); its own reviewer and autonomy are kept apart, per agent. "direct" is never remembered, and leaves what the repository had.
 // The folder goes first in the recents (newest first, each once, at most RECENT_MAX).
 // The agent is remembered from any run's start; the profile under that agent.
 export function remember(prefs, { kind, profile, repo, drafts, agent = "claude" }) {
   const folders = [repo, ...(prefs?.folders ?? []).filter((f) => f !== repo)].slice(0, RECENT_MAX);
-  const next = { profile: prefs?.profile ?? null, profiles: { ...(prefs?.profiles ?? {}) }, agent: prefs?.agent ?? null, drafts: { ...(prefs?.drafts ?? {}) }, folders };
+  const next = { profile: prefs?.profile ?? null, profiles: { ...(prefs?.profiles ?? {}) }, reviewProfiles: { ...(prefs?.reviewProfiles ?? {}) }, agent: prefs?.agent ?? null, drafts: { ...(prefs?.drafts ?? {}) }, folders };
   if (kind === "captain") return next; // only the folder is remembered
   next.agent = agent;
-  if (kind === "review") { if (drafts !== "direct") next.drafts[repo] = drafts; }
+  if (kind === "review") {
+    if (drafts !== "direct") next.drafts[repo] = drafts;
+    if (profile) next.reviewProfiles[agent] = reviewPart(profile);
+  }
   else if (agent === "claude") next.profile = profile;
   else next.profiles[agent] = profile;
   return next;
 }
+
+// The last review's profile with this agent, or null.
+export const lastReviewProfile = (prefs, agent) => prefs?.reviewProfiles?.[agent] ?? null;
 
 // The last profile used with this agent.
 export const lastProfile = (prefs, agent) => (agent === "claude" ? prefs?.profile : prefs?.profiles?.[agent]) ?? null;

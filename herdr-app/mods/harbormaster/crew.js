@@ -14,7 +14,7 @@ import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, ex
 import { reviewError } from "./reviews.js";
 import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
-import { openNewRun, openStartCaptain, startReview, reviewStarting } from "./newrun.js";
+import { openNewRun, openStartCaptain, reviewStarting } from "./newrun.js";
 import { primaryOf, isMergeAsk, requestingFor } from "./needaction.js";
 import { claimsAsk, checksLine, reviewedLine, withSaid, withAsked, claimActions } from "./claims.js";
 import {
@@ -418,11 +418,7 @@ export function nextAction(m, it, id) {
     // Started from here and its run not seen yet (newrun.js reviewStarting): never a second Review.
     if (reviewStarting(it.url)) return div().flex_none().text_size(11).text_color(t.dim).tooltip("Its review run is starting; it shows as reviewing once its run files name the PR").child("starting…");
     if (!it.local) return null;
-    return smallButton(t, `${id}-act`, "Review", "Start a review run in its repository's space, with your remembered review settings", (cx) => {
-      // The click's cx is gone once startReview awaits: the redraw after it uses a task's own.
-      cx.spawn(async (cx) => { await startReview({ repo: it.local, pr: it.number, url: it.url }).catch(() => {}); cx.notify(); });
-      cx.notify();
-    });
+    return smallButton(t, `${id}-act`, "Review", "Open New run for this PR: choose the agent and reviewer, then Start", () => openNewRun({ repo: it.local.root, kind: "review", input: String(it.number), url: it.url }));
   }
   return it.action?.url ? smallButton(t, `${id}-act`, it.action.label, it.action.url, () => openUrl(it.action.url)) : null;
 }
@@ -431,7 +427,7 @@ function nextRow(m, it, i) {
   const { t } = m;
   const id = `crew-next-${i}`;
   const action = nextAction(m, it, id);
-  const far = it.kind === "review" && !it.local ? "No clone of this repository found next to your open spaces: open a space for it to review with one click" : null;
+  const far = it.kind === "review" && !it.local ? "No clone of this repository found next to your open spaces: open a space for it, or clone it beside one, to review it from here" : null;
   return h_flex().id(id).flex_none().gap(8).px(PAD).py(3).rounded(6).items_center().cursor_pointer().hover((st) => st.bg(t.hover))
     .tooltip([`${it.repo}#${it.number}: ${it.title}`, it.url, far].filter(Boolean).join("\n"))
     .on_click(() => openUrl(it.url))
