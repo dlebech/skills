@@ -212,3 +212,14 @@ test("close: an orchestrator that is gone fails the wake as before, never report
 test("a close has no unread prefix: NOT_ANSWERS is the string it always was", () => {
   assert.equal(NOT_ANSWERS, "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?|address comments on |changes asked from Harbormaster: )");
 });
+
+test("answer: an after that throws leaves it answered and shows no error", async () => {
+  const run = runIn(), it = IT({ run });
+  const f = { actionError: "old", redraw: false, load: async () => {} };
+  let done;
+  const cx = { notify: () => {}, spawn: (g) => { done = g(cx); } };
+  askClick(f, cx, run, "answer", { title: it.title, answer: "Yes" }, { asks: [{ key: it.id, item: it }], after: () => { throw new Error("drop broke"); }, onError: () => unmarkAsked(run, "answer", it.id) });
+  await done;
+  assert.equal(f.actionError, null);
+  assert.equal(asked(run, "answer", it.id, it), true);
+});

@@ -136,3 +136,18 @@ test("an empty change is an error, not a note", async () => {
   const f = await click(run, "changes", { text: "  " }, { notes: NOTES });
   assert.equal(f.view.actionError, "feat-x: say what to change");
 });
+
+// `after` and `onError` are the button's own; a throwing `after` is not a failed send.
+test("a throwing after: the send's outcome stands, no error, no onError, still asked", async () => {
+  const run = runIn();
+  let onError = 0;
+  const f = await click(run, "blocking", { quiet: "5m" }, {
+    asks: [{ key: "", item: run }], notes: NOTES,
+    after: () => { throw new Error("after broke"); }, onError: () => { onError++; },
+  });
+  assert.equal(f.view.actionError, null);
+  assert.equal(onError, 0);
+  assert.equal(noteText(f.view), "feat-x: waits note");
+  assert.equal(asked(run, "blocking", "", run), true);
+  assert.equal(f.calls.load, 1);
+});

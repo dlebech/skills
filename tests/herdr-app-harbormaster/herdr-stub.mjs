@@ -3,7 +3,7 @@
 export const exec = async (...a) => (globalThis.__herdrExec ?? (async () => ({ code: 0, stdout: "", stderr: "" })))(...a);
 export const appHome = () => "/nonexistent", readTextFile = async () => "stub";
 // A test may set globalThis.__herdrTerminals / __herdrAgents for what the window holds.
-export const terminals = () => globalThis.__herdrTerminals ?? [], agents = () => globalThis.__herdrAgents ?? [], panes = () => [], spaces = () => [], machines = () => [];
+export const terminals = () => globalThis.__herdrTerminals ?? [], agents = () => globalThis.__herdrAgents ?? [], panes = () => [], spaces = () => [], machines = () => globalThis.__herdrMachines ?? [];
 export const run = () => null, window = () => null, focused = () => null, settings = () => ({});
 // Herdr's shared state, kept in memory; a test calls resetShared() so one test's values don't reach the next.
 const sharedMap = new Map();

@@ -23,7 +23,8 @@ export function askClick(view, cx, run, kind, payload, { asks = [], notes = {}, 
   cx.spawn(async (cx) => {
     try {
       const { outcome } = await (via ? via() : send(run, kind, payload, { asks }));
-      if (after) await after(outcome);
+      // A throwing `after` is swallowed: the send's outcome stands and nothing is unmarked.
+      if (after) { try { await after(outcome); } catch { /* the send went through */ } }
       const note = outcome === "waits" ? notes.waits : outcome === "blocked" ? notes.blocked : notes.sent;
       if (note) setNote(view, `${run.branch}: ${note}`);
     } catch (e) {

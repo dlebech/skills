@@ -392,14 +392,15 @@ export const askedPrsOf = (run, prs, now = Date.now(), working = false) => {
 // gives its PRs), then drops the old key. An entry whose PR no run has is dropped, unless a run
 // is stale or has no PR list yet (its PRs are not known now): those stay in the old key for the
 // next read, until a week old. Call it only from a copy that polls the whole window (telling.js),
-// so one copy writes, and only after a read that listed every machine's runs: with none listed,
-// or a machine failed, a PR may be missing without being gone (telling.js skips the call then).
+// so one copy writes, and only after a read that succeeded with some run listed. `offline` says a
+// machine failed that read: a PR no listed run owns may belong to its runs, so it stays (until a
+// week old) while the ones a run owns move.
 const OLD_COMMENTS_KEY = "harbormaster.commentsAsked";
-export function migrateCommentsAsked(runs, prsOf) {
+export function migrateCommentsAsked(runs, prsOf, { offline = false } = {}) {
   const old = shared(OLD_COMMENTS_KEY);
   if (!old || typeof old !== "object") return;
   const store = askedStore(), next = { ...store }, left = {};
-  const unknown = (runs ?? []).some((r) => r.stale || prsOf(r) == null);
+  const unknown = offline || (runs ?? []).some((r) => r.stale || prsOf(r) == null);
   const owner = (url) => (runs ?? []).find((r) => !r.stale && (prsOf(r) ?? []).some((p) => p?.url === url));
   for (const [url, e] of Object.entries(old)) {
     const run = owner(url);

@@ -5,7 +5,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { resetShared, setShared, shared } from "herdr";
 import { observeTelling } from "../../herdr-app/mods/harbormaster/telling.js";
-import { loadRuns } from "../../herdr-app/mods/harbormaster/data.js";
+import { loadRuns, cachedRuns } from "../../herdr-app/mods/harbormaster/data.js";
 import { facts } from "../../herdr-app/mods/harbormaster/live.js";
 import { markAsked, askedStore } from "../../herdr-app/mods/harbormaster/inbox.js";
 
@@ -90,4 +90,38 @@ test("migration: the old comments asks wait for a read that lists every machine"
   observeTelling([r], facts());
   assert.deepEqual(shared(OLD), { [url]: entry });
   // (With a read that lists every machine the migration runs; inbox-views.test.mjs covers what it moves.)
+});
+
+// A read where this machine answers and the remote machine "box" fails (the stub's machines are
+// set through __herdrMachines).
+const readBoxDown = async () => {
+  globalThis.__herdrMachines = [{ name: "box", layout: "online" }];
+  try { await readWith(async (cmd, args, o) => (o?.on === "box" ? { code: 1, stdout: "", stderr: "unreachable" } : { code: 0, stdout: "", stderr: "" })); }
+  finally { delete globalThis.__herdrMachines; }
+  assert.deepEqual(cachedRuns().failed, ["box"]);
+};
+const readAll = () => readWith(async () => ({ code: 0, stdout: "", stderr: "" }));
+
+test("migration with a machine offline: an owned entry moves, an unowned one stays until every machine answers", async () => {
+  const OLD = "harbormaster.commentsAsked";
+  const r = run("m"), url = "https://github.com/o/r/pull/1", other = "https://github.com/o/r/pull/2", old = "https://github.com/o/r/pull/9";
+  setShared("harbormaster.prs", { [r.key]: { list: [{ url, number: 1 }] } });
+  setShared(OLD, { [url]: { sig: "s", ids: [], at: Date.now() }, [other]: { sig: "x", ids: [], at: Date.now() }, [old]: { sig: "x", ids: [], at: Date.now() - 8 * 24 * 3600 * 1000 } });
+  await readBoxDown();
+  observeTelling([r], facts());
+  assert.deepEqual(Object.keys(shared(OLD)), [other], "the unowned entry waits (it may be box's), the owned one moved, the week-old one went");
+  assert.equal(Object.keys(askedStore()).some((k) => k.startsWith(r.key) && k.endsWith(url)), true);
+  // Once every machine answers, the entry no run owns goes.
+  await readAll();
+  observeTelling([r], facts());
+  assert.equal(shared(OLD), null);
+});
+
+test("prune: a remote machine failing while this one is fresh keeps box's marks and drops a gone local run's", async () => {
+  const boxRun = { ...run("b"), key: "box:/r/b", machine: "box" }, local = run("gone");
+  markAsked(boxRun, "blocking", "", boxRun);
+  markAsked(local, "blocking", "", local);
+  await readBoxDown();
+  observeTelling([run("other")], facts());
+  assert.deepEqual(Object.keys(askedStore()).map((k) => k.split("\u001f")[0]), ["box:/r/b"]);
 });
