@@ -183,7 +183,7 @@ test("pokes cross between the private and the shared listener; viewers counts bo
     await p.waitFor(e => e.event === "scene" && e.data.viewers === 2)
     await s.waitFor(e => e.event === "scene" && e.data.viewers === 2)
     // shared -> private, and private -> shared
-    assert.equal((await post(sh.localUrl, { kind: "horn", target: "harbor" }, "a")).status, 204)
+    assert.equal((await post(sh.localUrl, { kind: "feed", target: "harbor" }, "a")).status, 204)
     const got = await p.waitFor(e => e.event === "poke")
     assert.deepEqual(Object.keys(got.data).sort(), ["at", "kind", "target"])
     await s.waitFor(e => e.event === "poke")
@@ -218,7 +218,7 @@ test("rate limits stay per listener: the shared limit does not use up the privat
   const priv = app.listener({ mode: "private", base: "/" }); const pport = await priv.listen(0)
   const sh = await startShare(app, { tunnel: false })
   const purl = `http://127.0.0.1:${pport}/`
-  const post = (url, id) => fetch(url + "poke", { method: "POST", headers: { "content-type": "application/json", "x-viewer": id.repeat(16) }, body: JSON.stringify({ kind: "horn", target: "harbor" }) })
+  const post = (url, id) => fetch(url + "poke", { method: "POST", headers: { "content-type": "application/json", "x-viewer": id.repeat(16) }, body: JSON.stringify({ kind: "feed", target: "harbor" }) })
   const p = await events(purl + "events"), s = await events(sh.localUrl + "events")
   try {
     await p.waitFor(e => e.event === "scene")

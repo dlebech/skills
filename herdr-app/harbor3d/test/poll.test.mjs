@@ -42,15 +42,15 @@ test("poll: a held poll is answered by a scene change and by a poke", async () =
     // a poke: no scene (unchanged since after), one poke
     const p2 = poll(s.url, b.n, vid("a")).then(r => r.json())
     await wait(50)
-    assert.equal((await post(s.url, { kind: "horn", target: "harbor" }, vid("b"))).status, 204)
+    assert.equal((await post(s.url, { kind: "feed", target: "harbor" }, vid("b"))).status, 204)
     const c = await p2
     assert.ok(!("scene" in c)); assert.equal(c.n, b.n + 1)
-    assert.deepEqual(Object.keys(c.pokes[0]).sort(), ["at", "kind", "target"]); assert.equal(c.pokes[0].kind, "horn")
+    assert.deepEqual(Object.keys(c.pokes[0]).sort(), ["at", "kind", "target"]); assert.equal(c.pokes[0].kind, "feed")
     // a late client gets the older pokes oldest first, and only the ones it has not seen
     await wait(1100)
     await post(s.url, { kind: "feed", target: "harbor" }, vid("c"))
     const late = await (await poll(s.url, b.n, vid("d"))).json()
-    assert.deepEqual(late.pokes.map(p => p.kind), ["horn", "feed"])
+    assert.deepEqual(late.pokes.map(p => p.kind), ["feed", "feed"])
     assert.deepEqual((await (await poll(s.url, c.n, vid("e"))).json()).pokes.map(p => p.kind), ["feed"])
   } finally { await s.close() }
 })
@@ -167,9 +167,9 @@ test("poll: the shared listener never holds a private label; pokes cross between
     const gn = (await (await poll(purl, 0, vid("9"))).json()).n
     const held2 = poll(purl, gn, vid("b")).then(r => r.json())
     await wait(50)
-    assert.equal((await post(sh.localUrl, { kind: "horn", target: "harbor" }, vid("d"))).status, 204)
+    assert.equal((await post(sh.localUrl, { kind: "feed", target: "harbor" }, vid("d"))).status, 204)
     const back = await held2
-    assert.ok(back.pokes.some(p => p.kind === "horn"))
+    assert.ok(back.pokes.some(p => p.kind === "feed"))
     for (const b of [got, back]) for (const p of b.pokes) assert.deepEqual(Object.keys(p).sort(), ["at", "kind", "target"])
   } finally { await sh.stop(); await priv.close(); app.stop() }
 })

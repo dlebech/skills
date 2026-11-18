@@ -99,24 +99,31 @@ export const octopusPosition = () => ({ ...OCTOPUS, angle: 0 })
 // the ship's beam (5 m x scale) beyond it. The design's fixed x of 0.8 left a 2 m gap for a medium ship.
 export function shipPosition(castOff = false, scale = 1) { return { x: PIER.x + PIER.width / 2 + (SHIP.beam / 2) * scale + SHIP.gap, y: 0, z: castOff ? SHIP.castoffZ : SHIP.z } }
 
-// Planned container i in the yard on the quay: 4 across, 2 high, then a second row further back. At most 24.
+// A container as the model is built: 1.1 wide (x), 1.1 high, 2.4 long along z (door bars reach 0.045 past the far end).
+// At angle 0 its length runs along z, which is how every slot below lays it out (along the pier and the ship).
+export const CONTAINER = { w: 1.1, h: 1.1, z0: -1.2, z1: 1.245 }
+// One storey of stacking: the container's height and a 5 cm gap, so tiers never share a face.
+export const TIER = 1.15
+
+// Planned container i in the yard on the quay: 4 across, 2 high, then further rows back, 2.6 m apart so
+// the 2.4 m containers leave a gap. At most 24.
 export function yardPosition(i) {
   if (!int(i, MAX_YARD)) return null
   const col = i % 4, tier = Math.floor(i / 4) % 2, row = Math.floor(i / 8)
-  return { x: [-3, -0.4, 2.2, 4.8][col], y: QUAY_TOP + tier * 1.1, z: -5 - row * 1.6, angle: 0 }
+  return { x: [-3, -0.4, 2.2, 4.8][col], y: QUAY_TOP + tier * TIER, z: -5 - row * 2.6, angle: 0 }
 }
 
 // Container i in progress, on the pier's west side: z = 4, 6.8, 9.6, then past the crane's legs (z 12.5 to 15.5)
 // at 17.4, 20.2, 23 (6 of them), then a second tier. At most 12.
 export function progressPosition(i) {
   if (!int(i, MAX_PROGRESS)) return null
-  return { x: -7.2, y: QUAY_TOP + Math.floor(i / 6) * 1.1, z: [4, 6.8, 9.6, 17.4, 20.2, 23][i % 6], angle: Math.PI / 2 }
+  return { x: -7.2, y: QUAY_TOP + Math.floor(i / 6) * TIER, z: [4, 6.8, 9.6, 17.4, 20.2, 23][i % 6], angle: 0 }
 }
 
-// Done container i in the ship's own frame: 3 across, 4 rows stern to bow, tier 1 first, then tier 2. At most 24.
+// Deck slot i in the ship's own frame: 3 across, 4 rows stern to bow, tier 1 first, then tier 2. At most 24.
 export function deckPosition(i) {
   if (!int(i, MAX_DECK)) return null
-  return { x: [-1.3, 0, 1.3][i % 3], y: 1.6 + Math.floor(i / 12) * 1.15, z: [-3.5, -0.9, 1.7, 4.3][Math.floor(i / 3) % 4], angle: Math.PI / 2 }
+  return { x: [-1.3, 0, 1.3][i % 3], y: 1.6 + Math.floor(i / 12) * TIER, z: [-3.5, -0.9, 1.7, 4.3][Math.floor(i / 3) % 4], angle: 0 }
 }
 
 // A deck spot in the berth's frame, for a ship at `ship` (its position) and uniform `scale`.
@@ -124,15 +131,55 @@ export function deckToBerth(p, ship, scale) {
   return { x: ship.x + p.x * scale, y: ship.y + p.y * scale, z: ship.z + p.z * scale }
 }
 
-// Where each task's container goes, from the tasks' stages. Returns one { zone, index, ...position } per
-// task (`zone` yard | pier | deck | none when over the caps), counting each zone in task order.
-export function containerSlots(stages) {
-  const next = { yard: 0, pier: 0, deck: 0 }
-  return stages.map(stage => {
-    const zone = stage === "planned" ? "yard" : stage === "done" ? "deck" : "pier"
+// Which deck slot each task's container takes (null when the task is not done or the deck is full). A task keeps
+// the slot it had (`prev`, the last answer) while it stays done, so nothing shuffles when another task finishes;
+// a newly done task takes the lowest free slot, in task order. A tier-2 container whose slot below is empty
+// drops to the lowest free one, so a second tier never floats or starts before the first is full.
+export function deckAssign(prev, stages) {
+  const out = stages.map(() => null), used = new Set()
+  const old = Array.isArray(prev) ? prev : []
+  stages.forEach((st, i) => { const s = old[i]; if (st === "done" && int(s, MAX_DECK) && !used.has(s)) { out[i] = s; used.add(s) } })
+  stages.forEach((st, i) => { const s = out[i]; if (s !== null && s >= 12 && !used.has(s - 12)) { used.delete(s); out[i] = null } })
+  let free = 0
+  stages.forEach((st, i) => {
+    if (st !== "done" || out[i] !== null) return
+    while (free < MAX_DECK && used.has(free)) free++
+    if (free < MAX_DECK) { out[i] = free; used.add(free) }
+  })
+  return out
+}
+
+// How many done tasks do not fit on the deck.
+export const deckOverflow = stages => Math.max(0, stages.filter(s => s === "done").length - MAX_DECK)
+
+// Where each task's container goes, from the tasks' stages. Returns one { zone, index, ...position } per task
+// (`zone` yard | pier | deck | none when over the caps). Yard and pier count in task order; the deck uses
+// `deckSlots` (from deckAssign) so a container keeps its place.
+export function containerSlots(stages, deckSlots = null) {
+  const slots = deckSlots || deckAssign([], stages)
+  const next = { yard: 0, pier: 0 }
+  return stages.map((stage, t) => {
+    if (stage === "done") { const s = slots[t], p = int(s, MAX_DECK) ? deckPosition(s) : null; return p ? { zone: "deck", index: s, ...p } : { zone: "none", index: -1 } }
+    const zone = stage === "planned" ? "yard" : "pier"
     const i = next[zone]++
-    const p = zone === "yard" ? yardPosition(i) : zone === "deck" ? deckPosition(i) : progressPosition(i)
+    const p = zone === "yard" ? yardPosition(i) : progressPosition(i)
     return p ? { zone, index: i, ...p } : { zone: "none", index: i }
+  })
+}
+
+// Every drawn container of a run as a box in world metres, { task, zone, min: [x, y, z], max: [x, y, z] }, for the
+// berth in `slot`, a ship of uniform `scale` and `castOff`. Deck boxes are the container grown by the ship's scale.
+// This is what the "no two containers touch" test and any collision check read.
+export function containerBoxes(stages, { slot = 0, scale = 1, castOff = false, deckSlots = null } = {}) {
+  const b = berthPosition(slot) || { x: 0, y: 0, z: QUAY_Z }
+  const sh = shipPosition(castOff, scale)
+  return containerSlots(stages, deckSlots).flatMap((c, task) => {
+    if (c.zone === "none" || (castOff && c.zone === "pier")) return []
+    const k = c.zone === "deck" ? scale : 1
+    const turned = Math.abs(Math.sin(c.angle)) > 0.5
+    const [x0, x1, z0, z1] = turned ? [CONTAINER.z0, CONTAINER.z1, -CONTAINER.w / 2, CONTAINER.w / 2] : [-CONTAINER.w / 2, CONTAINER.w / 2, CONTAINER.z0, CONTAINER.z1]
+    const o = c.zone === "deck" ? { x: b.x + sh.x + c.x * scale, y: c.y * scale, z: b.z + sh.z + c.z * scale } : { x: b.x + c.x, y: c.y, z: b.z + c.z }
+    return [{ task, zone: c.zone, min: [o.x + x0 * k, o.y, o.z + z0 * k], max: [o.x + x1 * k, o.y + CONTAINER.h * k, o.z + z1 * k] }]
   })
 }
 

@@ -3,10 +3,10 @@ import * as THREE from "three"
 import { OrbitControls } from "three/addons/controls/OrbitControls.js"
 import { Kit, Water, Sky, Port, Tug, softTexture, damp } from "./world.js"
 import { Berth, Anchored, Raft, berthAssets } from "./berths.js"
-import { Horn, Fireworks, Gulls } from "./effects.js"
+import { Fireworks, Gulls, Bubbles, Fish } from "./effects.js"
 import { Labels, Card, Toolbar, overlays, $ } from "./ui.js"
 import { createLoop } from "./loop.js"
-import { declutterLabels, labelUnderCard, assignSlots, berthPosition, roadsteadPosition, breakwaterWidth, MAX_BERTHS, MAX_ADRIFT } from "./layout.js"
+import { declutterLabels, labelUnderCard, assignSlots, berthPosition, roadsteadPosition, breakwaterWidth, MAX_BERTHS, MAX_ADRIFT, OFFICE } from "./layout.js"
 import { skyLook, captainLook } from "./look.js"
 import { createFeed } from "./feed.js"
 
@@ -55,7 +55,7 @@ function resize(initial) {
 
 // ---- state ----
 const kit = new Kit()
-let world = null          // { water, sky, port, tug, horn, fireworks, gulls, assets }
+let world = null          // { water, sky, port, tug, fireworks, bubbles, fish, gulls, assets }
 let data = null           // the latest scene
 let firstScene = false
 const berths = new Map()  // run id -> Berth (at the quay) or Anchored (parked)
@@ -76,10 +76,7 @@ const toolbar = new Toolbar($("toolbar"), {
   overview: () => { stopTour(); overview() },
   tour: () => (touring ? stopTour() : startTour()),
   sky: () => { skyMode = skyMode === "auto" ? "day" : skyMode === "day" ? "night" : "auto"; toolbar.setSky(skyMode[0].toUpperCase() + skyMode.slice(1)); applySky(true) },
-  horn: b => poke(b, "horn", "harbor"),
   feed: b => poke(b, "feed", "harbor"),
-  sound: () => { const on = !world.horn.sound; world.horn.setSound(on); toolbar.setSound(on) },
-  wave: b => { const r = berths.get(selected); if (r && r.run.orchestrator) poke(b, "wave", r.run.orchestrator.id) },
   fireworks: b => { if (selected) poke(b, "fireworks", selected) },
 })
 
@@ -140,9 +137,11 @@ function applyScene(s, snap = false) {
   if (hiddenRafts > 0) more.push(`+${hiddenRafts} more adrift`)
   moreText = more.join(" · "); updateStatus()
 
-  world.tug.setState(s.captain.state); captainState = s.captain.state
+  world.tug.setState(s.captain.state)
   if (snap) world.tug.opacity = captainLook(s.captain.state).opacity
   world.gulls.setCount(s.viewers)
+  world.gulls.setPerches(perchPoints())
+  world.fish.setWidth(harborWidth)
   applySky(false)
   if (!moved && !params.get("cam")) { camera.position.copy(overviewPos()); controls.update() }
   if (!focused && params.get("focus") !== null && shown[+params.get("focus")]) { focused = true; select(shown[+params.get("focus")].id, 0.01) }
@@ -150,7 +149,7 @@ function applyScene(s, snap = false) {
 }
 
 // ---- connection ----
-let connected = false, moreText = "", captainState = "none"
+let connected = false, moreText = ""
 function updateStatus() { overlays.status(connected ? moreText : "reconnecting…") }
 let transport = "sse"
 // The feed tries the event stream first and long-polls where a proxy buffers it (see feed.js).
@@ -186,14 +185,18 @@ let pending = null
 async function poke(button, kind, target) {
   try {
     const r = await fetch("./poke", { method: "POST", headers: { "content-type": "application/json", "x-viewer": viewerId }, body: JSON.stringify({ kind, target }) })
-    if (r.status === 429) toolbar.dim(button)
-  } catch { toolbar.dim(button) }
+    if (r.status === 429 && button) toolbar.dim(button)
+    return r.status
+  } catch { if (button) toolbar.dim(button); return 0 }
 }
 function onPoke(p) {
   if (!world || !p || typeof p.target !== "string") return
-  if (p.kind === "horn") { const h = world.tug.hornPoint(captainState); world.tug.horn(time); world.horn.play(time, h.x, h.z) }
-  else if (p.kind === "feed") world.gulls.feed(time)
-  else if (p.kind === "wave") { for (const r of berths.values()) if (r.waveTarget(p.target, time)) return; for (const r of rafts.values()) if (r.waveTarget(p.target, time)) return }
+  if (p.kind === "feed") world.gulls.feed(time)
+  else if (p.kind === "wave") {
+    const e = [...berths.values(), ...rafts.values()].find(r => r.waveTarget(p.target, time))
+    // on the page that petted it, three bubbles rise from the creature
+    if (e && petted.get(p.target) > performance.now() - 4000 && e.creaturePoint(p.target, proj)) { petted.delete(p.target); world.bubbles.emit(proj.x, proj.y, proj.z, time) }
+  }
   else if (p.kind === "fireworks") {
     const e = berths.get(p.target) || [...berths.values()].find(r => r.run?.orchestrator?.id === p.target)
     if (e) { e.focus(proj); world.fireworks.launch(proj.x, proj.z, time) }
@@ -244,6 +247,7 @@ function tourStep() {
 }
 
 // ---- input ----
+const petted = new Map()   // scene id -> when this page petted it (bubbles rise when the poke comes back)
 let down = null
 canvas.addEventListener("pointerdown", e => { moved = true; down = { x: e.clientX, y: e.clientY, t: performance.now() }; tween = null })
 canvas.addEventListener("pointerup", e => {
@@ -256,14 +260,40 @@ for (const ev of ["pointerdown", "wheel", "keydown"]) window.addEventListener(ev
 window.addEventListener("keydown", e => { if (e.key === "Escape") { stopTour(); overview() } })
 
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2()
-function click(x, y) {
+// The nearest thing under a screen point: { berth, pet } (a berth, and the scene id of the octopus or crab hit, if it was one), or
+// { raft, pet } for a crab on a raft, or null. The creature is told apart first, so the octopus and crabs are petted rather than just selected.
+function pick(x, y) {
   ndc.set((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1)
   ray.setFromCamera(ndc, camera)
-  const hit = ray.intersectObjects([...berths.values()].map(r => r.group), true)[0]
-  let o = hit && hit.object
-  while (o && !o.userData.berth) o = o.parent
-  if (o) { stopTour(); select(o.userData.berth.id) } else { stopTour(); overview() }
+  const hit = ray.intersectObjects([...[...berths.values()].map(r => r.group), ...[...rafts.values()].map(r => r.group)], true)[0]
+  let o = hit && hit.object, pet = null
+  while (o) {
+    if (pet === null && typeof o.userData.petId === "string") pet = o.userData.petId
+    if (o.userData.berth) return { berth: o.userData.berth, pet }
+    if (o.userData.raft) return { raft: o.userData.raft, pet }
+    o = o.parent
+  }
+  return null
 }
+function click(x, y) {
+  const h = pick(x, y)
+  stopTour()
+  if (h && h.pet) { petted.set(h.pet, performance.now()); poke(null, "wave", h.pet).then(st => { if (st !== 204) petted.delete(h.pet) }) }
+  if (h && h.berth) select(h.berth.id); else if (!h || !h.pet) overview()
+}
+// A pointer cursor over anything that can be petted (mouse only; checked at most once a frame).
+let hoverAt = null, hoverBusy = false
+canvas.addEventListener("pointermove", e => {
+  if (e.pointerType !== "mouse" || e.buttons) return
+  hoverAt = { x: e.clientX, y: e.clientY }
+  if (hoverBusy) return
+  hoverBusy = true
+  requestAnimationFrame(() => { hoverBusy = false; const h = hoverAt && pick(hoverAt.x, hoverAt.y); canvas.style.cursor = h && h.pet ? "pointer" : "" })
+})
+canvas.addEventListener("pointerleave", () => { hoverAt = null; canvas.style.cursor = "" })
+// The tops of the cranes and the office roof, where gulls land between flights.
+const OFFICE_ROOF = { x: OFFICE.x - 2.8, y: OFFICE.y + 10.5, z: OFFICE.z }
+const perchPoints = () => [...[...berths.values()].filter(e => e.perchPoint && !e.look.parked), OFFICE_ROOF]
 
 // ---- labels float above each ship's mast ----
 const proj = new THREE.Vector3()
@@ -311,7 +341,7 @@ function step(dt) {
   const glow = 1.4 + 1.6 * env.night
   for (const l of Object.values(world.assets.signal)) l.on.emissiveIntensity = glow
   world.assets.shipOn.emissiveIntensity = 1 + 1.4 * env.night
-  world.horn.update(time); world.fireworks.update(time, dt); world.gulls.update(time, motion)
+  world.fireworks.update(time, dt); world.bubbles.update(time); world.fish.update(time, motion); world.gulls.update(time, motion, dt)
   for (const r of berths.values()) r.update(env)
   for (const r of rafts.values()) r.update(env)
   if (touring) tourStep()
@@ -336,7 +366,7 @@ async function main() {
   const sky = new Sky(scene)
   const port = new Port(kit, scene), tug = new Tug(kit, scene)
   const assets = berthAssets(kit, softTexture())
-  world = { water, sky, port, tug, assets, horn: new Horn(scene), fireworks: new Fireworks(scene), gulls: new Gulls(kit, scene) }
+  world = { water, sky, port, tug, assets, fireworks: new Fireworks(scene), bubbles: new Bubbles(scene, assets.softTex), fish: new Fish(scene), gulls: new Gulls(kit, scene) }
   port.setBerths([])
   applySky(true)
   resize(true)

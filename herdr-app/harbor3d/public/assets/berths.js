@@ -6,9 +6,12 @@ import * as THREE from "three"
 import { part, waveHeight, damp } from "./world.js"
 import {
   pierPosition, cranePosition, signalPosition, octopusPosition, shipPosition, crabLane, flagPosition, deckPosition, deckToBerth, hazePosition,
-  adriftPosition, MAX_WORKERS, MAX_FLAGS, OCTOPUS_SCALE, CRAB_SCALE,
+  adriftPosition, MAX_WORKERS, MAX_FLAGS, MAX_DECK, OCTOPUS_SCALE, CRAB_SCALE, CONTAINER,
 } from "./layout.js"
-import { berthLook, workerLook, containerPlan, flagLook } from "./look.js"
+import { berthLook, workerLook, containerPlan, flagLook, stageOf } from "./look.js"
+import { deckOverflow } from "./layout.js"
+import { crewEvents, crewStances, blockedWorker, faceOctopus, beat, walk, cheer, clap, ROLL_CALL, WAVE_OFF } from "./crew.js"
+import { nextBlink, lidClosed, headTarget, flickerOn, lightDelay } from "./life.js"
 
 const TAU = Math.PI * 2
 const none = () => {}
@@ -33,6 +36,7 @@ export function berthAssets(kit, softTex) {
   return {
     kit, softTex, signal, shipOn, shipOff, frameMat,
     strip: new THREE.BoxGeometry(1, 0.1, 1),
+    pole: new THREE.CylinderGeometry(0.03, 0.03, 1, 6), poleMat: new THREE.MeshStandardMaterial({ color: "#d9dde0", roughness: 1 }),
     smokeMat: new THREE.SpriteMaterial({ map: softTex, color: "#e8ecef", transparent: true, opacity: 0.5, depthWrite: false }),
     hazeMat: new THREE.SpriteMaterial({ map: softTex, color: "#ffffff", transparent: true, opacity: 0.45, depthWrite: false }),
   }
@@ -68,11 +72,30 @@ class Ship {
     this.puffs = Array.from({ length: 7 }, () => { const s = new THREE.Sprite(assets.smokeMat.clone()); s.visible = false; s.raycast = none; this.group.add(s); return { s, age: 9 } })
     this.nextPuff = 0; this.smoke = false
     this.ph = 0
+    this.nightAt = null; this.gateDelay = 0; this.gateOn = true
+    // "+n more": a small flag on the last deck slot's container when more tasks are done than the deck holds
+    this.more = new THREE.Group()
+    const pole = new THREE.Mesh(assets.pole, assets.poleMat); pole.scale.y = 0.9; pole.position.y = 0.45; pole.raycast = none
+    const flag = this.kit.make("flag"); flag.scale.setScalar(0.5); flag.position.set(0.02, 0.8, 0); flag.raycast = none
+    this.kit.meshes(flag, "FlagColor").forEach(m => this.kit.paint(m, "#d4553e"))
+    this.more.add(pole, flag); this.more.visible = false
+    const d = deckPosition(MAX_DECK - 1); this.more.position.set(d.x, d.y + CONTAINER.h, d.z)
+    this.deck.add(this.more)
+  }
+  // Show or hide the "+n more" flag.
+  setMore(on) { this.more.visible = on }
+  // Lights come on one by one at dusk: each ship has its own delay (a fraction of a second), and flickers on within 0.4 s
+  // after it; in daylight the lights follow the look at once.
+  lightGate(t, night) {
+    if (night > 0.5) { if (this.nightAt === null) this.nightAt = t; return flickerOn((t - this.nightAt - this.gateDelay) / 0.4, this.gateDelay + 0.17) === 1 }
+    this.nightAt = null
+    return true
   }
   // Apply the look: size, lights, smoke, flags (`prs` is the run's PR list).
   setLook(look, prs, snap) {
     this.goalScale = look.scale; if (snap) this.scale = look.scale
-    if (this.lit !== look.lights) { this.lit = look.lights; for (const m of this.lights) this.kit.setMat(m, look.lights ? this.a.shipOn : this.a.shipOff) }
+    this.want = look.lights
+    this.showLights(look.lights && this.gateOn)
     this.smoke = look.smoke
     const n = Math.min(prs.length, MAX_FLAGS)
     while (this.flags.length > n) this.mast.remove(this.flags.pop().pivot)
@@ -89,7 +112,13 @@ class Ship {
       f.speed = l.speed
     }
   }
+  showLights(on) {
+    if (this.lit === on) return
+    this.lit = on
+    for (const m of this.lights) this.kit.setMat(m, on ? this.a.shipOn : this.a.shipOff)
+  }
   update(t, dt, motion, night, x, z) {
+    if (motion) { this.gateOn = this.lightGate(t, night); this.showLights(!!this.want && this.gateOn) }
     this.scale += (this.goalScale - this.scale) * damp(dt, 4)
     this.group.scale.setScalar(this.scale)
     this.group.position.y = waveHeight(x, z, t * motion) * 0.4 - 0.08
@@ -127,7 +156,7 @@ export class Berth {
     const pp = pierPosition(); this.pier = k.make("pier"); this.pier.position.set(pp.x, pp.y, pp.z); this.stuff.add(this.pier)
     this.sel = frameOf(assets, -12, 8, 0.5, 35); this.group.add(this.sel)
 
-    this.ship = new Ship(assets); this.ship.ph = this.ph
+    this.ship = new Ship(assets); this.ship.ph = this.ph; this.ship.gateDelay = lightDelay(Math.round(seed(id) * 11), 12)
     const sp = shipPosition(); this.ship.group.position.set(sp.x, 0, sp.z); this.stuff.add(this.ship.group)
     this.shipGoal = { x: sp.x, z: sp.z }
 
@@ -149,7 +178,13 @@ export class Berth {
     this.tent = Array.from({ length: 8 }, (_, i) => part(this.octo, `Tentacle.${i}`))
     this.lids = [part(this.octo, "EyeLid.L"), part(this.octo, "EyeLid.R")]
     this.stuff.add(this.octoRoot)
+    this.octoRoot.userData.petId = null
     this.leanAmt = 0; this.waveUntil = -1
+    // the foreman: what just happened (set by apply, played by update), and the clocks of what is playing
+    this.pending = null; this.rollUntil = -1; this.cheerAt = -100; this.clapAt = -100; this.rolling = false
+    this.stances = []; this.rollAmt = 0; this.head = 0
+    this.blinkAt = -100; this.nextBlinkAt = 2 + seed(id + "b") * 4
+    this.deckSlots = null
     // needs you, seen from afar: a red beacon over the crane top and a red ring spreading round the octopus
     this.beacon = new THREE.Sprite(new THREE.SpriteMaterial({ map: assets.softTex, color: "#ff2a1f", transparent: true, opacity: 0, depthWrite: false }))
     this.beacon.position.set(0, 12.2, 0); this.beacon.visible = false; this.beacon.raycast = none; this.crane.add(this.beacon)
@@ -160,7 +195,7 @@ export class Berth {
     this.cargo = []          // by task index
     this.lift = null; this.queue = []
     this.run = null; this.look = berthLook(null)
-    this.tmp = new THREE.Vector3()
+    this.tmp = new THREE.Vector3(); this.tmp2 = new THREE.Vector3()
   }
   get position() { return this.group.position }
   select(on) { this.sel.visible = on }
@@ -192,15 +227,30 @@ export class Berth {
   // Apply a run from the scene: what changed becomes the new target; `snap` skips the easing.
   apply(run, snap = false) {
     const k = this.kit, look = berthLook(run)
+    // what changed since the last push (not on the first sight, and not when snapping to a still)
+    if (!snap && this.run) {
+      const ev = crewEvents(this.run, run)
+      if (ev.rollCall || ev.done.length || ev.castOff) { const p = this.pending || (this.pending = { rollCall: false, done: false, castOff: false }); p.rollCall ||= ev.rollCall; p.done ||= ev.done.length > 0; p.castOff ||= ev.castOff }
+    }
     this.run = run; this.look = look
     const o = look.orchestrator
-    for (const l of this.lids) { l.scale.setScalar(o.eyelids); l.visible = o.eyelids > 0 }
+    this.octoRoot.userData.petId = run.orchestrator && typeof run.orchestrator.id === "string" ? run.orchestrator.id : null
     k.fade(this.octoRoot, Math.min(o.opacity, 1))
     const sp = shipPosition(look.castOff, look.scale); this.shipGoal = { x: sp.x, z: sp.z }
     if (snap) this.ship.group.position.set(sp.x, 0, sp.z)
     this.ship.setLook(look, run.prs || [], snap)
     this.syncWorkers(run.workers || [], snap)
-    this.syncCargo(containerPlan(run.tasks || [], look.castOff), snap)
+    const plan = containerPlan(run.tasks || [], look.castOff, this.deckSlots)
+    this.deckSlots = plan.map(p => (p.zone === "deck" ? p.index : null))
+    this.ship.setMore(deckOverflow((run.tasks || []).map(stageOf)) > 0)
+    this.syncCargo(plan, snap)
+    this.refreshStances()
+  }
+
+  // What each crab does (from crew.js), by its place in the run's worker list.
+  refreshStances() {
+    this.stances = crewStances(this.run, this.rolling)
+    for (const e of this.workers.values()) e.st = this.stances[e.idx] || { stance: "stand" }
   }
 
   syncCargo(plan, snap) {
@@ -249,10 +299,11 @@ export class Berth {
       if (!e) {
         const root = new THREE.Group(), tilt = new THREE.Group(), model = this.kit.make("crab")
         tilt.add(model); root.add(tilt); this.stuff.add(root)
-        e = { id: w.id, root, tilt, claws: [part(model, "Claw.L"), part(model, "Claw.R")], home: new THREE.Vector3(p.x, p.y, p.z), target: new THREE.Vector3(), scale: snap ? 1 : 0, goal: 1, ph: seed(w.id) * TAU, waveUntil: -1, tiltAmt: 0, yaw: Math.PI / 2 }
+        e = { id: w.id, root, tilt, claws: [part(model, "Claw.L"), part(model, "Claw.R")], home: new THREE.Vector3(p.x, p.y, p.z), target: new THREE.Vector3(), scale: snap ? 1 : 0, goal: 1, ph: seed(w.id) * TAU, waveUntil: -1, tiltAmt: 0, yaw: Math.PI / 2, oz: 0, idx: i, st: { stance: "stand" } }
         this.workers.set(w.id, e)
       }
-      e.goal = 1; e.target.set(p.x, p.y, p.z); e.look = workerLook(w.state)
+      e.goal = 1; e.target.set(p.x, p.y, p.z); e.look = workerLook(w.state); e.idx = i; e.st = this.stances[i] || { stance: "stand" }
+      e.root.userData.petId = w.id
       if (snap) e.home.copy(e.target)
     })
     for (const [id, e] of this.workers) if (!seen.has(id)) e.goal = 0
@@ -264,6 +315,16 @@ export class Berth {
     const e = this.workers.get(id)
     if (e && e.goal) { e.waveUntil = t + 2; return true }
     return false
+  }
+  // The world point of the crane's top, where a gull may perch.
+  perchPoint(out) { const c = cranePosition(); return out.set(this.group.position.x + c.x + 0.5, c.y + 11.5, this.group.position.z + this.craneZ) }
+  // The crab at place i in the worker list.
+  crabAt(i) { for (const e of this.workers.values()) if (e.idx === i && e.goal) return e; return null }
+  // The world place of a creature of this berth by its scene id (bubbles rise from it), or null.
+  creaturePoint(id, out) {
+    if (this.run?.orchestrator?.id === id) return this.octoRoot.getWorldPosition(out).setY(1)
+    const e = this.workers.get(id)
+    return e ? e.root.getWorldPosition(out) : null
   }
 
   // Animate. `env`: { t, dt, camera, motion (1 or 0), night }.
@@ -277,44 +338,86 @@ export class Berth {
     this.ship.group.position.z += (this.shipGoal.z - this.ship.group.position.z) * damp(dt, 1.2)
     this.ship.update(t, dt, m, env.night, gx + this.ship.group.position.x, gz + this.ship.group.position.z)
 
+    // what just happened: a roll call, a cheer, a wave-off (set by apply)
+    if (this.pending) {
+      const p = this.pending; this.pending = null
+      if (p.rollCall) this.rollUntil = t + ROLL_CALL
+      if (p.done) { this.cheerAt = t; this.clapAt = t }
+      if (p.castOff) this.waveUntil = Math.max(this.waveUntil, t + WAVE_OFF)
+    }
+    const rolling = this.rollUntil > t
+    if (rolling !== this.rolling) { this.rolling = rolling; this.refreshStances() }
+
     // octopus
     const op = octopusPosition()
     const bob = o.bob ? o.bob.amp * Math.sin((TAU * t) / o.bob.period + ph) * m : 0
     this.octoRoot.position.y = op.y + bob + waveHeight(gx + op.x, gz + op.z, t * m) * 0.5
     const waving = this.waveUntil > t
+    const blocked = this.run && !look.parked ? blockedWorker(this.run) : -1
     for (let i = 0; i < 8; i++) {
       const tn = this.tent[i]; if (!tn) continue
       const sway = o.sway ? m : 0
       tn.rotation.x = Math.sin(t * 2.6 + i * 0.8 + ph) * 0.2 * sway
       tn.rotation.z = Math.cos(t * 2.1 + i * 1.1 + ph) * 0.2 * sway
     }
+    // working: one tentacle beats slowly, and the crabs walk to the same beat
+    if (o.sway && this.tent[5]) this.tent[5].rotation.x += beat(t, ph) * 0.55 * m
+    // roll call: Tentacle.2 rises and points at the pier (behind the octopus, towards -Z)
+    this.rollAmt += ((rolling ? 1 : 0) - this.rollAmt) * damp(dt, 9)
+    if (this.rollAmt > 0.01 && this.tent[2]) { this.tent[2].rotation.x = 1.5 * this.rollAmt; this.tent[2].rotation.z = 0 }
     if (o.wave && this.tent[0]) this.tent[0].rotation.z = 0.9 + Math.sin(t * 7 + ph) * 0.45
+    // a task became done: clap two tentacles once
+    const cl = clap(t, this.clapAt)
+    if (cl.raise > 0 && this.tent[0] && this.tent[4]) { const a = 2.9 * cl.raise + 0.6 * cl.close; this.tent[0].rotation.z = a; this.tent[4].rotation.z = -a }
     if (waving) {
       this.tent[0].rotation.z = 1.2 + Math.sin(t * 13) * 0.7
       if (this.tent[4]) this.tent[4].rotation.z = -(1.2 + Math.sin(t * 13 + 1) * 0.7)
     }
-    this.leanAmt += ((o.lean ? 0.22 : 0) - this.leanAmt) * damp(dt, 4)
+    // blink every 3 to 6 s (not with reduced motion)
+    if (m && t >= this.nextBlinkAt) { this.blinkAt = t; this.nextBlinkAt = nextBlink(t, seed(this.id + Math.floor(t))) }
+    const lid = Math.max(o.eyelids, m ? lidClosed(t, this.blinkAt) : 0)
+    for (const l of this.lids) { l.scale.setScalar(lid); l.visible = lid > 0.02 }
+    // the head: follows the camera within 50° of its heading, or looks at a blocked crab (and leans towards it)
+    const ox = gx + this.octoRoot.position.x, oz = gz + this.octoRoot.position.z
+    let look3 = camera.position, lookLimit = 0
+    if (blocked >= 0 && !(this.run && this.run.needsYou === true)) { const e = this.crabAt(blocked); if (e) { look3 = this.tmp2.set(gx + e.root.position.x, 0, gz + e.root.position.z); lookLimit = 1 } }
+    const yawGoal = m ? headTarget(look3.x - ox, look3.z - oz, lookLimit ? 2.2 : undefined) : 0
+    this.head += (yawGoal - this.head) * damp(dt, lookLimit ? 3 : 0.8)
+    this.octoRoot.rotation.y = op.angle + this.head
+    const leaning = o.lean || lookLimit
+    this.leanAmt += ((leaning ? 0.22 : 0) - this.leanAmt) * damp(dt, 4)
     if (this.leanAmt > 0.002) {
-      // the camera's direction in the octopus's own frame (it is turned a quarter to face the pier)
-      const wx = camera.position.x - (gx + this.octoRoot.position.x), wz = camera.position.z - (gz + this.octoRoot.position.z)
+      // the direction to look at (the camera, or the blocked crab) in the octopus's own frame
+      const wx = look3.x - ox, wz = look3.z - oz
       const c = Math.cos(this.octoRoot.rotation.y), s = Math.sin(this.octoRoot.rotation.y)
       const dx = wx * c - wz * s, dz = wx * s + wz * c, n = Math.hypot(dx, dz) || 1
       this.octoLean.quaternion.setFromAxisAngle(this.tmp.set(dz / n, 0, -dx / n), this.leanAmt)
     } else this.octoLean.quaternion.identity()
 
-    // crabs: walking ones go up and down their lane, turned the way they go
+    // crabs: what each does comes from crew.js (work in step with the beat, gather, roll call, face the camera, hop)
     for (const [id, e] of this.workers) {
       e.scale += (e.goal - e.scale) * damp(dt, 8)
       if (!e.goal && e.scale < 0.03) { this.stuff.remove(e.root); this.workers.delete(id); continue }
+      const st = e.st, stance = st.stance
+      if (stance === "gather" && st.spot) e.target.set(st.spot.x, e.target.y, st.spot.z)
+      else { const p = crabLane(e.idx); e.target.set(p.x, p.y, p.z) }
       ease(e.home, e.target, dt)
       const l = e.look, tau = TAU / l.period
-      let oz = 0, oy = 0, clawA = 0.2, yaw = Math.PI / 2
-      if (l.motion === "walk") { oz = Math.sin(t * tau + e.ph) * l.amp * m; yaw = Math.cos(t * tau + e.ph) >= 0 ? 0 : Math.PI; clawA = 0.25 + Math.sin(t * 9 + e.ph) * 0.15 * m }
-      else if (l.motion === "hop") oy = Math.abs(Math.sin(t * tau * 0.5 + e.ph)) * l.amp * m
-      else if (l.motion === "claws") clawA = 0.25 + (0.5 + 0.5 * Math.sin(t * tau + e.ph)) * 0.45 * m
+      let oy = 0, clawA = 0.2, yaw = Math.PI / 2, goalOz = 0
+      if (stance === "work") { const w = walk(t, ph, l.amp); goalOz = w.oz * m; yaw = w.yaw; clawA = 0.25 + Math.sin(t * 9 + e.ph) * 0.15 * m }
+      else if (stance === "roll" || stance === "facing") goalOz = e.oz
+      if (stance === "roll") yaw = faceOctopus(e.home.x, e.home.z + e.oz)
+      else if (stance === "facing") yaw = 0
+      else if (stance === "gather") yaw = faceOctopus(e.home.x, e.home.z)
+      if (stance === "work") e.oz = goalOz
+      else e.oz += (goalOz - e.oz) * damp(dt, 6)
+      if (stance === "hop" || (stance === "facing" && st.hop)) oy = Math.abs(Math.sin(t * tau * 0.5 + e.ph)) * 0.25 * m
+      else if (stance === "roll" || stance === "gather" || stance === "facing") clawA = 0.25 + (0.5 + 0.5 * Math.sin(t * 2.4 + e.ph)) * 0.2 * m
+      else if (stance !== "work" && l.motion === "claws") clawA = 0.25 + (0.5 + 0.5 * Math.sin(t * tau + e.ph)) * 0.45 * m
+      oy += cheer(t, this.cheerAt, e.idx)
       const w = e.waveUntil > t
       if (w) { oy = Math.abs(Math.sin(t * 9)) * 0.25; clawA = 0.9 + Math.sin(t * 14) * 0.5 }
-      e.root.position.set(e.home.x, e.home.y + oy, e.home.z + oz)
+      e.root.position.set(e.home.x, e.home.y + oy, e.home.z + e.oz)
       let dy = yaw - e.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); e.yaw += dy * damp(dt, 10)
       e.root.rotation.y = e.yaw
       e.root.scale.setScalar(CRAB_SCALE * Math.max(e.scale, 0.001))
@@ -429,6 +532,7 @@ export class Anchored {
     const look = berthLook(run)
     this.run = run; this.look = look
     this.ship.setLook({ ...look, smoke: false }, run.prs || [], true)
+    this.ship.setMore(deckOverflow((run.tasks || []).map(stageOf)) > 0)
     const plan = containerPlan(run.tasks || []).filter(p => p.zone === "deck")
     while (this.cargo.length > plan.length) this.ship.deck.remove(this.cargo.pop().root)
     plan.forEach((p, i) => {
@@ -458,12 +562,13 @@ export class Raft {
     this.crab = kit.make("crab"); this.crabRoot.add(this.crab); this.group.add(this.crabRoot)
     this.claws = [part(this.crab, "Claw.L"), part(this.crab, "Claw.R")]
     this.scale = 0; this.goal = 1; this.look = workerLook("idle"); this.waveUntil = -1
-    this.group.userData.raft = this
+    this.group.userData.raft = this; this.crabRoot.userData.petId = id
   }
   apply(a, snap) { this.look = workerLook(a.state); if (snap) this.scale = 1 }
   dispose() { this.group.removeFromParent() }
   setSlot(slot) { this.slot = slot; const p = adriftPosition(slot); this.target.set(p.x, 0, p.z); this.angle = p.angle }
   waveTarget(id, t) { if (id === this.id && this.goal) { this.waveUntil = t + 2; return true } return false }
+  creaturePoint(id, out) { return id === this.id ? this.crabRoot.getWorldPosition(out) : null }
   update(env) {
     const { t, dt } = env, m = env.motion
     this.scale += (this.goal - this.scale) * damp(dt, 8)

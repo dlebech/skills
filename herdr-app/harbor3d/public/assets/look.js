@@ -1,7 +1,7 @@
 // What a scene fact looks like. Pure: scene model in, plain descriptions out (numbers, colours as hex,
 // and short strings built only from fixed tables). berths.js and world.js apply them. Every function has
 // a safe default for a value outside its enum, and none throws on odd input.
-import { containerSlots, CARGO_COLORS, MAX_WORKERS } from "./layout.js"
+import { containerSlots, deckAssign, CARGO_COLORS, MAX_WORKERS } from "./layout.js"
 
 const has = (t, k) => typeof k === "string" && Object.prototype.hasOwnProperty.call(t, k)
 const pick = (t, k, d) => (has(t, k) ? t[k] : d)
@@ -51,10 +51,11 @@ export function containerLook(stage, index = 0) {
 
 // Where each task's container goes and what it looks like: [{ zone, index, x, y, z, angle, color, tilt }].
 // zone: yard (planned), pier (implement, review, fix, blocked), deck (done) or none (over a cap).
-// With `castOff` the pier shows no containers.
-export function containerPlan(tasks, castOff = false) {
+// With `castOff` the pier shows no containers. `deckSlots` is the previous plan's deck slot per task
+// (`plan.map(p => p.zone === "deck" ? p.index : null)`), so a done container keeps its place.
+export function containerPlan(tasks, castOff = false, deckSlots = null) {
   const stages = (Array.isArray(tasks) ? tasks : []).map(stageOf)
-  return containerSlots(stages).map((slot, i) => {
+  return containerSlots(stages, deckAssign(deckSlots, stages)).map((slot, i) => {
     const l = containerLook(stages[i], i)
     return { ...slot, color: l.color, tilt: l.tilt, zone: castOff && slot.zone === "pier" ? "none" : slot.zone }
   })
@@ -225,8 +226,9 @@ export function cardModel(run) {
   const counts = taskCounts(r.tasks)
   const notes = []
   if (workers.length > MAX_WORKERS) notes.push(`${workers.length - MAX_WORKERS} more workers are not drawn`)
-  const undrawn = containerSlots((Array.isArray(r.tasks) ? r.tasks : []).map(stageOf)).filter(s => s.zone === "none").length
-  if (undrawn > 0) notes.push(`${undrawn} more task${undrawn === 1 ? " is" : "s are"} not drawn`)
+  const stages = (Array.isArray(r.tasks) ? r.tasks : []).map(stageOf)
+  const undrawn = containerSlots(stages).filter(s => s.zone === "none").length
+  if (undrawn > 0) notes.push(`+${undrawn} more task${undrawn === 1 ? "" : "s"} not drawn`)
   if (prs.length > 4) notes.push(`${prs.length - 4} more PRs are not drawn`)
   return {
     title: typeof r.label === "string" ? r.label : "",

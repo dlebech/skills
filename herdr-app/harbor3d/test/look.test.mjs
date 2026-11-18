@@ -58,6 +58,8 @@ test("container plan: zones by stage, colours, done colour from the task's own i
   assert.deepEqual(c.map(x => x.zone), ["yard", "none", "deck", "none", "deck", "none", "yard"])
   assert.deepEqual(K.containerPlan(null), []); assert.deepEqual(K.containerPlan(undefined), [])
   assert.equal(K.containerPlan(Array(30).fill("done")).filter(x => x.zone === "none").length, 6, "deck takes 24")
+  const stay = K.containerPlan(["done", "planned"]), later = K.containerPlan(["done", "done"], false, stay.map(x => x.zone === "deck" ? x.index : null))
+  assert.deepEqual(later.map(x => x.index), [0, 1], "the first done task keeps slot 0")
 })
 
 test("flags: colour by PR state, red checks make it red, running checks wave twice as fast", () => {
@@ -196,7 +198,7 @@ test("basic fixture, shared mode: no sub, PRs without a label, workers are Crab 
 })
 test("card: caps are announced, odd values get safe words", () => {
   const m = K.cardModel(run({ workers: Array.from({ length: 12 }, () => ({ id: "x", state: "weird", kind: "weird" })), tasks: Array(26).fill("done"), prs: Array(6).fill({ state: "weird", checks: "weird" }), type: "zzz", size: "Q" }))
-  assert.deepEqual(m.notes, ["4 more workers are not drawn", "2 more tasks are not drawn", "2 more PRs are not drawn"])
+  assert.deepEqual(m.notes, ["4 more workers are not drawn", "+2 more tasks not drawn", "2 more PRs are not drawn"])
   assert.equal(m.workers[0], "Crab 1 · agent · idle"); assert.equal(m.prs[0], "PR · unknown · checks none"); assert.equal(m.type, "Run"); assert.equal(m.size, "M")
   assert.doesNotThrow(() => K.cardModel(null))
 })

@@ -110,12 +110,12 @@ test("private: Host and Origin checks", async () => {
       assert.equal((await raw(s.port, "/", { headers: { host } })).statusCode, 403, String(host))
     assert.equal((await raw(s.port, "/", { headers: { host: `localhost:${s.port}` } })).statusCode, 200)
     assert.equal((await raw(s.port, "/", { headers: { host: `127.0.0.1:${s.port}`, origin: "http://evil.example" } })).statusCode, 200, "Origin is only checked on POST")
-    const ok = (origin, id) => post(s.url, { kind: "horn", target: "harbor" }, { origin, "x-viewer": id })
+    const ok = (origin, id) => post(s.url, { kind: "feed", target: "harbor" }, { origin, "x-viewer": id })
     assert.equal((await ok("http://evil.example", "a".repeat(16))).status, 403)
     assert.equal((await ok("null", "b".repeat(16))).status, 403)
     assert.equal((await ok(`http://127.0.0.1:${s.port}`, "c".repeat(16))).status, 204)
     assert.equal((await ok(`http://localhost:${s.port}`, "d".repeat(16))).status, 204)
-    assert.equal((await post(s.url, { kind: "horn", target: "harbor" }, { "x-viewer": "e".repeat(16) })).status, 204, "no Origin is fine")
+    assert.equal((await post(s.url, { kind: "feed", target: "harbor" }, { "x-viewer": "e".repeat(16) })).status, 204, "no Origin is fine")
   } finally { await s.close() }
 })
 
@@ -136,7 +136,7 @@ test("poke: 204 and broadcast to every viewer, rebuilt from validated values", a
     // worker, orchestrator, adrift and "harbor" are valid targets too
     const w = scene.runs[0].workers[0].id
     assert.equal((await post(s.url, { kind: "wave", target: w }, { "x-viewer": "2".repeat(16) })).status, 204)
-    assert.equal((await post(s.url, { kind: "horn", target: "harbor" }, { "x-viewer": "3".repeat(16) })).status, 204)
+    assert.equal((await post(s.url, { kind: "feed", target: "harbor" }, { "x-viewer": "3".repeat(16) })).status, 204)
     assert.equal((await post(s.url, { kind: "feed", target: scene.adrift[0].id }, { "x-viewer": "4".repeat(16) })).status, 204)
   } finally { a.close(); b.close(); await s.close() }
 })
@@ -148,12 +148,12 @@ test("poke: unknown kind, unknown target, bad bodies and wrong content are 400",
     const id = (await (async () => { const e = await sse(s.url + "events"); const sc = (await e.waitFor(x => x.event === "scene")).data; e.close(); return sc })()).runs[0].id
     let n = 0
     const go = (body, headers = {}) => post(s.url, body, { "x-viewer": (n++).toString(16).padStart(16, "0"), ...headers })
-    for (const body of [{ kind: "nope", target: id }, { kind: "horn", target: "r0000" }, { kind: "horn" }, { target: id }, { kind: ["horn"], target: id }, { kind: "horn", target: [id] },
-      { kind: "horn", target: { id } }, { kind: "constructor", target: id }, { kind: "__proto__", target: id }, "[]", "null", "42", '"horn"', "{bad", ""])
+    for (const body of [{ kind: "horn", target: id }, { kind: "nope", target: id }, { kind: "feed", target: "r0000" }, { kind: "feed" }, { target: id }, { kind: ["feed"], target: id }, { kind: "feed", target: [id] },
+      { kind: "feed", target: { id } }, { kind: "constructor", target: id }, { kind: "__proto__", target: id }, "[]", "null", "42", '"feed"', "{bad", ""])
       assert.equal((await go(body)).status, 400, JSON.stringify(body))
-    assert.equal((await go({ kind: "horn", target: id }, { "content-type": "text/plain" })).status, 400)
-    assert.equal((await fetch(s.url + "poke", { method: "POST", headers: { "x-viewer": "f".repeat(16) }, body: JSON.stringify({ kind: "horn", target: id }) })).status, 400, "no content-type")
-    assert.equal((await go({ kind: "horn", target: id }, { "content-type": "application/json; charset=utf-8" })).status, 204)
+    assert.equal((await go({ kind: "feed", target: id }, { "content-type": "text/plain" })).status, 400)
+    assert.equal((await fetch(s.url + "poke", { method: "POST", headers: { "x-viewer": "f".repeat(16) }, body: JSON.stringify({ kind: "feed", target: id }) })).status, 400, "no content-type")
+    assert.equal((await go({ kind: "feed", target: id }, { "content-type": "application/json; charset=utf-8" })).status, 204)
     assert.equal((await fetch(s.url + "poke")).status, 405)
   } finally { await s.close() }
 })
@@ -161,7 +161,7 @@ test("poke: unknown kind, unknown target, bad bodies and wrong content are 400",
 test("poke: a body over 200 bytes is refused and the connection dropped", async () => {
   const s = await start()
   try {
-    const big = JSON.stringify({ kind: "horn", target: "harbor", pad: "x".repeat(300) })
+    const big = JSON.stringify({ kind: "feed", target: "harbor", pad: "x".repeat(300) })
     const r = await post(s.url, big, { "x-viewer": "a".repeat(16) }).then(r => r.status, () => "reset")
     assert.ok(r === 400 || r === "reset", String(r))
     // chunked, no content-length
@@ -171,7 +171,7 @@ test("poke: a body over 200 bytes is refused and the connection dropped", async 
       req.write("{" + " ".repeat(250)); setTimeout(() => req.write(" ".repeat(250)), 20)
     })
     assert.ok(res === 400 || res === "reset", String(res))
-    assert.equal((await post(s.url, { kind: "horn", target: "harbor" }, { "x-viewer": "c".repeat(16) })).status, 204, "the server is fine afterwards")
+    assert.equal((await post(s.url, { kind: "feed", target: "harbor" }, { "x-viewer": "c".repeat(16) })).status, 204, "the server is fine afterwards")
   } finally { await s.close() }
 })
 
@@ -191,7 +191,7 @@ test("poke rate limit: 1 per second per viewer, 5 per second in all (injected cl
   const clock = { t: 5000 }
   const s = await start({ now: () => clock.t })
   try {
-    const p = id => post(s.url, { kind: "horn", target: "harbor" }, { "x-viewer": id.repeat(16) }).then(r => r.status)
+    const p = id => post(s.url, { kind: "feed", target: "harbor" }, { "x-viewer": id.repeat(16) }).then(r => r.status)
     assert.equal(await p("a"), 204)
     assert.equal(await p("a"), 429, "same viewer within a second")
     assert.deepEqual([await p("b"), await p("c"), await p("d"), await p("e")], [204, 204, 204, 204])
@@ -200,8 +200,8 @@ test("poke rate limit: 1 per second per viewer, 5 per second in all (injected cl
     assert.equal(await p("a"), 204)
     // without x-viewer (or with a malformed one) the key is the remote address
     clock.t += 1001
-    assert.equal(await post(s.url, { kind: "horn", target: "harbor" }, { "x-viewer": "ZZ" }).then(r => r.status), 204)
-    assert.equal(await post(s.url, { kind: "horn", target: "harbor" }).then(r => r.status), 429)
+    assert.equal(await post(s.url, { kind: "feed", target: "harbor" }, { "x-viewer": "ZZ" }).then(r => r.status), 204)
+    assert.equal(await post(s.url, { kind: "feed", target: "harbor" }).then(r => r.status), 429)
   } finally { await s.close() }
 })
 

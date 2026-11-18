@@ -9,7 +9,7 @@ import zlib from "node:zlib"
 import { promisify } from "node:util"
 import { sanitize } from "./sanitize.js"
 
-export const POKE_KINDS = ["horn", "wave", "feed", "fireworks"]
+export const POKE_KINDS = ["wave", "feed", "fireworks"]
 const MAX_BODY = 200
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".glb": "model/gltf-binary", ".png": "image/png", ".svg": "image/svg+xml", ".json": "application/json; charset=utf-8" }
 export const MODELS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "models", "out")

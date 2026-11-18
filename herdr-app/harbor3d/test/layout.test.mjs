@@ -69,11 +69,11 @@ test("fixed local positions from the design", () => {
 
 test("yard: 4 across at x -3, -0.4, 2.2, 4.8, 2 high, then a second row behind; 24 at most, all behind the quay edge", () => {
   assert.deepEqual([0, 1, 2, 3].map(i => L.yardPosition(i).x), [-3, -0.4, 2.2, 4.8])
-  assert.deepEqual([0, 3, 4, 7].map(i => L.yardPosition(i).y), [1.2, 1.2, 2.3, 2.3])
-  assert.equal(L.yardPosition(7).z, -5); assert.equal(L.yardPosition(8).z, -6.6); assert.equal(L.yardPosition(8).y, 1.2)
-  assert.equal(L.yardPosition(23).z, -8.2)
+  assert.deepEqual([0, 3, 4, 7].map(i => Math.round(L.yardPosition(i).y * 100) / 100), [1.2, 1.2, 2.35, 2.35])
+  assert.equal(L.yardPosition(7).z, -5); assert.equal(L.yardPosition(8).z, -7.6); assert.equal(L.yardPosition(8).y, 1.2)
+  assert.equal(L.yardPosition(23).z, -10.2)
   assert.equal(L.yardPosition(24), null); assert.equal(L.yardPosition(-1), null)
-  for (let i = 0; i < 24; i++) { const p = L.yardPosition(i); assert.ok(p.z <= -5 && p.z >= -9) }
+  for (let i = 0; i < 24; i++) { const p = L.yardPosition(i); assert.ok(p.z <= -5 && p.z >= -10.2) }
   const seen = new Set(Array.from({ length: 24 }, (_, i) => JSON.stringify(L.yardPosition(i)))); assert.equal(seen.size, 24)
 })
 
@@ -81,7 +81,7 @@ test("in progress: one row on the pier's west side (z 4, 6.8, 9.6, then past the
   assert.deepEqual([0, 1, 2, 3, 4, 5].map(i => L.progressPosition(i).z), [4, 6.8, 9.6, 17.4, 20.2, 23])
   for (let i = 0; i < 6; i++) assert.ok(Math.abs(L.progressPosition(i).z - 14) > 2.7, "clear of the crane legs")
   for (let i = 0; i < 6; i++) { assert.equal(L.progressPosition(i).x, -7.2); assert.equal(L.progressPosition(i).y, 1.2) }
-  assert.equal(L.progressPosition(6).z, 4); assert.equal(L.progressPosition(6).y, 2.3)
+  assert.equal(L.progressPosition(6).z, 4); close(L.progressPosition(6).y, 2.35)
   assert.equal(L.progressPosition(12), null)
 })
 
@@ -198,4 +198,66 @@ test("a label is under the card when its box, not just its centre, touches the c
   assert.equal(L.labelUnderCard(l(1000, 0), card), false, "above the card: the box (y - h .. y) ends at 0, more than 8 px above the card")
   assert.equal(L.labelUnderCard(l(1000, 638), card), true, "box top 606 is inside the 8 px margin below the card")
   assert.equal(L.labelUnderCard(l(1000, 300), null), false, "no card")
+})
+
+// ---- containers never touch ----
+const SHIPS = { S: 0.8, M: 1, L: 1.2, XL: 1.4 }
+// Every pair of boxes must be apart by 4 cm sideways (x or z) or 2 cm up (y); returns the first offending pair.
+function touching(boxes) {
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], b = boxes[j]
+    const apart = [0, 1, 2].map(k => Math.max(a.min[k] - b.max[k], b.min[k] - a.max[k]))
+    if (apart[0] < 0.04 && apart[2] < 0.04 && apart[1] < 0.02) return [a, b]
+  }
+  return null
+}
+const shuffled = (n, seed) => { const a = Array.from({ length: n }, (_, i) => i); let s = seed; for (let i = n - 1; i > 0; i--) { s = (s * 16807) % 2147483647; const j = s % (i + 1); [a[i], a[j]] = [a[j], a[i]] } return a }
+
+test("containerBoxes: for every ship size and 1 to 40 done tasks no two containers touch", () => {
+  for (const [size, scale] of Object.entries(SHIPS)) for (let n = 1; n <= 40; n++) {
+    const boxes = L.containerBoxes(Array(n).fill("done"), { scale })
+    assert.equal(boxes.length, Math.min(n, 24), `${size} ${n}`)
+    assert.equal(touching(boxes), null, `${size} ${n} done`)
+  }
+})
+
+test("containerBoxes: tasks that become done in any order take distinct slots and never touch, at every size", () => {
+  for (const [size, scale] of Object.entries(SHIPS)) for (const seed of [3, 17, 99, 1234]) for (const n of [5, 12, 13, 24, 30, 40]) {
+    const order = shuffled(n, seed)
+    let stages = Array(n).fill("planned"), slots = null
+    for (const t of order) {
+      stages = stages.map((s, i) => (i === t ? "done" : s))
+      slots = L.deckAssign(slots, stages)
+      const used = slots.filter(s => s !== null)
+      assert.equal(new Set(used).size, used.length, "a slot is used twice")
+      assert.equal(used.length, Math.min(stages.filter(s => s === "done").length, 24))
+      // tier 2 never has a gap under it
+      for (const s of used) if (s >= 12) assert.ok(used.includes(s - 12), "a floating container")
+      assert.equal(touching(L.containerBoxes(stages, { scale, deckSlots: slots })), null, `${size} ${n} seed ${seed}`)
+    }
+  }
+})
+
+test("deckAssign: a done task keeps its slot when others finish, a freed slot is reused, over 24 gets null", () => {
+  let s = L.deckAssign(null, ["planned", "done", "planned", "done"]); assert.deepEqual(s, [null, 0, null, 1])
+  s = L.deckAssign(s, ["done", "done", "planned", "done"]); assert.deepEqual(s, [2, 0, null, 1], "the first two keep 0 and 1")
+  s = L.deckAssign(s, ["planned", "done", "done", "done"]); assert.deepEqual(s, [null, 0, 2, 1], "task 0's slot is freed, task 2 takes the lowest free one")
+  const full = L.deckAssign(null, Array(26).fill("done")); assert.equal(full.filter(x => x === null).length, 2)
+  assert.equal(L.deckOverflow(Array(26).fill("done")), 2); assert.equal(L.deckOverflow(Array(24).fill("done")), 0)
+})
+
+test("containerBoxes: the yard and the pier rows do not touch either, in every task mix", () => {
+  const mixes = []
+  for (let n = 1; n <= 40; n++) { mixes.push(Array(n).fill("planned")); mixes.push(Array(n).fill("implement")); mixes.push(Array.from({ length: n }, (_, i) => ["planned", "fix", "done", "blocked", "review"][i % 5])) }
+  for (const m of mixes) for (const castOff of [false, true]) for (const slot of [0, 1, 2]) {
+    const boxes = L.containerBoxes(m, { scale: 1.2, castOff, slot })
+    assert.equal(touching(boxes), null, m.join(","))
+    for (const b of boxes) if (b.zone === "pier") assert.ok(b.min[0] >= L.berthPosition(slot).x + L.PIER.x - 2 && b.max[0] <= L.berthPosition(slot).x + L.PIER.x + 2, "on the pier")
+  }
+})
+
+test("containerBoxes: the pier row stays on the pier and the yard behind the quay edge", () => {
+  const b = L.containerBoxes([...Array(12).fill("implement"), ...Array(24).fill("planned")], { slot: 0 })
+  for (const x of b.filter(y => y.zone === "pier")) { assert.ok(x.min[2] >= -10 && x.max[2] <= -10 + 26, "within the pier's length") }
+  for (const x of b.filter(y => y.zone === "yard")) assert.ok(x.max[2] <= -10 - 3.7 && x.min[2] >= -10 - 14, "on the quay")
 })

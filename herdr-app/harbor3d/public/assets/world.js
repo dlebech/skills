@@ -2,8 +2,9 @@
 // water, sky and light, the land with the quay, office, warehouses, floodlights and breakwater, and the tug.
 import * as THREE from "three"
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
-import { TUG_MOORED, OFFICE, WAREHOUSES, SILO, QUAY_Z, QUAY_TOP, SLOT_W, quaySegments, floodlightPositions, breakwaterWidth, rockPositions, markerPositions, buoyPositions, clutterStacks, tugPosition, offsetRange } from "./layout.js"
+import { TUG_MOORED, OFFICE, WAREHOUSES, SILO, QUAY_Z, QUAY_TOP, SLOT_W, quaySegments, floodlightPositions, breakwaterWidth, rockPositions, markerPositions, buoyPositions, clutterStacks, tugPosition, offsetRange, TIER } from "./layout.js"
 import { captainLook } from "./look.js"
+import { flickerOn, lightDelay } from "./life.js"
 
 export const MODEL_NAMES = ["octopus", "crab", "gull", "buoy", "flag", "driftwood", "ship", "container", "crane", "pier", "quay", "signal", "tug", "office", "warehouse", "silo", "floodlight", "marker", "rock"]
 const TAU = Math.PI * 2
@@ -204,7 +205,7 @@ const GREY_STACKS = ["#ffffff", "#e6e9ec", "#cfd5da", "#f2f4f5"]
 export class Port {
   constructor(kit, scene) {
     this.kit = kit; this.scene = scene
-    this.key = null
+    this.key = null; this.nightAt = null
     this.landMat = new THREE.MeshStandardMaterial({ color: "#8b9398", roughness: 1, flatShading: true })
     this.fixed = new THREE.Group()
     const place = (name, p, rot = 0) => { const o = kit.make(name); o.position.set(p.x, p.y, p.z); o.rotation.y = rot; this.fixed.add(o); return o }
@@ -215,7 +216,7 @@ export class Port {
     place("silo", SILO)
     // clutter: a few grey container stacks behind the quay, in fixed spots
     const stacks = []
-    for (const s of clutterStacks()) for (let c = 0; c < s.cols; c++) for (let t = 0; t < s.tiers; t++) stacks.push({ x: s.x + c * 2.6, y: QUAY_TOP + t * 1.1, z: s.z, rot: 0 })
+    for (const s of clutterStacks()) for (let c = 0; c < s.cols; c++) for (let t = 0; t < s.tiers; t++) stacks.push({ x: s.x + c * 2.6, y: QUAY_TOP + t * TIER, z: s.z, rot: 0 })
     const clutter = instanced(kit, "container", "Body", stacks, GREY_STACKS)
     this.fixed.add(clutter)
     // a low skyline far behind the quay and two more silos and warehouses, so the horizon is not empty
@@ -273,7 +274,11 @@ export class Port {
   }
   update(t, night, motion) {
     this.radar.rotation.y = t * 1.2 * motion
-    if (this.officeLights) this.officeLights.emissiveIntensity = 0.3 + 1.6 * night
+    // at dusk the office windows come on in four steps within a second, flickering, instead of all at once
+    if (night > 0.5) { if (this.nightAt === null) this.nightAt = t } else this.nightAt = null
+    let lit = 1
+    if (this.nightAt !== null && motion) { lit = 0; for (let i = 0; i < 4; i++) lit += flickerOn((t - this.nightAt - lightDelay(i, 4) * 0.5) / 0.4, 0.13 + i * 0.21) / 4; lit = 0.15 + 0.85 * lit }
+    if (this.officeLights) this.officeLights.emissiveIntensity = (0.3 + 1.6 * night) * lit
     for (const m of this.lampMats) m.emissiveIntensity = 0.2 + 2.2 * night
     this.glowMat.opacity = 0.75 * night
     for (const m of this.markers) m.mat.emissiveIntensity = 0.4 + night * (1.2 + 1.6 * (Math.sin(t * 3 + m.ph) > 0 ? 1 : 0))
@@ -297,15 +302,12 @@ export class Tug {
     this.wake.position.y = 0.1; this.wake.visible = false; this.wake.raycast = () => {}
     this.group.add(this.wake)
     scene.add(this.group)
-    this.look = captainLook("none"); this.opacity = 0.4; this.lap = 0; this.W = 36; this.lurchAt = -10
+    this.look = captainLook("none"); this.opacity = 0.4; this.lap = 0; this.W = 36;
     this.pos = new THREE.Vector3(TUG_MOORED.x, 0, TUG_MOORED.z); this.angle = TUG_MOORED.angle
     kit.fade(this.model, 0.4)
   }
   setState(state) { this.look = captainLook(state) }
   setWidth(W) { this.W = W }
-  horn(t) { this.lurchAt = t }
-  // Where the horn's ring starts: the tug, or the quay in front of the office when there is no captain.
-  hornPoint(state) { return state === "none" ? { x: 0, z: QUAY_Z } : { x: this.pos.x, z: this.pos.z } }
   update(t, dt, motion, night) {
     const l = this.look
     let tx = TUG_MOORED.x, tz = TUG_MOORED.z, ta = TUG_MOORED.angle
@@ -313,9 +315,8 @@ export class Tug {
     const k = damp(dt, l.patrol ? 3 : 1.2)
     this.pos.x += (tx - this.pos.x) * k; this.pos.z += (tz - this.pos.z) * k
     let da = ta - this.angle; da = Math.atan2(Math.sin(da), Math.cos(da)); this.angle += da * k
-    const lt = t - this.lurchAt, lurch = lt >= 0 && lt < 1.2 ? Math.exp(-lt * 3) : 0
-    this.group.position.set(this.pos.x, waveHeight(this.pos.x, this.pos.z, t * motion) * 0.6 - 0.1 - lurch * 0.1 * Math.sin(lt * 9), this.pos.z)
-    this.group.rotation.set(Math.cos(t * 0.8) * 0.02 * motion, this.angle, Math.sin(t * 0.9) * 0.03 * motion + lurch * 0.1 * Math.sin(lt * 11))
+    this.group.position.set(this.pos.x, waveHeight(this.pos.x, this.pos.z, t * motion) * 0.6 - 0.1, this.pos.z)
+    this.group.rotation.set(Math.cos(t * 0.8) * 0.02 * motion, this.angle, Math.sin(t * 0.9) * 0.03 * motion)
     this.wake.visible = l.patrol
     this.lampMat.emissiveIntensity = 0.6 + 1.6 * night
     if (Math.abs(this.opacity - l.opacity) > 0.01) { this.opacity += (l.opacity - this.opacity) * damp(dt, 3); this.kit.fade(this.model, Math.abs(this.opacity - 1) < 0.02 ? 1 : Math.round(this.opacity * 20) / 20) }
