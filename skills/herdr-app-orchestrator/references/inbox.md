@@ -19,6 +19,10 @@ From Harbormaster's Close or `herdr-app-captain` ("The user closed this run… a
 
 Ask for changes, on a run that was ready to merge. Set the status back to running (`<skill-dir>/scripts/set-status.sh <run-directory> running`), plan the changes as tasks in `plan.md` with their Proof lines, run them as usual, and finish again with a new report (the skill's section 8), so the proof is read anew.
 
+## re-review asked from Harbormaster: …
+
+Harbormaster's Re-review first, asked before the user requests a peer's review because the final AI review is behind the branch or missing. Set the status to running, run the final review again on the integration branch as it is now, as [finish.md](finish.md) describes (fix what it finds as tasks under the normal review rules), append the new `Reviewed:` line to `proof.md`, finish again, and rename the message `.handled`. Never merge.
+
 ## set autonomy to L<n> / set proof tier to T<n>
 
 Harbormaster's level tags. Apply it with `set-status.sh --autonomy L<n>`, or the plan's `Proof tier: T<n> (set by user)` line, log it in `decisions.md`, and act on it. A higher tier on a finished run means proving its done tasks to it, which sets the run back to running.

@@ -244,7 +244,7 @@ a finished run means proving its done tasks to the new tier, which sets the run 
 Until `status.json` or `plan.md` shows the level, while the message is unhandled, the tag reads
 `T3 requested…`. A level request does not count as an answer to an open `question.md`. Neither
 does an ask to prove (`prove C<n> to T<n>: …`, see [Accepting a claim](#accepting-a-claim-or-asking-for-it)),
-an ask what is blocking, an ask to address review comments or an ask for changes (below).
+an ask what is blocking, an ask to address review comments, an ask for changes or an ask for another review (below).
 
 ### Asking for changes
 
@@ -286,6 +286,25 @@ The orchestrator looks at what its run waits on. If it needs the user, it asks w
 its progress line with `set-status.sh --progress`, so the user sees it move. Either way it renames
 the message `.handled`. Until the run's progress line, task states or status change, or while the
 message is unhandled, the row reads `asked…`.
+
+### Asking for another review
+
+A finished run in the peer flow whose PR still has no reviewer shows **Request review** in its
+Needs-you box. When the run's final AI review is behind the branch (commits came after the latest
+`Reviewed:` line) or there is none, the box says so in amber and offers **Re-review first** beside
+it. It writes a message (source `harbormaster-review`, woken like an answer) whose first line starts
+`re-review asked from Harbormaster:`:
+
+```
+re-review asked from Harbormaster: the final review is 2 commits behind 3f9a1c2
+Asked from Harbormaster: run the final review again on the integration branch as it is now, fix what it finds as tasks under the normal review rules, update proof.md's Reviewed line, then finish again. Never merge.
+```
+
+(`…: there is no final review of the branch yet` when the run has no `Reviewed:` line for the
+branch.) The orchestrator sets the status back to `running`, runs the final review again as
+[finish.md](finish.md) describes, appends the new `Reviewed:` line, finishes again and renames the
+message `.handled`. Until the run's status or `Reviewed:` line changes, or while the message is
+unhandled, the button reads `asked…`. Like the other asks it answers no open `question.md`.
 
 ### Addressing review comments
 

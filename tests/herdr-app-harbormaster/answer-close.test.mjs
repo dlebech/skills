@@ -210,7 +210,7 @@ test("close: an orchestrator that is gone fails the wake as before, never report
 });
 
 test("a close has no unread prefix: NOT_ANSWERS is the string it always was", () => {
-  assert.equal(NOT_ANSWERS, "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?|address comments on |changes asked from Harbormaster: )");
+  assert.equal(NOT_ANSWERS, "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?|address comments on |changes asked from Harbormaster: |re-review asked from Harbormaster:)");
 });
 
 test("answer: an after that throws leaves it answered and shows no error", async () => {

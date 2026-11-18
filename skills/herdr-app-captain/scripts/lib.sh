@@ -232,12 +232,12 @@ unhandled_messages() {
 # from its Proof rows), asks what is blocking ("what is blocking? …", from a stalled run's
 # Crew row or pane) and asks to address review comments ("address comments on <PR url>: ask",
 # from a run's card or pane; run-files.md) and asks for changes ("changes asked from Harbormaster: …",
-# from a ready run's box), which answer nothing. Harbormaster's inbox.js (its kind table builds
+# from a ready run's box) and asks to review again ("re-review asked from Harbormaster: …", from the Needs-you box's Re-review first), which answer nothing. Harbormaster's inbox.js (its kind table builds
 # NOT_ANSWERS) uses the same pattern; tests/herdr-app-harbormaster/inbox.test.mjs fails if the two differ.
 answer_messages() {
   local f
   unhandled_messages "$1" | while IFS= read -r f; do
-    head -n 1 "$f" | grep -qE '^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\?|address comments on |changes asked from Harbormaster: )' || echo "$f"
+    head -n 1 "$f" | grep -qE '^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\?|address comments on |changes asked from Harbormaster: |re-review asked from Harbormaster:)' || echo "$f"
   done
 }
 

@@ -20,6 +20,7 @@ import { AUTONOMY, TIER_TEXT, requestLine } from "./levels.js";
 
 export const BLOCKING = /^what is blocking\?/;
 export const CHANGES = /^changes asked from Harbormaster: /;
+export const REREVIEW = /^re-review asked from Harbormaster:/;
 
 // Whether a "what is blocking?" message is among the first lines of the run's unhandled
 // inbox messages (data.js reads them with the level requests).
@@ -28,6 +29,20 @@ export const blockingPending = (lines) => (lines ?? "").split("\n").some((l) => 
 // Whether an "Ask for changes" message is among those first lines: the run is being changed,
 // not ready.
 export const changesPending = (lines) => (lines ?? "").split("\n").some((l) => CHANGES.test(l.trim()));
+
+// Whether a "Re-review first" message is among those first lines: the run is about to review again.
+export const rereviewPending = (lines) => (lines ?? "").split("\n").some((l) => REREVIEW.test(l.trim()));
+
+// The Re-review first message: the final review is `behind` commits behind the branch (`sha`, its
+// head, when known), or there is none; then what to do. Its first line is what rereviewPending reads.
+export function rereviewRequest({ behind = null, sha = null } = {}) {
+  const head = behind > 0
+    ? `the final review is ${behind} ${behind === 1 ? "commit" : "commits"} behind ${sha ? String(sha).slice(0, 7) : "the branch"}`
+    : "there is no final review of the branch yet";
+  return `re-review asked from Harbormaster: ${head}\n`
+    + "Asked from Harbormaster: run the final review again on the integration branch as it is now, fix what it finds as tasks under the normal review rules, "
+    + "update proof.md's Reviewed line, then finish again. Never merge.";
+}
 
 // The message, in the user's voice: what Harbormaster sees, then what to do.
 // `quiet` is how long the run has been quiet ("34m"), `step` its current step with its age
@@ -204,6 +219,13 @@ export const KINDS = {
     sig: null,
     unread: (run) => Boolean(run?.changesAsked),
   },
+  rereview: {
+    source: "harbormaster-review", prefix: "re-review asked from Harbormaster:", family: "rereview",
+    build: (run, { behind = null, sha = null }) => rereviewRequest({ behind, sha }),
+    // Asked until the run's status or its Reviewed lines change, or the message is read.
+    sig: (run) => rereviewSig(run),
+    unread: (run) => Boolean(run?.rereviewAsked),
+  },
   answer: {
     source: "harbormaster", prefix: null, family: "answer",
     build: (run, { title, answer, free = "" }) => answerMessage(title, answer, free),
@@ -231,6 +253,9 @@ export const NOT_ANSWERS = `^(${PREFIXES.join("|")})`;
 // What the run looked like when a blocking ask was made: its progress line, plan task states and
 // status. The ask reads "asked…" until this changes (or while its message is still unread).
 export const askSig = (run) => `${stepSig(run)}\n${run?.statusLine ?? ""}`;
+
+// What a re-review ask looked like when it was made: the run's status line and its Reviewed lines.
+export const rereviewSig = (run) => `${run?.statusLine ?? ""}\n${JSON.stringify((run?.proof?.md?.reviewed ?? []).map((x) => [x.sha, x.what, x.result]))}`;
 
 // ---- sending ----
 

@@ -15,7 +15,7 @@ import { reviewError } from "./reviews.js";
 import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
 import { openNewRun, openStartCaptain, startReview, reviewStarting } from "./newrun.js";
-import { primaryOf, isMergeAsk } from "./needaction.js";
+import { primaryOf, isMergeAsk, requestingFor } from "./needaction.js";
 import { claimsAsk, checksLine, reviewedLine, withSaid, withAsked, claimActions } from "./claims.js";
 import {
   attOf, runStatus, levelTags, runTypeTag, statusDot, actionButton, closeAllControl, runFacts, needItemsOf,
@@ -275,6 +275,8 @@ function boxActions(m, x, f, items) {
     const input = a.input && div().id(`${key}-reply`).on_click((_e, cx) => cx.stop_propagation()).child(a.input);
     return [more ? all : folded, input || null, a.note || null, confirm].filter(Boolean);
   }
+  // Request review was clicked: the picker opens in the box, in place of the one button.
+  if (requestingFor(view, r, items)) return [...needLines(view, t, r, f, items, "sidebar"), confirm].filter(Boolean);
   const p = primaryOf(items);
   const main = p ? needButton(view, t, r, f, items[p.i].actions[p.j], `need-sidebar-${r.key}-${p.i}-${p.j}`, "sidebar", true) : null;
   // "N more" counts the buttons the unfolded box draws: not an "asked…" note, nor one that draws nothing.

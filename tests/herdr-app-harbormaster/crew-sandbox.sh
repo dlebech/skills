@@ -41,6 +41,9 @@
 #                   approved by a colleague                               -> approved — merge
 #   approved-plan-open  running, folder "snevagten" (peer), 1/2 tasks done, fake-two/api#44 (approved, no comments)
 #                       -> Needs you "approved · plan open", the box: "merge once the plan is done (1/2 tasks)"
+#   peer-ask      finished, folder "snevagten" (peer), fake-two/api#72 with no reviewer, 5 claims, its Reviewed line two commits
+#                 behind -> request review, the AI-review caveat, Re-review first and the picker (mfalkenbrink, martinioyo,
+#                 anna from fake-gh.sh); a chip's `gh pr edit --add-reviewer` goes to <scratch>/gh-calls.txt only
 #   red-ci        finished, cli/cli#14927 (a public PR with a failing check) -> red CI, then
 #                 review proof → merge
 #   review-proof  finished, dlebech/wapi-beatbox#1, proof.md T2 1/2 pass  -> review proof → merge
@@ -240,6 +243,13 @@ make_runs() {
     --pr fake-two/api https://github.com/fake-two/api/pull/66
   cp "$cm/plan.md" "$S/runs/skills/reviewed-current/plan.md"; mkdir -p "$S/runs/skills/reviewed-current/shared/proof"; cp "$cm"/shared/proof/* "$S/runs/skills/reviewed-current/shared/proof/"
   sed "s/^Reviewed: .*/Reviewed: $($g rev-parse --short HEAD) final review — 1 finding, fixed/" "$cm/proof.md" >"$S/runs/skills/reviewed-current/proof.md"
+  # A peer-flow run with no reviewer asked, its AI review two commits behind (t2): Request review.
+  local pa=$S/runs/skills/peer-ask
+  $g checkout -q -B peer-ask "$rsha" && echo a >"$sn/peer-a" && $g add peer-a && $g commit -q -m "after a" && echo b >"$sn/peer-b" && $g add peer-b && $g commit -q -m "after b"
+  RUN_FOLDER=$sn mkrun peer-ask finished feat "Peer ask" "${day}T08:40:00Z" 2/2 merged merged --progress "PR up, nobody asked" \
+    --pr fake-two/api https://github.com/fake-two/api/pull/72
+  cp "$cm/plan.md" "$pa/plan.md"; mkdir -p "$pa/shared/proof"; cp "$cm"/shared/proof/* "$pa/shared/proof/"
+  cp "$cm/proof.md" "$pa/proof.md"
   mkrun report-run finished rev "Report run" "${day}T05:00:00Z" 2/2 merged merged --progress "review written"
   printf '# Review report\n\nAll good.\n' >"$S/runs/skills/report-run/shared/final-report.md"
   printf '# t1 report\n\nA task'"'"'s own report: never the run'"'"'s.\n' >"$S/runs/skills/report-run/shared/t1-report.md"

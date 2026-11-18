@@ -4,7 +4,7 @@ import { div, svg } from "gpui-kit";
 import { openStartCaptain } from "./newrun.js";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, acceptProof, unacceptProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
+import { stats, decisionQueue, acceptProof, unacceptProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, refreshPrs, cachedReviewers, loadReviewers, loadingReviewers, requestReview } from "./data.js";
 import { facts, exactStatus, orchestratorState, agentStatus, workersOf, captainOf, programOf, captainPane, paneBeside, togglePin, needReason, focusAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
@@ -26,7 +26,8 @@ import { asked as inboxAsked, unmarkAsked, askedLevel } from "./inbox.js";
 import { askClick } from "./askclick.js";
 import { defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
-import { needActions, ownAddressRows, isPrimary, detailsLabel } from "./needaction.js";
+import { needActions, ownAddressRows, isPrimary, detailsLabel, showsFlow, requestingFor } from "./needaction.js";
+import { canRequest, pickerLabel } from "./reviewers.js";
 
 // How each runPhase() reads on a card. Running is muted, not the working colour: colour means
 // something to look at (see AMBER), and the run's spinning dot already says it works.
@@ -397,11 +398,23 @@ const addressRows = (view, t, r, ctx, f, id) => (ownAddressRows(f.need, f.need ?
 // proof), as a two-way toggle with the folder's default marked. A click sets it for the whole
 // repository folder (tracking.js setReviewFlow), so every run of it changes at once; picking
 // the default removes the setting.
+const flowTip = (st, f) => `${f === "peer" ? "Peer: a colleague reviews on GitHub (request review, review from, approved — merge)" : "Self: you review the proof and merge (review proof → merge)"}.
+`
+  + `For every run in ${st.key}${f === st.fallback ? "; the default for it" : ""}.`;
+
+// The need box's quiet "review: peer · change": who reviews, and a link that switches the folder to
+// the other flow, as flowToggle's segments do.
+function flowChange(t, r, id) {
+  const st = flowState(r, reviewFlows());
+  const other = st.flow === "peer" ? "self" : "peer";
+  return h_flex().id(id).flex_none().gap(3).items_center().text_size(11).text_color(t.dim).child(`review: ${st.flow} ·`)
+    .child(div().id(`${id}-change`).cursor_pointer().hover((s) => s.text_color(t.foreground)).tooltip(`Switch to ${other}.\n${flowTip(st, other)}`)
+      .on_click((_e, cx) => { cx.stop_propagation(); setReviewFlow(st.key, flowSetting(other, st.fallback)); cx.notify(); }).child("change"));
+}
+
 function flowToggle(t, r, id) {
   const st = flowState(r, reviewFlows());
-  const tip = (f) => `${f === "peer" ? "Peer: a colleague reviews on GitHub (request review, review from, approved — merge)" : "Self: you review the proof and merge (review proof → merge)"}.
-`
-    + `For every run in ${st.key}${f === st.fallback ? "; the default for it" : ""}.`;
+  const tip = (f) => flowTip(st, f);
   const seg = (f) => {
     const on = st.flow === f;
     return div().id(`flow-${id}-${f}`).flex_none().px(7).h(18).flex().items_center().rounded(4).text_size(10.5)
@@ -544,7 +557,7 @@ const badgeColor = (t, f) => (f.badge.ready ? PASS(t) : f.need ? "blocked" : f.b
 // proof and its reports, for the lines that point at them.
 export function needItemsOf(r, ctx, att = attOf(r, ctx)) {
   if (att?.group !== "needs") return [];
-  return needActions(att, { run: r, prs: prsOf(r) ?? [], now: Date.now(), proof: needProof(r, stagesOf(r, ctx)), reports: (r.reports ?? []).map((n) => `shared/${n}`) });
+  return needActions(att, { run: r, prs: prsOf(r) ?? [], reviewed: reviewedOf(r), claims: hasClaims(r), now: Date.now(), proof: needProof(r, stagesOf(r, ctx)), reports: (r.reports ?? []).map((n) => `shared/${n}`) });
 }
 
 // A run's proof in the shape needActions takes ({tier, pass, total, fail, failed, accepted,
@@ -565,7 +578,9 @@ function needProof(r, stages) {
 export function needButton(view, t, r, f, x, id, where, primary) {
   const confirm = (action) => (cx) => { view.confirm = { key: r.key, action, box: where }; view.actionError = null; view.actionNote = null; cx.notify(); };
   switch (x.kind) {
-    case "open": return actionButton(t, id, x.label, x.url, () => openUrl(x.url), primary);
+    case "open": return x.quiet ? textLink(t, id, `${x.label} ↗`, x.url, () => openUrl(x.url)) : actionButton(t, id, x.label, x.url, () => openUrl(x.url), primary);
+    case "request-review": return actionButton(t, id, x.label, "Ask a colleague to review this PR, from the people who reviewed this repository before; GitHub tells them", (cx) => startRequesting(view, r, x.pr, cx), primary);
+    case "rereview": return rereviewAction(view, t, r, x, id);
     // Ask me and Handle them share one "asked…" once either was clicked.
     case "address": return addressAsked(r, x.pr, f.att) ? (x.mode === "ask" ? askedNote(t, id) : null)
       : actionButton(t, id, x.label, modeTip(r, x.mode), addressSend(view, r, x.pr, x.mode), primary);
@@ -596,6 +611,78 @@ export function needButton(view, t, r, f, x, id, where, primary) {
   }
 }
 
+// A small text link: the quiet way to a PR on GitHub, and the picker's Cancel.
+const textLink = (t, id, label, tip, onClick) => div().id(id).flex_none().text_size(11.5).text_color(t.muted).cursor_pointer()
+  .hover((s) => s.text_color(t.foreground)).tooltip(tip).on_click((_e, cx) => { cx.stop_propagation(); onClick(cx); }).child(label);
+
+// "Re-review first" beside Request review: asks the orchestrator to run the final review again
+// (inbox.js rereview); "asked…" while its message is unread or the run's status and Reviewed lines
+// have not moved.
+function rereviewAction(view, t, r, x, id) {
+  if (!r?.dir || !r.localTerminal || r.away) return null;
+  if (inboxAsked(r, "rereview", "", r)) return askedNote(t, id);
+  const behind = x.reviewed?.kind === "behind" ? x.reviewed.behind : null;
+  return actionButton(t, id, x.label, "Before asking a colleague: a message in the run's inbox that wakes its orchestrator to run the final review again on the branch as it is now, fix what it finds and finish again",
+    (cx) => askClick(view, cx, r, "rereview", { behind, sha: x.pr?.sha ?? null }, { asks: [{ key: "", item: r }], notes: ASK_NOTES }));
+}
+
+// Request review was clicked: the box shows the earlier reviewers of the PR's repository to pick
+// from (data.js reads them once per 30 minutes).
+function startRequesting(view, r, pr, cx) {
+  view.requesting = { key: r.key, pr: pr.url, busy: null, error: null };
+  view.actionError = null;
+  if (cachedReviewers(r, pr.repo) === null) {
+    cx.spawn(async (cx) => {
+      await loadReviewers(r, pr.repo).catch(() => {});
+      view.redraw = true;
+      try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+    }, { owner: null });
+  }
+  cx.notify();
+}
+
+// A chip was clicked: ask `login` (one of the candidates, checked here) to review `pr`, marking a
+// draft ready first. Success clears the picker and reads the run's PRs at once, so the run moves to
+// "review from <login>"; failure keeps the picker with gh's first line.
+function pickReviewer(view, r, pr, login, list, cx) {
+  const req = view.requesting;
+  if (!canRequest({ requesting: req, key: r.key, url: pr.url, login, candidates: list })) return;
+  req.busy = login; req.error = null;
+  cx.notify();
+  cx.spawn(async (cx) => {
+    const out = await requestReview(r, pr.url, login, { draft: pr.state === "DRAFT" }).catch((e) => ({ error: e?.message ?? String(e) }));
+    if (out.error) {
+      req.busy = null; req.error = out.error;
+      // Marked ready already: read the PR again, so the box shows it is no draft.
+      if (out.readied) await refreshPrs(r, false, true).catch(() => {});
+    }
+    else {
+      if (view.requesting === req) view.requesting = null;
+      await refreshPrs(r, false, true).catch(() => {});
+    }
+    view.redraw = true;
+    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+    try { await view.load(cx); } catch { /* the next refresh shows it */ }
+  }, { owner: null });
+}
+
+// The picker that takes the place of an item's buttons after Request review: the label, a chip per
+// earlier reviewer and Cancel; "finding reviewers…" while they are read; "requesting…" while gh runs.
+function reviewPicker(view, t, r, x, id) {
+  const req = view.requesting, pr = x.pr;
+  const label = pickerLabel(pr.state === "DRAFT");
+  const dim = (text) => div().flex_none().text_size(11.5).text_color(t.dim).child(text);
+  const cancel = textLink(t, `${id}-cancel`, "Cancel", "Back to the buttons", (cx) => { view.requesting = null; cx.notify(); });
+  if (req.busy) return [dim("requesting…")];
+  const list = cachedReviewers(r, pr.repo, pr.author ?? null);
+  if (list === null) return [dim("finding reviewers…"), cancel];
+  if (!list.length) return [div().flex_none().text_size(11.5).text_color(t.muted).child("No earlier reviewers found."),
+    ...(pr.url ? [textLink(t, `${id}-open`, `Open ${pr.number ? `#${pr.number}` : "the PR"} ↗`, pr.url, () => openUrl(pr.url))] : []), cancel];
+  return [div().flex_none().text_size(11.5).text_color(t.muted).child(label),
+    ...list.map((login) => actionButton(t, `${id}-${login}`, login, `Ask ${login} to review${pr.state === "DRAFT" ? " (the draft is marked ready first)" : ""}: gh pr edit --add-reviewer`, (cx) => pickReviewer(view, r, pr, login, list, cx))),
+    cancel];
+}
+
 // Marks the run's proof, as it shows now, as read (proofseen.js).
 const markProofRead = (r) => markProofSeen(r, proofState(r, stageNames(r, stagesOf(r, facts()))).sig);
 
@@ -624,14 +711,18 @@ function changesButton(view, t, r, id) {
 // The need items as lines, each with its buttons; the first item's first button stands out, unless
 // the actions say which does (`primary`). Actions about one PR each (`row`: "#1799 · 15 comments")
 // go in a row per PR, led by it.
-export function needLines(view, t, r, f, items, where, underQuestion = false) {
+export function needLines(view, t, r, f, items, where, underQuestion = false, tail = null) {
+  const open = requestingFor(view, r, items);
+  const picking = (x) => x === open;
   return items.map((it, i) => {
-    const buttons = it.actions.map((x, j) => ({ row: x.row ?? null,
+    const buttons = it.actions.map((x, j) => ({ row: x.row ?? null, pick: picking(x) ? x : null,
       el: needButton(view, t, r, f, x, `need-${where}-${r.key}-${i}-${j}`, where, isPrimary(x, i, j, underQuestion)) })).filter((b) => b.el);
     const rows = [];
     for (const b of buttons) {
-      if (!rows.length || rows[rows.length - 1].row !== b.row) rows.push({ row: b.row, els: [] });
-      rows[rows.length - 1].els.push(b.el);
+      if (!rows.length || rows[rows.length - 1].row !== b.row) rows.push({ row: b.row, els: [], pick: null });
+      const row = rows[rows.length - 1];
+      if (b.pick) row.pick = b.pick;
+      row.els.push(b.el);
     }
     // A ready run: a headline and what is done, in the pass colour (needaction.js readyItem).
     const head = it.ready
@@ -639,11 +730,21 @@ export function needLines(view, t, r, f, items, where, underQuestion = false) {
         .child(div().text_size(14).font_semibold().text_color(PASS(t)).child(it.headline))
         .child(div().text_size(12).text_color(PASS(t)).child(oneLine(it.detail, 220)))
       : div().id(`needt-${where}-${r.key}-${i}`).text_size(12).text_color(t.foreground).when(Boolean(it.tip), (el) => el.tooltip(it.tip)).child(oneLine(it.line, 220));
+    // The quiet control sits at the right end of the box's last row.
+    const last = tail && i === items.length - 1;
+    if (last && !rows.length) rows.push({ row: null, els: [], pick: null });
     return v_flex().id(`needl-${where}-${r.key}-${i}`).gap(4)
       .child(head)
-      .children(rows.map((x) => h_flex().flex_wrap().gap(6).items_center()
-        .when(Boolean(x.row), (el) => el.child(div().flex_none().min_w(0).pr(2).text_size(11).text_color(t.muted).child(x.row)))
-        .children(x.els)));
+      .when(Boolean(it.caveat), (el) => el.child(div().id(`needc-${where}-${r.key}-${i}`).text_size(11.5).text_color(AMBER(t)).child(it.caveat)))
+      .children(rows.map((x, k) => {
+        const row = h_flex().flex_wrap().gap(6).items_center()
+          .when(Boolean(x.row), (el) => el.child(div().flex_none().min_w(0).pr(2).text_size(11).text_color(t.muted).child(x.row)))
+          .children(x.pick ? reviewPicker(view, t, r, x.pick, `need-${where}-${r.key}-${i}-pick`) : x.els);
+        if (!last || k !== rows.length - 1) return row;
+        // The picker's chips fill the row: the control goes on its own line, at the right.
+        return x.pick ? v_flex().gap(4).child(row).child(h_flex().justify_end().child(tail)) : row.child(div().flex_1()).child(tail);
+      }))
+      .when(it.actions.some(picking) && view.requesting.error, (el) => el.child(div().id(`needr-${where}-${r.key}-${i}`).text_size(11.5).text_color(t.blocked).child(oneLine(view.requesting.error, 200))));
   });
 }
 
@@ -683,7 +784,7 @@ export function needBox(view, t, r, f, ctx, where) {
     return box.child(v_flex().flex_1().min_w(0).gap(6)
       // The sidebar's box sits under the red "Needs you · N" heading already; a second label is a line spent on nothing.
       .when(!ready && where !== "sidebar", (el) => el.child(div().text_size(11).font_semibold().text_color(tint).child("Needs you")))
-      .children(needLines(view, t, r, f, items, where))
+      .children(needLines(view, t, r, f, items, where, false, where !== "sidebar" && showsFlow(items) ? flowChange(t, r, `need-flow-${where}-${r.key}`) : null))
       .when(ready && view.replying === changesId(r), (el) => el.child(v_flex().gap(4)
         .child(Input.new(view.reply))
         .child(div().text_size(10.5).text_color(t.dim).child("What should change? Enter writes it to the run's inbox and tells its orchestrator"))))
@@ -880,12 +981,16 @@ function factsLine(t, r, prs, size = 13, att = null, { parts = "all" } = {}) {
   return h_flex().flex_wrap().items_center().text_size(size).font_medium().text_color(t.foreground).children(joined(t, items));
 }
 
+// The run's final AI review against its branch, as plain facts: the one read the path strip and the
+// need box's caveat share (claims.js reviewedState).
+const reviewedOf = (r) => reviewedState(r.proof?.md, r.reviewedGap);
+
 // The strip's input from what runFacts has: plain data for mergepath.js.
 export function pathInput(r, f, stages) {
   const rows = hasClaims(r) ? claimRowsOf(r, stages) : null;
   const c = rows ? claimCounts(rows) : null;
   const md = r.proof?.md;
-  const reviewed = reviewedState(md, r.reviewedGap);
+  const reviewed = reviewedOf(r);
   const state = md?.checks?.state;
   return {
     phase: r.phase, away: r.away, counts: f.counts, blockedTasks: r.tasks.filter((k) => taskTone(k.state) === "blocked").length,
@@ -1348,6 +1453,8 @@ function runDetail(view, t, r, ctx) {
   const notes = cardNotes(t, r, f, false);
   const blocking = need ? null : blockingAction(view, t, r, f.att, `pane-${r.key}`);
   const comments = addressRows(view, t, r, ctx, f, `pane-${r.key}`);
+  // The need box carries the self/peer choice where it applies, so the section header does not.
+  const flowInBox = need && showsFlow(needItemsOf(r, ctx, f.att));
   // Most important first: who and what, whether it needs you, when and its PR, then the PR
   // itself, proof, tasks, decisions and agents; tokens last, since they are about cost.
   return v_flex().id(`run-${r.key}`).relative().overflow_hidden().flex_none().gap(14).p(14).pl(18).rounded(10).bg(t.surface)
@@ -1364,7 +1471,7 @@ function runDetail(view, t, r, ctx) {
       .when(Boolean(blocking), (e) => e.child(h_flex().pt(2).child(blocking)))
       .when(Boolean(comments), (e) => e.child(div().pt(2).child(comments)))))
     // Who reviews means nothing before there is a PR to review: the toggle comes with the first.
-    .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests", r.away || !prs.length ? null : flowToggle(t, r, `pane-${r.key}`))
+    .child(section(t, prs.length ? `Pull requests · ${prs.length}` : "Pull requests", r.away || !prs.length || flowInBox ? null : flowToggle(t, r, `pane-${r.key}`))
       .children(prs.map((p, i) => prDetail(t, p, i, false, Boolean(r.away))))
       .when(prs.length === 0, (el) => el.child(div().px(2).text_size(11.5).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet"))))
     .when(r.issues.length + related.length > 0, (el) => el.child(section(t, "Issues and related PRs")

@@ -5,7 +5,25 @@
 # 13 approved and mergeable, 14 two new comments since the push, 15 quiet; 16 is in a run; 17-20 have no reviewDecision (repo without required reviews): 17 anna's APPROVED stands, 18 her CHANGES_REQUESTED, 19 approved but CI pending, 20 approved with mergeable UNKNOWN.
 # `search prs --review-requested` answers from <scratch>/review-requests.json (none without it). Anything else runs the real gh ($REAL_GH).
 args="$*"
+scratch="$(dirname "$0")/.."
 case "$args" in
+  # Asking for a review (t2): never reaches GitHub. The call is recorded in <scratch>/gh-calls.txt and
+  # the PR then shows that reviewer requested (<scratch>/reviewer-<number>). `pr ready` is recorded too.
+  "pr edit "*"--add-reviewer "*|"pr ready "*)
+    echo "gh $args" >>"$scratch/gh-calls.txt"
+    n=$(grep -o 'pull/[0-9]*' <<<"$args" | head -1 | cut -d/ -f2); login=${args##*--add-reviewer }
+    case "$args" in *--add-reviewer*) echo "${login%% *}" >"$scratch/reviewer-$n";; esac
+    exit 0
+    ;;
+  # The repository's recent PRs for the reviewers to ask: mfalkenbrink on 3, martinioyo on 2, anna on 1, and
+  # the author, a bot and a team, who are never offered.
+  "pr list "*"--json author,reviews,reviewRequests"*)
+    jq -n 'def r($l): {author:{login:$l},state:"APPROVED",submittedAt:"2026-11-17T01:00:00Z"}; [
+      {author:{login:"dlebech"},reviews:[r("mfalkenbrink"),r("martinioyo"),{author:{login:"dependabot[bot]",is_bot:true},state:"COMMENTED"}],reviewRequests:[{name:"core",slug:"core"}]},
+      {author:{login:"anna"},reviews:[r("mfalkenbrink"),r("dlebech")],reviewRequests:[{login:"martinioyo"}]},
+      {author:{login:"dlebech"},reviews:[r("mfalkenbrink"),r("anna")],reviewRequests:[]}]'
+    ;;
+  "api user"*) echo dlebech ;;
   # <scratch>/no-mine makes the viewer query answer no PRs (a "nothing for you" shot).
   *"api graphql"*viewer*)
     if [ -e "$(dirname "$0")/../no-mine" ]; then echo '{"data":{"viewer":{"login":"dlebech","pullRequests":{"nodes":[]}}}}'; exit 0; fi
@@ -27,8 +45,9 @@ case "$args" in
   *github.com/fake-two/*)
     n=$(grep -o 'pull/[0-9]*' <<<"$args" | head -1 | cut -d/ -f2)
     u=$(grep -o 'https://github.com/fake-two/[^ ]*' <<<"$args" | head -1)
-    jq -n --argjson n "$n" --arg u "$u" --arg ago "$(date -u -d '45 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" '{number:$n,title:"Fake PR",state:"OPEN",isDraft:false,reviewDecision:"APPROVED",
-      reviews:[{author:{login:"mfalkenbrink"},state:"APPROVED",submittedAt:"2026-11-17T01:00:00Z"}],reviewRequests:[],
+    req=$(cat "$scratch/reviewer-$n" 2>/dev/null)
+    jq -n --argjson n "$n" --arg u "$u" --arg req "$req" --arg ago "$(date -u -d '45 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" '{number:$n,title:"Fake PR",state:"OPEN",isDraft:false,reviewDecision:(if $n == 72 then null else "APPROVED" end),
+      reviews:(if $n == 72 then [] else [{author:{login:"mfalkenbrink"},state:"APPROVED",submittedAt:"2026-11-17T01:00:00Z"}] end),reviewRequests:(if $req != "" then [{login:$req}] else [] end),
       author:{login:"dlebech"},statusCheckRollup:(if $n == 70 then [{name:"build",status:"IN_PROGRESS",conclusion:"",startedAt:$ago,detailsUrl:"https://x/1"}] elif $n >= 60 then [{name:"build",status:"COMPLETED",conclusion:"SUCCESS",completedAt:"2026-11-17T01:00:00Z",startedAt:"2026-11-17T00:50:00Z",detailsUrl:"https://x/1"}] else [] end),url:$u,headRefName:"x",headRefOid:"sha\($n)",body:"",updatedAt:"2026-11-17T01:00:00Z"}'
     ;;
   *"api graphql"*"owner=fake-two"*)
