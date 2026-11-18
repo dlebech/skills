@@ -184,6 +184,17 @@ test("a gone orchestrator says to resume, park or close, with Resume", () => {
   assert.deepEqual(kinds(it), ["resume"]);
 });
 
+test("an idle orchestrator says to read its tab and answer there, with Open the orchestrator", () => {
+  const [it] = items(run(), [], { orch: "done", orchIdleMs: 3 * MIN });
+  assert.equal(it.key, "idle-ask");
+  assert.equal(it.line, "Its orchestrator stopped 3m ago without asking through Harbormaster: read its tab and answer there");
+  assert.deepEqual(it.actions.map((a) => [a.kind, a.label, a.address]), [["focus", "Open the orchestrator", "w/orch"]]);
+  // Ranked after gone, before PR reasons such as red CI.
+  const red = pr({ checks: checks(2, 1) });
+  const all = items(run(), [red], { orch: "done", orchIdleMs: 3 * MIN }).map((x) => x.key);
+  assert.ok(all.indexOf("idle-ask") < all.indexOf("red-ci"), all.join(","));
+});
+
 test("a dialog names the agent it waits in and opens that agent", () => {
   const r = run();
   const [it] = needActions(assess(r, { orch: "blocked", pr: read([]), now }), { run: r, now, blocked: { name: "impl-x-t3", address: "w/t3" } });

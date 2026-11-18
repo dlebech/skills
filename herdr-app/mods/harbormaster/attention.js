@@ -16,10 +16,49 @@ import { planOpen, taskCounts } from "./tasks.js";
 // No new progress line, no change in the run's agents and no new terminal output for this
 // long, and the run has stalled.
 export const STALL_MS = 30 * 60000;
-// How often a run's PRs are read (data.js refreshPrs): every minute while the run is open,
-// every 15 minutes once it is closed (data.js isClosed).
-export const prTtl = (closed) => (closed ? 15 * 60000 : 60000);
-// A PR read older than its ttl plus this no longer tells: its refresh is stuck.
+// An orchestrator idle this long in a running run, with nothing asked through Harbormaster and
+// none of its agents at work, has most likely asked in its own tab: it needs you (idle-ask).
+// Matches the captain's idle_grace (skills/herdr-app-captain/scripts/watch-runs.sh).
+export const IDLE_ASK_MS = 2 * 60000;
+export const IDLE_ASK_TEXT = "orchestrator idle — may be asking in its tab";
+
+// Whether a run's orchestrator stopped without asking through Harbormaster: its own status idle
+// or done (not working, blocked, gone or unknown), nothing of the run working, the run running
+// (not finished, waiting, blocked, parked or closed), no open question, and so for at least
+// IDLE_ASK_MS. `orchIdleMs`: how long its agents have looked as they do now (tracking.js
+// agentsSince), null when unknown or while one of its agents works or is blocked (attend.js).
+// `budget`: Harbormaster asks the run's budget question itself (data.js budgetPending): then the
+// orchestrator waits on that item, not on something in its tab.
+export function idleAsking(run, { orch = null, working = false, orchIdleMs = null, budget = false } = {}) {
+  if (!run || run.away || run.phase !== "running" || working || budget) return false;
+  if (orch !== "idle" && orch !== "done") return false;
+  if (needsYou(run, orch)) return false;
+  return orchIdleMs != null && orchIdleMs >= IDLE_ASK_MS;
+}
+// How often a run's PRs are read at the latest (data.js refreshPrs), the backstop: every 5 minutes
+// while the run is open, every 30 minutes once it is parked or closed (data.js isClosed). Each read
+// is a `gh pr view` per PR, and GitHub's 5,000 points an hour are shared with the orchestrators and
+// the user, so the backstop is slow. What the run itself changes (its files, a push of a PR's head)
+// is read sooner, at most once per PR_EVENT_FLOOR_MS (data.js prTrigger). Each run's backstop is
+// also put off by up to PR_SPREAD_MS (prOffset), so runs started together don't all read in one poll.
+export const prTtl = (closed) => (closed ? 30 * 60000 : 5 * 60000);
+// Whatever fires, a run's PRs are read at most this often (but for a forced read, after an action).
+export const PR_EVENT_FLOOR_MS = 30_000;
+// Opening a run reads its PRs when the last read is older than this (data.js markOpened).
+export const PR_OPENED_MS = 60_000;
+// The most a run's backstop is put off (prOffset).
+export const PR_SPREAD_MS = 60_000;
+// A stable 0..PR_SPREAD_MS offset for a run key, so the backstops of many runs fall in different polls.
+// FNV-1a, so keys that differ in one letter (run-1, run-2) still land far apart.
+export const prOffset = (key) => fnv1a(String(key ?? "")) % PR_SPREAD_MS;
+// A 32-bit FNV-1a hash of a text's UTF-16 code units: small and fast, and a one-letter change moves
+// it far. For prOffset and data.js textSig; not for anything that must resist a chosen collision.
+export function fnv1a(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return h;
+}
+// A PR read older than its ttl plus this no longer tells: its refresh is stuck. It covers prOffset too.
 export const PR_READ_MARGIN = 10 * 60000;
 export const prMaxAge = (closed) => prTtl(closed) + PR_READ_MARGIN;
 // A CI watch past this many times the repository's usual CI time has stalled.
@@ -386,6 +425,8 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 // be read (its machine is offline, or the orchestrator has no run directory). Input:
 //   orch      the orchestrator's status (live.js orchestratorState), or null when unknown
 //   working   true while the orchestrator or any of its agents is working
+//   orchIdleMs  how long its agents have looked as they do now (idleAsking), or null
+//   budgetPending  Harbormaster asks its budget question itself (idleAsking), so no idle-ask
 //   pr        prRead() of the run
 //   flow      reviewFlow() of the run
 //   stall     stalled() of the run
@@ -402,12 +443,13 @@ export const quietText = (stall) => (stall ? `quiet ${ageText(stall.quietMs)}` :
 // next (nextStep), step (stepOf), stall, proofFailed, proofRead, ready (ready to merge), waitSince (ms: the longest-waiting reason's anchor,
 // for sorting; oldest first), waitingOn ({text, at} while the user's mark holds the run in
 // Waiting on others), dropWait (true when the mark no longer applies and should be deleted)}. Reason keys: question, gone (an unfinished run whose
-// orchestrator is gone or lost: Resume is what it needs), stalled, red-ci, and the next-step
+// orchestrator is gone or lost: Resume is what it needs), idle-ask (idleAsking: its orchestrator
+// stopped without asking through Harbormaster, most likely asking in its tab), stalled, red-ci, and the next-step
 // labels in Needs you, and finished (a finished run with no PR: its report is read and the
 // run closed); working, ci-running, idle in Working (idle: briefly quiet, not
 // stalled yet); waiting-for and waiting-on in Waiting on others; cant-tell in Can't tell. A Needs you run
 // may still have cantTell: a question read from its files, its PRs unreadable.
-export function assess(run, { related = null, orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, proofFailed = false, proofRead = false, proofClean = false, changesAsked = false, askedPrs = null, waitOn = null, now = Date.now() } = {}) {
+export function assess(run, { related = null, orch = null, working = false, pr = null, flow = "self", stall = false, stages = [], since = null, ages = null, filesOk = true, closed = false, proofFailed = false, proofRead = false, proofClean = false, changesAsked = false, askedPrs = null, waitOn = null, orchIdleMs = null, budgetPending = false, now = Date.now() } = {}) {
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
   const step = stepOf(run, { prs, stages, since, ages });
@@ -437,6 +479,9 @@ export function assess(run, { related = null, orch = null, working = false, pr =
   // Nobody carries an unfinished run on once its orchestrator is gone: a live fact, so it
   // counts whatever the PR read says. A finished one waits on its PRs as before.
   if (orch === "gone" && run.phase !== "finished") reasons.push({ key: "gone", text: "orchestrator gone", since: run.updated ?? null });
+  // Also a live fact (its terminal's status): it counts whatever the PR read says.
+  const idleAsk = idleAsking(run, { orch, working, orchIdleMs, budget: budgetPending });
+  if (idleAsk) reasons.push({ key: "idle-ask", text: IDLE_ASK_TEXT, short: "idle — asking in its tab?", since: now - orchIdleMs });
   if (!pr?.readable) {
     // The question was read from its file, so it still counts; nothing is said on PR grounds.
     if (reasons.length) return out("needs", { reasons, cantTell: true, why: pr?.why ?? null });
@@ -445,7 +490,7 @@ export function assess(run, { related = null, orch = null, working = false, pr =
   // PRs whose comments are being handled leave the step while the others wait on you (nextStepAsking).
   const { next, partial } = nextStepAsking(prs, flow, askedPrs);
   const ci = ciState(prs);
-  judgeWait = reasons.some((x) => x.key === "question" || x.key === "gone") || (!working && ci.state !== "running");
+  judgeWait = reasons.some((x) => x.key === "question" || x.key === "gone" || x.key === "idle-ask") || (!working && ci.state !== "running");
   // The user's mark holds while the step and its PRs are as they were when it was set.
   const marked = Boolean(waitOn) && WAIT_LABELS.has(waitOn.label) && next?.label === waitOn.label && waitSig(next) === waitOn.sig;
   base.next = next;
@@ -469,6 +514,9 @@ export function assess(run, { related = null, orch = null, working = false, pr =
   // Waiting on a reviewer, or on whoever the user's mark names, is a wait on a person, not a
   // stall (only CI past its usual time stalls while CI runs).
   if (stall && stall.by !== "ci" && (next?.label === "review from" || ci.state === "running" || marked)) stall = false;
+  // An idle orchestrator past IDLE_ASK_MS is told as idle-ask: a quiet stall then would say the
+  // same thing less precisely (an idle orchestrator is quiet), so only one of them shows.
+  if (stall && stall.by !== "ci" && idleAsk) stall = false;
   if (stall) reasons.push({ key: "stalled", text: quietText(stall), since: now - stall.quietMs });
   // PR grounds only once nothing works on the run any more and CI is not running: while it
   // works, it is the run's turn, not the user's. The exception: PRs of an approval or change

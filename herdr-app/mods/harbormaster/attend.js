@@ -1,13 +1,13 @@
 // One run's attention (attention.js assess) from what Harbormaster knows now: its files
 // (data.js), its PR read, its live agents, and the times and settings tracking.js keeps.
 
-import { prEntryOf, relatedOf, taskAgents, shownStage, isClosed, isParked, filesFresh } from "./data.js";
-import { orchestratorState, orchestratorsOf, agentStatus, workersOf, needReason } from "./live.js";
+import { prEntryOf, relatedOf, taskAgents, shownStage, isClosed, isParked, filesFresh, budgetPending } from "./data.js";
+import { orchestratorState, orchestratorsOf, agentStatus, exactStatus, workersOf, needReason } from "./live.js";
 import { assess, prRead, reviewFlow, stalled, ciState } from "./attention.js";
 import { gatheringStage, proofRead } from "./proof.js";
 import { proofState } from "./claims.js";
 import { proofSeenSig } from "./proofseen.js";
-import { stepSince, stepAges, lastActivity, ciUsualOf, reviewFlows, waitingOn, waitingOnOf, pruneWaitingOn } from "./tracking.js";
+import { stepSince, stepAges, lastActivity, agentsSince, ciUsualOf, reviewFlows, waitingOn, waitingOnOf, pruneWaitingOn } from "./tracking.js";
 import { needLine, needsRun } from "./crewrows.js";
 import { askedPrsOf } from "./inbox.js";
 
@@ -19,7 +19,13 @@ export { filesFresh };
 export function attentionOf(run, ctx, now = Date.now(), term = null) {
   if (!run) return assess(null, { orch: term ? agentStatus(term, ctx) : null, now });
   const orch = orchestratorState(run, ctx);
-  const working = orch === "working" || workersOf(run.terminal, ctx).some((w) => agentStatus(w, ctx) === "working");
+  const kids = workersOf(run.terminal, ctx).map((w) => agentStatus(w, ctx));
+  const working = orch === "working" || kids.includes("working");
+  // How long an idle orchestrator has been so (attention.js idleAsking): only one that reports
+  // idle or done itself (not one with no status, which agentStatus calls idle), and none of its
+  // agents working or blocked.
+  const own = exactStatus(run.terminal, ctx);
+  const idleSince = (own === "idle" || own === "done") && !kids.some((s) => s === "working" || s === "blocked") ? agentsSince(run) : null;
   const closed = isClosed(run, ctx);
   // A parked run's PRs are read on the closed runs' slower schedule (main.js refresh).
   const pr = prRead(run, prEntryOf(run), now, closed || isParked(run));
@@ -30,6 +36,8 @@ export function attentionOf(run, ctx, now = Date.now(), term = null) {
   return assess(run, {
     related: run.type === "rev" ? relatedOf(run) : null,
     orch, working, pr, stall, now, closed,
+    orchIdleMs: idleSince == null ? null : Math.max(0, now - idleSince),
+    budgetPending: budgetPending(run),
     flow: reviewFlow(run, reviewFlows()),
     stages,
     proofFailed: proofFailed(run, stages),

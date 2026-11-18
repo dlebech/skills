@@ -50,7 +50,7 @@ const checksUrl = (pr) => (/^https:\/\//i.test(pr?.failed?.url ?? "") ? pr.faile
 // The order the lines come in: what blocks a run outright first (a question or dialog, a gone
 // orchestrator), then a broken build, then the PR steps, most urgent first, then a stall, then
 // the cleanup of a finished run.
-export const ORDER = ["question", "gone", "red-ci", "changes requested", "approved — merge", "review proof → merge", "request review", "stalled", "review-pending", "finished"];
+export const ORDER = ["question", "gone", "idle-ask", "red-ci", "changes requested", "approved — merge", "review proof → merge", "request review", "stalled", "review-pending", "finished"];
 
 // "T2 · 5/10 proven · 1 fail" from {tier, pass, total, fail}, or null with no proof to read.
 export function proofText(proof) {
@@ -155,6 +155,13 @@ function reasonItem(r, a, ctx) {
     }
     case "gone":
       return { line: "Its orchestrator is gone: resume it to carry on, or park or close the run", actions: [{ kind: "resume", label: "Resume" }] };
+    case "idle-ask": {
+      // The orchestrator ended its turn without question.md or a waiting status: what it waits on
+      // is in its own tab (attention.js idleAsking).
+      return { line: `Its orchestrator stopped${ago(r.since, now)} without asking through Harbormaster: read its tab and answer there`,
+        tip: "It reports idle in a running run with no question.md: it most likely asked in its own terminal",
+        actions: run?.terminal ? [{ kind: "focus", label: "Open the orchestrator", address: run.terminal }] : [] };
+    }
     case "red-ci": {
       const red = ciState(ctx.prs ?? []);
       const pr = red.state === "red" ? red.pr : null;

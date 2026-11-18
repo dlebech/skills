@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   reviewFlow, flowKey, prStep, nextStep, nextStepText, prRead, ciState, ciTimes, usualCi, ageText, stepOf, stepText,
   trackSince, stepSig, stalled, quietText, assess, byWait, STALL_MS, prMaxAge, prTtl, trackParts, stepParts, taskKey, progressKey, reviewRunStep,
-  waitSig,
+  waitSig, IDLE_ASK_MS, IDLE_ASK_TEXT, idleAsking,
 } from "../../herdr-app/mods/harbormaster/attention.js";
 import { addCiSample, nextSteps, screenSig, CI_KEEP, probeEvery, withWait, prunedWaits } from "../../herdr-app/mods/harbormaster/tracking.js";
 import { prSummary, viewerReview, PR_FIELDS, carryRuns, withReadTimes, prEntrySame } from "../../herdr-app/mods/harbormaster/data.js";
@@ -370,10 +370,16 @@ test("PR reads ask for reviewRequests, and the summary names who is requested", 
 
 // ---- review round 1 ----
 
-test("a closed run's PRs, read every 15 minutes, do not go stale between reads", () => {
-  assert.equal(prTtl(true), 15 * MIN);
-  const entry = { at: ago(14), list: [pr({ state: "MERGED" })] };
-  // Open, a 14-minute-old read means the refresh is stuck; closed, it is on schedule.
+test("an open run's PRs are read every 5 minutes, so a few open runs stay within GitHub's rate limits", () => {
+  assert.equal(prTtl(false), 5 * MIN);
+  // A read one interval old is on schedule, not stuck.
+  assert.equal(prRead(run(), { at: now - prTtl(false), list: [pr()] }, now).readable, true);
+});
+
+test("a closed run's PRs, read every 30 minutes, do not go stale between reads", () => {
+  assert.equal(prTtl(true), 30 * MIN);
+  const entry = { at: ago(31), list: [pr({ state: "MERGED" })] };
+  // Open, a 31-minute-old read means the refresh is stuck; closed, it is on schedule.
   assert.equal(prRead(run(), entry, now, false).readable, false);
   assert.equal(prRead(run({ phase: "finished" }), entry, now, true).readable, true);
   assert.equal(prRead(run(), { ...entry, at: now - prMaxAge(true) - 1 }, now, true).readable, false);
@@ -668,4 +674,58 @@ test("the waiting-on store: set, clear, prune unlisted and dropped runs", () => 
   // An unread run (its machine did not answer) keeps its mark though it is not listed; a drop still goes.
   assert.equal(prunedWaits(two, new Set(), [], () => true), two);
   assert.deepEqual(Object.keys(prunedWaits(two, new Set(), ["a"], () => true)), ["b"]);
+});
+
+// ---- idle-ask: an orchestrator that stopped without asking through Harbormaster ----
+
+const idle = (r, o = {}) => assess(r, { orch: "done", working: false, pr: read([]), orchIdleMs: IDLE_ASK_MS, since: ago(5), now, ...o });
+
+test("idle-ask: an idle or done orchestrator in a running run, no question, idle 2 minutes: Needs you", () => {
+  for (const orch of ["idle", "done"]) {
+    const a = idle(run({ prs: [] }), { orch });
+    assert.deepEqual([a.group, a.reasons.map((x) => x.key)], ["needs", ["idle-ask"]], orch);
+    assert.equal(a.reasons[0].text, IDLE_ASK_TEXT);
+    assert.equal(a.reasons[0].since, now - IDLE_ASK_MS);
+    assert.ok(a.reasons[0].short);
+  }
+  // Its PRs unreadable: still a live fact, told with can't-tell beside it.
+  const b = idle(run(), { pr: { list: null, readable: false, why: "gh failed" } });
+  assert.deepEqual([b.group, b.cantTell, b.reasons[0].key], ["needs", true, "idle-ask"]);
+});
+
+test("idle-ask: under the grace, or with the idle time unknown, it stays Working with reason idle", () => {
+  for (const orchIdleMs of [IDLE_ASK_MS - 1, MIN, 0, null]) {
+    const a = idle(run({ prs: [] }), { orchIdleMs });
+    assert.deepEqual([a.group, a.reasons.map((x) => x.key)], ["working", ["idle"]], String(orchIdleMs));
+  }
+});
+
+test("idle-ask: a working, blocked, gone or unknown orchestrator, or a working agent, never triggers it", () => {
+  const r = run({ prs: [] });
+  const keys = (o) => idle(r, { orchIdleMs: 60 * MIN, ...o }).reasons.map((x) => x.key);
+  assert.deepEqual(keys({ orch: "working", working: true }), ["working"]);
+  assert.deepEqual(keys({ orch: "blocked" }), ["question"]);
+  assert.deepEqual(keys({ orch: "gone" }), ["gone"]);
+  assert.deepEqual(keys({ orch: null }), ["idle"]);
+  assert.deepEqual(keys({ working: true }), ["working"]);
+  assert.equal(idleAsking(r, { orch: "idle", working: true, orchIdleMs: 60 * MIN }), false);
+  // Harbormaster asks the budget question itself (data.js budgetPending).
+  assert.deepEqual(keys({ budgetPending: true }), ["idle"]);
+});
+
+test("idle-ask: a waiting, blocked, finished, parked or closed run, or an open question, never triggers it", () => {
+  const no = (r) => assert.equal(idle(r, { orchIdleMs: 60 * MIN }).reasons.some((x) => x.key === "idle-ask"), false, JSON.stringify(r.phase ?? r.away));
+  no(run({ prs: [], phase: "waiting", statusLine: "waiting for user: which branch?" }));
+  no(run({ prs: [], phase: "blocked", statusLine: "blocked: no access" }));
+  no(run({ prs: [], phase: "finished", statusLine: "finished" }));
+  no(run({ prs: [], away: { how: "parked", at: ago(10) } }));
+  no(run({ prs: [], away: { how: "closed", at: ago(10) } }));
+  no(run({ prs: [], question: "Which groups?", ask: { title: "Which groups?" }, askedAt: ago(3) }));
+});
+
+test("idle-ask with a quiet stall shows one entry, idle-ask; a CI stall stays beside it", () => {
+  const a = idle(run({ prs: [] }), { orchIdleMs: 40 * MIN, stall: { quietMs: 40 * MIN, by: "quiet" } });
+  assert.deepEqual([a.group, a.stall, a.reasons.map((x) => x.key)], ["needs", false, ["idle-ask"]]);
+  const b = idle(run({ prs: [] }), { orchIdleMs: 40 * MIN, stall: { quietMs: 40 * MIN, by: "ci" } });
+  assert.deepEqual(b.reasons.map((x) => x.key), ["idle-ask", "stalled"]);
 });

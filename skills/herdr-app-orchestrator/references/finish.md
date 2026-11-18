@@ -33,7 +33,7 @@ Publish each PR with `set-status.sh <run-directory> --pr <owner/repo> <url>` as 
 
 ## 3. Watch CI
 
-Watch each PR's CI to the end, with `gh pr checks <url> --watch` run with `hc run --bg`, so you stay reachable. Fix a red build in a short-lived worktree like any change, push, and watch again. After pushing more commits to an open PR, update its `## Evidence` so the commit and counts match the head (`proving` §5's `gh pr edit` way). If you cannot make it green, ask the user (the skill's section 6) instead of finishing. Without CI, go on.
+Watch each PR's CI to the end, with `gh pr checks <url> --watch --interval 60` run with `hc run --bg`, so you stay reachable. Keep the 60 s interval: each check is several GraphQL requests, so the default 10 s spends the account's hourly rate limit, which Harbormaster and the user share, and CI takes minutes anyway. Fix a red build in a short-lived worktree like any change, push, and watch again. After pushing more commits to an open PR, update its `## Evidence` so the commit and counts match the head (`proving` §5's `gh pr edit` way). If you cannot make it green, ask the user (the skill's section 6) instead of finishing. Without CI, go on.
 
 ## 4. Finished
 
