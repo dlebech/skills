@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import fs from "node:fs"
 import path from "node:path"
 import http from "node:http"
+import { createHash } from "node:crypto"
 import { start, sse, fixture, tmp } from "./helpers.mjs"
 import { createRateLimiter, writeTo } from "../server/http.js"
 
@@ -14,9 +15,11 @@ const raw = (port, p, { method = "GET", headers = {} } = {}) => new Promise((ok,
   r.on("error", bad); r.end()
 })
 const HEADER_NAMES = ["content-security-policy", "x-content-type-options", "referrer-policy", "cache-control"]
+const MAP = /<script type="importmap">([\s\S]*?)<\/script>/.exec(fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8"))[1]
+const MAP_HASH = `'sha256-${createHash("sha256").update(MAP).digest("base64")}'`
 const checkHeaders = r => {
   const res = { headers: typeof r.headers.get === "function" ? Object.fromEntries(r.headers) : r.headers }
-  assert.equal(res.headers["content-security-policy"], "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+  assert.equal(res.headers["content-security-policy"], `default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self' ${MAP_HASH}; connect-src 'self'; frame-ancestors 'none'`)
   assert.equal(res.headers["x-content-type-options"], "nosniff")
   assert.equal(res.headers["referrer-policy"], "no-referrer")
   assert.equal(res.headers["cache-control"], "no-store")
@@ -30,7 +33,7 @@ test("index and assets are served, with the security headers", async () => {
     assert.match(r.headers.get("content-type"), /text\/html/)
     assert.match(await r.text(), /Harbor 3D/)
     checkHeaders(r)
-    const js = await fetch(s.url + "assets/debug.js")
+    const js = await fetch(s.url + "assets/app.js")
     assert.equal(js.status, 200)
     assert.match(js.headers.get("content-type"), /javascript/)
     assert.equal((await fetch(s.url + "vendor/three/build/three.module.js")).status, 200)
@@ -56,13 +59,15 @@ test("the contract headers are on every response, errors included", async () => 
 
 test("static: traversal, encoded traversal, dotfiles, symlink escape and unknown extensions are all 404", async () => {
   const dir = tmp(), pub = path.join(dir, "public"), outside = path.join(dir, "secret.json")
-  fs.mkdirSync(pub); fs.writeFileSync(path.join(pub, "ok.js"), "1"); fs.writeFileSync(path.join(pub, ".hidden.js"), "1")
-  fs.writeFileSync(path.join(pub, "data.txt"), "1"); fs.writeFileSync(path.join(pub, "index.html"), "<p>hi")
-  fs.writeFileSync(outside, "{}"); fs.symlinkSync(outside, path.join(pub, "link.json")); fs.symlinkSync(dir, path.join(pub, "up"))
-  fs.mkdirSync(path.join(pub, ".git")); fs.writeFileSync(path.join(pub, ".git", "x.js"), "1")
+  const A = path.join(pub, "assets")
+  fs.mkdirSync(A, { recursive: true }); fs.writeFileSync(path.join(A, "ok.js"), "1"); fs.writeFileSync(path.join(A, ".hidden.js"), "1")
+  fs.writeFileSync(path.join(A, "data.txt"), "1"); fs.writeFileSync(path.join(pub, "index.html"), "<p>hi"); fs.writeFileSync(path.join(pub, "top.js"), "1")
+  fs.writeFileSync(outside, "{}"); fs.symlinkSync(outside, path.join(A, "link.json")); fs.symlinkSync(dir, path.join(A, "up"))
+  fs.mkdirSync(path.join(A, ".git")); fs.writeFileSync(path.join(A, ".git", "x.js"), "1")
   const s = await start({ publicDir: pub })
   try {
     assert.equal((await fetch(s.url + "assets/ok.js")).status, 200)
+    assert.equal((await fetch(s.url + "top.js")).status, 404, "only assets/ is served from public/")
     for (const p of ["assets/../secret.json", "assets/%2e%2e/secret.json", "assets/%2E%2E%2Fsecret.json", "assets/..%2fsecret.json", "assets/%2e%2e%5csecret.json",
       "assets/.hidden.js", "assets/.git/x.js", "assets/data.txt", "assets/link.json", "assets/up/secret.json", "assets/ok.js%00.png", "assets/", "assets//ok.js", "assets/ok.js/",
       "vendor/three/", "vendor/three/package.json", "vendor/three/build/../package.json", "vendor/three/build/%2e%2e/package.json", "vendor/other/x.js", "assets/missing.js"]) {
@@ -77,7 +82,7 @@ test("static: traversal, encoded traversal, dotfiles, symlink escape and unknown
 test("shared: everything outside /s/<token>/ is 404, wrong token is 404, right token works", async () => {
   const s = await start({ mode: "shared", base: `/s/${TOKEN}/` })
   try {
-    for (const p of ["/", "/events", "/poke", "/assets/debug.js", "/s/", `/s/${TOKEN}`, `/s/${TOKEN.replace(/.$/, "0")}/`, `/s/${TOKEN.toUpperCase()}/`, `/s/${TOKEN}x/`, "/s/short/", `/x/s/${TOKEN}/`, "/%2fs/" + TOKEN + "/"]) {
+    for (const p of ["/", "/events", "/poke", "/assets/app.js", "/s/", `/s/${TOKEN}`, `/s/${TOKEN.replace(/.$/, "0")}/`, `/s/${TOKEN.toUpperCase()}/`, `/s/${TOKEN}x/`, "/s/short/", `/x/s/${TOKEN}/`, "/%2fs/" + TOKEN + "/"]) {
       for (const method of ["GET", "POST"]) assert.equal((await raw(s.port, p, { method })).statusCode, 404, `${method} ${p}`)
       const r = await fetch(`http://127.0.0.1:${s.port}${p}`)
       assert.equal(r.status, 404); assert.equal(await r.text(), "")
@@ -254,14 +259,14 @@ test("SSE keep-alive comment is sent", async () => {
   } finally { await s.close() }
 })
 
-test("a stale scene is flagged for viewers and the placeholder page is script-free", async () => {
+test("a stale scene is flagged for viewers and the page has no inline script but the import map", async () => {
   const s = await start({ stale: true, facts: null, now: () => 1 })
   const e = await sse(s.url + "events")
   try {
     const sc = (await e.waitFor(x => x.event === "scene")).data
     assert.equal(sc.stale, true); assert.deepEqual(sc.runs, [])
     const html = await (await fetch(s.url)).text()
-    assert.ok(!/<script(?![^>]*\bsrc=)/i.test(html) && !/\son\w+=/i.test(html) && !/<style|style=/i.test(html))
+    assert.ok(!/<script(?![^>]*\b(src=|type="importmap"))/i.test(html) && !/\son\w+=/i.test(html) && !/<style|style=/i.test(html))
   } finally { e.close(); await s.close() }
 })
 
@@ -286,4 +291,61 @@ test("socket limits are set, and a client that does not read is dropped", async 
   assert.deepEqual([ok.destroyed, slow.destroyed, slow.writes], [false, true, 1])
   assert.equal(fake(5000).destroyed, false)
   const small = fake(5000); writeTo(small, "x", 1024); assert.equal(small.destroyed, true)
+})
+
+test("the CSP carries the hash of the page's import map, and index.html has no other inline script", async () => {
+  const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8")
+  const inline = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
+  assert.equal(inline.length, 1, "exactly one inline script")
+  assert.match(inline[0][0], /^<script type="importmap">/)
+  assert.equal(inline[0][1], MAP)
+  assert.ok(!/<style|\sstyle=|\sonclick=|\sonload=|javascript:/i.test(html), "no inline style or handler")
+  for (const mode of ["private", "shared"]) {
+    const s = await start(mode === "shared" ? { mode, base: `/s/${TOKEN}/` } : {})
+    try {
+      const csp = (await fetch(s.url)).headers.get("content-security-policy")
+      assert.equal(csp.match(/script-src ([^;]*)/)[1], `'self' ${MAP_HASH}`)
+      // nothing else in the policy changed
+      assert.equal(csp.replace(` ${MAP_HASH}`, ""), "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+    } finally { await s.close() }
+  }
+  // a listener over a page with no import map adds no hash; one with a changed map gets another hash
+  const dir = tmp()
+  fs.writeFileSync(path.join(dir, "index.html"), "<p>x</p>")
+  const a = await start({ publicDir: dir })
+  try { assert.equal((await fetch(a.url)).headers.get("content-security-policy").match(/script-src ([^;]*)/)[1], "'self'") } finally { await a.close() }
+  fs.writeFileSync(path.join(dir, "index.html"), '<script type="importmap">{"imports":{}}</script><script>alert(1)</script>')
+  const b = await start({ publicDir: dir })
+  try {
+    const got = (await fetch(b.url)).headers.get("content-security-policy").match(/script-src ([^;]*)/)[1]
+    assert.notEqual(got, `'self' ${MAP_HASH}`)
+    assert.equal(got, `'self' 'sha256-${createHash("sha256").update('{"imports":{}}').digest("base64")}'`, "the second inline script is not covered: only the map's hash is allowed")
+  } finally { await b.close() }
+})
+
+test("models are served from models/out at assets/models/<name>.glb, and nothing else is", async () => {
+  const s = await start()
+  try {
+    const r = await fetch(s.url + "assets/models/octopus.glb")
+    assert.equal(r.status, 200)
+    assert.equal(r.headers.get("content-type"), "model/gltf-binary")
+    const buf = Buffer.from(await r.arrayBuffer())
+    assert.equal(buf.subarray(0, 4).toString(), "glTF")
+    checkHeaders(r)
+    for (const p of ["assets/models/nope.glb", "assets/models/octopus.js", "assets/models/", "assets/models/..%2fbuild.py", "assets/models/%2e%2e/out/octopus.glb", "assets/models/.octopus.glb", "assets/models/sub/octopus.glb", "assets/models/octopus.glb%00.js", "assets/models%5coctopus.glb", "assets/models/octopus.GLB.txt"]) {
+      assert.equal((await fetch(s.url + p)).status, 404, p)
+    }
+    assert.equal((await fetch(s.url + "assets/octopus.glb")).status, 404, "not under the plain assets root")
+    const raw = await new Promise((ok, bad) => http.get({ host: "127.0.0.1", port: s.port, path: "/assets/models/../../server/http.js" }, res => { res.resume(); ok(res.statusCode) }).on("error", bad))
+    assert.equal(raw, 404)
+  } finally { await s.close() }
+  // a symlink in the models folder that leaves it is refused
+  const dir = tmp(), out = path.join(dir, "out")
+  fs.mkdirSync(out); fs.writeFileSync(path.join(dir, "secret.glb"), "secret"); fs.writeFileSync(path.join(out, "ok.glb"), "glTFok")
+  fs.symlinkSync(path.join(dir, "secret.glb"), path.join(out, "link.glb"))
+  const t = await start({ modelsDir: out })
+  try {
+    assert.equal((await fetch(t.url + "assets/models/ok.glb")).status, 200)
+    assert.equal((await fetch(t.url + "assets/models/link.glb")).status, 404)
+  } finally { await t.close() }
 })

@@ -1,0 +1,51 @@
+:root { color-scheme: dark; --ui: rgba(14, 24, 38, 0.82); --ui-line: rgba(255, 255, 255, 0.16); --fg: #eef3f8; --dim: #9fb0c0; --accent: #ffb454; --red: #ff6b5b; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd2f0; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); }
+#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+[hidden] { display: none !important; }
+
+#labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+.label { position: absolute; left: 0; top: 0; text-align: center; white-space: nowrap; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75), 0 0 6px rgba(0, 0, 0, 0.5); color: #fff; transition: opacity 0.15s; will-change: transform; }
+.label .name { font-size: 13px; font-weight: 600; }
+.label .line { font-size: 11px; opacity: 0.92; }
+.label.needs .line { color: #ffb0a6; font-weight: 600; }
+.label.parked { color: #dfe6ec; }
+.label.finished .line { color: #b9f0cb; }
+
+#status, #banner, #stats { position: fixed; z-index: 3; background: var(--ui); border: 1px solid var(--ui-line); border-radius: 6px; padding: 4px 9px; font-size: 12px; backdrop-filter: blur(6px); }
+#status { top: 10px; left: 10px; color: var(--dim); }
+#banner { top: 10px; left: 50%; transform: translateX(-50%); color: #ffd9a0; border-color: rgba(255, 180, 84, 0.5); max-width: calc(100vw - 24px); text-align: center; }
+#stats { bottom: 10px; left: 10px; font: 11px/1.4 ui-monospace, Menlo, monospace; white-space: pre; }
+
+#toolbar { position: fixed; z-index: 4; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: calc(100vw - 24px); }
+#toolbar button { font: inherit; font-size: 12px; color: var(--fg); background: var(--ui); border: 1px solid var(--ui-line); border-radius: 6px; padding: 5px 10px; cursor: pointer; backdrop-filter: blur(6px); }
+#toolbar button:hover { border-color: rgba(255, 255, 255, 0.4); }
+#toolbar button:focus-visible, #card .close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#toolbar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+#toolbar button.dim, #toolbar button:disabled { opacity: 0.4; cursor: default; }
+#toolbar button.sel { border-color: rgba(255, 180, 84, 0.55); }
+
+#card { position: fixed; z-index: 5; top: 12px; right: 12px; bottom: 60px; width: 300px; overflow: auto; padding: 12px 14px; background: var(--ui); border: 1px solid var(--ui-line); border-radius: 10px; backdrop-filter: blur(8px); }
+#card .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+#card h2 { margin: 0; font-size: 15px; line-height: 1.25; overflow-wrap: anywhere; }
+#card h3 { margin: 10px 0 3px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
+#card p { margin: 4px 0; }
+#card .close { font: inherit; font-size: 18px; line-height: 1; color: var(--dim); background: none; border: 0; padding: 0 2px; cursor: pointer; }
+#card .sub, #card .kind { color: var(--dim); }
+#card .path { margin: 8px 0; line-height: 1.6; }
+#card .step.dim { color: var(--dim); opacity: 0.7; }
+#card .step.current { font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+#card .sep { color: var(--dim); }
+#card .row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+#card .row .k { color: var(--dim); }
+#card .item { padding: 1px 0; overflow-wrap: anywhere; }
+#card .note { color: #ffd9a0; font-size: 12px; }
+
+@media (max-width: 700px) {
+  #toolbar { bottom: auto; top: 8px; }
+  #toolbar button { padding: 6px 9px; }
+  #status { top: auto; bottom: 8px; }
+  #banner { top: auto; bottom: 8px; left: 50%; }
+  #card { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 46vh; border-radius: 12px 12px 0 0; }
+}
+@media (prefers-reduced-motion: reduce) { .label { transition: none; } }

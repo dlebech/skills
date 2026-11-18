@@ -3,18 +3,30 @@
 import http from "node:http"
 import fs from "node:fs"
 import path from "node:path"
-import { timingSafeEqual } from "node:crypto"
+import { timingSafeEqual, createHash } from "node:crypto"
+import { fileURLToPath } from "node:url"
 import { sanitize } from "./sanitize.js"
 
 export const POKE_KINDS = ["horn", "wave", "feed", "fireworks"]
 const MAX_BODY = 200
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".glb": "model/gltf-binary", ".png": "image/png", ".svg": "image/svg+xml", ".json": "application/json; charset=utf-8" }
+export const MODELS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "models", "out")
 const HEADERS = {
   "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
   "Referrer-Policy": "no-referrer",
   "Cache-Control": "no-store",
+}
+
+// The CSP source for the page's one inline script (the import map): 'sha256-<base64>' of its exact text, or
+// "" when the page has none. Read once, when a listener is created.
+export function importMapHash(publicDir) {
+  try {
+    const html = fs.readFileSync(path.join(publicDir, "index.html"), "utf8")
+    const m = html.match(/<script type="importmap">([\s\S]*?)<\/script>/)
+    return m ? `'sha256-${createHash("sha256").update(m[1]).digest("base64")}'` : ""
+  } catch { return "" }
 }
 
 // Poke limits: 1 per second per viewer, 5 per second in all. Only allowed attempts are recorded.
@@ -62,7 +74,9 @@ function resolveStatic(root, rel) {
 }
 
 // Create a listener. `snapshot()` gives { facts, stale }. mode "private" or "shared"; base "/" or "/s/<token>/".
-export function createListener({ base = "/", mode, secret, snapshot, now = Date.now, publicDir, vendorDir, maxSse = mode === "shared" ? 20 : 8, keepAliveMs = 20000, maxBuffer = 256 * 1024 }) {
+export function createListener({ base = "/", mode, secret, snapshot, now = Date.now, publicDir, vendorDir, modelsDir = MODELS_DIR, maxSse = mode === "shared" ? 20 : 8, keepAliveMs = 20000, maxBuffer = 256 * 1024 }) {
+  const hash = importMapHash(publicDir)
+  const HEAD = { ...HEADERS, "Content-Security-Policy": HEADERS["Content-Security-Policy"].replace("script-src 'self'", `script-src 'self'${hash ? " " + hash : ""}`) }
   const clients = new Set()
   const allow = createRateLimiter({ now })
   const baseBuf = Buffer.from(base)
@@ -84,13 +98,13 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
   function refresh() { if (rebuild()) broadcast("scene", json) }
 
   function reply(res, status, headers = {}, body = "") {
-    res.writeHead(status, { ...HEADERS, ...headers })
+    res.writeHead(status, { ...HEAD, ...headers })
     res.end(body)
   }
 
   function events(req, res) {
     if (clients.size >= maxSse) return reply(res, 503)
-    res.writeHead(200, { ...HEADERS, "Content-Type": "text/event-stream", Connection: "keep-alive" })
+    res.writeHead(200, { ...HEAD, "Content-Type": "text/event-stream", Connection: "keep-alive" })
     res.write("retry: 3000\n\n")
     clients.add(res)
     res.on("close", () => { clients.delete(res); refresh() })
@@ -128,7 +142,7 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
   // Answer 400 and drop the connection: the rest of an oversized body is never read.
   function tooBig(req, res) {
     if (res.headersSent) return
-    res.writeHead(400, { ...HEADERS, Connection: "close" })
+    res.writeHead(400, { ...HEAD, Connection: "close" })
     res.end(() => req.destroy())
   }
 
@@ -138,7 +152,7 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
       const realRoot = await fs.promises.realpath(root)
       if (!real.startsWith(realRoot + path.sep)) return reply(res, 404)
       if (!(await fs.promises.stat(real)).isFile()) return reply(res, 404)
-      res.writeHead(200, { ...HEADERS, "Content-Type": TYPES[path.extname(real).toLowerCase()] })
+      res.writeHead(200, { ...HEAD, "Content-Type": TYPES[path.extname(real).toLowerCase()] })
       if (req.method === "HEAD") return res.end()
       fs.createReadStream(real).on("error", () => res.destroy()).pipe(res)
     } catch { reply(res, 404) }
@@ -164,7 +178,8 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
     if (rest === "events") return req.method === "GET" ? events(req, res) : reply(res, 405, { Allow: "GET" })
     let root = null, rel = null
     if (rest === "") [root, rel] = [publicDir, "index.html"]
-    else if (rest.startsWith("assets/")) [root, rel] = [publicDir, rest.slice(7)]
+    else if (rest.startsWith("assets/models/")) { rel = rest.slice(14); root = /^[\w.-]+\.glb$/i.test(rel) ? modelsDir : null }
+    else if (rest.startsWith("assets/")) [root, rel] = [publicDir, rest]
     else if (/^vendor\/three\/(build|examples\/jsm)\//.test(rest)) [root, rel] = [vendorDir, rest.slice(13)]
     const full = root && resolveStatic(root, rel)
     if (!full) return reply(res, 404)
