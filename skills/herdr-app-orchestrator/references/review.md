@@ -62,6 +62,8 @@ Set `commit_id` to the sha you reviewed (re-read `headRefOid` first; if the head
 
 **`direct`**. Submit the same JSON with `"event": "COMMENT"`. Never `APPROVE` or `REQUEST_CHANGES` unless the user said so in this run.
 
+In every mode, everything posted to GitHub starts with `Written by AI 🤖` and a blank line: each comment's `body`, and the review `body` when it has text (`"body": "Written by AI 🤖\n\n<text>"`). Posts go out in the user's name, so the PR's author must be able to tell they are not the user's own words, even after the user edits them. Add the prefix when building the JSON, not in `review-drafts.md`, and never twice.
+
 GitHub rejects the whole request (422) if one comment's line is outside the diff, and may not say which: check every comment's line against `gh pr diff`, fold the ones not in it into the body with their `path:line`, and post once more; say so in the report.
 
 ## 3. Finish
