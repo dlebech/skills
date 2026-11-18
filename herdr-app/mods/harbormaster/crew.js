@@ -10,7 +10,7 @@ import { programIcon, plural, runName } from "./ui.js";
 import { startedTip } from "./context.js";
 import { liveUsage } from "./resources.js";
 import { attentionOf } from "./attend.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, captainNeedNote, captainMark, needsSlots, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
+import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, captainNeedNote, captainMark, needsSlots, needCardLook, HOVER_TINT, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
 import { reviewError } from "./reviews.js";
 import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
@@ -230,8 +230,9 @@ function needRow(m, x, onOpen) {
   const color = tone === "amber" ? AMBER(t) : tone === "pass" ? PASS(t) : t[tone] ?? t.dim;
   const open = onOpen ?? openRun(m, x);
   const id = `crew-need-${needKey(x)}`;
+  const here = term?.address != null && term.address === m.current;
   return v_flex().id(id).relative().overflow_hidden().flex_none().gap(1).pl(PAD + 3).pr(PAD).py(5).rounded(6)
-    .bg(edge + "14").cursor_pointer().hover((st) => st.bg(edge + "26"))
+    .bg(here ? SELECTED(t) : edge + "14").cursor_pointer().hover((st) => st.bg(here ? SELECTED(t) : edge + "26"))
     .tooltip([name.tip ?? name.title, ...rowTip(a, now), onOpen ? OPEN_HERE : null].filter(Boolean).join("\n")).on_click(open)
     .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
     .child(titleText(t, name, 12.5, true))
@@ -353,11 +354,15 @@ function needCard(m, x) {
   const color = tone === "amber" ? AMBER(t) : tone === "pass" ? PASS(t) : t[tone] ?? t.dim;
   const id = `crew-box-${r.key}`;
   const go = openRun(m, x);
+  const selected = x.term?.address != null && x.term.address === m.current;
+  const look = needCardLook(selected);
   const focus = (_e, cx) => { cx.stop_propagation(); if (x.term) go(); };
   return v_flex().id("crew-needs-box").relative().overflow_hidden().flex_none().min_w(0).gap(6).pl(PAD + 3).pr(PAD).pt(7).pb(8).rounded(6)
-    // The selected one: a stronger tint, an edge-coloured outline and a wider bar; the rows are quieter.
-    .bg(edge + "33").border(1).border_color(edge).when(Boolean(x.term), (el) => el.cursor_pointer()).on_click(focus)
-    .child(div().absolute().left(0).top(0).bottom(0).w(5).bg(edge))
+    // Selected (its orchestrator's terminal is the current one): a stronger tint, an edge-coloured
+    // outline and a 5 px bar. Otherwise a light tint, a transparent border (same width) and a 3 px bar.
+    .bg(edge + look.tint).border(1).border_color(edge + look.border)
+    .when(Boolean(x.term), (el) => el.cursor_pointer().hover((st) => st.bg(edge + (selected ? look.tint : HOVER_TINT)))).on_click(focus)
+    .child(div().absolute().left(0).top(0).bottom(0).w(look.bar).bg(edge))
     .child(v_flex().gap(1).min_w(0)
       .child(h_flex().gap(6).items_center().min_w(0)
         .child(div().id(`${id}-title`).flex_1().min_w(0).flex().cursor_default()

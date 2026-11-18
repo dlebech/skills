@@ -174,6 +174,12 @@ export const emptyNote = (g, count, total) => (g.empty && !count && total > 0 ? 
 
 // Whether a run needs you, given its attention `a`: in Needs you and not put away (a parked or
 // closed run's PRs may wait on you, but it is not counted). attend.js needsYouNow is this.
+// The Needs-you card's look for "its orchestrator's terminal is the selected one": colour
+// suffixes to add to the edge colour (tint, border; "00" is fully transparent, so the 1 px border
+// keeps its width and nothing shifts) and the left bar's width. Hover on an unselected card: HOVER_TINT.
+export const HOVER_TINT = "2e";
+export const needCardLook = (selected) => (selected ? { tint: "3d", border: "", bar: 5 } : { tint: "22", border: "00", bar: 3 });
+
 export const needsRun = (r, a) => !r.away && a.group === "needs";
 
 // The runs that need you, for the overview's cards and header and the Crew alike; `attOf(run)`
