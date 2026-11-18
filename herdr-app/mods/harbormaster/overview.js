@@ -4,12 +4,12 @@ import { div, svg } from "gpui-kit";
 import { openStartCaptain } from "./newrun.js";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input, HoverCard } from "gpui-base";
-import { stats, decisionQueue, answerRun, requestLevel, acceptProof, unacceptProof, askProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime, askBlocking, askComments, askCommentsAll, askCi, askChanges } from "./data.js";
+import { stats, decisionQueue, acceptProof, unacceptProof, compactRun, isCompact, isBudgetQuestion, overBudget, dropDecision, runPhase, taskTone, taskCounts, taskAgents, shownStage, taskStage, prsOf, relatedOf, unknownPr, oneWay, PR_TONE, isClosed, isParked, putAway, resumeRun, deleteRun, deleteRuns, newestFirst, runTime } from "./data.js";
 import { facts, exactStatus, orchestratorState, agentStatus, workersOf, captainOf, programOf, captainPane, paneBeside, togglePin, needReason, focusAgent, openUrl, replyToCaptain, closeOwnPane, openStats } from "./live.js";
 import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, ago, shortRef, stateText, runName, withTip, typeTag } from "./ui.js";
 import { tokenText, tokenHeadline, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage, hotText, memText } from "./resources.js";
-import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, worthALook, hasClaims, proofState, withSaid } from "./claims.js";
+import { claimRows, claimCounts, claimsVerdict, claimsGaps, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, worthALook, hasClaims, proofState, withSaid, withAsked } from "./claims.js";
 import { oneLine, needHead, questionSections, queueLines, paragraphs, plain, replyId, replyItem } from "./question.js";
 import { thumbs } from "./viewer.js";
 import { setNote, noteText } from "./note.js";
@@ -20,10 +20,10 @@ import { parkedLabel, parkedHeading, openPrsLabel, newDecisions, newSinceText } 
 import { reviewText, prStateText, prFacts } from "./prfacts.js";
 import { toastsOn, setToastsOn, decisionsSeen, markDecisionsSeen } from "./telling.js";
 import { markProofSeen } from "./proofseen.js";
-import { askedStore, markPrsAsked, unmarkPrAsked } from "./asked.js";
 import { rowEdge, badgeOf, needLine, closableDone, needCount, needRunsOf, runlessNeeds, watchingText, workerTree } from "./crewrows.js";
-import { blockingAsked, askSig } from "./blocking.js";
-import { commentsAsked, defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
+import { asked as inboxAsked, unmarkAsked, askedLevel } from "./inbox.js";
+import { askClick } from "./askclick.js";
+import { defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow } from "./tracking.js";
 import { needActions, ownAddressRows, isPrimary, detailsLabel } from "./needaction.js";
 
@@ -295,19 +295,18 @@ export const edgeColor = (t, edge) => opaque(edge === "amber" ? AMBER(t) : edge 
 
 // ---- ask what's blocking, the review flow, close all merged ----
 
-// Runs asked what is blocking from here, by run key: {sig} (blocking.js askSig at the click).
-// Shared by the Crew, the cards and the panes of this copy; the ask's unread message in the
-// inbox (run.blockingAsked) carries it across copies and reloads.
-const blockAsked = new Map();
+// The notes after "<branch>: " when an ask to what is blocking, or a red CI, waits or is blocked.
+const ASK_NOTES = {
+  waits: "the ask waits in its inbox until the run is resumed",
+  blocked: "its orchestrator is blocked on a dialog; it reads the ask once that is answered",
+};
 
 // A stalled run's "Ask what's blocking" (`short`: "Ask", for the narrow Crew row), or "asked…"
 // while the ask waits: its message is unread, or nothing moved since it was asked here. Null for
 // a run that is not stalled, is put away, or whose orchestrator is not known here.
 export function blockingAction(view, t, r, att, id, short = false) {
   if (!r?.dir || !r.localTerminal || r.away || !att?.stall) return null;
-  const mine = blockAsked.get(r.key);
-  if (mine && mine.sig !== askSig(r)) blockAsked.delete(r.key);
-  if (blockingAsked(r, blockAsked.get(r.key))) {
+  if (inboxAsked(r, "blocking", "", r)) {
     return div().id(`blk-${id}`).flex_none().text_size(11).text_color(AMBER(t))
       .tooltip("Asked its orchestrator what is blocking; waiting for its progress or status to change").child("asked…");
   }
@@ -315,34 +314,15 @@ export function blockingAction(view, t, r, att, id, short = false) {
   const step = stepText(att.step) || null;
   return actionButton(t, `blk-${id}`, short ? "Ask" : "Ask what's blocking",
     `Ask what's blocking: a message in the run's inbox that wakes its orchestrator ("what is blocking? … quiet for ${quiet}…"); it asks you with a question if it needs you, else carries on`,
-    (cx) => {
-      blockAsked.set(r.key, { sig: askSig(r) });
-      view.actionError = null;
-      cx.notify();
-      cx.spawn(async (cx) => {
-        try {
-          const out = await askBlocking(r, { quiet, step });
-          if (out?.waits) setNote(view, `${r.branch}: the ask waits in its inbox until the run is resumed`);
-          else if (out?.blocked) setNote(view, `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`);
-        } catch (e) {
-          // Written but not woken: the ask is in the inbox, so it stays asked.
-          if (!e?.inInbox) blockAsked.delete(r.key);
-          view.actionError = `${r.branch}: ${e?.message ?? e}`;
-        }
-        view.redraw = true;
-        try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
-        try { await view.load(cx); } catch { /* the next refresh shows it */ }
-      }, { owner: null });
-    });
+    // Written but not woken: the ask is in the inbox, so it stays asked (inbox.js send).
+    (cx) => askClick(view, cx, r, "blocking", { quiet, step }, { asks: [{ key: "", item: r }], notes: ASK_NOTES }));
 }
 
 // A red CI's "Ask the orchestrator" in a Needs-you box, or "asked…" while the ask waits: the same
-// "what is blocking?" message (blocking.js ciRequest), so it reads asked as Ask what's blocking does.
+// "what is blocking?" message (inbox.js ciRequest), so it reads asked as Ask what's blocking does.
 function ciAction(view, t, r, action, id) {
   if (!r?.dir || !r.localTerminal || r.away) return null;
-  const mine = blockAsked.get(r.key);
-  if (mine && mine.sig !== askSig(r)) blockAsked.delete(r.key);
-  if (blockingAsked(r, blockAsked.get(r.key))) {
+  if (inboxAsked(r, "ci", "", r)) {
     return div().id(`ci-${id}`).flex_none().text_size(11).text_color(t.muted)
       .tooltip("Asked its orchestrator to see to the red CI; waiting for its progress or status to change").child("asked…");
   }
@@ -350,27 +330,10 @@ function ciAction(view, t, r, action, id) {
   const url = pr?.failed?.url ?? pr?.url ?? null;
   return actionButton(t, `ci-${id}`, action.label,
     `A message in the run's inbox that wakes its orchestrator ("what is blocking? … CI red on #${pr?.number ?? "?"}…"): it fixes what is the run's to fix, or asks you`,
-    (cx) => {
-      blockAsked.set(r.key, { sig: askSig(r) });
-      view.actionError = null;
-      cx.notify();
-      cx.spawn(async (cx) => {
-        try {
-          const out = await askCi(r, { pr: pr?.number ?? null, check: action.check, url });
-          if (out?.waits) setNote(view, `${r.branch}: the ask waits in its inbox until the run is resumed`);
-          else if (out?.blocked) setNote(view, `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`);
-        } catch (e) {
-          if (!e?.inInbox) blockAsked.delete(r.key);
-          view.actionError = `${r.branch}: ${e?.message ?? e}`;
-        }
-        view.redraw = true;
-        try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
-        try { await view.load(cx); } catch { /* the next refresh shows it */ }
-      }, { owner: null });
-    });
+    (cx) => askClick(view, cx, r, "ci", { pr: pr?.number ?? null, check: action.check, url }, { asks: [{ key: "", item: r }], notes: ASK_NOTES }));
 }
 
-// PRs asked to address their comments, by PR URL: {sig, at} in shared state (asked.js), so every
+// PRs asked to address their comments are kept in the shared asked store (inbox.js), so every
 // copy and a reload know; the unread message (run.commentsAsked) says it too until it is read.
 
 const MODE_TIP = {
@@ -381,7 +344,7 @@ const MODE_TIP = {
 // Address comments, on a run's card and pane: for each of its approved or changes-requested PRs
 // with open review comments, "Address 9 threads on #42" and two buttons, Ask me and Handle them,
 // the run's autonomy's default (comments.js defaultMode) highlighted; a click writes an inbox
-// message for that PR (data.js askComments) and the row reads "asked…" while the message is
+// message for that PR (inbox.js) and the row reads "asked…" while the message is
 // unread and, once read, until the PR's open comments change (while the run works, until a new
 // one appears). Null when there are none, the run
 // is put away, or its orchestrator is not known here; and while the run has an open question
@@ -404,42 +367,25 @@ function commentsAction(view, t, r, att, id) {
   return v_flex().gap(4).children(rows);
 }
 
-// Whether a PR's Address comments was asked and is still being handled (comments.js askedEntry).
+// Whether a PR's Address comments was asked and is still being handled (inbox.js asked).
 // The run's assessment (`att`) has the PRs asked about, judged with whether the run is working
 // (a moving comment list under a working orchestrator is its own doing); without one, the store.
 function addressAsked(r, p, att = null) {
-  return att?.askedPrs ? att.askedPrs.has(p.url) : commentsAsked(r, p, askedStore()[p.url]);
+  return att?.askedPrs ? att.askedPrs.has(p.url) : inboxAsked(r, "comments", p.url, p);
 }
 const askedNote = (t, id) => div().id(id).flex_none().text_size(11).text_color(t.muted)
   .tooltip("Asked its orchestrator to address these comments; while its orchestrator works on them, or until its open comments change (a comment the reviewer adds later ends it)").child("asked…");
 const modeTip = (r, mode) => `${MODE_TIP[mode]}.${mode === defaultMode(r.autonomy) ? ` The default at ${r.autonomy ?? "L0"}.` : ""}`;
 
-// The click of an Ask me or Handle them: writes the run's inbox message for the PR (data.js
-// askComments); the button reads "asked…" until the PR's open comments change.
+// The click of an Ask me or Handle them: writes the run's inbox message for the PR (inbox.js);
+// the button reads "asked…" until the PR's open comments change.
 const addressSend = (view, r, p, mode) => addressSendAll(view, r, [p], mode);
 
-// The click of Ask me about all / Handle all: one message for all the PRs (data.js askCommentsAll),
-// so the orchestrator is woken once. Each PR reads "asked…" at once; all are unmarked if the
-// message did not reach the inbox.
-const addressSendAll = (view, r, prs, mode) => (cx) => {
-  markPrsAsked(r, prs);
-  view.actionError = null;
-  cx.notify();
-  cx.spawn(async (cx) => {
-    try {
-      const out = await askCommentsAll(r, prs, mode);
-      if (out?.waits) setNote(view, `${r.branch}: the ask waits in its inbox until the run is resumed`);
-      else if (out?.blocked) setNote(view, `${r.branch}: its orchestrator is blocked on a dialog; it reads the ask once that is answered`);
-    } catch (e) {
-      // Written but not woken: the ask is in the inbox, so it stays asked.
-      if (!e?.inInbox) for (const p of prs) unmarkPrAsked(p.url);
-      view.actionError = `${r.branch}: ${e?.message ?? e}`;
-    }
-    view.redraw = true;
-    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
-    try { await view.load(cx); } catch { /* the next refresh shows it */ }
-  }, { owner: null });
-};
+// The click of Ask me about all / Handle all: one message for all the PRs (inbox.js), so the
+// orchestrator is woken once. Each PR reads "asked…" at once; all are unmarked if the message
+// did not reach the inbox.
+const addressSendAll = (view, r, prs, mode) => (cx) => askClick(view, cx, r, "comments-all", { prs, mode },
+  { asks: prs.map((p) => ({ key: p.url, item: p })), notes: ASK_NOTES });
 
 // The card's and pane's own Address rows, only while the run is in Needs you and its box does
 // not carry them (needaction.js ownAddressRows).
@@ -945,8 +891,9 @@ function claimsSummary(t, r, stages = null) {
   return { parts: v.parts.map(paint), rows, tip: v.tip || null };
 }
 
-// What was clicked on a claim row (Accept, Unaccept, Ask to prove) and not read back from the
-// run's files yet (claims.js withSaid). Shared by the pane and the card, so both show it at once.
+// What was clicked on a claim row (Accept, Unaccept) and not read back from the run's files yet
+// (claims.js withSaid). Shared by the pane and the card, so both show it at once. An Ask to prove
+// is an inbox message: its "asked…" comes from inbox.js (claims.js withAsked).
 export const said = new Map();
 
 const isFinished = (r) => r.phase === "finished" || Boolean(r.away);
@@ -955,7 +902,7 @@ const isFinished = (r) => r.phase === "finished" || Boolean(r.away);
 const stageNames = (r, stages) => (stages ? r.tasks.map((_, i) => stages[i]?.stage ?? null) : null);
 
 // The run's claims (claims.js claimRows) with the clicks its files don't show yet.
-const claimRowsOf = (r, stages = null) => withSaid(claimRows(r.proof, r, stageNames(r, stages), isFinished(r)), said, r.key, r.proof);
+const claimRowsOf = (r, stages = null) => withAsked(withSaid(claimRows(r.proof, r, stageNames(r, stages), isFinished(r)), said, r.key, r.proof), r);
 
 // ---- one run on its own, as the pane pinned beside its orchestrator ----
 
@@ -1028,18 +975,16 @@ export function levelTags(view, t, r, id, short = false) {
 
 // An autonomy ("L1") or proof tier ("T2") tag. Resting the pointer on it opens a card that
 // lists every level with its definition, the run's own highlighted; clicking another asks the
-// orchestrator to change it (data.js requestLevel: a message in the run's inbox). Until
+// orchestrator to change it (inbox.js: a message in the run's inbox). Until
 // status.json or plan.md shows the new level, the tag reads "T3 requested…": from the request
 // still unread in the inbox (r.pending), so it survives a reload, and from the click itself
 // until the next read sees that message (at most 15 s, should the orchestrator be quicker).
 function levelTag(view, t, r, kind, id, short = false) {
   const cur = kind === "autonomy" ? r.autonomy : r.proof.tier.tier;
   const label = (l) => (kind === "autonomy" ? l : `T${l}`);
-  const key = `${r.key}:${kind}`;
-  let asked = view.levelAsked?.get(key)?.level;
-  // The click's own note goes once the run's files show the request, or the level itself.
-  if (asked !== undefined && (r.pending?.[kind] === asked || cur === asked || Date.now() - view.levelAsked.get(key).at > 15000)) { view.levelAsked.delete(key); asked = undefined; }
-  const pending = asked ?? r.pending?.[kind] ?? null;
+  // The click's own mark goes once the run's files show the request, or the level itself, or
+  // after 15 s (inbox.js askedLevel).
+  const pending = askedLevel(r, kind, cur);
   // A request waits on the orchestrator, not on you: no colour, its "requested…" says it.
   const tag = div().flex_none().text_size(10).font_semibold().px(5).rounded(4).bg(t.raised)
     .text_color(pending !== null ? t.foreground : kind === "autonomy" && cur === "L0" ? t.dim : t.muted)
@@ -1052,20 +997,8 @@ function levelTag(view, t, r, kind, id, short = false) {
       .when(c.current, (el) => el.bg(t.selected))
       .when(ask, (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click((_e, cx) => {
         cx.stop_propagation();
-        view.levelAsked ??= new Map();
-        view.levelAsked.set(key, { level: c.level, at: Date.now() });
-        view.actionError = null;
-        cx.notify();
-        cx.spawn(async (cx) => {
-          try { await requestLevel(r, kind, c.level); } catch (e) {
-            // Written but not woken: the request is in the inbox, so it stays requested.
-            if (!e?.inInbox) view.levelAsked.delete(key);
-            view.actionError = `${r.branch}: ${e?.message ?? e}`;
-          }
-          view.redraw = true;
-          try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
-          try { await view.load(cx); } catch { /* the next refresh shows it */ }
-        }, { owner: null });
+        // Written but not woken: the request is in the inbox, so it stays requested.
+        askClick(view, cx, r, "level", { kind, level: c.level }, { asks: [{ key: kind, item: { level: c.level, current: cur } }] });
       }))
       .child(div().flex_none().w(20).font_semibold().text_color(c.current ? t.foreground : t.muted).child(c.label))
       .child(v_flex().flex_1().min_w(0)
@@ -1263,8 +1196,8 @@ function claimsSection(view, t, r, stages) {
 
 // A claim row's button: Accept (Harbormaster records it in proof-accepted.json itself, so it works
 // with the orchestrator gone), Unaccept, Ask to prove (a "prove C<n> to T<n>: …" message in the
-// run's inbox), or "asked…" while that waits. The click shows at once (`said`), before the next
-// read of the run's files.
+// run's inbox), or "asked…" while that waits. An Accept or Unaccept shows at once (`said`), before
+// the next read of the run's files; an ask is marked asked in inbox.js.
 const PROOF_ACTION = {
   accept: { label: "Accept", tip: "Accept this claim as it is: it stops needing a look, until its result changes" },
   unaccept: { label: "Unaccept", tip: "Take the acceptance back: it needs a look again" },
@@ -1276,6 +1209,7 @@ export function proofAction(view, t, r, k, a, button = actionButton) {
   const line = claimResultLine(k);
   const { label, tip } = PROOF_ACTION[a];
   return button(t, `pf${a}-${r.key}-${k.id}`, label, tip, (cx) => {
+    if (a === "ask") return askClick(view, cx, r, "proof", { row: k }, { asks: [{ key: k.id, item: k }] });
     const key = `${r.key}:${k.id}`;
     said.set(key, { kind: a, line, at: Date.now() });
     view.actionError = null;
@@ -1283,11 +1217,9 @@ export function proofAction(view, t, r, k, a, button = actionButton) {
     cx.spawn(async (cx) => {
       try {
         if (a === "accept") await acceptProof(r, k);
-        else if (a === "unaccept") await unacceptProof(r, k);
-        else await askProof(r, k);
+        else await unacceptProof(r, k);
       } catch (e) {
-        // Written but not woken: the ask is in the inbox, so it stays asked.
-        if (!e?.inInbox) said.delete(key);
+        said.delete(key);
         view.actionError = `${r.branch}: ${e?.message ?? e}`;
       }
       view.redraw = true;
@@ -1430,9 +1362,10 @@ export function captainStrip(view, t, ctx, s) {
 
 // Sends an answer to an item of the queue. A captain decision goes to the captain, typed
 // into its input, when it is there; otherwise, and for a run's question, to the run's inbox
-// (answerRun), which wakes its orchestrator. Marks the item answered once it is written.
+// (inbox.js, the answer kind), which wakes its orchestrator. Marks the item answered (inbox.js
+// asked) before the write, so a second click meanwhile is ignored.
 // Returns false when there is nowhere to send it.
-function sendAnswer(view, it, text, cx, option = false) {
+export function sendAnswer(view, it, text, cx, option = false) {
   const cap = captainOf(facts()).terminal;
   if (it.kind === "decision" && cap) {
     replyToCaptain(cap.address, it.decision, text);
@@ -1440,27 +1373,22 @@ function sendAnswer(view, it, text, cx, option = false) {
   }
   const run = it.run;
   if (!run?.localTerminal || noAnswer(it)) return false;
-  view.actionError = null;
-  // Marked before the write, so a second click meanwhile is ignored; undone if it fails.
-  view.answered[it.id] = it.since ?? 0;
-  cx.spawn(async (cx) => {
-    try {
-      // The budget question's Compact button compacts the orchestrator first (never a typed reply).
-      if (option && isCompact(text) && isBudgetQuestion(it)) await compactRun(run, it.title, text);
-      else await answerRun(run, it.title, text);
-      // The captain isn't there to clear its decision, so it goes with the answer.
-      if (it.kind === "decision") await dropDecision(it.decision).catch(() => {});
-    } catch (e) {
-      // Written but the wake failed: the answer is in the inbox, so it stays answered and
-      // a captain decision still goes (else each click would write another message).
-      if (e?.inInbox) { if (it.kind === "decision") await dropDecision(it.decision).catch(() => {}); }
-      else delete view.answered[it.id];
-      view.actionError = `${run.branch}: ${e?.message ?? e}`;
-    }
-    view.redraw = true;
-    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
-    try { await view.load(cx); } catch { /* the next refresh shows it */ }
-  }, { owner: null });
+  const key = it.id;
+  // The captain isn't there to clear its decision, so it goes with the answer.
+  const drop = async () => { if (it.kind === "decision") await dropDecision(it.decision).catch(() => {}); };
+  // The budget question's Compact button compacts the orchestrator first (never a typed reply).
+  const compact = option && isCompact(text) && isBudgetQuestion(it);
+  askClick(view, cx, run, "answer", { title: it.title, answer: text }, {
+    asks: [{ key, item: it }],
+    via: compact ? async () => { await compactRun(run, it.title, text); return { outcome: "sent" }; } : null,
+    after: drop,
+    // Written but the wake failed: the answer is in the inbox, so it stays answered and
+    // a captain decision still goes (else each click would write another message).
+    onError: async (e) => {
+      if (e?.inInbox) await drop();
+      else unmarkAsked(run, "answer", key);
+    },
+  });
   return true;
 }
 
@@ -1478,25 +1406,18 @@ export function submitReply(view, cx) {
   cx.notify();
 }
 
-// Writes the user's changes to the run's inbox (data.js askChanges); the field closes once it is written.
+// Writes the user's changes to the run's inbox (inbox.js); the field closes once it is written.
 function sendChanges(view, key, text, cx) {
   const run = view.runs.find((x) => x.key === key);
   if (!text || !run) return;
-  view.actionError = null;
-  view.reply.set_value("");
-  view.replying = null;
-  cx.notify();
-  cx.spawn(async (cx) => {
-    try {
-      const out = await askChanges(run, text);
-      if (out?.waits) setNote(view, `${run.branch}: the changes wait in its inbox until the run is resumed`);
-      else if (out?.blocked) setNote(view, `${run.branch}: its orchestrator is blocked on a dialog; it reads the changes once that is answered`);
-      else setNote(view, `${run.branch}: changes sent to its orchestrator`);
-    } catch (e) { view.actionError = `${run.branch}: ${e?.message ?? e}`; }
-    view.redraw = true;
-    try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
-    try { await view.load(cx); } catch { /* the next refresh shows it */ }
-  }, { owner: null });
+  askClick(view, cx, run, "changes", { text }, {
+    before: () => { view.reply.set_value(""); view.replying = null; },
+    notes: {
+      waits: "the changes wait in its inbox until the run is resumed",
+      blocked: "its orchestrator is blocked on a dialog; it reads the changes once that is answered",
+      sent: "changes sent to its orchestrator",
+    },
+  });
 }
 
 // A gone or lost orchestrator: an answer only waits in its inbox, and nothing is typed into its terminal.
@@ -1524,12 +1445,10 @@ function noAnswer(it) {
 // {replyBtn, optionButton(i), canPick, note, input}; replyBtn, note and input may be false.
 export function answerParts(view, t, it, ctx, slot = "") {
   const cap = captainOf(ctx);
-  // An answer written for an earlier question of this run (another `since`) no longer counts.
-  if (view.answered[it.id] !== undefined && view.answered[it.id] !== (it.since ?? 0)) delete view.answered[it.id];
   const rid = replyId(slot, it.id);
   const open = view.replying === rid;
   // A message waiting in the run's inbox counts too: someone else (the captain, by hand) answered.
-  const sent = view.answered[it.id] !== undefined;
+  const sent = it.run ? inboxAsked(it.run, "answer", it.id, it) : false;
   const answered = sent || Boolean(it.answered);
   const why = noAnswer(it);
   const replyBtn = it.kind !== "attention" && h_flex().id(rid + "-reply").flex_none().items_center().px(8).h(22).rounded(5)
@@ -1576,10 +1495,6 @@ function waitingOnYou(view, t, s, decisions, runs, ctx) {
   const cap = captainOf(ctx);
   const items = decisionQueue(runs, decisions, ctx);
   if (!items.length) return null;
-  for (const id of Object.keys(view.answered)) {
-    const it = items.find((x) => x.id === id);
-    if (!it || (it.since ?? 0) !== view.answered[id]) delete view.answered[id];
-  }
   const row = (it) => {
     const why = noAnswer(it);
     const address = it.kind === "decision" ? cap.terminal?.address : it.run?.terminal;

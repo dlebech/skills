@@ -1,4 +1,4 @@
-// The level popover's click, end to end on this machine: requestLevel writes its message to a
+// The level popover's click, end to end on this machine: inbox.js send writes its message to a
 // throwaway run's inbox, the next read of the runs finds it pending, and it stops being pending
 // once the orchestrator applies it or renames the message to .handled.
 // Run: node --import ./loader.mjs --test level-request.test.mjs
@@ -9,17 +9,9 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, renameSync, rmSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadRuns, requestLevel } from "../../herdr-app/mods/harbormaster/data.js";
-
-// Only sh runs for real (the runs read and the inbox write), with the throwaway root; nothing else
-// (hc, gh) is called for real.
-function withRoot(root) {
-  globalThis.__herdrExec = async (cmd, args) => {
-    if (cmd !== "sh") return { code: 1, stdout: "", stderr: "not in this test" };
-    const r = spawnSync(cmd, args, { encoding: "utf8", env: { ...process.env, HERDR_ORCHESTRATION_ROOT: root } });
-    return { code: r.status, stdout: r.stdout, stderr: r.stderr };
-  };
-}
+import { withRoot } from "./root.mjs";
+import { loadRuns } from "../../herdr-app/mods/harbormaster/data.js";
+import { send, legacyOutcome } from "../../herdr-app/mods/harbormaster/inbox.js";
 
 // loadRuns keeps a read for 2.5 s; step the clock past it between reads.
 const realNow = Date.now;
@@ -47,7 +39,7 @@ test("a level request goes to the inbox, shows as pending, and clears when handl
     assert.deepEqual(r.pending, { autonomy: null, tier: null });
 
     // The orchestrator t99 is not running here, so the message only waits in the inbox.
-    assert.deepEqual(await requestLevel(r, "tier", 2), { blocked: false, waits: true });
+    assert.deepEqual(legacyOutcome(await send(r, "level", { kind: "tier", level: 2 })), { blocked: false, waits: true });
     const files = readdirSync(join(dir, "inbox"));
     assert.equal(files.length, 1);
     assert.match(files[0], /^\d{8}T\d{6}Z-\d{3}-harbormaster-level\.message$/);
@@ -77,7 +69,7 @@ test("a level request goes to the inbox, shows as pending, and clears when handl
     assert.deepEqual(r.pending, { autonomy: null, tier: null });
 
     // Applied before it was renamed: status.json shows the new level, so it is no longer pending.
-    await requestLevel(r, "autonomy", "L2");
+    await send(r, "level", { kind: "autonomy", level: "L2" });
     r = await read(dir);
     assert.deepEqual(r.pending, { autonomy: "L2", tier: null });
     writeFileSync(join(dir, "status.json"), JSON.stringify({ status: "running", autonomy: "L2", type: "feat" }));

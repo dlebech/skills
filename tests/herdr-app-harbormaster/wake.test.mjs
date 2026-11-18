@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { detachedSend, wakeName, isWake } from "../../herdr-app/mods/harbormaster/wake.js";
 import { facts, adrift } from "../../herdr-app/mods/harbormaster/live.js";
-import { answerRun } from "../../herdr-app/mods/harbormaster/data.js";
+import { send } from "../../herdr-app/mods/harbormaster/inbox.js";
 
 test("the send is started detached, parentless and removed after, with the line as one argument", () => {
   const a = detachedSend("t5pw", "Read and act on /r/inbox/x.message.", "wake-abc");
@@ -52,8 +52,8 @@ const withHc = async ({ state = "live", status = "idle", gone = false } = {}, fn
 };
 
 test("answering checks the terminal, then wakes through a detached hc run on its machine", async () => {
-  const [res, hc] = await withHc({}, () => answerRun(runOf, "Q", "Written"));
-  assert.equal(res.blocked, false);
+  const [res, hc] = await withHc({}, () => send(runOf, "answer", { title: "Q", answer: "Written" }));
+  assert.equal(res.outcome, "sent");
   assert.deepEqual(hc.map((c) => c.args[0]), ["get", "run"]);
   assert.ok(hc.every((c) => c.on === "m1"));
   assert.deepEqual(hc[0].args, ["get", "t7"]);
@@ -61,22 +61,22 @@ test("answering checks the terminal, then wakes through a detached hc run on its
   assert.deepEqual(hc[1].args.slice(-4, -1), ["hc", "send", "t7"]);
 });
 test("a terminal that is gone shows as an error and nothing is started", async () => {
-  const [err, hc] = await withHc({ gone: true }, () => answerRun(runOf, "Q", "Written").catch((e) => e));
+  const [err, hc] = await withHc({ gone: true }, () => send(runOf, "answer", { title: "Q", answer: "Written" }).catch((e) => e));
   assert.equal(err.inInbox, true);
   assert.match(err.message, /could not be told: no terminal/);
   assert.deepEqual(hc.map((c) => c.args[0]), ["get"]);
 });
 test("a terminal that is not live shows as an error", async () => {
-  const [err] = await withHc({ state: "finished" }, () => answerRun(runOf, "Q", "Written").catch((e) => e));
+  const [err] = await withHc({ state: "finished" }, () => send(runOf, "answer", { title: "Q", answer: "Written" }).catch((e) => e));
   assert.equal(err.inInbox, true);
 });
 test("an orchestrator on a dialog is reported blocked and no wake is started", async () => {
-  const [res, hc] = await withHc({ status: "blocked" }, () => answerRun(runOf, "Q", "Written"));
-  assert.equal(res.blocked, true);
+  const [res, hc] = await withHc({ status: "blocked" }, () => send(runOf, "answer", { title: "Q", answer: "Written" }));
+  assert.equal(res.outcome, "blocked");
   assert.deepEqual(hc.map((c) => c.args[0]), ["get"]);
 });
 test("an orchestrator in error is not blocked: hc delivers to it", async () => {
-  const [res, hc] = await withHc({ status: "error" }, () => answerRun(runOf, "Q", "Written"));
-  assert.equal(res.blocked, false);
+  const [res, hc] = await withHc({ status: "error" }, () => send(runOf, "answer", { title: "Q", answer: "Written" }));
+  assert.equal(res.outcome, "sent");
   assert.deepEqual(hc.map((c) => c.args[0]), ["get", "run"]);
 });

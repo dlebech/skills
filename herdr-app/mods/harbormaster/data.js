@@ -12,13 +12,13 @@
 // process snapshot for CPU and memory (resources.js), kept per run in .resources.json.
 
 import { exec, appHome, machines, spaces, shared, setShared, run as command } from "herdr";
-import { parseQuestion, answerMessage } from "./question.js";
+import { parseQuestion } from "./question.js";
 import { parseDecidedLines } from "./decided.js";
-import { levelRequest, pendingLevels } from "./levels.js";
+import { pendingLevels } from "./levels.js";
 import { tokenText } from "./context.js";
 import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, withAcceptance } from "./proof.js";
-import { parsePlanClaims, claimProveRequest, claimResultLine } from "./claims.js";
+import { parsePlanClaims, claimResultLine } from "./claims.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
 import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
 import { taskTone, taskCounts, taskStage } from "./tasks.js";
@@ -26,21 +26,15 @@ import { taskTone, taskCounts, taskStage } from "./tasks.js";
 export { taskStage };
 export { taskTone, taskCounts };
 import { checkKind, ciTimes, prTtl, isOpenPr } from "./attention.js";
-import { blockingRequest, blockingPending, ciRequest } from "./blocking.js";
-import { changesRequest, changesPending } from "./changes.js";
-import { commentsArgs, commentSummary, commentsRequest, commentsRequestAll, pendingComments } from "./comments.js";
+import { NOT_ANSWERS, blockingPending, changesPending, send, writeMessage, wakeRun } from "./inbox.js";
+import { commentsArgs, commentSummary, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { detachedSend } from "./wake.js";
 import { exactStatus, reportedStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f", GS = "\u001d";
 
-// The first lines of inbox messages that answer no question: level requests ("set autonomy to
-// L2"), asks to prove ("prove t23 to T2: …"), asks what is blocking ("what is blocking? …") and
-// asks to address review comments ("address comments on <PR url>: ask") and asks for changes
-// ("changes asked from Harbormaster: …").
-// Kept equal to answer_messages in skills/herdr-app-captain/scripts/lib.sh.
-const NOT_ANSWERS = "^(set (autonomy|proof tier) to |prove [^ ]+( to T[0-3])?: |what is blocking\\?|address comments on |changes asked from Harbormaster: )";
+// NOT_ANSWERS (inbox.js) is the ERE of the first lines of inbox messages that answer no question.
 
 // One sh script per machine: the captain's decisions, then every run, its files
 // separated by \x1f, runs by \x1e; then, after a \x1d, the process snapshot.
@@ -67,7 +61,7 @@ const SCRIPT = [
   '  ls -p "$d/shared/proof" 2>/dev/null | grep -v / | head -40; printf \'\\037\'',
   // decisions.md: the last 60 lines of its own decisions and the user's, capped.
   '  grep -a -E "^- \\[(decided|user)\\] " "$d/decisions.md" 2>/dev/null | tail -n 60 | tail -c 20000; printf \'\\037\'',
-  // Level requests (levels.js), asks to prove (proof.js), asks what is blocking (blocking.js) and
+  // Level requests (levels.js), asks to prove (proof.js), asks what is blocking (inbox.js) and
   // asks to address comments (comments.js) in the inbox's unhandled messages,
   // oldest first: what is pending. Only a message's first line, so an answer's free text that
   // reads like one is not one.
@@ -280,9 +274,9 @@ function parseRun(machine, chunk) {
     ask: parseQuestion(question),
     askedAt: Number(asked?.trim()) * 1000 || null,
     unhandled: Number(inbox?.trim() || 0),
-    // An ask what is blocking (blocking.js) still unread in the inbox.
+    // An ask what is blocking (inbox.js) still unread in the inbox.
     blockingAsked: blockingPending(requests),
-    // An Ask for changes (changes.js) still unread: the run is not ready to merge until it is handled.
+    // An Ask for changes (inbox.js) still unread: the run is not ready to merge until it is handled.
     changesAsked: changesPending(requests),
     // The PRs an Address comments (comments.js) is still unread for, by URL.
     commentsAsked: pendingComments(requests),
@@ -829,118 +823,10 @@ export function decisionRun(d, runs) {
 
 const MARK = 'd=$1 m=$2; { date -u +%Y-%m-%dT%H:%M:%SZ | tr -d "\\n"; printf "\\t"; sed -n "1s/^Status: *//p" "$d/plan.md"; } >"$d/.$m.tmp" && mv "$d/.$m.tmp" "$d/$m"';
 
-// A message in the run's inbox, as herdr-app-captain relays them: written beside, then
-// moved in, so the orchestrator never reads half of it.
-const POST = 'd=$1 f=$2; mkdir -p "$d/inbox" && printf "%s\\n" "$3" >"$d/inbox/.$f.tmp" && mv "$d/inbox/.$f.tmp" "$d/inbox/$f"';
-
-// Writes `text` to the run's inbox as <UTC yyyymmddThhmmssZ>-<source>.message and wakes the
-// orchestrator: the one path Close and an answer from the queue share (run-files.md).
-// Resolves to {blocked}: true when the orchestrator is on a dialog and reads the message
-// once that is answered. Throws when the message could not be written, or the wake failed
-// (the message then still waits in the inbox).
-async function tellOrchestrator(run, source, text) {
-  return wakeOrchestrator(run, await writeInbox(run, source, text));
-}
-
-// Writes the message to the run's inbox and returns its file name.
-async function writeInbox(run, source, text) {
-  // Milliseconds after the seconds, so two answers in one second are two files.
-  const now = new Date().toISOString();
-  const file = `${now.replace(/[-:]|\.\d+/g, "")}-${now.slice(20, 23)}-${source}.message`;
-  const out = await exec("sh", ["-c", POST, "sh", run.dir, file, text], { on: run.machine });
-  if (out.code !== 0) throw new Error(out.stderr || "could not write to its inbox");
-  return file;
-}
-
-// Tells the orchestrator to read an inbox message (see tellOrchestrator for what it resolves to).
-// The send is detached (see wake.js), so a person's unfinished draft in the orchestrator's tab
-// only delays it and never fails it. Detached, its own failures are no longer seen, so what
-// can be known now is checked first: `hc get` (quick, no draft hold) says whether the terminal
-// is there, and a refusal shows as an error as before. An orchestrator on a dialog (as the
-// window reports it) is not sent to at all, as hc would refuse it; the message waits in its
-// inbox. A dialog that opens while a wake is held drops that wake the same way, with no sign;
-// the orchestrator reads its inbox at its next step.
-async function wakeOrchestrator(run, file) {
-  const fail = (why) => Object.assign(new Error(`the message is in its inbox, but its orchestrator could not be told: ${why}`), { inInbox: true });
-  const hc = (args) => exec("hc", args, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
-  const got = await hc(["get", run.localTerminal]);
-  let live = got.code === 0;
-  if (live) try { live = JSON.parse(got.stdout).state === "live"; } catch { live = false; }
-  if (!live) throw fail((got.stderr || got.stdout || "its terminal is gone").trim());
-  if (reportedStatus(run.terminal, facts()) === "blocked") return { blocked: true };
-  const sent = await hc(detachedSend(run.localTerminal, `Read and act on ${run.dir}/inbox/${file}.`));
-  if (sent.code !== 0) throw fail((sent.stderr || sent.stdout || "hc run failed").trim());
-  return { blocked: false };
-}
-
 // Removes a captain decision from .captain-decisions.json on its machine, atomically, once
 // its answer went to a run's inbox instead of the captain: nobody else would clear it.
 const DROP = 'f="${HERDR_ORCHESTRATION_ROOT:-$HOME/.herdr/hc-orchestration}/.captain-decisions.json"; [ -s "$f" ] && jq --arg id "$1" \'map(select(.id != $id))\' "$f" >"$f.tmp" && mv "$f.tmp" "$f"';
 export const dropDecision = (d) => exec("sh", ["-c", DROP, "sh", d.id], { on: d.machine });
-
-// Answers a run's question (or a captain decision that names the run) from the queue:
-// `answer` is an option's label or the person's own words.
-// A gone or lost orchestrator is never told: its terminal is gone, or only a shell, which
-// would run the wake-up line as a command. The message waits in the inbox until the run is
-// resumed, and this resolves to {blocked: false, waits: true}.
-export const answerRun = (run, title, answer, free = "") => messageRun(run, "harbormaster", answerMessage(title, answer, free));
-
-// Writes `text` to the run's inbox and wakes its orchestrator, unless it is gone (see answerRun).
-async function messageRun(run, source, text) {
-  if (orchestratorState(run, facts()) === "gone") {
-    await writeInbox(run, source, text);
-    return { blocked: false, waits: true };
-  }
-  return tellOrchestrator(run, source, text);
-}
-
-// Asks the orchestrator to change the run's autonomy ("L2") or proof tier (2), from a tag's
-// popover: an inbox message (levels.js levelRequest), the way an answer is sent. The
-// orchestrator applies it to status.json or plan.md; until then the tag shows it as requested.
-export function requestLevel(run, kind, level) {
-  const from = kind === "autonomy" ? run.autonomy : run.proof?.tier?.tier ?? null;
-  return messageRun(run, "harbormaster-level", levelRequest(kind, level, { from, finished: run.phase === "finished" }));
-}
-
-// Asks the orchestrator to prove one claim (a Claims row's Ask to prove): an inbox message,
-// "prove C2 to T2: <the result line>", the way a level request is sent. The row reads "asked…"
-// while it is unhandled and the result line is the same.
-export function askProof(run, row) {
-  return messageRun(run, "harbormaster-proof", claimProveRequest(row));
-}
-
-// Asks the orchestrator of a stalled run what is blocking it (Ask what's blocking on its Crew row
-// or pane): an inbox message, "what is blocking? Harbormaster sees this run quiet for 34m (step:
-// …)", the way an ask to prove is sent. `quiet` and `step` are the texts the row shows.
-export function askBlocking(run, { quiet, step = null }) {
-  return messageRun(run, "harbormaster-blocking", blockingRequest({ quiet, step }));
-}
-
-// Asks the orchestrator to see to a red CI (Ask the orchestrator in a Needs-you box): the same
-// "what is blocking?" message, saying which PR and check failed (blocking.js ciRequest).
-export function askCi(run, { pr, check = null, url = null }) {
-  return messageRun(run, "harbormaster-blocking", ciRequest({ pr, check, url }));
-}
-
-// Asks the orchestrator for changes to a run that was ready to merge (Ask for changes in its
-// box): the user's words as an inbox message (changes.js), woken like the others. Throws without text.
-export function askChanges(run, text) {
-  const msg = changesRequest(text);
-  if (!msg) throw new Error("say what to change");
-  return messageRun(run, "harbormaster-changes", msg);
-}
-
-// Asks the orchestrator to address the review comments on one of its PRs (Address comments on
-// its card or pane): an inbox message, "address comments on <PR url>: ask|handle", then the
-// comments Harbormaster sees (comments.js commentsRequest), the way an ask what is blocking is sent.
-export function askComments(run, pr, mode) {
-  return messageRun(run, "harbormaster-comments", commentsRequest(pr, mode));
-}
-// The same for several PRs at once (Ask me about all / Handle all): one inbox message covering
-// them all, so the orchestrator is woken once and, for ask, writes one question.
-export function askCommentsAll(run, prs, mode) {
-  return messageRun(run, "harbormaster-comments", commentsRequestAll(prs, mode));
-}
 
 // proof-accepted.json in the run directory, which Harbormaster owns: read on the run's machine,
 // changed here, and written back only if it still holds what was read (else exit 3, and it is
@@ -996,7 +882,7 @@ export async function compactRun(run, title, answer) {
   if (orchestratorState(run, facts()) === "gone") throw new Error("not compacted: its orchestrator is gone or lost; the answer waits for a resume");
   const ok = () => ["idle", "done"].includes(exactStatus(run.terminal, facts()));
   if (!ok()) throw new Error("not compacted: its orchestrator is not idle or done");
-  const file = await writeInbox(run, "harbormaster", answerMessage(title, answer));
+  const file = await writeMessage(run, "answer", { title, answer });
   // Detached like the wake (a held draft must not fail it). The dialog case was ruled out by the
   // status check above, and the wait below outlasts the draft hold (60 s) before it goes on.
   const sent = await exec("hc", detachedSend(run.localTerminal, "/compact"), { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
@@ -1007,7 +893,7 @@ export async function compactRun(run, title, answer) {
   for (let i = 0; i < 35 && ok(); i++) await sleep(2);
   for (let i = 0; i < 300 && !ok(); i++) await sleep(2);
   if (!ok()) throw new Error("compaction is still running after 10 minutes; the answer waits in its inbox");
-  return wakeOrchestrator(run, file);
+  return wakeRun(run, file);
 }
 
 // Closing a run whose orchestrator is there asks it to clean up: it ends its agents,
@@ -1015,9 +901,8 @@ export async function compactRun(run, title, answer) {
 // marker and closes its own tab (herdr-app-orchestrator's section 9). Resolves to a note
 // for the card, and whether it is blocked. A blocked orchestrator reads it once its dialog is answered.
 async function askToClose(run) {
-  const { blocked } = await tellOrchestrator(run, "harbormaster-close",
-    "The user closed this run in Harbormaster. Clean up and close your tab, as in your skill's section 9 (Close).");
-  return blocked
+  const { outcome } = await send(run, "close");
+  return outcome === "blocked"
     ? { blocked: true, note: "its orchestrator is blocked on a dialog: answer it in its tab, and it then cleans up and closes" }
     : { blocked: false, note: "its orchestrator is cleaning up, and its tab closes when done" };
 }

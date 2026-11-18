@@ -47,19 +47,8 @@ export function levelChoices(kind, current, pending = null) {
 const REQUEST = /^set (autonomy|proof tier) to (L[0-2]|T[0-3])\s*$/;
 export const requestLine = (kind, level) => (kind === "autonomy" ? `set autonomy to ${level}` : `set proof tier to T${level}`);
 
-// The whole message: the request, then one line on what it implies. `finished` says the run is
-// finished, where a higher tier means proving its done tasks again.
-export function levelRequest(kind, level, { from = null, finished = false } = {}) {
-  if (kind === "autonomy") {
-    return `${requestLine(kind, level)}\nAsked from Harbormaster${from ? ` (was ${from})` : ""}. From now on: ${AUTONOMY[level]}.`;
-  }
-  const up = from === null || level > from;
-  // The run's tier is each claim's bar unless a claim names its own (claims.js).
-  const why = !up ? `every claim needs only to be proved with ${TIER_TEXT[level]}; proof already gathered stays`
-    : finished ? `the run is finished, so prove its claims to T${level} (${TIER_TEXT[level]}), which sets it back to running`
-    : `every claim is proved with ${TIER_TEXT[level]}, proven ones included`;
-  return `${requestLine(kind, level)}\nAsked from Harbormaster${from !== null ? ` (was T${from})` : ""}: ${why}.`;
-}
+// The level request message lives in inbox.js; re-exported so imports keep working.
+export { levelRequest } from "./inbox.js";
 
 // The levels asked for and not applied yet: `lines` are the request lines found in the run's
 // unhandled inbox messages (data.js), oldest first, so the latest of each kind wins. A request

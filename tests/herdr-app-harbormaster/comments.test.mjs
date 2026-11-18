@@ -1,5 +1,5 @@
 // Review comments on approved or changes-requested PRs (comments.js; attention.js nextStep and
-// nextStepText; crewrows.js reviewCommentLines; data.js withComments and askComments): what is
+// nextStepText; crewrows.js reviewCommentLines; data.js withComments, inbox.js comments): what is
 // counted, the labels ("approved · 3 threads", unknown never zero), the Address comments message,
 // when it reads "asked…", and that the message answers no question.
 // Run: node --import ./loader.mjs --test comments.test.mjs
@@ -10,10 +10,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, renam
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { commentSummary, commentText, commentsArgs, commentsRequest, commentsRequestAll, pendingComments, commentsAsked, commentsSig, defaultMode, commentLines, commentsText, stepComments, COMMENTS, AI_PREFIX, COMMENTS_QUERY } from "../../herdr-app/mods/harbormaster/comments.js";
+import { commentSummary, commentText, commentsArgs, commentsRequest, commentsRequestAll, pendingComments, commentsSig, defaultMode, commentLines, commentsText, stepComments, COMMENTS, AI_PREFIX, COMMENTS_QUERY } from "../../herdr-app/mods/harbormaster/comments.js";
 import { nextStep, nextStepText, assess, prStep } from "../../herdr-app/mods/harbormaster/attention.js";
 import { reviewCommentLines, badgeOf, rowTip } from "../../herdr-app/mods/harbormaster/crewrows.js";
-import { loadRuns, askComments, askCommentsAll, withComments, COMMENTS_TTL } from "../../herdr-app/mods/harbormaster/data.js";
+import { resetShared } from "herdr";
+import { send, legacyOutcome, asked, markAsked } from "../../herdr-app/mods/harbormaster/inbox.js";
+import { loadRuns, withComments, COMMENTS_TTL } from "../../herdr-app/mods/harbormaster/data.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const URL = "https://github.com/o/api/pull/1799";
@@ -330,15 +332,17 @@ test("asked… holds while the message is unread, or until the PR's open comment
   assert.deepEqual(pendingComments("set autonomy to L2\naddress comments on https://x/pull/1: ask\nwhat is blocking? y"), ["https://x/pull/1"]);
   assert.deepEqual(pendingComments(null), []);
   const p = pr(1, "APPROVED", some(2));
-  const r = { statusLine: "finished", commentsAsked: [] };
-  const asked = { sig: commentsSig(r, p) };
-  assert.equal(commentsAsked(r, p, asked), true);
-  assert.equal(commentsAsked(r, { ...p, comments: some(1) }, asked), false);
+  const r = { key: ":/r/x", statusLine: "finished", commentsAsked: [] };
+  resetShared();
+  markAsked(r, "comments", p.url, p);
+  assert.equal(asked(r, "comments", p.url, p), true);
+  assert.equal(asked(r, "comments", p.url, { ...p, comments: some(1) }), false);
   assert.doesNotMatch(commentsRequest(p, "handle"), /resolve the threads/);
   // The orchestrator read the ask and is working on it: its status changed, the comments did not.
-  assert.equal(commentsAsked({ ...r, statusLine: "t3 addressing comments" }, p, asked), true);
-  assert.equal(commentsAsked({ ...r, commentsAsked: [p.url] }, p, null), true);
-  assert.equal(commentsAsked(r, p, null), false);
+  assert.equal(asked({ ...r, statusLine: "t3 addressing comments" }, "comments", p.url, p), true);
+  assert.equal(asked({ ...r, commentsAsked: [p.url] }, "comments", p.url, p), true);
+  resetShared();
+  assert.equal(asked(r, "comments", p.url, p), false);
 });
 
 test("the captain watcher does not take an address comments message as an answer", () => {
@@ -354,7 +358,7 @@ test("the captain watcher does not take an address comments message as an answer
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("askComments writes the message to the run's inbox; the next read shows it asked, not as an answer", async () => {
+test("an Ask me writes the message to the run's inbox; the next read shows it asked, not as an answer", async () => {
   const root = mkdtempSync(join(tmpdir(), "hm-cmt-root-"));
   const realNow = Date.now;
   let skew = 0;
@@ -377,7 +381,7 @@ test("askComments writes the message to the run's inbox; the next read shows it 
     assert.deepEqual(r.commentsAsked, []);
     const p = pr(1799, "APPROVED", some(2));
     // The orchestrator t99 is not running here, so the ask only waits in the inbox.
-    assert.deepEqual(await askComments(r, p, "handle"), { blocked: false, waits: true });
+    assert.deepEqual(legacyOutcome(await send(r, "comments", { pr: p, mode: "handle" })), { blocked: false, waits: true });
     const [msg] = readdirSync(join(dir, "inbox"));
     assert.match(msg, /^\d{8}T\d{6}Z-\d{3}-harbormaster-comments\.message$/);
     assert.match(readFileSync(join(dir, "inbox", msg), "utf8"), /^address comments on https:\/\/github\.com\/o\/r\/pull\/1799: handle\n/);
@@ -395,7 +399,7 @@ test("askComments writes the message to the run's inbox; the next read shows it 
   }
 });
 
-test("askCommentsAll writes one message for all the PRs; the next read shows every PR asked", async () => {
+test("Ask me about all writes one message for all the PRs; the next read shows every PR asked", async () => {
   const root = mkdtempSync(join(tmpdir(), "hm-cmt-root-"));
   const realNow = Date.now;
   let skew = 3600000; // past the earlier test's skewed cache, which would hide this root
@@ -419,7 +423,7 @@ test("askCommentsAll writes one message for all the PRs; the next read shows eve
     const p = pr(1799, "APPROVED", some(2));
     const q = pr(1372, "APPROVED", some(1));
     // The orchestrator t99 is not running here, so the ask only waits in the inbox.
-    assert.deepEqual(await askCommentsAll(r, [p, q], "handle"), { blocked: false, waits: true });
+    assert.deepEqual(legacyOutcome(await send(r, "comments-all", { prs: [p, q], mode: "handle" })), { blocked: false, waits: true });
     const files = readdirSync(join(dir, "inbox"));
     assert.equal(files.length, 1, "one inbox file for both PRs");
     const [msg] = files;

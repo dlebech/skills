@@ -13,8 +13,9 @@
 // toast in the shared store (`by`) and posts it only if its claim still stands after writing.
 
 import { shared, setShared, notify } from "herdr";
-import { cachedRuns, prsOf } from "./data.js";
-import { pruneAsked } from "./asked.js";
+import { cachedRuns, prsOf, isClosed, decisionQueue, filesFresh } from "./data.js";
+import { pruneAsked, migrateCommentsAsked } from "./inbox.js";
+import { claimRows } from "./claims.js";
 import { attentionOf } from "./attend.js";
 import { orchestratorState } from "./live.js";
 import { runName } from "./ui.js";
@@ -75,6 +76,26 @@ export function markDecisionsSeen(run) {
 
 // ---- after each run read ----
 
+// The item a mark's signature is read from, where the run alone does not give it: the PR of an
+// Address comments mark, the claim row of an Ask to prove. Undefined (the mark is kept) for a stale
+// run, or one that no longer has it.
+function markItem(run, family, key, queue = null) {
+  // Not a fresh read (a stale run, a machine that failed, or polls older than two minutes): the
+  // queue is missing items only because nothing was read, so every mark is kept.
+  if (!filesFresh(run)) return undefined;
+  // An answer's queue item by id; false once it is not in the queue (the question is gone). A
+  // captain decision belongs to its own machine (its key is "dec-<machine>:<id>"): gone only
+  // when that machine answered this read too.
+  if (family === "answer") {
+    const item = queue?.get(key);
+    if (item || !key.startsWith("dec-")) return item ?? false;
+    return filesFresh({ machine: key.slice(4, key.indexOf(":")) || null }) ? false : undefined;
+  }
+  if (family === "comments") return (prsOf(run) ?? []).find((p) => p.url === key);
+  if (family === "proof") return claimRows(run.proof, run).find((k) => k.id === key);
+  return undefined;
+}
+
 export function observeTelling(runs, ctx, now = Date.now()) {
   const failed = cachedRuns().failed ?? [];
   const seen = shared(SEEN_KEY) ?? {};
@@ -87,7 +108,16 @@ export function observeTelling(runs, ctx, now = Date.now()) {
   const live = runs.filter((r) => !r.stale);
   const atts = new Map(live.map((r) => [r, attentionOf(r, ctx, now)]));
   observeToasts(runs, atts, ctx, failed, now);
-  // Asks for Address comments that no longer hold go from their store (asked.js).
+  // The marks of the shared asked store (inbox.js): the signature moved, the run is closed or gone, or
+  // a week passed. A comments mark reads its PR, a proof mark its claim row; a stale run's marks
+  // are kept (its files are not a fresh read), and age out.
   const busy = new Set(live.filter((r) => atts.get(r).working).flatMap((r) => (prsOf(r) ?? []).map((p) => p.url)));
-  pruneAsked(live.flatMap((r) => prsOf(r) ?? []), busy);
+  const queue = new Map(decisionQueue(runs, cachedRuns().decisions ?? [], ctx).map((x) => [x.id, x]));
+  // A run absent from `runs` is gone only when its machine was read fresh this time; after a
+  // reload, or while a machine fails, it may only be unread. Then its marks are kept (they age out),
+  // and the old comments asks of no listed run wait for a read that lists every machine.
+  const read = cachedRuns().at > 0;
+  const machineOf = (rk) => rk.slice(0, Math.max(rk.indexOf(":/"), 0)) || null;
+  if (read && runs.length) migrateCommentsAsked(runs, prsOf, { offline: failed.length > 0 });
+  pruneAsked(runs, { now, gone: (rk) => read && !failed.includes(machineOf(rk)), closed: (r) => isClosed(r, ctx), busy, lookup: (run, family, key) => markItem(run, family, key, queue) });
 }

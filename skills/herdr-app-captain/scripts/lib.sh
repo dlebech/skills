@@ -232,8 +232,8 @@ unhandled_messages() {
 # from its Proof rows), asks what is blocking ("what is blocking? …", from a stalled run's
 # Crew row or pane) and asks to address review comments ("address comments on <PR url>: ask",
 # from a run's card or pane; run-files.md) and asks for changes ("changes asked from Harbormaster: …",
-# from a ready run's box), which answer nothing. Harbormaster's data.js
-# (NOT_ANSWERS) uses the same pattern.
+# from a ready run's box), which answer nothing. Harbormaster's inbox.js (its kind table builds
+# NOT_ANSWERS) uses the same pattern; tests/herdr-app-harbormaster/inbox.test.mjs fails if the two differ.
 answer_messages() {
   local f
   unhandled_messages "$1" | while IFS= read -r f; do

@@ -17,7 +17,7 @@ import { proofRead, parseProofMd } from "../../herdr-app/mods/harbormaster/proof
 import { claimRows, claimCounts, claimsClean, claimsGaps, claimsSig, parsePlanClaims, proofState } from "../../herdr-app/mods/harbormaster/claims.js";
 import { nextProofSeen } from "../../herdr-app/mods/harbormaster/proofseen.js";
 import { proofStateOf } from "../../herdr-app/mods/harbormaster/attend.js";
-import { changesRequest, changesPending, CHANGES } from "../../herdr-app/mods/harbormaster/changes.js";
+import { changesRequest, changesPending, CHANGES } from "../../herdr-app/mods/harbormaster/inbox.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MIN = 60000;
