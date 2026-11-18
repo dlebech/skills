@@ -87,10 +87,10 @@ function adriftRows(m) {
   const stray = (a, i) => h_flex().id(`adrift-${a.address}`).flex_none().gap(8).h(24).px(8).items_center().rounded(6).cursor_pointer()
     .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(t.hover)).tooltip([names[i], a.title, `${a.space_name} · ${a.tab_name}`].filter((x, i, all) => x && all.indexOf(x) === i).join("\n"))
     .on_click(() => focusAgent(a.address))
-    .child(programIcon(a.program, 13, t.muted))
+    .child(statusDot(t, a.status))
     .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(`${a.space_name} · ${names[i]}`))
     .map(withUsage(t, `adrift-${a.address}`, liveUsage(a.address), "This agent and its commands"))
-    .child(statusDot(t, a.status));
+    .child(programIcon(a.program, 13, t.muted));
   return {
     head: drifters.length > 0 ? div().flex_none().px(4).pt(6).text_size(10.5).font_semibold().text_color(t.dim).child(`Adrift · ${drifters.length}`) : null,
     rows: drifters.map(stray),

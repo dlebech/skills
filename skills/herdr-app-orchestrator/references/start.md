@@ -9,6 +9,7 @@ Parse `$ARGUMENTS` for the work source, constraints, options, and optional profi
 - `agent=<kind>` and `model=<model>` are shorthand defaults for all roles.
 - `implementer=<kind>` and `implementer-model=<model>` override implementation and fixes.
 - `reviewer=<kind>` and `reviewer-model=<model>` override review.
+- `implementer-tier=small|default` (default `default`) marks the implementer profile as a small or limited-context model, such as a local model with a 128k window. Only the user sets it; never infer it from the model name. With `small`, briefs and task sizes change as [briefs.md](briefs.md#small-tier-implementers) says. It affects implementers and fixers only; reviewers keep their usual briefs.
 - `autonomy=L0|L1|L2` sets how much you decide yourself (default `L0`; the skill's section 6).
 - `budget=<tokens>` (`30M`, `50M`; cache reads dominate a run's total) is a soft token budget: start with `set-status.sh --budget <it>`. What to do when it is reached is in [status.md](status.md#soft-budget). Default: none.
 - `grunt=<kind>` and `grunt-model=<model>` define an optional cheap profile for agents that only run and watch commands and never edit files (tests, lint, builds, CI, gathering proof); `grunt-model` alone means your implementer's kind. Default: none; everything works as without it. [speed.md](speed.md) §4 says how it is kept from editing.
