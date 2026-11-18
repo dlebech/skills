@@ -41,6 +41,22 @@ export function newSpaceId(folder, openSpaces) {
   return clash ? `${id}-${slug(base(parentOf(folder))) || "root"}` : id;
 }
 
+// The local space a New run in `folder` starts in: the one whose own `folder` is it, else the one
+// with a terminal live in it (a space's `folder` can be stale, the folder it was launched in). Exact
+// folder only; remote spaces are never chosen. Null for none.
+export function spaceAt(folder, spaces, panes) {
+  const want = trim(String(folder || ""));
+  if (!want) return null;
+  const local = spaces.filter((s) => !s.machine);
+  const own = local.find((s) => trim(String(s.folder || "")) === want);
+  if (own) return own.id;
+  for (const s of local) {
+    const tabs = new Set((s.tabs ?? []).map((t) => t.id));
+    if (panes.some((p) => tabs.has(p.tab) && trim(String(p.cwd || "")) === want)) return s.id;
+  }
+  return null;
+}
+
 // The folders runs were started in or have: the dialog's own history first (newest first), then
 // the run directories' `folder`s; no duplicates, RECENT_MAX in all (`runFolders` newest run first).
 export function recentFolders(history = [], runFolders = []) {
