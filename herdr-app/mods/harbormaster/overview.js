@@ -597,7 +597,8 @@ export function needButton(view, t, r, f, x, id, where, primary) {
     case "asked": return askedNote(t, id);
     case "address-all": return x.prs.every((p) => addressAsked(r, p, f.att)) ? null
       : actionButton(t, id, x.label, `${modeTip(r, x.mode)} For each of the ${x.prs.length} PRs.`, addressSendAll(view, r, x.prs.filter((p) => !addressAsked(r, p, f.att)), x.mode), primary);
-    case "focus": return actionButton(t, id, x.label, "Show its terminal", () => focusAgent(x.address), primary);
+    // Focusing the run's own orchestrator opens the run (the next poll reads its PRs); focusing a worker does not.
+    case "focus": return actionButton(t, id, x.label, "Show its terminal", () => { if (x.address === r.terminal) markOpened(r); focusAgent(x.address); }, primary);
     case "ask-ci": return ciAction(view, t, r, x, id);
     case "ask-blocking": return blockingAction(view, t, r, f.att, id);
     case "report": return pathLink(t, r, id, x.path, x.label);

@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resetShared } from "herdr";
+import { needButton } from "../../herdr-app/mods/harbormaster/overview.js";
 import { refreshPrs, markOpened, textSig, prFilesSig, PR_BACKSTOP_CAP } from "../../herdr-app/mods/harbormaster/data.js";
 import { prTtl, prOffset, prMaxAge, fnv1a, PR_EVENT_FLOOR_MS, PR_OPENED_MS, PR_SPREAD_MS } from "../../herdr-app/mods/harbormaster/attention.js";
 
@@ -341,4 +342,21 @@ test("an opening that meets another copy deciding on the run is kept and read at
   assert.equal(w.calls.view, 2);
   assert.equal(await refreshPrs(run, false), "opened", "the next poll reads the kept opening");
   assert.equal(w.calls.view, 4);
+}));
+
+// The need box's focus button (overview.js needButton): focusing the run's own orchestrator opens the run,
+// so the next poll reads its PRs; focusing a worker does not.
+test("a need box's Open the orchestrator button marks the run opened; a worker's focus button does not", withClock(async () => {
+  const t = new Proxy({}, { get: () => "#000" });
+  const click = (r, address) => needButton({}, t, r, {}, { kind: "focus", label: "Open", address }, "b", "card", false).click({}, { stop_propagation() {}, notify() {} });
+  const w = world();
+  const run = { ...w.run(2), terminal: "t7" };
+  await refreshPrs(run, false);
+  tick(PR_OPENED_MS + 1000);
+  click(run, "t9");
+  await refreshPrs(run, false);
+  assert.equal(w.calls.view, 2, "a worker's terminal: nothing marked, nothing read");
+  click(run, "t7");
+  await refreshPrs(run, false);
+  assert.equal(w.calls.view, 4, "the run's orchestrator: marked, read at the next poll");
 }));
