@@ -30,6 +30,7 @@ SPEC = {
     "quay": (300, ["Body"]),
     "signal": (200, ["Body", "Red", "Amber", "Green"]),
     "tug": (700, ["Body", "Captain", "Light"]),
+    "captain": (400, ["Body", "arm"]),
     "office": (500, ["Body", "Radar", "Windows"]),
     "warehouse": (150, ["Body"]),
     "silo": (250, ["Body"]),

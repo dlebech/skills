@@ -275,3 +275,78 @@ export function labelUnderCard(l, rect, pad = 8) {
   if (!rect) return false
   return l.x + l.w / 2 > rect.left - pad && l.x - l.w / 2 < rect.right + pad && l.y > rect.top - pad && l.y - l.h < rect.bottom + pad
 }
+
+// ---- the camera that fits a berth ----
+// The view direction of a selected berth: from the south-east (+X, +Z), 30° above the water. Unit vector from the target to the camera.
+export const VIEW_DIR = (() => { const az = Math.atan2(24, 28), el = (30 * Math.PI) / 180; return [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)] })()
+
+// The points that must be visible for a berth at `origin` ({ x, z }) with a ship of uniform `scale`: the ship's bow, stern, beam and
+// mast top, the crane's top and the end of its boom, the pier's tip, and the octopus off the tip (its whole body, radius included).
+export function berthFitPoints(origin, scale = 1) {
+  const o = origin, s = shipPosition(false, scale), pts = []
+  const at = (x, y, z) => pts.push([o.x + x, y, o.z + z])
+  for (const dz of [-9, 9]) for (const dx of [-2.5, 2.5]) at(s.x + dx * scale, 0, s.z + dz * scale)
+  at(s.x, MAST_FLAG_TOP * scale + 0.5, s.z - 6.9 * scale)
+  at(CRANE.x - 3.03, CRANE.y + 11.46, CRANE.z); at(CRANE.x + 8.02, CRANE.y + 11.46, CRANE.z)
+  at(PIER.x, 0, PIER.length)
+  const r = 0.72 * OCTOPUS_SCALE
+  for (const dx of [-r, r]) for (const dz of [-r, r]) for (const y of [OCTOPUS.y - 0.27 * OCTOPUS_SCALE, OCTOPUS.y + 1.41 * OCTOPUS_SCALE]) at(OCTOPUS.x + dx, y, OCTOPUS.z + dz)
+  return pts
+}
+// The same for an anchored ship at `pos` ({ x, z }), bow to the east: the ship only.
+export function anchoredFitPoints(pos, scale = 1) {
+  const pts = []
+  for (const dx of [-9, 9]) for (const dz of [-2.5, 2.5]) pts.push([pos.x + dx * scale, 0, pos.z + dz * scale])
+  pts.push([pos.x, MAST_FLAG_TOP * scale + 0.5, pos.z])
+  return pts
+}
+
+// The part of a w x h window that is free of the info card and the toolbar, as fractions { left, top, right, bottom } of the window.
+// `card` and `bar` are their boxes ({ left, top, right, bottom } in pixels) or null. A card at the side leaves the area to its left; one
+// across the full width (a narrow window) leaves the area above it. The toolbar takes a band at the top or the bottom, whichever it is nearer.
+export function freeRect(w, h, card, bar, pad = 8) {
+  let left = 0, top = 0, right = w, bottom = h
+  if (card && card.right > card.left) {
+    if (card.right - card.left >= w * 0.9) { if (card.top > h / 2) bottom = Math.min(bottom, card.top - pad); else top = Math.max(top, card.bottom + pad) }
+    else if (card.left > w / 2) right = Math.min(right, card.left - pad)
+    else left = Math.max(left, card.right + pad)
+  }
+  if (bar && bar.bottom > bar.top) { if (bar.top > h / 2) bottom = Math.min(bottom, bar.top - pad); else top = Math.max(top, bar.bottom + pad) }
+  return { left: left / w, top: top / h, right: right / w, bottom: bottom / h }
+}
+
+// Where to put a camera so that every point shows inside `free` (fractions of the window, from freeRect) with `margin` of the free
+// size to spare on each side, and the points are centred in it. `fov` is the vertical field of view in radians, `aspect` the window's
+// width over height, `dir` the unit vector from the target to the camera (VIEW_DIR). Only the distance and the target change: the target
+// slides sideways and up in the view plane, which moves nothing in depth, so each point's bounds are exact and the nearest fitting
+// distance is found by bisection. Returns { position: [x, y, z], target: [x, y, z], distance }.
+export function fitView(points, { fov, aspect, free, dir = VIEW_DIR, margin = 0.08 }) {
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+  const norm = a => { const l = Math.hypot(...a); return [a[0] / l, a[1] / l, a[2] / l] }
+  const fwd = [-dir[0], -dir[1], -dir[2]], right = norm(cross(fwd, [0, 1, 0])), up = cross(right, fwd)
+  const c0 = [0, 1, 2].map(i => (Math.min(...points.map(p => p[i])) + Math.max(...points.map(p => p[i]))) / 2)
+  const q = points.map(p => { const v = sub(p, c0); return { x: dot(v, right), y: dot(v, up), z: dot(v, fwd) } })
+  const ty = Math.tan(fov / 2), tx = ty * aspect
+  const fw = free.right - free.left, fh = free.bottom - free.top
+  const L = (free.left + margin * fw) * 2 - 1, R = (free.right - margin * fw) * 2 - 1
+  const B = 1 - (free.bottom - margin * fh) * 2, T = 1 - (free.top + margin * fh) * 2
+  const near = Math.max(...q.map(p => -p.z)) + 0.5
+  // the range of sideways shifts (a) and upward shifts (b) of the target that keep every point inside, for a distance d
+  const span = d => {
+    let aLo = -Infinity, aHi = Infinity, bLo = -Infinity, bHi = Infinity
+    for (const p of q) {
+      const dep = d + p.z
+      aLo = Math.max(aLo, p.x - R * tx * dep); aHi = Math.min(aHi, p.x - L * tx * dep)
+      bLo = Math.max(bLo, p.y - T * ty * dep); bHi = Math.min(bHi, p.y - B * ty * dep)
+    }
+    return { aLo, aHi, bLo, bHi }
+  }
+  const fits = d => { const s = span(d); return s.aLo <= s.aHi && s.bLo <= s.bHi }
+  let lo = near, hi = near + 10
+  while (!fits(hi) && hi < 1e5) hi *= 2
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (fits(m)) hi = m; else lo = m }
+  const d = hi, s = span(d), a = (s.aLo + s.aHi) / 2, b = (s.bLo + s.bHi) / 2
+  const target = [0, 1, 2].map(i => c0[i] + right[i] * a + up[i] * b)
+  return { position: [0, 1, 2].map(i => target[i] + dir[i] * d), target, distance: d }
+}

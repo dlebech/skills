@@ -204,7 +204,7 @@ export class Berth {
     this.group.removeFromParent(); this.ship.dispose()
     this.glow.material.dispose(); this.beacon.material.dispose(); this.ring.material.dispose(); this.ring.geometry.dispose()
   }
-  // Where the label goes, and where fireworks burst.
+  // Where the label goes.
   labelPoint(out) { return this.ship.top(out, this.group.position) }
   // The ship's current place in the world.
   focus(out) { return out.set(this.group.position.x + this.ship.group.position.x, 2, this.group.position.z + this.ship.group.position.z) }

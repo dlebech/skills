@@ -24,7 +24,6 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd2f0; fon
 #toolbar button:focus-visible, #card .close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #toolbar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 #toolbar button.dim, #toolbar button:disabled { opacity: 0.4; cursor: default; }
-#toolbar button.sel { border-color: rgba(255, 180, 84, 0.55); }
 
 #card { position: fixed; z-index: 5; top: 12px; right: 12px; bottom: 60px; width: 300px; overflow: auto; padding: 12px 14px; background: var(--ui); border: 1px solid var(--ui-line); border-radius: 10px; backdrop-filter: blur(8px); }
 #card .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -47,6 +46,6 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd2f0; fon
   #toolbar button { padding: 6px 9px; }
   #status { top: auto; bottom: 8px; }
   #banner { top: auto; bottom: 8px; left: 50%; }
-  #card { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 46vh; border-radius: 12px 12px 0 0; }
+  #card { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 40vh; border-radius: 12px 12px 0 0; }
 }
 @media (prefers-reduced-motion: reduce) { .label { transition: none; } }

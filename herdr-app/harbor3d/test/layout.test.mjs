@@ -261,3 +261,61 @@ test("containerBoxes: the pier row stays on the pier and the yard behind the qua
   for (const x of b.filter(y => y.zone === "pier")) { assert.ok(x.min[2] >= -10 && x.max[2] <= -10 + 26, "within the pier's length") }
   for (const x of b.filter(y => y.zone === "yard")) assert.ok(x.max[2] <= -10 - 3.7 && x.min[2] >= -10 - 14, "on the quay")
 })
+
+// ---- the camera that fits a berth ----
+import { fitView, freeRect, berthFitPoints, anchoredFitPoints, VIEW_DIR } from "../public/assets/layout.js"
+
+// Project a point with the camera fitView returned (looking from position at target, y up), to the window's fractions (0..1, y down).
+function project(p, cam, fov, aspect) {
+  const sub = (a, b) => a.map((v, i) => v - b[i]), dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+  const f = sub(cam.target, cam.position), l = Math.hypot(...f), fwd = f.map(v => v / l)
+  const r0 = [-fwd[2], 0, fwd[0]], rl = Math.hypot(...r0), right = r0.map(v => v / rl)
+  const up = [right[1] * fwd[2] - right[2] * fwd[1], right[2] * fwd[0] - right[0] * fwd[2], right[0] * fwd[1] - right[1] * fwd[0]]
+  const v = sub(p, cam.position), z = dot(v, fwd), ty = Math.tan(fov / 2)
+  return { x: (dot(v, right) / (z * ty * aspect)) * 0.5 + 0.5, y: 0.5 - (dot(v, up) / (z * ty)) * 0.5, z }
+}
+
+test("fitView: every point of a berth lies inside the free part, with the margin, in any window shape", () => {
+  const fov = (50 * Math.PI) / 180
+  const pts = berthFitPoints({ x: 0, z: -10 }, 1.3)
+  for (const aspect of [0.5, 0.75, 1, 1.6, 2.4]) {
+    const w = 1000 * aspect, h = 1000
+    // a card at the side in a wide window, across the bottom in a narrow one, and the toolbar's band
+    const card = aspect > 0.9 ? { left: w - 312, top: 12, right: w - 12, bottom: h - 60 } : { left: 0, top: h * 0.6, right: w, bottom: h }
+    const bar = aspect > 0.9 ? { left: w / 2 - 150, top: h - 44, right: w / 2 + 150, bottom: h - 12 } : { left: 0, top: 8, right: w, bottom: 44 }
+    const free = freeRect(w, h, card, bar)
+    const cam = fitView(pts, { fov, aspect, free })
+    const fw = free.right - free.left, fh = free.bottom - free.top
+    for (const p of pts) {
+      const s = project(p, cam, fov, aspect)
+      assert.ok(s.z > 0, `aspect ${aspect}: in front`)
+      assert.ok(s.x >= free.left + 0.08 * fw - 1e-6 && s.x <= free.right - 0.08 * fw + 1e-6, `aspect ${aspect}: x ${s.x.toFixed(3)} in ${free.left.toFixed(2)}..${free.right.toFixed(2)}`)
+      assert.ok(s.y >= free.top + 0.08 * fh - 1e-6 && s.y <= free.bottom - 0.08 * fh + 1e-6, `aspect ${aspect}: y ${s.y.toFixed(3)} in ${free.top.toFixed(2)}..${free.bottom.toFixed(2)}`)
+    }
+    // centred in the free part, not in the window: the extremes touch the margin on at least one axis and the middle is the free part's
+    const xs = pts.map(p => project(p, cam, fov, aspect).x), ys = pts.map(p => project(p, cam, fov, aspect).y)
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2
+    assert.ok(Math.abs(cx - (free.left + free.right) / 2) < 0.02 || Math.abs(cy - (free.top + free.bottom) / 2) < 0.02, `aspect ${aspect}: centred`)
+    // the direction is kept
+    const d = [0, 1, 2].map(i => (cam.position[i] - cam.target[i]) / cam.distance)
+    for (let i = 0; i < 3; i++) assert.ok(Math.abs(d[i] - VIEW_DIR[i]) < 1e-9)
+  }
+})
+
+test("fitView: a tall narrow window puts the camera further away than a wide one; an anchored ship is closer than a berth", () => {
+  const fov = (50 * Math.PI) / 180, full = { left: 0, top: 0, right: 1, bottom: 1 }
+  const pts = berthFitPoints({ x: 0, z: -10 }, 1)
+  const tall = fitView(pts, { fov, aspect: 0.5, free: full }), wide = fitView(pts, { fov, aspect: 2.4, free: full })
+  assert.ok(tall.distance > wide.distance)
+  const anchored = fitView(anchoredFitPoints({ x: 0, z: 78 }, 1), { fov, aspect: 1, free: full })
+  assert.ok(anchored.distance < fitView(pts, { fov, aspect: 1, free: full }).distance)
+})
+
+test("freeRect: the card at the side, the card across the bottom or top, and the toolbar's band", () => {
+  const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} vs ${b}`)
+  let f = freeRect(1600, 900, { left: 1288, top: 12, right: 1588, bottom: 840 }, { left: 700, top: 856, right: 900, bottom: 888 })
+  near(f.left, 0); near(f.right, (1288 - 8) / 1600); near(f.top, 0); near(f.bottom, (856 - 8) / 900)
+  f = freeRect(700, 1200, { left: 0, top: 720, right: 700, bottom: 1200 }, { left: 0, top: 8, right: 700, bottom: 44 })
+  near(f.top, (44 + 8) / 1200); near(f.bottom, (720 - 8) / 1200); near(f.left, 0); near(f.right, 1)
+  f = freeRect(500, 800, null, null); assert.deepEqual(f, { left: 0, top: 0, right: 1, bottom: 1 })
+})

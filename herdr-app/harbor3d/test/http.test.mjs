@@ -120,24 +120,30 @@ test("private: Host and Origin checks", async () => {
 })
 
 test("poke: 204 and broadcast to every viewer, rebuilt from validated values", async () => {
-  const s = await start()
+  const clock = { t: 1000 }
+  const s = await start({ now: () => (clock.t += 1100) })
   const a = await sse(s.url + "events"), b = await sse(s.url + "events")
   try {
     const scene = (await a.waitFor(e => e.event === "scene")).data
     const target = scene.runs[1].id
-    const r = await post(s.url, { kind: "fireworks", target, extra: "<script>", __proto__: { x: 1 }, nested: { a: 1 } }, { "x-viewer": "1".repeat(16) })
+    const r = await post(s.url, { kind: "wave", target, extra: "<script>", __proto__: { x: 1 }, nested: { a: 1 } }, { "x-viewer": "1".repeat(16) })
     assert.equal(r.status, 204)
     for (const c of [a, b]) {
       const p = await c.waitFor(e => e.event === "poke")
       assert.deepEqual(Object.keys(p.data).sort(), ["at", "kind", "target"])
-      assert.equal(p.data.kind, "fireworks"); assert.equal(p.data.target, target)
+      assert.equal(p.data.kind, "wave"); assert.equal(p.data.target, target)
       assert.equal(typeof p.data.at, "number")
     }
     // worker, orchestrator, adrift and "harbor" are valid targets too
     const w = scene.runs[0].workers[0].id
     assert.equal((await post(s.url, { kind: "wave", target: w }, { "x-viewer": "2".repeat(16) })).status, 204)
     assert.equal((await post(s.url, { kind: "feed", target: "harbor" }, { "x-viewer": "3".repeat(16) })).status, 204)
-    assert.equal((await post(s.url, { kind: "feed", target: scene.adrift[0].id }, { "x-viewer": "4".repeat(16) })).status, 204)
+    assert.equal((await post(s.url, { kind: "wave", target: scene.adrift[0].id }, { "x-viewer": "4".repeat(16) })).status, 204)
+    // the kinds are tied to their targets: feed takes only the harbor, wave takes creatures and the captain (state is "watching" here)
+    assert.equal((await post(s.url, { kind: "feed", target: scene.adrift[0].id }, { "x-viewer": "5".repeat(16) })).status, 400)
+    assert.equal((await post(s.url, { kind: "wave", target: "harbor" }, { "x-viewer": "6".repeat(16) })).status, 400)
+    assert.equal((await post(s.url, { kind: "feed", target: "captain" }, { "x-viewer": "7".repeat(16) })).status, 400)
+    assert.equal((await post(s.url, { kind: "wave", target: "captain" }, { "x-viewer": "8".repeat(16) })).status, 204)
   } finally { a.close(); b.close(); await s.close() }
 })
 
@@ -148,12 +154,12 @@ test("poke: unknown kind, unknown target, bad bodies and wrong content are 400",
     const id = (await (async () => { const e = await sse(s.url + "events"); const sc = (await e.waitFor(x => x.event === "scene")).data; e.close(); return sc })()).runs[0].id
     let n = 0
     const go = (body, headers = {}) => post(s.url, body, { "x-viewer": (n++).toString(16).padStart(16, "0"), ...headers })
-    for (const body of [{ kind: "horn", target: id }, { kind: "nope", target: id }, { kind: "feed", target: "r0000" }, { kind: "feed" }, { target: id }, { kind: ["feed"], target: id }, { kind: "feed", target: [id] },
+    for (const body of [{ kind: "horn", target: id }, { kind: "fireworks", target: id }, { kind: "nope", target: id }, { kind: "wave", target: "r0000" }, { kind: "feed", target: id }, { kind: "wave" }, { kind: "feed" }, { target: id }, { kind: ["feed"], target: id }, { kind: "feed", target: [id] },
       { kind: "feed", target: { id } }, { kind: "constructor", target: id }, { kind: "__proto__", target: id }, "[]", "null", "42", '"feed"', "{bad", ""])
       assert.equal((await go(body)).status, 400, JSON.stringify(body))
-    assert.equal((await go({ kind: "feed", target: id }, { "content-type": "text/plain" })).status, 400)
-    assert.equal((await fetch(s.url + "poke", { method: "POST", headers: { "x-viewer": "f".repeat(16) }, body: JSON.stringify({ kind: "feed", target: id }) })).status, 400, "no content-type")
-    assert.equal((await go({ kind: "feed", target: id }, { "content-type": "application/json; charset=utf-8" })).status, 204)
+    assert.equal((await go({ kind: "wave", target: id }, { "content-type": "text/plain" })).status, 400)
+    assert.equal((await fetch(s.url + "poke", { method: "POST", headers: { "x-viewer": "f".repeat(16) }, body: JSON.stringify({ kind: "wave", target: id }) })).status, 400, "no content-type")
+    assert.equal((await go({ kind: "wave", target: id }, { "content-type": "application/json; charset=utf-8" })).status, 204)
     assert.equal((await fetch(s.url + "poke")).status, 405)
   } finally { await s.close() }
 })
@@ -412,4 +418,21 @@ test("gzip: gzip;q=0 gets the plain file; the cache follows a changed file; .glb
     assert.equal(h.r.headers["content-encoding"], "gzip"); assert.equal(h.body.length, 0)
     assert.equal(Number(h.r.headers["content-length"]), zlib.gzipSync(Buffer.from("const b = 2\n".repeat(300)), { level: 9 }).length)
   } finally { await s.close() }
+})
+
+test("poke: the captain can be waved at only while the tug is out (state is not none)", async () => {
+  const clock = { t: 1000 }
+  const s = await start({ now: () => (clock.t += 1100) })
+  const a = await sse(s.url + "events")
+  try {
+    await a.waitFor(e => e.event === "scene")
+    const f = structuredClone(fixture("facts-basic.json")); f.captain.state = "none"
+    s.set(f)
+    await a.waitFor(e => e.event === "scene" && e.data.captain.state === "none")
+    assert.equal((await post(s.url, { kind: "wave", target: "captain" }, { "x-viewer": "a".repeat(16) })).status, 400, "moored tug: refused")
+    f.captain.state = "working"; s.set(f)
+    await a.waitFor(e => e.event === "scene" && e.data.captain.state === "working")
+    assert.equal((await post(s.url, { kind: "wave", target: "captain" }, { "x-viewer": "b".repeat(16) })).status, 204)
+    assert.equal((await a.waitFor(e => e.event === "poke")).data.target, "captain")
+  } finally { a.close(); await s.close() }
 })

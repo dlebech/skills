@@ -50,6 +50,7 @@ file-size (100 kB each, 700 kB total) or material (5) budget is exceeded or a re
 | quay | 166 | 300 | 12448 | 22.00x14.30x4.45 |
 | signal | 200 | 200 | 13860 | 0.50x0.50x4.80 |
 | tug | 448 | 700 | 29328 | 3.35x7.20x4.50 |
+| captain | 210 | 400 | 17544 | 0.74x0.44x1.21 |
 | office | 224 | 500 | 16604 | 8.40x6.65x11.00 |
 | warehouse | 68 | 150 | 6708 | 16.20x9.13x6.00 |
 | silo | 232 | 250 | 14272 | 7.95x3.94x9.00 |
@@ -57,4 +58,4 @@ file-size (100 kB each, 700 kB total) or material (5) budget is exceeded or a re
 | marker | 94 | 120 | 8980 | 0.87x1.00x4.00 |
 | rock | 28 | 60 | 3940 | 4.00x3.00x2.50 |
 
-Total 321 kB (limit 700 kB). Sizes are in Blender axes (z is height).
+Total 339 kB (limit 700 kB). Sizes are in Blender axes (z is height).

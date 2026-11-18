@@ -1,4 +1,4 @@
-// Things that happen for a moment: bubbles when something is petted, a jumping fish, fireworks, and the gulls (one per viewer).
+// Things that happen for a moment: bubbles when something is petted, a jumping fish, and the gulls (one per viewer).
 import * as THREE from "three"
 import { part } from "./world.js"
 import { OFFICE } from "./layout.js"
@@ -6,7 +6,6 @@ import { gullCount } from "./look.js"
 import { nextFish, FISH, fishArc, splash, gullCycle, gullState } from "./life.js"
 
 const TAU = Math.PI * 2
-const COLORS = ["#ff5d5d", "#ffd24a", "#5de08a", "#5db7ff", "#c58bff", "#ff9a4a"]
 
 // Bubbles that rise from a creature that has just been petted: three at a time, from a pool of 12 sprites that is reused
 // (nothing is made or freed per pet).
@@ -66,52 +65,6 @@ export class Fish {
       r.visible = sp.opacity > 0
       if (r.visible) { r.position.set(this.from.x + Math.sin(this.dir) * FISH.reach * i, 0.1, this.from.z + Math.cos(this.dir) * FISH.reach * i); r.scale.setScalar(sp.scale * 1.4); r.material.opacity = sp.opacity }
     }
-  }
-}
-
-// Fireworks: three coloured bursts over a berth's ship within 3 s, as points (one buffer, 600 particles).
-export class Fireworks {
-  constructor(scene) {
-    this.N = 600
-    this.pos = new Float32Array(this.N * 3); this.col = new Float32Array(this.N * 3)
-    this.vel = new Float32Array(this.N * 3); this.life = new Float32Array(this.N)
-    this.geo = new THREE.BufferGeometry()
-    this.geo.setAttribute("position", new THREE.BufferAttribute(this.pos, 3)); this.geo.setAttribute("color", new THREE.BufferAttribute(this.col, 3))
-    this.points = new THREE.Points(this.geo, new THREE.PointsMaterial({ size: 0.45, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }))
-    this.points.frustumCulled = false; this.points.raycast = () => {}
-    scene.add(this.points)
-    this.queue = []
-    this.cursor = 0
-    this.alive = 0
-    this.c = new THREE.Color()
-  }
-  // Three bursts above (x, z): at 0, 1.1 and 2.4 s from `t`.
-  launch(x, z, t) {
-    for (let i = 0; i < 3; i++) this.queue.push({ at: t + [0, 1.1, 2.4][i], x: x + (i - 1) * 1.6, y: 7 + i * 1.2, z: z + (i === 1 ? 1.2 : -0.6), color: COLORS[(i * 2 + Math.floor(t)) % COLORS.length] })
-  }
-  burst(b) {
-    this.c.set(b.color)
-    for (let i = 0; i < 70; i++) {
-      const j = this.cursor++ % this.N, a = Math.random() * TAU, e = Math.acos(2 * Math.random() - 1), s = 3 + Math.random() * 3
-      this.pos.set([b.x, b.y, b.z], j * 3)
-      this.vel.set([Math.sin(e) * Math.cos(a) * s, Math.cos(e) * s, Math.sin(e) * Math.sin(a) * s], j * 3)
-      this.col.set([this.c.r, this.c.g, this.c.b], j * 3)
-      this.life[j] = 1.4 + Math.random() * 0.5
-    }
-  }
-  update(t, dt) {
-    for (let i = this.queue.length - 1; i >= 0; i--) if (this.queue[i].at <= t) this.burst(this.queue.splice(i, 1)[0])
-    let alive = 0
-    for (let j = 0; j < this.N; j++) {
-      if (this.life[j] <= 0) continue
-      this.life[j] -= dt; alive++
-      const k = j * 3
-      this.vel[k + 1] -= 4.5 * dt
-      this.pos[k] += this.vel[k] * dt; this.pos[k + 1] += this.vel[k + 1] * dt; this.pos[k + 2] += this.vel[k + 2] * dt
-      if (this.life[j] <= 0) this.pos[k + 1] = -1000
-    }
-    if (alive || this.alive) { this.geo.attributes.position.needsUpdate = true; this.geo.attributes.color.needsUpdate = true }
-    this.alive = alive
   }
 }
 

@@ -5,6 +5,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { createFactsReader, runsRoot } from "./facts.js"
 import { createListener } from "./http.js"
+import { createSlots } from "./sanitize.js"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 export const PUBLIC_DIR = path.join(here, "..", "public")
@@ -14,6 +15,8 @@ export const VENDOR_DIR = path.join(here, "..", "node_modules", "three")
 export function createApp({ root = runsRoot(), now = Date.now, secret = randomBytes(32), publicDir = PUBLIC_DIR, vendorDir = VENDOR_DIR } = {}) {
   const reader = createFactsReader({ root, now })
   const listeners = new Set()
+  // One berth memory and one sea-name map for the server's lifetime, shared by every listener, so every viewer sees the same order.
+  const slots = createSlots(), names = new Map()
   // Both listeners meet here: an accepted poke (only its rebuilt {kind, target, at}) reaches every viewer of
   // both, and `viewers` counts both. Nothing else crosses: each listener still builds its own scene.
   const hub = {
@@ -27,7 +30,7 @@ export function createApp({ root = runsRoot(), now = Date.now, secret = randomBy
     reader, secret,
     // A listener of its own; `mode` and `base` are fixed here.
     listener(opts) {
-      const l = createListener({ hub, secret, snapshot: reader.snapshot, now, publicDir, vendorDir, ...opts })
+      const l = createListener({ hub, secret, slots, names, snapshot: reader.snapshot, now, publicDir, vendorDir, ...opts })
       listeners.add(l)
       return l
     },

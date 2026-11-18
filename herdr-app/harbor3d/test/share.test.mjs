@@ -230,3 +230,17 @@ test("rate limits stay per listener: the shared limit does not use up the privat
     await s.waitFor(e => e.event === "poke" && s.list.filter(x => x.event === "poke").length === 6)
   } finally { p.close(); s.close(); await sh.stop(); await priv.close(); app.stop() }
 })
+
+test("the private and the shared listener of one app give every run and raft the same slot", async () => {
+  const app = mkApp()
+  const priv = app.listener({ mode: "private", base: "/" }); await priv.listen(0)
+  const sh = await startShare(app, { tunnel: false })
+  const scene = async url => { const r = await fetch(url + "events"), rd = r.body.getReader(); let t = ""; while (!t.includes("data: ")) t += Buffer.from((await rd.read()).value).toString(); await rd.cancel(); return JSON.parse(/data: (.*)/.exec(t)[1]) }
+  try {
+    const a = await scene(`http://127.0.0.1:${priv.server.address().port}/`), b = await scene(sh.localUrl)
+    assert.equal(a.mode, "private"); assert.equal(b.mode, "shared")
+    assert.deepEqual(a.runs.map(r => [r.id, r.slot]), b.runs.map(r => [r.id, r.slot]))
+    assert.deepEqual(a.adrift.map(r => [r.id, r.slot]), b.adrift.map(r => [r.id, r.slot]))
+    assert.ok(a.runs.length > 0 && a.runs.every(r => r.slot >= 0))
+  } finally { await sh.stop(); await priv.close(); app.stop() }
+})

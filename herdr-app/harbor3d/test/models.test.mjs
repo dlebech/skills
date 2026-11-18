@@ -10,7 +10,7 @@ const PARTS = {
   octopus: ['Body', ...Array.from({ length: 8 }, (_, i) => `Tentacle.${i}`), 'EyeLid.L', 'EyeLid.R'],
   crab: ['Body', 'Claw.L', 'Claw.R', 'Legs'], buoy: ['Body', 'Float'], flag: ['Flag'], gull: ['Body', 'Wing.L', 'Wing.R'],
   driftwood: ['Body'], ship: ['Body', 'Funnel', 'Mast', 'Lights'], container: ['Body'], crane: ['Body', 'Trolley', 'Hook'],
-  pier: ['Body'], quay: ['Body'], signal: ['Body', 'Red', 'Amber', 'Green'], tug: ['Body', 'Captain', 'Light'],
+  captain: ['Body', 'arm'], pier: ['Body'], quay: ['Body'], signal: ['Body', 'Red', 'Amber', 'Green'], tug: ['Body', 'Captain', 'Light'],
   office: ['Body', 'Radar', 'Windows'], warehouse: ['Body'], silo: ['Body'], floodlight: ['Body', 'Lamp'],
   marker: ['Body', 'Daymark', 'Lamp'], rock: ['Body'],
 }

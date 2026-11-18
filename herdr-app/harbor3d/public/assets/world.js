@@ -6,7 +6,7 @@ import { TUG_MOORED, OFFICE, WAREHOUSES, SILO, QUAY_Z, QUAY_TOP, SLOT_W, quaySeg
 import { captainLook } from "./look.js"
 import { flickerOn, lightDelay } from "./life.js"
 
-export const MODEL_NAMES = ["octopus", "crab", "gull", "buoy", "flag", "driftwood", "ship", "container", "crane", "pier", "quay", "signal", "tug", "office", "warehouse", "silo", "floodlight", "marker", "rock"]
+export const MODEL_NAMES = ["octopus", "crab", "gull", "buoy", "flag", "driftwood", "ship", "container", "crane", "pier", "quay", "signal", "tug", "captain", "office", "warehouse", "silo", "floodlight", "marker", "rock"]
 const TAU = Math.PI * 2
 const MOON = new THREE.Color("#6f86c0")
 const DEEP = { day: new THREE.Color("#1d5f8f"), night: new THREE.Color("#081a33"), grey: new THREE.Color("#4f6a7c") }
@@ -286,6 +286,7 @@ export class Port {
   }
 }
 
+const SKIPPER_LOW = -1.3, SKIPPER_HIGH = 1.1, SKIPPER_SCALE = 1.92   // cartoon-sized like the creatures: feet below the afterdeck (y 1.1) with the head under it, then standing on it
 // The captain's tug: moored alongside the quay (dim when there is no captain) or patrolling the basin
 // on an ellipse, with a small wake.
 export class Tug {
@@ -302,13 +303,38 @@ export class Tug {
     this.wake.position.y = 0.1; this.wake.visible = false; this.wake.raycast = () => {}
     this.group.add(this.wake)
     scene.add(this.group)
+    // The skipper who pops up to wave: hidden under the afterdeck behind the wheelhouse until a wave (he rises through the deck), in place of the model's still captain.
+    this.skipper = kit.make("captain"); this.skipper.position.set(-0.95, SKIPPER_LOW, -1.2); this.skipper.scale.setScalar(SKIPPER_SCALE); this.skipper.visible = false
+    this.arm = part(this.skipper, "arm"); this.still = this.model.getObjectByName("Captain"); this.group.add(this.skipper)
+    this.group.userData.tug = this; this.state = "none"; this.waveAt = null
     this.look = captainLook("none"); this.opacity = 0.4; this.lap = 0; this.W = 36;
     this.pos = new THREE.Vector3(TUG_MOORED.x, 0, TUG_MOORED.z); this.angle = TUG_MOORED.angle
     kit.fade(this.model, 0.4)
   }
-  setState(state) { this.look = captainLook(state) }
+  setState(state) { this.look = captainLook(state); this.state = state }
+  // Is the captain aboard to be waved at (not the dim, moored tug of state "none")?
+  get aboard() { return this.state !== "none" }
+  // The captain peeks out, turns to the camera, waves four times and goes back down (2.8 s; the same without the rise and swing when motion is 0).
+  wave(t) { this.waveAt = t; this.skipper.rotation.y = 0 }
+  // One tick of the wave: rise 0.4 s, wave 2 s, lower 0.4 s; the lamp blinks twice with it. Returns the lamp's intensity override or null.
+  updateWave(t, dt, motion, camPos) {
+    if (this.waveAt === null) return null
+    const rise = motion ? 0.4 : 0, k = t - this.waveAt
+    if (k >= rise * 2 + 2) { this.waveAt = null; this.skipper.visible = false; this.still.visible = true; return null }
+    this.skipper.visible = true; this.still.visible = false
+    const sm = x => x * x * (3 - 2 * x)
+    const h = !motion ? 1 : k < rise ? sm(k / rise) : k > rise + 2 ? 1 - sm((k - rise - 2) / rise) : 1
+    this.skipper.position.y = SKIPPER_LOW + h * (SKIPPER_HIGH - SKIPPER_LOW)
+    // turn to face the camera, whatever way the tug is heading
+    let da = Math.atan2(camPos.x - this.group.position.x, camPos.z - this.group.position.z) - this.group.rotation.y - this.skipper.rotation.y
+    da = Math.atan2(Math.sin(da), Math.cos(da))
+    this.skipper.rotation.y += motion ? da * damp(dt, 8) : da
+    const swing = motion && k > rise && k < rise + 2 ? Math.sin((k - rise) * 4 * Math.PI) : 0
+    this.arm.rotation.z = 0.2 + swing * 0.5
+    return (k > 0.2 && k < 0.6) || (k > 1 && k < 1.4) ? 3.5 : 0.1
+  }
   setWidth(W) { this.W = W }
-  update(t, dt, motion, night) {
+  update(t, dt, motion, night, camPos) {
     const l = this.look
     let tx = TUG_MOORED.x, tz = TUG_MOORED.z, ta = TUG_MOORED.angle
     if (l.patrol) { this.lap += (dt * motion) / l.period; const p = tugPosition(this.lap * l.period, l.period, this.W); tx = p.x; tz = p.z; ta = p.angle }
@@ -318,7 +344,8 @@ export class Tug {
     this.group.position.set(this.pos.x, waveHeight(this.pos.x, this.pos.z, t * motion) * 0.6 - 0.1, this.pos.z)
     this.group.rotation.set(Math.cos(t * 0.8) * 0.02 * motion, this.angle, Math.sin(t * 0.9) * 0.03 * motion)
     this.wake.visible = l.patrol
-    this.lampMat.emissiveIntensity = 0.6 + 1.6 * night
+    const blink = this.updateWave(t, dt, motion, camPos)
+    this.lampMat.emissiveIntensity = blink ?? 0.6 + 1.6 * night
     if (Math.abs(this.opacity - l.opacity) > 0.01) { this.opacity += (l.opacity - this.opacity) * damp(dt, 3); this.kit.fade(this.model, Math.abs(this.opacity - 1) < 0.02 ? 1 : Math.round(this.opacity * 20) / 20) }
   }
 }

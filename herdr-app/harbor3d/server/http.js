@@ -7,9 +7,9 @@ import { timingSafeEqual, createHash } from "node:crypto"
 import { fileURLToPath } from "node:url"
 import zlib from "node:zlib"
 import { promisify } from "node:util"
-import { sanitize } from "./sanitize.js"
+import { sanitize, createSlots } from "./sanitize.js"
 
-export const POKE_KINDS = ["wave", "feed", "fireworks"]
+export const POKE_KINDS = ["wave", "feed"]
 const MAX_BODY = 200
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".glb": "model/gltf-binary", ".png": "image/png", ".svg": "image/svg+xml", ".json": "application/json; charset=utf-8" }
 export const MODELS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "models", "out")
@@ -52,9 +52,10 @@ export function writeTo(res, chunk, maxBuffer = 256 * 1024) {
   if (res.writableLength > maxBuffer) res.destroy()
 }
 
-// Every id a poke may target: "harbor" and all ids in the current scene.
+// Every id a `wave` may target: the creatures in the current scene, and "captain" while the tug is out (state is not "none").
 function sceneIds(scene) {
-  const ids = new Set(["harbor"])
+  const ids = new Set()
+  if (scene.captain.state !== "none") ids.add("captain")
   for (const r of scene.runs) {
     ids.add(r.id)
     if (r.orchestrator) ids.add(r.orchestrator.id)
@@ -63,6 +64,8 @@ function sceneIds(scene) {
   for (const a of scene.adrift) ids.add(a.id)
   return ids
 }
+// Which targets a kind takes: `feed` only the harbor, `wave` a creature or the captain.
+const pokeTargetOk = (scene, kind, target) => (kind === "feed" ? target === "harbor" : sceneIds(scene).has(target))
 
 const GZIP_TYPES = new Set([".html", ".js", ".css", ".json", ".svg"])
 const gzip = promisify(zlib.gzip)
@@ -113,7 +116,7 @@ function resolveStatic(root, rel) {
 
 // Create a listener. `snapshot()` gives { facts, stale }. mode "private" or "shared"; base "/" or "/s/<token>/".
 // `pollHoldMs` is how long a long-poll waits for news (12 s; tests shorten it).
-export function createListener({ base = "/", mode, secret, snapshot, now = Date.now, publicDir, vendorDir, modelsDir = MODELS_DIR, hub, maxSse = mode === "shared" ? 20 : 8, keepAliveMs = 20000, maxBuffer = 256 * 1024, pollHoldMs = 12000 }) {
+export function createListener({ base = "/", mode, secret, snapshot, now = Date.now, publicDir, vendorDir, modelsDir = MODELS_DIR, hub, maxSse = mode === "shared" ? 20 : 8, keepAliveMs = 20000, maxBuffer = 256 * 1024, pollHoldMs = 12000, names = new Map(), slots = createSlots() }) {
   const hash = importMapHash(publicDir)
   const HEAD = { ...HEADERS, "Content-Security-Policy": HEADERS["Content-Security-Policy"].replace("script-src 'self'", `script-src 'self'${hash ? " " + hash : ""}`) }
   const clients = new Set()
@@ -123,7 +126,6 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
   const self = { deliver: data => deliverPoke(data) }
   hub ??= { broadcastPoke: data => self.deliver(data), viewerCount: () => viewers(), refreshAll: () => refresh() }
   let scene = null, json = ""
-  const names = new Map()   // run key -> sea name, only ever added to, so names stay put when the order changes
   let timer = null
   // The event log long-polling readers use (for proxies that buffer SSE): `n` counts every scene change and every
   // poke delivered here, `sceneN` is the `n` the current scene was built at, and `log` holds the last 50 pokes.
@@ -144,7 +146,7 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
   // Rebuild the scene; true when it differs from the last one sent.
   function rebuild() {
     const { facts, stale } = snapshot()
-    scene = sanitize(facts, { mode, secret, now: now(), viewers: hub.viewerCount(), stale, names })
+    scene = sanitize(facts, { mode, secret, now: now(), viewers: hub.viewerCount(), stale, names, slots })
     const next = JSON.stringify(scene)
     const changed = next !== json
     json = next
@@ -242,7 +244,7 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
       if (b === null || typeof b !== "object" || Array.isArray(b)) return reply(res, 400)
       const { kind, target } = b
       if (typeof kind !== "string" || !POKE_KINDS.includes(kind)) return reply(res, 400)
-      if (typeof target !== "string" || !sceneIds(scene).has(target)) return reply(res, 400)
+      if (typeof target !== "string" || !pokeTargetOk(scene, kind, target)) return reply(res, 400)
       hub.broadcastPoke(JSON.stringify({ kind, target, at: now() }))
       reply(res, 204)
     })

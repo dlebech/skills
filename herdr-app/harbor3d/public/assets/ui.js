@@ -95,15 +95,13 @@ export class Toolbar {
   constructor(root, on) {
     this.root = root; this.b = {}
     const add = (key, text, extra) => {
-      const b = el("button", key === "fireworks" ? "sel" : "", text, { type: "button", ...(extra || {}) })
+      const b = el("button", "", text, { type: "button", ...(extra || {}) })
       b.addEventListener("click", () => on[key] && on[key](b))
       this.b[key] = b; root.append(b)
       return b
     }
     add("overview", "Overview"); add("tour", "Tour", { "aria-pressed": "false" }); add("sky", "Auto"); add("feed", "Feed the gulls")
-    add("fireworks", "Fireworks").hidden = true
   }
-  setSelected(on) { this.b.fireworks.hidden = !on }
   setTour(on) { this.b.tour.setAttribute("aria-pressed", String(on)); this.b.tour.textContent = on ? "Stop tour" : "Tour" }
   setSky(text) { this.b.sky.textContent = text }
   // Dim a button for a moment (after a 429).
