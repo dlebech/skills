@@ -79,7 +79,7 @@ export class Gulls {
     this.group = new THREE.Group(); scene.add(this.group)
   }
   // The places a gull may land: the tops of the cranes (berths, which know where theirs is now) and the office roof (a point).
-  setPerches(list) { this.perches = list }
+  setPerches(list) { this.perches = list; for (const g of this.gulls) if (g.spot && !list.includes(g.spot)) g.spot = null }
   setCount(n) {
     n = gullCount(n)
     while (this.gulls.length < n) {

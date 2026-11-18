@@ -404,7 +404,7 @@ export class Berth {
       ease(e.home, e.target, dt)
       const l = e.look, tau = TAU / l.period
       let oy = 0, clawA = 0.2, yaw = Math.PI / 2, goalOz = 0
-      if (stance === "work") { const w = walk(t, ph, l.amp); goalOz = w.oz * m; yaw = w.yaw; clawA = 0.25 + Math.sin(t * 9 + e.ph) * 0.15 * m }
+      if (stance === "work") { const w = walk(t, ph, l.amp); goalOz = w.oz * m; yaw = m ? w.yaw : Math.PI / 2; clawA = 0.25 + Math.sin(t * 9 + e.ph) * 0.15 * m }
       else if (stance === "roll" || stance === "facing") goalOz = e.oz
       if (stance === "roll") yaw = faceOctopus(e.home.x, e.home.z + e.oz)
       else if (stance === "facing") yaw = 0

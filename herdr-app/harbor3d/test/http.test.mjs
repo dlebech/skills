@@ -125,7 +125,7 @@ test("poke: 204 and broadcast to every viewer, rebuilt from validated values", a
   const a = await sse(s.url + "events"), b = await sse(s.url + "events")
   try {
     const scene = (await a.waitFor(e => e.event === "scene")).data
-    const target = scene.runs[1].id
+    const target = scene.runs[1].orchestrator.id
     const r = await post(s.url, { kind: "wave", target, extra: "<script>", __proto__: { x: 1 }, nested: { a: 1 } }, { "x-viewer": "1".repeat(16) })
     assert.equal(r.status, 204)
     for (const c of [a, b]) {
@@ -151,15 +151,16 @@ test("poke: unknown kind, unknown target, bad bodies and wrong content are 400",
   const clock = { t: 1000 }
   const s = await start({ now: () => (clock.t += 1100) })
   try {
-    const id = (await (async () => { const e = await sse(s.url + "events"); const sc = (await e.waitFor(x => x.event === "scene")).data; e.close(); return sc })()).runs[0].id
+    const run = (await (async () => { const e = await sse(s.url + "events"); const sc = (await e.waitFor(x => x.event === "scene")).data; e.close(); return sc })()).runs[0]
+    const oid = run.orchestrator.id, id = run.id
     let n = 0
     const go = (body, headers = {}) => post(s.url, body, { "x-viewer": (n++).toString(16).padStart(16, "0"), ...headers })
-    for (const body of [{ kind: "horn", target: id }, { kind: "fireworks", target: id }, { kind: "nope", target: id }, { kind: "wave", target: "r0000" }, { kind: "feed", target: id }, { kind: "wave" }, { kind: "feed" }, { target: id }, { kind: ["feed"], target: id }, { kind: "feed", target: [id] },
+    for (const body of [{ kind: "horn", target: id }, { kind: "fireworks", target: id }, { kind: "nope", target: id }, { kind: "wave", target: "r0000" }, { kind: "wave", target: id }, { kind: "feed", target: id }, { kind: "wave" }, { kind: "feed" }, { target: id }, { kind: ["feed"], target: id }, { kind: "feed", target: [id] },
       { kind: "feed", target: { id } }, { kind: "constructor", target: id }, { kind: "__proto__", target: id }, "[]", "null", "42", '"feed"', "{bad", ""])
       assert.equal((await go(body)).status, 400, JSON.stringify(body))
-    assert.equal((await go({ kind: "wave", target: id }, { "content-type": "text/plain" })).status, 400)
-    assert.equal((await fetch(s.url + "poke", { method: "POST", headers: { "x-viewer": "f".repeat(16) }, body: JSON.stringify({ kind: "wave", target: id }) })).status, 400, "no content-type")
-    assert.equal((await go({ kind: "wave", target: id }, { "content-type": "application/json; charset=utf-8" })).status, 204)
+    assert.equal((await go({ kind: "wave", target: oid }, { "content-type": "text/plain" })).status, 400)
+    assert.equal((await fetch(s.url + "poke", { method: "POST", headers: { "x-viewer": "f".repeat(16) }, body: JSON.stringify({ kind: "wave", target: oid }) })).status, 400, "no content-type")
+    assert.equal((await go({ kind: "wave", target: oid }, { "content-type": "application/json; charset=utf-8" })).status, 204)
     assert.equal((await fetch(s.url + "poke")).status, 405)
   } finally { await s.close() }
 })

@@ -187,7 +187,7 @@ test("pokes cross between the private and the shared listener; viewers counts bo
     const got = await p.waitFor(e => e.event === "poke")
     assert.deepEqual(Object.keys(got.data).sort(), ["at", "kind", "target"])
     await s.waitFor(e => e.event === "poke")
-    const target = ps.runs[0].id
+    const target = ps.runs[0].orchestrator.id
     assert.equal((await post(purl, { kind: "wave", target }, "b")).status, 204)
     const back = await s.waitFor(e => e.event === "poke" && e.data.kind === "wave")
     assert.equal(back.data.target, target)

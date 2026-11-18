@@ -2,7 +2,8 @@
 // or passed through, so a field nobody listed here can never reach a browser. Every enum is checked and
 // falls back to a safe default; every free string is a label, stripped and cut to 60 characters.
 import { hmacId, seaName } from "./names.js"
-import { assignSlots, MAX_BERTHS, MAX_ADRIFT } from "../public/assets/layout.js"
+import { assignSlots, createSlots, MAX_BERTHS, MAX_ADRIFT } from "./slots.js"
+export { createSlots }
 
 const E = {
   captain: ["none", "watching", "idle", "working"],
@@ -29,11 +30,6 @@ const pick = (v, allowed, fallback) => (typeof v === "string" && allowed.include
 const label = v => (typeof v === "string" ? [...v.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, "")].slice(0, 60).join("").trim() : "")
 const num = v => (typeof v === "number" && Number.isFinite(v) ? v : 0)
 const sizeOf = tokens => (tokens < 10e6 ? "S" : tokens < 50e6 ? "M" : tokens < 150e6 ? "L" : "XL")
-
-// The berth memory: real run key -> slot at the quay, real run key -> index among the anchored ships, and real adrift id -> raft
-// index. One of these lives as long as the server and is handed to every listener's sanitize, so every viewer sees the same order.
-// It holds real keys and is never sent anywhere.
-export const createSlots = () => ({ quay: new Map(), parked: new Map(), adrift: new Map() })
 
 // Build the scene for one mode ("private" shows real names, "shared" never does).
 // `names` is the listener's key -> sea name map (kept for the server's lifetime, see seaName).

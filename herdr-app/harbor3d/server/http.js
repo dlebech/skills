@@ -7,7 +7,8 @@ import { timingSafeEqual, createHash } from "node:crypto"
 import { fileURLToPath } from "node:url"
 import zlib from "node:zlib"
 import { promisify } from "node:util"
-import { sanitize, createSlots } from "./sanitize.js"
+import { sanitize } from "./sanitize.js"
+import { createSlots } from "./slots.js"
 
 export const POKE_KINDS = ["wave", "feed"]
 const MAX_BODY = 200
@@ -57,7 +58,6 @@ function sceneIds(scene) {
   const ids = new Set()
   if (scene.captain.state !== "none") ids.add("captain")
   for (const r of scene.runs) {
-    ids.add(r.id)
     if (r.orchestrator) ids.add(r.orchestrator.id)
     for (const w of r.workers) ids.add(w.id)
   }

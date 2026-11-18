@@ -157,7 +157,7 @@ test("poll: the shared listener never holds a private label; pokes cross between
     for (const a of sb.scene.adrift) assert.ok(!("label" in a))
     assert.equal(pb.scene.viewers, 2, "viewers sums polling viewers over both listeners")
     // private poke → shared polling viewer, and the reverse
-    const target = pb.scene.runs[0].id
+    const target = pb.scene.runs[0].orchestrator.id
     const sn = (await (await poll(sh.localUrl, 0, vid("e"))).json()).n   // the private viewer's arrival changed this scene too
     const held = poll(sh.localUrl, sn, vid("a")).then(r => r.json())
     await wait(50)

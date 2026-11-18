@@ -5,7 +5,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { createFactsReader, runsRoot } from "./facts.js"
 import { createListener } from "./http.js"
-import { createSlots } from "./sanitize.js"
+import { createSlots } from "./slots.js"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 export const PUBLIC_DIR = path.join(here, "..", "public")

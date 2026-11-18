@@ -279,6 +279,7 @@ const ray = new THREE.Raycaster(), ndc = new THREE.Vector2()
 // The nearest thing under a screen point: { berth, pet } (a berth, and the scene id of the octopus or crab hit, if it was one), or
 // { raft, pet } for a crab on a raft, { tug } for the captain's tug, or null. The creature is told apart first, so the octopus and crabs are petted rather than just selected.
 function pick(x, y) {
+  if (!world) return null
   ndc.set((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1)
   ray.setFromCamera(ndc, camera)
   const hit = ray.intersectObjects([...[...berths.values()].map(r => r.group), ...[...rafts.values()].map(r => r.group), world.tug.group], true)[0]

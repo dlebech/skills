@@ -42,25 +42,6 @@ export function berthPosition(slot) {
   return o === null ? null : { x: o * SLOT_W, y: 0, z: QUAY_Z, offset: o }
 }
 
-// Keep every id that is still there where it was, free the slots of ids that left, and give each new
-// id the lowest free slot. Ids that find no slot are simply left out of the map (not drawn).
-export function assignSlots(prev, ids, capacity = MAX_BERTHS) {
-  const next = new Map()
-  const taken = new Set()
-  for (const id of ids) {
-    const s = prev.get(id)
-    if (s !== undefined && s < capacity && !taken.has(s)) { next.set(id, s); taken.add(s) }
-  }
-  let free = 0
-  for (const id of ids) {
-    if (next.has(id)) continue
-    while (free < capacity && taken.has(free)) free++
-    if (free >= capacity) break
-    next.set(id, free); taken.add(free)
-  }
-  return next
-}
-
 // The lowest and highest offset of the slots in use (0, 0 when none), from a list of slot numbers.
 export function offsetRange(slots) {
   let lo = 0, hi = 0
@@ -297,7 +278,7 @@ export function berthFitPoints(origin, scale = 1) {
 export function anchoredFitPoints(pos, scale = 1) {
   const pts = []
   for (const dx of [-9, 9]) for (const dz of [-2.5, 2.5]) pts.push([pos.x + dx * scale, 0, pos.z + dz * scale])
-  pts.push([pos.x, MAST_FLAG_TOP * scale + 0.5, pos.z])
+  pts.push([pos.x - 6.9 * scale, MAST_FLAG_TOP * scale + 0.5, pos.z])
   return pts
 }
 

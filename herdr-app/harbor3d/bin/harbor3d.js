@@ -25,7 +25,7 @@ if (!Number.isInteger(port) || port < 0 || port > 65535 || !(minutes > 0)) { con
 
 // The page imports three.js from node_modules/three; without it the page would load blank, so say so and stop.
 if (!fs.existsSync(path.join(VENDOR_DIR, "build", "three.module.js"))) {
-  console.error(`harbor3d: three.js is missing (${VENDOR_DIR}). Run npm ci --omit=dev in ${path.dirname(path.dirname(VENDOR_DIR))}, or herdr-app/install.sh again.`)
+  console.error(`harbor3d: three.js is missing (${VENDOR_DIR}). Run npm install in ${path.dirname(path.dirname(VENDOR_DIR))}.`)
   process.exit(1)
 }
 

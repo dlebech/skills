@@ -12,36 +12,6 @@ test("slot offsets run 0, +1, -1, +2, -2, ... and berths sit 22 m apart on the q
   for (const bad of [-1, 12, 1.5, "1", null, undefined, NaN]) { assert.equal(L.slotOffset(bad), null); assert.equal(L.berthPosition(bad), null) }
 })
 
-test("assignSlots keeps ids where they are, frees the slots of ids that left, and fills the lowest free slot", () => {
-  let m = L.assignSlots(new Map(), ["a", "b", "c"])
-  assert.deepEqual([...m], [["a", 0], ["b", 1], ["c", 2]])
-  m = L.assignSlots(m, ["c", "a", "d"])
-  assert.equal(m.get("a"), 0); assert.equal(m.get("c"), 2)
-  assert.equal(m.get("d"), 1, "d takes the slot b left")
-  assert.equal(m.has("b"), false)
-  m = L.assignSlots(m, ["e", "a", "c", "d"])
-  assert.equal(m.get("e"), 3); assert.equal(m.get("d"), 1)
-})
-
-test("a parked run is simply left out of the ids: it frees its slot and takes the lowest free one when it returns", () => {
-  let m = L.assignSlots(new Map(), ["a", "b", "c"])
-  m = L.assignSlots(m, ["a", "c"])                // b parked
-  assert.equal(m.has("b"), false); assert.equal(m.get("c"), 2)
-  m = L.assignSlots(m, ["a", "c", "d"])           // d takes the free slot 1
-  assert.equal(m.get("d"), 1)
-  m = L.assignSlots(m, ["a", "b", "c", "d"])      // b is back: next free
-  assert.equal(m.get("b"), 3)
-})
-
-test("more than 12 runs: the first 12 are drawn, the rest get no slot, and nobody moves", () => {
-  const ids = Array.from({ length: 16 }, (_, i) => `r${i}`)
-  const m = L.assignSlots(new Map(), ids)
-  assert.equal(m.size, 12); assert.equal(new Set(m.values()).size, 12); assert.equal(m.has("r12"), false)
-  const m2 = L.assignSlots(m, ids.filter(id => id !== "r3"))
-  assert.equal(m2.get("r12"), m.get("r3"), "the first undrawn run takes the freed slot")
-  for (const id of ids.slice(0, 12)) if (id !== "r3") assert.equal(m2.get(id), m.get(id))
-})
-
 test("offset range, breakwater width, quay segments and floodlights follow the slots in use", () => {
   assert.deepEqual(L.offsetRange([]), { lo: 0, hi: 0 })
   assert.deepEqual(L.offsetRange([0, 1, 2]), { lo: -1, hi: 1 })
@@ -318,4 +288,10 @@ test("freeRect: the card at the side, the card across the bottom or top, and the
   f = freeRect(700, 1200, { left: 0, top: 720, right: 700, bottom: 1200 }, { left: 0, top: 8, right: 700, bottom: 44 })
   near(f.top, (44 + 8) / 1200); near(f.bottom, (720 - 8) / 1200); near(f.left, 0); near(f.right, 1)
   f = freeRect(500, 800, null, null); assert.deepEqual(f, { left: 0, top: 0, right: 1, bottom: 1 })
+})
+
+test("an anchored ship's fit includes its real mast top: the ship is turned, so the mast is 6.9 m (times scale) to the west of its position", () => {
+  const pts = L.anchoredFitPoints({ x: 10, z: 70 }, 2)
+  const top = pts.find(p => p[1] > 5)
+  assert.deepEqual(top, [10 - 6.9 * 2, L.MAST_FLAG_TOP * 2 + 0.5, 70])
 })
