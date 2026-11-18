@@ -112,26 +112,68 @@ function resolveStatic(root, rel) {
 }
 
 // Create a listener. `snapshot()` gives { facts, stale }. mode "private" or "shared"; base "/" or "/s/<token>/".
-export function createListener({ base = "/", mode, secret, snapshot, now = Date.now, publicDir, vendorDir, modelsDir = MODELS_DIR, hub, maxSse = mode === "shared" ? 20 : 8, keepAliveMs = 20000, maxBuffer = 256 * 1024 }) {
+// `pollHoldMs` is how long a long-poll waits for news (12 s; tests shorten it).
+export function createListener({ base = "/", mode, secret, snapshot, now = Date.now, publicDir, vendorDir, modelsDir = MODELS_DIR, hub, maxSse = mode === "shared" ? 20 : 8, keepAliveMs = 20000, maxBuffer = 256 * 1024, pollHoldMs = 12000 }) {
   const hash = importMapHash(publicDir)
   const HEAD = { ...HEADERS, "Content-Security-Policy": HEADERS["Content-Security-Policy"].replace("script-src 'self'", `script-src 'self'${hash ? " " + hash : ""}`) }
   const clients = new Set()
   const allow = createRateLimiter({ now })
   const baseBuf = Buffer.from(base)
   // Pokes and viewer counts cross listeners through the hub; alone, a listener is its own hub.
-  const self = { deliver: data => broadcast("poke", data) }
-  hub ??= { broadcastPoke: data => self.deliver(data), viewerCount: () => clients.size, refreshAll() {} }
+  const self = { deliver: data => deliverPoke(data) }
+  hub ??= { broadcastPoke: data => self.deliver(data), viewerCount: () => viewers(), refreshAll: () => refresh() }
   let scene = null, json = ""
+  const names = new Map()   // run key -> sea name, only ever added to, so names stay put when the order changes
   let timer = null
+  // The event log long-polling readers use (for proxies that buffer SSE): `n` counts every scene change and every
+  // poke delivered here, `sceneN` is the `n` the current scene was built at, and `log` holds the last 50 pokes.
+  let n = 0, sceneN = 0
+  const log = []
+  // Polling viewers by their x-viewer id: when they last polled, the start times of their last polls (for the
+  // 2 per second limit) and the poll being held for them right now, if any. They count as viewers for 30 s.
+  const pollers = new Map()
+  const POLLER_TTL = 30000
+  const livePoller = (e, t) => e.held || t - e.seen < POLLER_TTL
+  function pollViewers() {
+    const t = now()
+    for (const [id, e] of pollers) if (!livePoller(e, t)) pollers.delete(id)
+    return pollers.size
+  }
+  const viewers = () => clients.size + pollViewers()
 
   // Rebuild the scene; true when it differs from the last one sent.
   function rebuild() {
     const { facts, stale } = snapshot()
-    scene = sanitize(facts, { mode, secret, now: now(), viewers: hub.viewerCount(), stale })
+    scene = sanitize(facts, { mode, secret, now: now(), viewers: hub.viewerCount(), stale, names })
     const next = JSON.stringify(scene)
     const changed = next !== json
     json = next
+    if (changed) { n++; sceneN = n; wake() }
     return changed
+  }
+  // Is there anything a client that has seen up to `after` has not seen? (A client ahead of us means we restarted.)
+  const hasNews = after => after > n || sceneN > after || (log.length > 0 && log[log.length - 1].n > after)
+  // The poll answer: the scene when it is newer than `after` (or the client is ahead of us), and the pokes newer than `after`.
+  function pollBody(after) {
+    const pokes = log.filter(p => p.n > after).map(({ kind, target, at }) => ({ kind, target, at }))
+    return `{"n":${n},${after > n || sceneN > after ? `"scene":${json},` : ""}"pokes":${JSON.stringify(pokes)}}`
+  }
+  // End a held poll: with the answer when there is news, else with just `n`.
+  function finishPoll(e, news = true) {
+    const h = e.held
+    if (!h) return
+    clearTimeout(h.timer)
+    e.held = null; e.seen = now()
+    if (!h.res.destroyed && !h.res.writableEnded) reply(h.res, 200, { "Content-Type": "application/json" }, news ? pollBody(h.after) : `{"n":${n}}`)
+  }
+  // Something happened: answer every held poll it matters to.
+  function wake() { for (const e of pollers.values()) if (e.held && hasNews(e.held.after)) finishPoll(e) }
+  const deliverPoke = data => {
+    let p; try { p = JSON.parse(data) } catch { return }
+    log.push({ n: ++n, kind: p.kind, target: p.target, at: p.at })
+    if (log.length > 50) log.shift()
+    broadcast("poke", data)
+    wake()
   }
   const send = (res, event, data) => writeTo(res, `event: ${event}\ndata: ${data}\n\n`, maxBuffer)
   const broadcast = (event, data, skip) => { for (const c of clients) if (c !== skip) send(c, event, data) }
@@ -144,7 +186,7 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
   }
 
   function events(req, res) {
-    if (clients.size >= maxSse) return reply(res, 503)
+    if (viewers() >= maxSse) return reply(res, 503)
     res.writeHead(200, { ...HEAD, "Content-Type": "text/event-stream", Connection: "keep-alive" })
     res.write("retry: 3000\n\n")
     clients.add(res)
@@ -153,6 +195,30 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
     send(res, "scene", json)
     if (changed) broadcast("scene", json, res)
     hub.refreshAll()
+  }
+
+  // GET poll?after=<n>: long-polling for viewers behind a proxy that buffers SSE (Cloudflare quick tunnels do).
+  function poll(req, res, query) {
+    const afters = new URLSearchParams(query).getAll("after"), raw = afters.length ? afters[0] : "0"
+    const vid = req.headers["x-viewer"]
+    if (afters.length > 1 || !/^\d{1,15}$/.test(raw) || typeof vid !== "string" || !/^[a-f0-9]{16}$/.test(vid)) return reply(res, 400)
+    const after = Number(raw), t = now()
+    pollViewers()
+    let e = pollers.get(vid)
+    if (!e && viewers() >= maxSse) return reply(res, 503)
+    if (e) {
+      e.starts = e.starts.filter(x => t - x < 1000)
+      if (e.starts.length >= 2) return reply(res, 429)
+    }
+    const fresh = !e
+    if (fresh) { e = { seen: t, starts: [], held: null }; pollers.set(vid, e) }
+    finishPoll(e, false)   // a second poll from the same viewer ends the first
+    e.seen = t; e.starts.push(t)
+    if (fresh) hub.refreshAll()   // the viewer count changed
+    if (hasNews(after)) return reply(res, 200, { "Content-Type": "application/json" }, pollBody(after))
+    const held = { res, after, timer: setTimeout(() => finishPoll(e, false), pollHoldMs) }
+    e.held = held
+    res.on("close", () => { if (e.held === held) { clearTimeout(held.timer); e.held = null; e.seen = now() } })
   }
 
   function poke(req, res) {
@@ -222,6 +288,7 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
     const get = req.method === "GET" || req.method === "HEAD"
     if (rest === "poke") return req.method === "POST" ? poke(req, res) : reply(res, 405, { Allow: "POST" })
     if (!get) return reply(res, 405, { Allow: "GET, HEAD" })
+    if (rest === "poll") return req.method === "GET" ? poll(req, res, q < 0 ? "" : url.slice(q + 1)) : reply(res, 405, { Allow: "GET" })
     if (rest === "events") return req.method === "GET" ? events(req, res) : reply(res, 405, { Allow: "GET" })
     let root = null, rel = null
     if (rest === "") [root, rel] = [publicDir, "index.html"]
@@ -245,7 +312,7 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
   return {
     server, refresh, deliver: self.deliver,
     scene: () => scene,
-    viewers: () => clients.size,
+    viewers,
     // Listen on 127.0.0.1; with `tries` > 1 a taken port moves on to the next one.
     async listen(port = 0, tries = 1) {
       for (let i = 0; ; i++) {
@@ -263,6 +330,7 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
       clearInterval(timer)
       for (const c of clients) c.end()
       clients.clear()
+      for (const e of pollers.values()) finishPoll(e, false)
       return new Promise(ok => { server.close(() => ok()); server.closeAllConnections() })
     },
   }

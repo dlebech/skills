@@ -33,7 +33,7 @@ test("share --no-tunnel: shared listener under /s/<token>/ only, shared scene, t
     const r = await fetch(sh.localUrl + "events"), rd = r.body.getReader(); let t = ""; while (!t.includes("data: ")) t += Buffer.from((await rd.read()).value).toString()
     const scene = JSON.parse(/data: (.*)/.exec(t)[1])
     assert.equal(scene.mode, "shared"); assert.equal(scene.stale, false)
-    assert.ok(!JSON.stringify(scene).includes("Ruter") && !JSON.stringify(scene).includes("snevagten"))
+    assert.ok(!JSON.stringify(scene).includes("Checkout") && !JSON.stringify(scene).includes("shop"))
     await rd.cancel()
   } finally { await sh.stop(); await priv.close(); app.stop() }
   await assert.rejects(fetch(sh.localUrl), "the shared listener is closed after stop")

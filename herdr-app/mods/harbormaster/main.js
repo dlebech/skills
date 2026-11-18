@@ -221,8 +221,10 @@ export default class Harbormaster extends View {
       if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) {
         try { observeTelling(runs, ctx); } catch (e) { console.log(`harbormaster: telling failed: ${e?.message ?? e}`); }
       }
-      // Harbor 3D's facts file, from the Crew's copy only (exportFacts does nothing without its want file).
-      if (role === "crew" && !props()?.overlay && !checking()) await exportFacts(() => harborFacts(runs, ctx)).catch((e) => console.log(`harbormaster: harbor3d facts failed: ${e?.message ?? e}`));
+      // Harbor 3D's facts file, from any copy that polls for the whole window (the Crew block, the overview, the sea
+      // layout's harbor): a layout without a Crew block still feeds it. Two copies may both write; they write the same
+      // facts atomically. exportFacts does nothing without its want file.
+      if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) await exportFacts(() => harborFacts(runs, ctx)).catch((e) => console.log(`harbormaster: harbor3d facts failed: ${e?.message ?? e}`));
       // PRs land in shared state, which re-renders every copy by itself. A parked run's PRs are
       // read as rarely as a closed run's: nobody works on them, they only show what they wait on.
       for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});

@@ -109,3 +109,61 @@ test("shouldWrite", () => {
   assert.equal(shouldWrite({ ...base, json: "b", wantAgeMs: 60000 }), false);
   assert.equal(shouldWrite({ ...base, json: "b", wantAgeMs: null }), false);
 });
+
+test("a run whose plan.md lists no parsed tasks gets its tasks from the card's counts: done first, then planned, capped at 40", () => {
+  const tasksOf = (counts, tasks = []) => sceneFacts([row({ tasks }, { counts })], extras()).runs[0].tasks;
+  assert.deepEqual(tasksOf({ done: 3, planned: 3 }), ["done", "done", "done"]);
+  assert.deepEqual(tasksOf({ done: 1, planned: 3 }), ["done", "planned", "planned"]);
+  assert.deepEqual(tasksOf({ done: 0, planned: 0 }), []);
+  assert.equal(tasksOf({ done: 90, planned: 100 }).length, 40);
+  assert.deepEqual(tasksOf({ done: 45, planned: 50 }), Array(40).fill("done"));
+  // a run that does list its tasks keeps them
+  assert.deepEqual(tasksOf({ done: 9, planned: 9 }, [{ id: "t1", name: "x", state: "merged" }]), ["done"]);
+  // workers stay without a task in the counts case
+  assert.equal(sceneFacts([row({ tasks: [] }, { counts: { done: 2, planned: 4 } })], extras()).runs[0].workers[0].task, null);
+});
+
+test("ciRunning is true whenever any PR's checks are pending, even when another reason comes first", () => {
+  const f = { att: { reasons: [{ key: "question" }, { key: "ci-running" }] }, prs: [{ number: 1, state: "OPEN", checks: { pass: 1, fail: 0, pending: 0 } }, { number: 2, state: "OPEN", checks: { pass: 0, fail: 0, pending: 2 } }] };
+  assert.equal(sceneFacts([row({}, f)], extras()).runs[0].ciRunning, true);
+  assert.equal(sceneFacts([row({}, { att: { reasons: [{ key: "ci-running" }] }, prs: [] })], extras()).runs[0].ciRunning, false);
+});
+
+test("what the mod writes goes through the server's sanitizer whole: no enum falls back to its default", async () => {
+  const { sanitize } = await import("../../herdr-app/harbor3d/server/sanitize.js");
+  const reasons = ["question", "gone", "stalled", "red-ci", "request review", "changes requested", "approved — merge", "review proof → merge", "finished", "review-pending"];
+  const stages = ["merged", "implementing", "in review", "fixing review", "not started", "blocked"];
+  const prStates = ["OPEN", "DRAFT", "MERGED", "CLOSED"], checks = [{ pass: 1 }, { fail: 1 }, { pending: 1 }, {}];
+  const pathStates = ["done", "current", "you", "look", "fail", "todo"], pathKeys = ["spec", "build", "proven", "review", "human", "merge"];
+  const kinds = ["claude", "pi", "opencode", "other"], states = ["working", "idle", "blocked", "done"];
+  const rows = reasons.map((key, i) => ({
+    r: run({ key: `:/runs/${i}`, type: ["feat", "fix", "rev", "expl"][i % 4], phase: i === 0 ? "finished" : "running", tasks: stages.map((state, k) => ({ id: `t${k}`, name: "x", state })) }),
+    f: facts({ need: true, att: { reasons: [{ key }] }, orch: ["working", "idle", "blocked", "done", "gone"][i % 5],
+      prs: prStates.map((state, k) => ({ number: k + 1, state, checks: checks[(k + i) % 4] })),
+      workers: kinds.map((k, n) => term(`w${i}${n}`, `impl-${n}`, k, states[n])), stages: [] }),
+    path: pathKeys.map((k, n) => ({ key: k, state: pathStates[(n + i) % 6] })),
+  }));
+  const out = sceneFacts(rows, extras({ captain: { terminal: term("c1", "cap"), watching: false }, adrift: kinds.map((k, n) => term(`a${n}`, "x", k, states[n])) }));
+  const scene = sanitize(out, { mode: "private", secret: Buffer.from("s"), now: 99 });
+  assert.equal(scene.runs.length, rows.length);
+  scene.runs.forEach((s, i) => {
+    const o = out.runs[i];
+    assert.deepEqual([s.type, s.phase, s.need, s.needsYou, s.ciRunning], [o.type, o.phase, o.need, o.needsYou, o.ciRunning]);
+    assert.deepEqual(s.path, o.path);
+    assert.deepEqual(s.tasks, o.tasks);
+    assert.deepEqual(s.prs.map(({ state, checks }) => ({ state, checks })), o.prs.map(({ state, checks }) => ({ state, checks })));
+    assert.deepEqual([s.orchestrator.state, s.orchestrator.kind], [o.orchestrator.state, o.orchestrator.kind]);
+    assert.deepEqual(s.workers.map((w) => [w.state, w.kind, w.task]), o.workers.map((w) => [w.state, w.kind, w.task]));
+  });
+  // every value of every enum was really exercised, so a rename on either side shows here
+  const seen = (f) => new Set(scene.runs.flatMap(f));
+  assert.equal(seen((s) => [s.need]).size, 10);
+  assert.deepEqual([...seen((s) => s.tasks)].sort(), ["blocked", "done", "fix", "implement", "planned", "review"]);
+  assert.equal(seen((s) => s.path.map((p) => p.state)).size, 6);
+  assert.equal(seen((s) => s.prs.map((p) => p.state)).size, 4);
+  assert.equal(seen((s) => s.prs.map((p) => p.checks)).size, 4);
+  assert.equal(seen((s) => [s.orchestrator.state]).size, 5);
+  assert.equal(seen((s) => s.workers.map((w) => w.kind)).size, 4);
+  assert.deepEqual(scene.adrift.map((a) => [a.state, a.kind]), out.adrift.map((a) => [a.state, a.kind]));
+  assert.equal(scene.captain.state, out.captain.state);
+});

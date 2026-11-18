@@ -134,10 +134,20 @@ cp -R "$here/harbor3d/bin" "$here/harbor3d/server" "$here/harbor3d/public" "$h3/
 cp "$here"/harbor3d/models/out/*.glb "$h3/models/out/"
 cp "$here/harbor3d/package.json" "$here/harbor3d/package-lock.json" "$here/harbor3d/README.md" "$h3/"
 echo "installed harbor3d"
-if command -v npm >/dev/null && (cd "$h3" && npm ci --omit=dev --no-audit --no-fund >/dev/null 2>&1); then
+# three.js is the only dependency. npm ci wipes node_modules first, so it is skipped when the installed
+# version already is the locked one (a re-install offline must not break a working Harbor 3D).
+want3=$(jq -r '.packages["node_modules/three"].version' "$h3/package-lock.json"  2>/dev/null) || want3=""
+have3=$(jq -r '.version' "$h3/node_modules/three/package.json"  2>/dev/null) || have3=""
+if [ -n "$want3" ] && [ "$want3" = "$have3" ] && [ -f "$h3/node_modules/three/build/three.module.js" ]; then
+  echo "Harbor 3D's dependencies are current (three $have3)"
+elif command -v npm >/dev/null && (cd "$h3" && npm ci --omit=dev --no-audit --no-fund >/dev/null 2>&1); then
   echo "installed Harbor 3D's dependencies"
 else
   echo "Harbor 3D needs Node 22+ and npm, which are missing or failed; the rest of Harbormaster is installed"
+fi
+# A server that is running keeps its old code in memory, so say so (it is never killed from here).
+if command -v hc >/dev/null && hc ls --json 2>/dev/null | jq -e '[.terminals[]? | select(.name == "harbor3d" and .state == "live")] | length > 0' >/dev/null 2>&1; then
+  echo "Harbor 3D is running the old server: restart it with hc kill harbor3d, then click 3D ↗"
 fi
 
 # 4. Check the mod.

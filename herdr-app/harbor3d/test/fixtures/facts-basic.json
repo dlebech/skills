@@ -6,9 +6,9 @@
   },
   "runs": [
     {
-      "key": ":/home/u/.herdr/hc-orchestration/skills/ruter-steder",
-      "name": "#1371 · Ruter steder",
-      "repo": "snevagten",
+      "key": ":/home/u/.herdr/hc-orchestration/skills/checkout-page",
+      "name": "#12 · Checkout page",
+      "repo": "shop",
       "type": "feat",
       "phase": "running",
       "parked": false,
@@ -49,7 +49,7 @@
       ],
       "prs": [
         {
-          "number": 1397,
+          "number": 31,
           "state": "draft",
           "checks": "running"
         }
@@ -62,14 +62,14 @@
       "workers": [
         {
           "id": "t69c",
-          "name": "impl-1371-t2",
+          "name": "impl-12-t2",
           "kind": "claude",
           "state": "working",
           "task": 1
         },
         {
           "id": "t69d",
-          "name": "impl-1371-t3",
+          "name": "impl-12-t3",
           "kind": "pi",
           "state": "working",
           "task": 2
@@ -80,9 +80,9 @@
       "updatedMs": 1794999900000
     },
     {
-      "key": ":/home/u/.herdr/hc-orchestration/skills/fix-login-loop",
-      "name": "#1402 · Fix login loop",
-      "repo": "snevagten",
+      "key": ":/home/u/.herdr/hc-orchestration/skills/fix-cart-total",
+      "name": "#14 · Fix cart total",
+      "repo": "shop",
       "type": "fix",
       "phase": "finished",
       "parked": false,
@@ -121,7 +121,7 @@
       ],
       "prs": [
         {
-          "number": 1405,
+          "number": 33,
           "state": "open",
           "checks": "green"
         }
@@ -134,7 +134,7 @@
       "workers": [
         {
           "id": "t6a1",
-          "name": "impl-1402-t1",
+          "name": "impl-14-t1",
           "kind": "claude",
           "state": "done",
           "task": 0
@@ -147,7 +147,7 @@
     {
       "key": ":/home/u/.herdr/hc-orchestration/skills/explore-offline",
       "name": "Explore offline maps",
-      "repo": "snevagten",
+      "repo": "shop",
       "type": "expl",
       "phase": "planning",
       "parked": true,
@@ -177,8 +177,8 @@
     },
     {
       "key": ":/home/u/.herdr/hc-orchestration/skills/ship-dark-mode",
-      "name": "#1388 · Dark mode",
-      "repo": "snevagten",
+      "name": "#18 · Dark mode",
+      "repo": "shop",
       "type": "feat",
       "phase": "finished",
       "parked": false,
@@ -238,7 +238,7 @@
       "workers": [
         {
           "id": "t6b1",
-          "name": "impl-1388-t1",
+          "name": "impl-18-t1",
           "kind": "claude",
           "state": "done",
           "task": 0
@@ -250,8 +250,8 @@
     },
     {
       "key": ":/home/u/.herdr/hc-orchestration/skills/stuck-sync",
-      "name": "#1410 · Stuck sync",
-      "repo": "snevagten",
+      "name": "#20 · Stuck sync",
+      "repo": "shop",
       "type": "fix",
       "phase": "running",
       "parked": false,
@@ -294,21 +294,21 @@
       "workers": [
         {
           "id": "t6c1",
-          "name": "impl-1410-t1",
+          "name": "impl-20-t1",
           "kind": "claude",
           "state": "blocked",
           "task": 0
         },
         {
           "id": "t6c2",
-          "name": "impl-1410-t2",
+          "name": "impl-20-t2",
           "kind": "claude",
           "state": "working",
           "task": 1
         },
         {
           "id": "t6c3",
-          "name": "impl-1410-t3",
+          "name": "impl-20-t3",
           "kind": "pi",
           "state": "idle",
           "task": 2
@@ -321,7 +321,7 @@
     {
       "key": ":/home/u/.herdr/hc-orchestration/skills/plan-export",
       "name": "Plan CSV export",
-      "repo": "snevagten",
+      "repo": "shop",
       "type": "expl",
       "phase": "planning",
       "parked": false,

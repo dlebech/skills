@@ -8,14 +8,17 @@ const NUMERALS = ["", "", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"
 // HMAC-SHA256 of a value, hex. The secret is random per server start.
 const mac = (secret, value) => createHmac("sha256", secret).update(String(value)).digest("hex")
 
-// An id for the browser: "r" or "a" plus the first 4 hex of the keyed hash. Never the real key.
-export const hmacId = (secret, prefix, value) => prefix + mac(secret, `id:${value}`).slice(0, 4)
+// An id for the browser: "r" or "a" plus the first 8 hex of the keyed hash. Never the real key.
+export const hmacId = (secret, prefix, value) => prefix + mac(secret, `id:${value}`).slice(0, 8)
 
-// A sea name for a run key; `used` (a Set) is updated, and a collision gets " II", " III", ...
-export function seaName(secret, key, used) {
+// A sea name for a run key. `names` is a Map key -> name that the caller keeps for the server's lifetime and that is
+// only ever added to, so a run keeps its name when the Crew's order changes. A collision gets " II", " III", ...
+export function seaName(secret, key, names = new Map()) {
+  if (names.has(key)) return names.get(key)
   const base = SEA_NAMES[parseInt(mac(secret, `name:${key}`).slice(0, 8), 16) % SEA_NAMES.length]
+  const taken = new Set(names.values())
   let name = base
-  for (let n = 2; used.has(name); n++) name = `${base} ${NUMERALS[n] || n}`
-  used.add(name)
+  for (let n = 2; taken.has(name); n++) name = `${base} ${NUMERALS[n] || n}`
+  names.set(key, name)
   return name
 }

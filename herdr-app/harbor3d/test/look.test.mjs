@@ -180,10 +180,10 @@ test("basic fixture, private mode: labels, lines, path row, card", () => {
   assert.equal(K.pathText(a.path), "Spec ✓ › Build › Proven › AI review › Review › Merge")
   assert.equal(K.pathText(b.path), "Spec ✓ › Build ✓ › Proven ✓ › AI review ● › Review › Merge")
   const m = K.cardModel(a)
-  assert.equal(m.title, "#1371 · Ruter steder"); assert.equal(m.sub, "snevagten"); assert.equal(m.type, "Feature")
+  assert.equal(m.title, "#12 · Checkout page"); assert.equal(m.sub, "shop"); assert.equal(m.type, "Feature")
   assert.equal(m.tasks, "1 planned · 2 implement · 1 review · 1 done")
-  assert.deepEqual(m.prs, ["#1397 · draft · checks running"])
-  assert.deepEqual(m.workers, ["impl-1371-t2 · claude · working", "impl-1371-t3 · pi · working"])
+  assert.deepEqual(m.prs, ["#31 · draft · checks running"])
+  assert.deepEqual(m.workers, ["impl-12-t2 · claude · working", "impl-12-t3 · pi · working"])
   assert.equal(m.age, "2 h 46 min"); assert.equal(m.size, "L"); assert.deepEqual(m.notes, [])
 })
 test("basic fixture, shared mode: no sub, PRs without a label, workers are Crab n", () => {

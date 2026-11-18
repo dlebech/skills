@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // harbor3d CLI: `serve` (private, localhost) and `share` (private plus a shared listener and a tunnel).
-import { createApp } from "../server/app.js"
+import fs from "node:fs"
+import path from "node:path"
+import { createApp, VENDOR_DIR } from "../server/app.js"
 import { startShare, stopAll } from "../server/share.js"
 
 const HELP = `harbor3d: a 3D harbor of your Herdr runs.
@@ -20,6 +22,12 @@ const cmd = args[0] && !args[0].startsWith("-") ? args[0] : "serve"
 if (cmd !== "serve" && cmd !== "share") { console.error(`harbor3d: unknown command "${cmd}"\n\n${HELP}`); process.exit(2) }
 const port = value("--port", 4173), minutes = value("--minutes", 60)
 if (!Number.isInteger(port) || port < 0 || port > 65535 || !(minutes > 0)) { console.error("harbor3d: bad --port or --minutes"); process.exit(2) }
+
+// The page imports three.js from node_modules/three; without it the page would load blank, so say so and stop.
+if (!fs.existsSync(path.join(VENDOR_DIR, "build", "three.module.js"))) {
+  console.error(`harbor3d: three.js is missing (${VENDOR_DIR}). Run npm ci --omit=dev in ${path.dirname(path.dirname(VENDOR_DIR))}, or herdr-app/install.sh again.`)
+  process.exit(1)
+}
 
 const app = createApp()
 const priv = app.listener({ mode: "private", base: "/" })

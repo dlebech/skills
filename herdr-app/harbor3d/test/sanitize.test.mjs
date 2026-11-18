@@ -40,10 +40,10 @@ test("shared mode has no sub, no pr labels, no worker or adrift labels (keys abs
 
 test("private mode carries the real labels", () => {
   const s = priv(fixture("facts-basic.json"))
-  assert.equal(s.runs[0].label, "#1371 · Ruter steder")
-  assert.equal(s.runs[0].sub, "snevagten")
-  assert.equal(s.runs[0].prs[0].label, "#1397")
-  assert.equal(s.runs[0].workers[0].label, "impl-1371-t2")
+  assert.equal(s.runs[0].label, "#12 · Checkout page")
+  assert.equal(s.runs[0].sub, "shop")
+  assert.equal(s.runs[0].prs[0].label, "#31")
+  assert.equal(s.runs[0].workers[0].label, "impl-12-t2")
   assert.equal(s.adrift[0].label, "skills · Claude Code")
 })
 
@@ -53,23 +53,36 @@ test("ids are keyed hashes: same in both modes, never the real key, different wi
   assert.deepEqual(a.runs.map(r => r.id), b.runs.map(r => r.id))
   assert.deepEqual(a.runs[0].workers.map(w => w.id), b.runs[0].workers.map(w => w.id))
   assert.notEqual(a.runs[0].id, c.runs[0].id)
-  assert.match(a.runs[0].id, /^r[0-9a-f]{4}$/)
-  assert.match(a.adrift[0].id, /^a[0-9a-f]{4}$/)
+  assert.match(a.runs[0].id, /^r[0-9a-f]{8}$/)
+  assert.match(a.adrift[0].id, /^a[0-9a-f]{8}$/)
   const s = JSON.stringify(a)
   assert.ok(!s.includes("t69c") && !s.includes("t68w") && !s.includes("/home/u"))
   assert.equal(hmacId(SECRET, "r", "x"), hmacId(SECRET, "r", "x"))
 })
 
 test("sea names: stable per key, collisions get II and III", () => {
-  const used = new Set()
+  const used = new Map()
   const keys = []
   // find three keys that map to the same sea name
-  const first = seaName(SECRET, "seed", new Set())
-  for (let i = 0; keys.length < 3 && i < 5000; i++) if (seaName(SECRET, `k${i}`, new Set()) === first) keys.push(`k${i}`)
+  const first = seaName(SECRET, "seed")
+  for (let i = 0; keys.length < 3 && i < 5000; i++) if (seaName(SECRET, `k${i}`) === first) keys.push(`k${i}`)
   const names = keys.map(k => seaName(SECRET, k, used))
   assert.deepEqual(names, [first, `${first} II`, `${first} III`])
   const s = shared({ runs: keys.map(key => ({ key })) })
   assert.deepEqual(s.runs.map(r => r.label), names)
+})
+
+test("sea names stay with their run when the order of the runs changes (a listener's names map only grows)", () => {
+  const first = seaName(SECRET, "seed")
+  const keys = []
+  for (let i = 0; keys.length < 2 && i < 5000; i++) if (seaName(SECRET, `k${i}`) === first) keys.push(`k${i}`)
+  const names = new Map()
+  const label = (order, extra = {}) => Object.fromEntries(shared({ runs: order.map(key => ({ key })) }, { names, ...extra }).runs.map((r, i) => [order[i], r.label]))
+  const a = label(keys), b = label([...keys].reverse())
+  assert.notEqual(a[keys[0]], a[keys[1]])
+  assert.deepEqual(a, b, "the names did not swap")
+  // without the map (a fresh one per call) the order decides, which is what the map prevents
+  assert.notDeepEqual(shared({ runs: keys.map(key => ({ key })) }).runs.map(r => r.label), shared({ runs: [...keys].reverse().map(key => ({ key })) }).runs.map(r => r.label).reverse())
 })
 
 test("size buckets, age (rounded to 5 in shared mode)", () => {
@@ -106,7 +119,7 @@ test("every enum keeps its valid values", () => {
   assert.equal(s.captain.state, "watching")
   assert.deepEqual(s.runs.map(r => r.type), ["feat", "fix", "expl", "feat", "fix", "expl"])
   assert.deepEqual(s.runs.map(r => r.need), [null, "request-review", null, null, null, null])
-  assert.deepEqual(s.runs[1].prs[0], { state: "open", checks: "green", label: "#1405" })
+  assert.deepEqual(s.runs[1].prs[0], { state: "open", checks: "green", label: "#33" })
   assert.equal(s.runs[0].workers[1].kind, "pi")
   assert.equal(s.runs[0].workers[1].task, 2)
   assert.equal(s.runs[2].parked, true)
@@ -139,4 +152,13 @@ test("stale and viewers pass through; the scene never holds __proto__ junk", () 
   assert.equal(s.stale, true)
   assert.equal(s.viewers, 3)
   assert.deepEqual(Object.keys(s.runs[0]).sort(), ["ageMinutes", "ciRunning", "id", "label", "need", "needsYou", "orchestrator", "parked", "path", "phase", "prs", "size", "tasks", "type", "workers"])
+})
+
+test("the load fixture (10 runs, 40 workers, 6 to 16 tasks each) goes through whole", () => {
+  const s = shared(fixture("facts-load.json"))
+  assert.equal(s.runs.length, 10)
+  assert.equal(s.runs.reduce((n, r) => n + r.workers.length, 0), 40)
+  for (const r of s.runs) assert.ok(r.tasks.length >= 6 && r.tasks.length <= 16)
+  assert.equal(s.runs.filter(r => r.parked).length, 1); assert.equal(s.runs.filter(r => r.needsYou).length, 1)
+  assert.equal(new Set(s.runs.map(r => r.label)).size, 10)
 })

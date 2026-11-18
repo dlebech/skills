@@ -28,7 +28,7 @@ import { asked as inboxAsked, unmarkAsked, askedLevel } from "./inbox.js";
 import { askClick } from "./askclick.js";
 import { defaultMode, commentLines, commentsText, hasComments, botCount } from "./comments.js";
 import { reviewFlows, setReviewFlow, setWaitingOn } from "./tracking.js";
-import { needActions, ownAddressRows, isPrimary, detailsLabel, showsFlow, requestingFor } from "./needaction.js";
+import { needActions, ownAddressRows, primaryOf, detailsLabel, showsFlow, requestingFor } from "./needaction.js";
 import { canRequest, pickerLabel } from "./reviewers.js";
 
 // How each runPhase() reads on a card. Running is muted, not the working colour: colour means
@@ -49,7 +49,8 @@ const PHASE = {
 // and keep their own sizes otherwise: T(was, role) is `was` in the sidebar and TYPE[role] here.
 let inPane = false;
 const T = (was, role) => (inPane ? TYPE[role] : was);
-const drawnInPane = (draw) => { const was = inPane; inPane = true; try { return draw(); } finally { inPane = was; } };
+// Draws with the card/pane type scale (TYPE) whatever the caller is: the sea's reefs use it so their button matches their text.
+export const drawnInPane = (draw) => { const was = inPane; inPane = true; try { return draw(); } finally { inPane = was; } };
 
 function pill(t, text, tone, solid = false) {
   const c = String(tone ?? "").startsWith("#") ? tone : t[tone] ?? t.dim;
@@ -773,10 +774,12 @@ export function waitNote(t, r, f, id) {
 // go in a row per PR, led by it.
 export function needLines(view, t, r, f, items, where, underQuestion = false, tail = null) {
   const open = requestingFor(view, r, items);
+  // One rule for which button stands out (needaction.js primaryOf), the same the sea's reefs use.
+  const main = underQuestion ? null : primaryOf(items);
   const picking = (x) => x === open;
   return items.map((it, i) => {
     const buttons = it.actions.map((x, j) => ({ row: x.row ?? null, pick: picking(x) ? x : null,
-      el: needButton(view, t, r, f, x, `need-${where}-${r.key}-${i}-${j}`, where, isPrimary(x, i, j, underQuestion)) })).filter((b) => b.el);
+      el: needButton(view, t, r, f, x, `need-${where}-${r.key}-${i}-${j}`, where, main?.i === i && main?.j === j) })).filter((b) => b.el);
     const rows = [];
     for (const b of buttons) {
       if (!rows.length || rows[rows.length - 1].row !== b.row) rows.push({ row: b.row, els: [], pick: null });

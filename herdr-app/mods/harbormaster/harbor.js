@@ -11,7 +11,7 @@ import { facts, orchestratorState, agentStatus, workersOf, captainOf, adrift, ag
 import { needsYouNow, runlessOrchs } from "./attend.js";
 import { needCount, rowLead } from "./crewrows.js";
 import { zoom, programIcon, runName, withTip } from "./ui.js";
-import { runFacts, attOf, pathInput, needItemsOf, needButton, actionButton, runProps, PASS, AMBER } from "./overview.js";
+import { runFacts, attOf, pathInput, needItemsOf, needButton, actionButton, drawnInPane, runProps, PASS, AMBER } from "./overview.js";
 import { primaryOf } from "./needaction.js";
 import { noteText } from "./note.js";
 import { openHarbor3d, HARBOR3D_TIP } from "./harbor3d.js";
@@ -99,8 +99,8 @@ function reef(view, t, motion, r, ctx, att, now) {
   const act = p ? items[p.i].actions[p.j] : null;
   const btnId = `need-reef-${r.key}`;
   const button = !act ? null : opensPopup(act.kind)
-    ? actionButton(t, btnId, act.label, "Open this run's pane", () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) }), true)
-    : needButton(view, t, r, f, act, btnId, "card", true);
+    ? drawnInPane(() => actionButton(t, btnId, act.label, "Open this run's pane", () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) }), true))
+    : drawnInPane(() => needButton(view, t, r, f, act, btnId, "card", true));
   const name = runName(r.branch, r.topic);
   const show = workers.slice(0, 5);
   const creatures = h_flex().gap(6).items_end().min_w(0)

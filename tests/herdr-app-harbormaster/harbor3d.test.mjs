@@ -25,3 +25,12 @@ test("hasServer finds a live terminal named harbor3d", () => {
   assert.equal(hasServer("not json"), false);
   assert.equal(hasServer(undefined), false);
 });
+import { lastLine, startArgs } from "../../herdr-app/mods/harbormaster/harbor3d.js";
+test("lastLine is the last non-empty line, cut", () => {
+  assert.equal(lastLine("a\nharbor3d: three.js is missing\n\n  \n"), "harbor3d: three.js is missing");
+  assert.equal(lastLine(""), ""); assert.equal(lastLine(null), "");
+  assert.equal(lastLine("x".repeat(300)).length, 120);
+});
+test("startArgs runs the server without a parent or notes, after --", () => {
+  assert.deepEqual(startArgs("/h"), ["run", "--bg", "--no-notify", "--no-parent", "--name", "harbor3d", "--", "node", "/h/harbor3d/bin/harbor3d.js", "serve"]);
+});

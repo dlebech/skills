@@ -57,6 +57,17 @@ const agentState = (s) => (AGENT_STATES.has(s) ? s : "idle");
 const orchState = (s, finished) => (s === "gone" ? "gone" : finished && (s === "idle" || s === "done") ? "done" : agentState(s));
 const num = (v) => (Number.isFinite(v) ? v : null);
 
+// At most this many tasks go out per run (the cap when only counts are known).
+const TASKS_MAX = 40;
+
+// The run's task stages. From plan.md's tasks (dropped ones left out); when plan.md lists none in a shape
+// Harbormaster parses, from the counts the card shows: the done ones first, then the rest as planned.
+export function taskStages(r, counts) {
+  if (r.tasks.length) return r.tasks.filter((t) => !isDropped(t.state)).map((t) => { const s = taskStage(t.state) ?? "implement"; return TASK_STAGES.has(s) ? s : "implement"; });
+  const done = Math.max(0, counts?.done ?? 0), planned = Math.max(done, counts?.planned ?? 0);
+  return [...Array(Math.min(done, TASKS_MAX)).fill("done"), ...Array(Math.max(0, Math.min(planned, TASKS_MAX) - Math.min(done, TASKS_MAX))).fill("planned")];
+}
+
 // One run's entry. `row` = { r, f, path }: the run, its runFacts and its mergePath stages.
 function runEntry({ r, f, path }, agentStatus, programOf) {
   const kept = [];
@@ -71,9 +82,9 @@ function runEntry({ r, f, path }, agentStatus, programOf) {
     type: pick(TYPES, r.type, null), phase: phaseOf(r, planned), parked: Boolean(f.parked), needsYou: Boolean(f.need),
     need: needOf(f.need, f.att),
     path: (path ?? []).filter((s) => PATH_KEYS.has(s.key)).map((s) => ({ key: s.key, state: PATH_STATES.has(s.state) ? s.state : "todo" })),
-    tasks: kept.map((i) => { const s = taskStage(r.tasks[i].state) ?? "implement"; return TASK_STAGES.has(s) ? s : "implement"; }),
+    tasks: taskStages(r, f.counts),
     prs: f.prs.map((p) => ({ number: num(p.number), state: prState(p.state), checks: checksOf(p) })),
-    ciRunning: f.att?.reasons?.[0]?.key === "ci-running",
+    ciRunning: f.prs.some((p) => checksOf(p) === "running"),
     orchestrator: { state: orchState(f.orch, finished), kind: kindOf(programOf({ address: r.terminal })) },
     workers: f.workers.map((w) => ({ id: String(w.address), name: String(w.name || w.program?.name || w.address), kind: kindOf(programOf(w)), state: agentState(agentStatus(w)), task: taskOf.get(w.address) ?? null })),
     tokens: num(r.tokens?.total) ?? 0, startedMs: num(r.started), updatedMs: num(r.updated),

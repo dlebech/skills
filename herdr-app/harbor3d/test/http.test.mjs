@@ -99,7 +99,7 @@ test("shared: the mode is fixed, so a request cannot ask for a private scene", a
   try {
     const ev = await e.waitFor(x => x.event === "scene")
     assert.equal(ev.data.mode, "shared")
-    assert.ok(!JSON.stringify(ev.data).includes("Ruter"))
+    assert.ok(!JSON.stringify(ev.data).includes("Checkout"))
   } finally { e.close(); await s.close() }
 })
 

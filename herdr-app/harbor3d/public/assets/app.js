@@ -8,6 +8,7 @@ import { Labels, Card, Toolbar, overlays, $ } from "./ui.js"
 import { createLoop } from "./loop.js"
 import { declutterLabels, labelUnderCard, assignSlots, berthPosition, roadsteadPosition, breakwaterWidth, MAX_BERTHS, MAX_ADRIFT } from "./layout.js"
 import { skyLook, captainLook } from "./look.js"
+import { createFeed } from "./feed.js"
 
 const params = new URLSearchParams(location.search)
 const STILL = params.get("still") === "1"
@@ -151,24 +152,34 @@ function applyScene(s, snap = false) {
 // ---- connection ----
 let connected = false, moreText = "", captainState = "none"
 function updateStatus() { overlays.status(connected ? moreText : "reconnecting…") }
-let retryMs = 5000
-function connect() {
-  const es = new EventSource("./events")
-  es.addEventListener("open", () => { connected = true; retryMs = 5000; updateStatus() })
-  // A refusal (503 when the listener is full) closes an EventSource for good: try again, 5 s then doubling to 30 s.
-  es.addEventListener("error", () => {
-    connected = false; updateStatus()
-    if (es.readyState === EventSource.CLOSED) { es.close(); setTimeout(connect, retryMs); retryMs = Math.min(retryMs * 2, 30000) }
-  })
-  es.addEventListener("scene", e => {
-    let s; try { s = JSON.parse(e.data) } catch { return }
+let transport = "sse"
+// The feed tries the event stream first and long-polls where a proxy buffers it (see feed.js).
+const feed = createFeed({
+  openEvents: h => {
+    const es = new EventSource("./events")
+    es.addEventListener("open", () => h.open())
+    es.addEventListener("error", () => h.error(es.readyState === EventSource.CLOSED))
+    es.addEventListener("scene", e => { try { h.scene(JSON.parse(e.data)) } catch {} })
+    es.addEventListener("poke", e => { try { h.poke(JSON.parse(e.data)) } catch {} })
+    return es
+  },
+  poll: async after => {
+    const r = await fetch(`./poll?after=${after}`, { headers: { "x-viewer": viewerId }, cache: "no-store" })
+    if (!r.ok) throw new Error(String(r.status))
+    return r.json()
+  },
+  now: Date.now,
+  setTimer: (fn, ms) => { const t = setTimeout(fn, ms); return () => clearTimeout(t) },
+  onScene: s => {
     if (!world) { pending = s; return }
     if (STILL && firstScene) return
     firstScene = true
     applyScene(s, STILL)
-  })
-  es.addEventListener("poke", e => { try { onPoke(JSON.parse(e.data)) } catch {} })
-}
+  },
+  onPoke: p => onPoke(p),
+  onState: (t, ok) => { transport = t; connected = ok; updateStatus() },
+})
+const connect = () => feed.start()
 let pending = null
 
 // ---- pokes: sent on click, played when the event comes back so every viewer sees them ----
@@ -286,7 +297,7 @@ function frame(now) {
   if (STATS) {
     frames.push(dt * 1000); if (frames.length > 120) frames.shift()
     const avg = frames.reduce((a, b) => a + b, 0) / frames.length
-    overlays.stats(`${avg.toFixed(1)} ms/frame (${(1000 / avg).toFixed(0)} fps)\n${renderer.info.render.calls} draw calls\n${renderer.info.render.triangles} triangles`)
+    overlays.stats(`${avg.toFixed(1)} ms/frame (${(1000 / avg).toFixed(0)} fps)\n${renderer.info.render.calls} draw calls\n${renderer.info.render.triangles} triangles\n${transport}`)
   }
 }
 // One tick of the world: time, sky, creatures, effects, camera.
@@ -313,7 +324,7 @@ function step(dt) {
 }
 // One loop handle: hiding the page cancels the queued frame, showing it starts a new one only if none is queued.
 const loop = createLoop(cb => requestAnimationFrame(cb), h => cancelAnimationFrame(h), frame)
-document.addEventListener("visibilitychange", () => { if (document.hidden) loop.stop(); else if (world && !STILL) { last = 0; loop.start() } })
+document.addEventListener("visibilitychange", () => { feed.setHidden(document.hidden); if (document.hidden) loop.stop(); else if (world && !STILL) { last = 0; loop.start() } })
 window.addEventListener("resize", () => resize())
 
 // ---- start ----

@@ -30,14 +30,14 @@ const num = v => (typeof v === "number" && Number.isFinite(v) ? v : 0)
 const sizeOf = tokens => (tokens < 10e6 ? "S" : tokens < 50e6 ? "M" : tokens < 150e6 ? "L" : "XL")
 
 // Build the scene for one mode ("private" shows real names, "shared" never does).
-export function sanitize(facts, { mode, secret, now, viewers = 0, stale = false }) {
+// `names` is the listener's key -> sea name map (kept for the server's lifetime, see seaName).
+export function sanitize(facts, { mode, secret, now, viewers = 0, stale = false, names = new Map() }) {
   const priv = mode === "private"
   const f = isObj(facts) ? facts : {}
-  const used = new Set()
   const runs = []
   for (const r of list(f.runs, MAX.runs)) {
     if (!isObj(r) || typeof r.key !== "string") continue
-    const sea = seaName(secret, r.key, used)
+    const sea = seaName(secret, r.key, names)
     const run = { id: hmacId(secret, "r", r.key), label: priv ? label(r.name) || sea : sea }
     if (priv) run.sub = label(r.repo)
     run.type = pick(r.type, E.type, null)
