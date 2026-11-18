@@ -1,0 +1,264 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throwaway. Not part of Harbormaster. Issue #50.
+  Question: what should the "captain place" look like?
+  Three variants of the place, switchable via ?variant=A|B|C, drawn inside a mock of the Herdr
+  window with the harbormaster-main sidebar. Extra params for the choices that hang off it:
+  parked=none|folded|count, decisions=items|count, captain=on|off. All data is made up.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE · captain place (#50)</title>
+<style>
+  :root {
+    --bg: #14171c; --chrome: #1a1e25; --panel: #1f242c; --raise: #262c36; --line: #2e3540;
+    --text: #d7dce4; --dim: #8b94a3; --faint: #5d6675;
+    --red: #e5534b; --amber: #d9a13b; --cyan: #4fb3c8; --green: #4ea66a; --accent: #7c8cf8;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: #0c0e11; color: var(--text); font: 13px/1.45 ui-sans-serif, system-ui, "Segoe UI", sans-serif; display: flex; flex-direction: column; }
+  .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .dim { color: var(--dim); } .faint { color: var(--faint); }
+  .red { color: var(--red); } .amber { color: var(--amber); } .cyan { color: var(--cyan); } .green { color: var(--green); }
+
+  /* what you are looking at (outside the mock) */
+  #caption { padding: 10px 16px; background: #23201a; border-bottom: 1px solid #4a4130; color: #e9dfc8; }
+  #caption b { color: #fff; } #caption ul { margin: 4px 0 0; padding-left: 18px; } #caption li { margin: 1px 0; }
+
+  /* mock Herdr window */
+  #win { flex: 1; min-height: 0; display: flex; margin: 12px 16px 70px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); position: relative; }
+  #side { width: 286px; flex: none; background: var(--chrome); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow: auto; }
+  #main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+  .tabs { height: 38px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--line); background: var(--chrome); }
+  .tab { padding: 4px 10px; border-radius: 6px; color: var(--dim); } .tab.on { background: var(--raise); color: var(--text); }
+  .body { flex: 1; min-height: 0; display: flex; }
+  .term { flex: 1; min-width: 0; padding: 14px 16px; color: #9aa4b4; white-space: pre-wrap; overflow: hidden; }
+  .status { height: 26px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 10px; border-top: 1px solid var(--line); background: var(--chrome); color: var(--dim); font-size: 12px; }
+
+  /* sidebar pieces */
+  .hdr { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
+  .hdr .t { font-weight: 600; flex: 1; }
+  .pill { border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; font-size: 12px; color: var(--text); background: var(--raise); cursor: default; }
+  .link { font-size: 12px; color: var(--dim); cursor: pointer; } .link.hot { color: var(--red); font-weight: 600; }
+  .sec { padding: 6px 12px 2px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); display: flex; gap: 6px; }
+  .sec .n { font-weight: 400; color: var(--faint); }
+  .box { margin: 4px 10px 6px; padding: 8px 10px; border: 1px solid var(--red); border-left-width: 3px; border-radius: 7px; background: #2a1d1e; }
+  .box .why { color: var(--red); } .box .name { font-weight: 600; }
+  .btn { display: inline-block; margin-top: 6px; padding: 3px 10px; border-radius: 6px; background: var(--accent); color: #10121a; font-weight: 600; font-size: 12px; cursor: default; }
+  .btn.q { background: var(--raise); color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  .row { padding: 4px 12px; display: flex; gap: 8px; align-items: baseline; }
+  .row .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; transform: translateY(-1px); background: var(--faint); }
+  .row .sub { color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .c { min-width: 0; flex: 1; }
+  .row.need { border-left: 3px solid var(--red); padding-left: 9px; }
+  .spaces { margin-top: auto; border-top: 1px solid var(--line); padding: 6px 0 10px; }
+  .new { outline: 1px dashed var(--accent); outline-offset: -2px; border-radius: 6px; } /* marks what this prototype adds */
+
+  /* the place: shared blocks */
+  .h { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); margin: 0 0 6px; display: flex; gap: 6px; align-items: baseline; }
+  .h .n { font-weight: 400; color: var(--faint); text-transform: none; letter-spacing: 0; }
+  .item { display: flex; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 7px; background: var(--panel); margin-bottom: 5px; border-left: 3px solid var(--line); }
+  .item.r { border-left-color: var(--red); } .item.a { border-left-color: var(--amber); } .item.p { border-left-color: var(--faint); }
+  .item .c { flex: 1; min-width: 0; } .item .sub { color: var(--dim); font-size: 12px; }
+  .item .btn { margin: 0; flex: none; }
+  .stat { display: flex; gap: 18px; } .stat div b { display: block; font-size: 18px; font-weight: 600; } .stat div span { color: var(--dim); font-size: 12px; }
+  .bar { height: 8px; border-radius: 4px; overflow: hidden; display: flex; margin: 8px 0 4px; } .bar i { display: block; height: 100%; }
+  .cap { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; }
+
+  /* A: the overview, reshaped, as popup */
+  .scrim { position: absolute; inset: 0; background: rgba(8,10,13,.62); display: flex; justify-content: center; align-items: flex-start; padding: 26px; overflow: auto; }
+  .place { width: min(780px, 100%); background: var(--chrome); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+  .place .top { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; } .place .top .t { font-size: 15px; font-weight: 600; flex: 1; }
+  .grid2 { display: grid; grid-template-columns: 1.25fr 1fr; gap: 18px; } .blk { margin-bottom: 16px; }
+  /* B: small desk beside the terminals */
+  .desk { width: 320px; flex: none; border-left: 1px solid var(--line); background: var(--chrome); padding: 12px; overflow: auto; }
+  /* C: whole-window layout */
+  .lay { flex: 1; display: grid; grid-template-columns: 300px 1fr 380px; min-width: 0; }
+  .lay > div { padding: 14px; overflow: auto; border-right: 1px solid var(--line); } .lay > div:last-child { border-right: 0; display: flex; flex-direction: column; padding: 0; }
+  .board { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .card { background: var(--panel); border-radius: 8px; padding: 9px 10px; border-top: 2px solid var(--line); }
+
+  /* floating switcher (not part of the design) */
+  #sw { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; background: #f4f1e8; color: #17181c; border-radius: 999px; padding: 6px 10px; box-shadow: 0 8px 30px rgba(0,0,0,.6); font-size: 12px; white-space: nowrap; }
+  #sw button { border: 0; background: #17181c; color: #f4f1e8; border-radius: 999px; width: 26px; height: 26px; cursor: pointer; font-size: 14px; }
+  #sw .lab { font-weight: 700; min-width: 210px; text-align: center; }
+  #sw .opt { display: flex; gap: 2px; align-items: center; border-left: 1px solid #c9c4b6; padding-left: 10px; }
+  #sw .opt span { color: #6a675e; margin-right: 4px; }
+  #sw .opt a { padding: 3px 8px; border-radius: 999px; cursor: pointer; } #sw .opt a.on { background: #17181c; color: #f4f1e8; }
+</style>
+</head>
+<body>
+<div id="caption"></div>
+<div id="win"></div>
+<div id="sw"></div>
+<script>
+// ---------- made-up data ----------
+const DATA = {
+  needs: [
+    { name: "captain place", type: "feat", why: "Which database should t2 use?", age: "4m", btn: "Answer: SQLite" },
+    { name: "skills#60 · gh every 5 min", type: "review", why: "submit your pending review", age: "1h", btn: "Open" },
+  ],
+  decisions: [
+    { title: "Two runs want crew.js: which goes first?", age: "12m", btn: "captain place first" },
+    { title: "Issue #41 looks ready. Start a run?", age: "2h", btn: "Start run" },
+  ],
+  next: [
+    { ref: "api#88", title: "Rate limit headers", why: "review requested · 3h", btn: "Review" },
+    { ref: "skills#60", title: "Read PRs every 5 min", why: "red CI · 40m", btn: "Open check" },
+  ],
+  working: [
+    { name: "harbor 3d gulls", type: "feat", sub: "t3 implementing · review next", dot: "green" },
+    { name: "inbox retries", type: "fix", sub: "final review running", dot: "green" },
+  ],
+  waiting: [{ name: "run pane strip", type: "feat", sub: "review from anna · 1d", dot: "cyan" }],
+  parked: [
+    { name: "billing export", type: "feat", since: "3d", waits: "#212 waits on QA (Kari)", tone: "dim" },
+    { name: "onboarding copy", type: "docs", since: "1d", waits: "#208 approved, merge when the release is out", tone: "amber" },
+    { name: "search index", type: "feat", since: "5d", waits: "unfinished, 4/7 tasks · no PR yet", tone: "dim" },
+  ],
+  stats: { runs: 9, hours: "31h", tokens: "48M", waitYou: "6h 20m", split: [["working", 52, "#4ea66a"], ["waiting on you", 20, "#e5534b"], ["waiting on review", 22, "#4fb3c8"], ["idle", 6, "#5d6675"]] },
+};
+
+// ---------- state from the URL ----------
+const VARIANTS = { A: "The overview, reshaped", B: "A small desk beside your work", C: "A layout of its own" };
+const OPTS = { parked: ["none", "folded", "count"], decisions: ["items", "count"], captain: ["on", "off"] };
+const q = new URLSearchParams(location.search);
+const S = { variant: VARIANTS[q.get("variant")] ? q.get("variant") : "A" };
+for (const k in OPTS) S[k] = OPTS[k].includes(q.get(k)) ? q.get(k) : OPTS[k][0];
+S.open = q.get("open") !== "0"; // A's popup / B's desk shown
+const set = (k, v) => { S[k] = v; const p = new URLSearchParams(S); p.set("open", S.open ? "1" : "0"); history.replaceState(null, "", "?" + p); draw(); };
+
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const h = (s, n) => `<div class="h">${s}${n != null ? `<span class="n">${n}</span>` : ""}</div>`;
+
+// ---------- shared blocks of the place ----------
+const queue = (compact) => {
+  const rows = [
+    ...DATA.needs.map((n) => ({ t: "r", a: n.why, b: `${n.name} · ${n.type} · ${n.age}`, btn: n.btn })),
+    ...DATA.decisions.map((d) => ({ t: "r", a: d.title, b: `captain · ${d.age}`, btn: d.btn })),
+    ...DATA.next.map((n) => ({ t: "a", a: `${n.ref} · ${n.title}`, b: n.why, btn: n.btn })),
+  ];
+  return h("Next for you, everywhere", rows.length) + rows.slice(0, compact ? 4 : 99).map((r) =>
+    `<div class="item ${r.t}"><div class="c"><div>${esc(r.a)}</div><div class="sub">${esc(r.b)}</div></div><span class="btn ${r.t === "a" ? "q" : ""}">${esc(r.btn)}</span></div>`).join("")
+    + (compact && rows.length > 4 ? `<div class="faint" style="padding:2px 10px">+ ${rows.length - 4} more</div>` : "");
+};
+const parked = () => h("Parked", `${DATA.parked.length} · set aside, not counted above`) + DATA.parked.map((p) =>
+  `<div class="item p"><div class="c"><div>${esc(p.name)} <span class="faint">${p.type} · parked ${p.since}</span></div><div class="sub ${p.tone === "amber" ? "amber" : ""}">${esc(p.waits)}</div></div><span class="btn q">Resume</span></div>`).join("");
+const stats = (small) => {
+  const s = DATA.stats;
+  return h("This week", small ? null : "all runs, open and closed") +
+    `<div class="stat"><div><b>${s.runs}</b><span>runs</span></div><div><b>${s.hours}</b><span>agent time</span></div><div><b>${s.tokens}</b><span>tokens</span></div>${small ? "" : `<div><b class="red">${s.waitYou}</b><span>waited on you</span></div>`}</div>
+     <div class="bar">${s.split.map(([, w, c]) => `<i style="width:${w}%;background:${c}"></i>`).join("")}</div>
+     <div class="dim" style="font-size:12px">${s.split.map(([n, w]) => `${n} ${w}%`).join(" · ")} · <span class="link">Full stats ↗</span></div>`;
+};
+const captainChat = () => S.captain === "on"
+  ? `<div class="cap"><span>⚓</span><div style="flex:1"><div>Captain is watching 5 runs</div><div class="dim" style="font-size:12px">Ask it anything across runs: "what happened overnight?", "park everything on billing"</div></div><span class="btn q" style="margin:0">Open chat</span></div>`
+  : `<div class="cap"><span class="faint">⚓</span><div style="flex:1"><div>No captain running</div><div class="dim" style="font-size:12px">This page works without one. Start a captain when you want someone to talk to.</div></div><span class="btn q" style="margin:0">Start captain</span></div>`;
+const liveRuns = () => [...DATA.working, ...DATA.waiting];
+
+// ---------- the sidebar (harbormaster-main today, plus the options) ----------
+function sidebar() {
+  const nDec = DATA.decisions.length, needN = DATA.needs.length + nDec;
+  const cap = S.captain === "off" ? `<span class="pill">⚓+</span>`
+    : S.decisions === "count" ? `<span class="link hot" data-open>captain · ${nDec} ↗</span>` : `<span class="link" data-open>captain ↗</span>`;
+  const first = DATA.needs[0];
+  const decRows = S.decisions === "items"
+    ? DATA.decisions.map((d) => `<div class="row need new"><div class="c"><div>${esc(d.title)}</div><div class="sub">captain · ${d.age}</div></div></div>`).join("")
+    : `<div class="row"><div class="c faint" style="font-size:12px">+ the captain's ${nDec} decisions, above</div></div>`;
+  const grp = (title, rows) => `<div class="sec">${title} <span class="n">${rows.length}</span></div>` + rows.map((r) =>
+    `<div class="row"><span class="dot" style="background:var(--${r.dot})"></span><div class="c"><div>${esc(r.name)} <span class="faint">${r.type}</span></div><div class="sub">${esc(r.sub)}</div></div></div>`).join("");
+  const park = S.parked === "folded" ? `<div class="sec new" style="cursor:pointer" data-open>▸ Parked <span class="n">${DATA.parked.length}</span></div>`
+    : S.parked === "count" ? `<div class="row new" data-open style="cursor:pointer"><div class="c faint" style="font-size:12px">${DATA.parked.length} parked · 1 has an approved PR ↗</div></div>` : "";
+  return `<div class="hdr"><span class="t">⚓ Harbormaster</span><span class="pill">+ New run</span>${cap}</div>
+    <div class="sec red" style="color:var(--red)">Needs you <span class="n">${needN}</span></div>
+    <div class="box"><div class="name">${esc(first.name)} <span class="faint" style="font-weight:400">${first.type}</span></div><div class="why">${esc(first.why)} · ${first.age}</div><span class="btn">${esc(first.btn)}</span> <span class="link" style="margin-left:8px">2 more</span></div>
+    ${DATA.needs.slice(1).map((n) => `<div class="row need"><div class="c"><div>${esc(n.name)}</div><div class="sub">${esc(n.why)} · ${n.age}</div></div></div>`).join("")}
+    ${decRows}
+    <div class="sec amber" style="color:var(--amber)">Next for you <span class="n">${DATA.next.length}</span></div>
+    ${DATA.next.map((n) => `<div class="row"><div class="c"><div>${n.ref} · ${esc(n.title)}</div><div class="sub">${esc(n.why)}</div></div></div>`).join("")}
+    ${grp("Working", DATA.working)}${grp("Waiting on others", DATA.waiting)}
+    <div class="sec">▸ Done <span class="n">2</span></div>
+    ${park}
+    <div class="spaces"><div class="sec">Spaces</div><div class="row"><div class="c">skills</div></div><div class="row"><div class="c">api</div></div><div class="row"><div class="c dim">billing</div></div></div>`;
+}
+
+const TERM = `$ claude\n\n● t2 is implemented and its tests pass. Before I merge it into the\n  integration branch I need one decision from you.\n\n  Which database should t2 use?\n   1. SQLite (recommended: no new service)\n   2. Postgres\n\n> _`;
+const mainFrame = (inner, tabs = `<span class="tab on">⚙ orchestrator</span><span class="tab">impl-t2</span><span class="tab">shell</span>`) =>
+  `<div class="tabs">${tabs}</div><div class="body">${inner}</div><div class="status"><span>skills · feat/captain-place</span><span class="red">4 need you</span><span style="margin-left:auto">ctrl-shift-h overview</span></div>`;
+
+// ---------- the three variants ----------
+// A: today's runs overview becomes the place. One popup (ctrl-shift-h, or the captain link). Question first.
+function VariantA() {
+  const place = `<div class="scrim" data-close><div class="place" data-stop>
+    <div class="top"><span class="t">⚓ Harbor</span><span class="dim">5 open runs · 3 parked · 2 open PRs</span><span class="link" data-close>esc</span></div>
+    <div class="grid2"><div>
+      <div class="blk">${queue(false)}</div>
+      <div class="blk">${h("Open runs", liveRuns().length + DATA.needs.length)}<div class="dim" style="padding:0 2px 4px">Today's run cards stay here, folded to one line each. <span class="link">Unfold all</span></div>
+        ${liveRuns().map((r) => `<div class="item"><div class="c">${esc(r.name)} <span class="faint">${r.type}</span></div><span class="sub dim">${esc(r.sub)}</span></div>`).join("")}</div>
+    </div><div>
+      <div class="blk new" style="padding:6px">${parked()}</div>
+      <div class="blk new" style="padding:6px">${stats(false)}</div>
+      <div class="blk">${h("Captain")}${captainChat()}</div>
+    </div></div></div></div>`;
+  return mainFrame(`<div class="term mono">${esc(TERM)}</div>`) + (S.open ? place : "");
+}
+// B: a new, narrow screen that sits beside the terminals and holds only what the sidebar leaves out.
+function VariantB() {
+  const desk = `<div class="desk">
+    <div class="top" style="display:flex;margin-bottom:12px"><b style="flex:1">⚓ Captain's desk</b><span class="link" data-close>close</span></div>
+    <div class="blk">${h("From the captain", DATA.decisions.length)}${DATA.decisions.map((d) => `<div class="item r"><div class="c"><div>${esc(d.title)}</div><div class="sub">${d.age}</div></div></div>`).join("")}</div>
+    <div class="blk">${parked()}</div>
+    <div class="blk">${stats(true)}</div>
+    <div class="blk">${captainChat()}</div>
+    <div class="dim" style="font-size:12px">Run cards are not here: <span class="link">All runs ↗</span> still opens today's overview.</div></div>`;
+  return mainFrame(`<div class="term mono">${esc(TERM)}</div>${S.open ? desk : ""}`);
+}
+// C: a whole-window layout you switch to. No sidebar; the captain's terminal is part of it.
+function VariantC() {
+  const all = [...DATA.needs.map((n) => ({ ...n, sub: n.why, c: "red" })), ...liveRuns().map((r) => ({ ...r, c: r.dot }))];
+  const chat = S.captain === "on"
+    ? `<div class="tabs"><span class="tab on">⚓ captain</span></div><div class="term mono">${esc("● Overnight: inbox retries finished its final review (2 findings, fixed).\n  run pane strip still waits on anna.\n\n  Two runs want crew.js. Which goes first?\n   1. captain place (recommended)\n   2. harbor 3d gulls\n\n> _")}</div>`
+    : `<div style="margin:auto;text-align:center;padding:20px"><div class="faint" style="font-size:28px">⚓</div><div>No captain running</div><div class="dim" style="font-size:12px;margin:4px 0 8px">The rest of this layout works without one.</div><span class="btn q">Start captain</span></div>`;
+  return `<div class="lay">
+    <div>${queue(false)}<div style="height:14px"></div>${stats(true)}</div>
+    <div><div class="blk">${h("Open runs", all.length)}<div class="board">${all.map((r) => `<div class="card" style="border-top-color:var(--${r.c})"><div>${esc(r.name)} <span class="faint">${r.type}</span></div><div class="sub dim" style="font-size:12px">${esc(r.sub)}</div></div>`).join("")}</div></div>
+      <div class="blk">${parked()}</div></div>
+    <div>${chat}</div></div>`;
+}
+const RENDER = { A: VariantA, B: VariantB, C: VariantC };
+
+// ---------- what you are looking at ----------
+const CAPTION = {
+  A: ["Today's runs overview <b>is</b> the captain place. Same popup as now (ctrl-shift-h, or the <i>captain ↗</i> link), reordered: one global queue first, run cards folded to a line, and Parked and This week get their own corner (dashed = new).",
+      "No new screen. The captain is one row at the bottom: a chat you open, or Start captain.", "Click <i>captain ↗</i> in the sidebar to reopen it after closing."],
+  B: ["A <b>new, narrow panel</b> beside your terminals, holding only what the sidebar leaves out: the captain's decisions, parked runs, a few numbers.",
+      "Today's overview stays as it is, as the detailed \"All runs\" screen. Two screens to keep in step.", "Click <i>captain ↗</i> in the sidebar to reopen it after closing."],
+  C: ["A <b>whole-window layout</b> you switch to (like the sea): global queue left, every run and the parked ones in the middle, the captain's terminal on the right.",
+      "No sidebar here, so the sidebar options below don't apply. You leave your work to look at it."],
+};
+function draw() {
+  document.getElementById("caption").innerHTML = `<b>PROTOTYPE · ${S.variant}: ${VARIANTS[S.variant]}</b><ul>${CAPTION[S.variant].map((l) => `<li>${l}</li>`).join("")}</ul>
+    <div class="mono" style="font-size:11px;opacity:.7;margin-top:4px">state: variant=${S.variant} parked=${S.parked} decisions=${S.decisions} captain=${S.captain} open=${S.open}</div>`;
+  const win = document.getElementById("win");
+  win.innerHTML = S.variant === "C" ? RENDER.C() : `<div id="side">${sidebar()}</div><div id="main">${RENDER[S.variant]()}</div>`;
+  win.querySelectorAll("[data-stop]").forEach((e) => e.addEventListener("click", (ev) => ev.stopPropagation()));
+  win.querySelectorAll("[data-close]").forEach((e) => e.addEventListener("click", () => set("open", false)));
+  win.querySelectorAll("[data-open]").forEach((e) => e.addEventListener("click", () => set("open", true)));
+  const names = { parked: "Parked in sidebar", decisions: "Captain's decisions", captain: "Captain" };
+  document.getElementById("sw").innerHTML = `<button id="prev">←</button><span class="lab">${S.variant} (${VARIANTS[S.variant]})</span><button id="next">→</button>` +
+    Object.keys(OPTS).map((k) => `<span class="opt"><span>${names[k]}</span>${OPTS[k].map((v) => `<a class="${S[k] === v ? "on" : ""}" data-k="${k}" data-v="${v}">${v}</a>`).join("")}</span>`).join("");
+  document.getElementById("prev").onclick = () => cycle(-1);
+  document.getElementById("next").onclick = () => cycle(1);
+  document.querySelectorAll("#sw a").forEach((a) => a.onclick = () => set(a.dataset.k, a.dataset.v));
+}
+const cycle = (d) => { const k = Object.keys(VARIANTS); S.open = true; set("variant", k[(k.indexOf(S.variant) + d + k.length) % k.length]); };
+addEventListener("keydown", (e) => {
+  if (e.target.matches("input, textarea, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") cycle(-1); else if (e.key === "ArrowRight") cycle(1); else if (e.key === "Escape") set("open", false);
+});
+draw();
+</script>
+</body>
+</html>
