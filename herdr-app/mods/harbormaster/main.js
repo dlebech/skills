@@ -4,7 +4,7 @@
 //   "run"             one run's card (props().dir and .terminal name it), pinned beside its orchestrator
 //   "crew"            the sidebar: header, Needs-you box, Next for you, runs as one-line rows, agents adrift
 //   "viewer"          a proof screenshot, opened as an overlay by a click on a thumbnail (viewer.js)
-//   "harbor"          the harbormaster-sea view; "harbor-rail" and "harbor-pane" its rail and pane headers
+//   "harbor"          the harbormaster-sea view; "harbor-rail" its status line
 //   "newrun"          the + New run dialog (newrun.js), an overlay
 //   "stats"           where the time goes, tokens, CPU and memory: per run, task and agent, live, and past runs
 // Reads run directories on every machine (data.js) every 5 s and PRs from gh every minute;
@@ -24,7 +24,7 @@ import { mergePath } from "./mergepath.js";
 import { sceneFacts, exportFacts } from "./sceneexport.js";
 import { crew } from "./crew.js";
 import { viewer, startCopies } from "./viewer.js";
-import { harbor, rail, paneHeader } from "./harbor.js";
+import { harbor, rail } from "./harbor.js";
 import { statsView } from "./stats.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
 import { observeTelling } from "./telling.js";
@@ -32,7 +32,7 @@ import { parseCommand, runNamed, newRunArgs } from "./commands.js";
 import { openNewRun, initNewRun, newRunView } from "./newrun.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
-const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "stats"]);
+const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "harbor-rail", "stats"]);
 
 // A brief popup of one run's pane, for taking a screenshot of it with `herdr-app shot` without
 // switching the user's space or tab. Commands sent with `herdr-app do 'harbormaster.<command>'`:
@@ -144,7 +144,6 @@ export default class Harbormaster extends View {
     this.runs = cachedRuns().runs;
     this.decisions = cachedRuns().decisions;
     this.errors = [];
-    this.step = 0;
     this.showDone = false;
     this.contexts = {}; // { [address]: { tokens, model } } for the crew
     this.replying = null; // the id of the queue item being answered inline
@@ -158,8 +157,6 @@ export default class Harbormaster extends View {
     if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards" || role === "crew") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
     this.refresh(cx);
     cx.timer.every(5000, (cx) => this.refresh(cx));
-    // The harbor's scuttle target: data, not frames; .transition does the moving.
-    if (role === "harbor") cx.timer.every(2000, (cx) => { this.step++; cx.notify(); });
     // Run timing is read in the background, one run at a time, each at most every 90 s while
     // open (statsdata.js); the history when a run may have closed. Never blocks drawing.
     if (role === "stats") {
@@ -211,7 +208,7 @@ export default class Harbormaster extends View {
     cx.spawn(async (cx) => {
       const runs = await this.load(cx);
       // The crew and the overview show each crew agent's context size; the harbor and stats do not.
-      if (props()?.role !== "harbor" && props()?.role !== "stats") {
+      if (props()?.role !== "harbor" && props()?.role !== "harbor-rail" && props()?.role !== "stats") {
         const contexts = await loadContexts(crewAddresses(facts()));
         if (JSON.stringify(contexts) !== JSON.stringify(this.contexts)) { this.contexts = contexts; cx.notify(); }
       }
@@ -249,9 +246,8 @@ export default class Harbormaster extends View {
       case "crew": return crew(this, t);
       case "run": return runPane(this, t, p);
       case "viewer": return viewer(this, t, p);
-      case "harbor": return harbor(this);
-      case "harbor-rail": return rail(this);
-      case "harbor-pane": return paneHeader(p);
+      case "harbor": return harbor(this, t);
+      case "harbor-rail": return rail(this, t);
       case "stats": return statsView(this, t);
       case "newrun": return newRunView(this, t);
       default: return cards(this, t, this.runs, this.errors, this.decisions);

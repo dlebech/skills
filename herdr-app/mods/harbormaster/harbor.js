@@ -1,233 +1,198 @@
-// The fun view: runs as reefs in a harbor. The captain watches from a boat on the
-// surface, each orchestrator is the octopus of its reef, its workers are crabs.
-// Buoys are the run's tasks, signal flags on the mast are its pull requests.
+// The sea: a calm status strip above the terminals. The captain's boat rides the surface, each run is a
+// reef card (its name, what it does now, its path to merge, its PR flags, its octopus and crabs, and the
+// one button it needs from you), agents outside any run drift on the right. Colours come from the theme;
+// the only motion is native and off unless the layout block sets props.motion (see sealook.js idle), so nothing here asks for a redraw of its own.
 
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, panes, run, setAgentOrder } from "herdr";
-import { stats, taskTone, taskCounts, prsOf, PR_TONE, isParked, resumeRun } from "./data.js";
+import { spaces, run, setAgentOrder, openOverlay, props } from "herdr";
+import { stats, prsOf, PR_TONE, isParked, resumeRun } from "./data.js";
 import { facts, orchestratorState, agentStatus, workersOf, captainOf, adrift, agentNames, focusAgent, openUrl } from "./live.js";
-import { needsYouNow, needWhy, attentionOf, runlessOrchs } from "./attend.js";
-import { needCount } from "./crewrows.js";
-import { CAPTAIN, OCTOPUS, programIcon, zoom, plural, stateText, runName, withTip } from "./ui.js";
+import { needsYouNow, runlessOrchs } from "./attend.js";
+import { needCount, rowLead } from "./crewrows.js";
+import { zoom, programIcon, runName, withTip } from "./ui.js";
+import { runFacts, attOf, pathInput, needItemsOf, needButton, actionButton, runProps, PASS, AMBER } from "./overview.js";
+import { primaryOf } from "./needaction.js";
+import { mergePath } from "./mergepath.js";
+import { buoyLook, stillLook, idle, captainText, boatBadge, railCounts, opensPopup, motionOf, BADGE_TEXT } from "./sealook.js";
 
-const ink = "#173450", navy = "#264a6b", deepNavy = "#1a3550", sail = "#fbf7ee", rope = "#e6cf98", brass = "#f2c94c";
-// PR_TONE's tones as signal-flag colors.
-const FLAG = { muted: "#3f8fd2", dim: "#9aa1a8", done: "#8256d0", blocked: "#c24a3a" };
-const SKY = 86;
-
-function bubble(text) {
-  return div().absolute().top(-26).left(0).max_w(260).px(9).py(3).rounded(10).bg(sail).border(2).border_color("#d4553e")
-    .text_size(11.5).font_weight(700).text_color("#a3301f").whitespace_nowrap().truncate().child(text);
-}
+const SURFACE = 30; // the water's surface line, from the top of the strip
 
 // One creature: the octopus (an orchestrator) or a crab (a worker, or a drifter outside any run).
-function critter(view, { kind, id, status, label, program, x, y, w, onClick, say, i }) {
+// Motion is native: working floats or sidles, blocked hops, the rest stay still.
+function critter(t, motion, { kind, id, status, name, program, w, onClick }) {
   const octo = kind === "octopus";
   const h = Math.round(w * (octo ? 0.92 : 0.75));
-  const working = status === "working", blocked = status === "blocked", done = status === "done";
-  // Crabs scuttle sideways while they work; the octopus drifts up and down instead.
-  const scuttle = working && !octo ? Math.sin(view.step * 0.9 + i) * Math.max(8, w * 0.18) : 0;
-  const art = octo ? "octopus" : done ? "crab-sleep" : "crab";
-  const body = div().relative().w(w).h(h)
+  const art = octo ? "octopus" : status === "done" ? "crab-sleep" : "crab";
+  const still = motion ? { raise: 0, badge: false } : stillLook(status);
+  const dot = Math.round(w * 0.3);
+  const body = div().id(`body-${id}`).relative().top(-still.raise).w(w).h(h)
     .child(image(`mods/harbormaster/${art}.svg`).w(w).h(h).opacity(status === "gone" ? 0.4 : 1))
-    .when(!octo && Boolean(program?.icon), (el) => el.child(div().absolute().left(Math.round(w * 0.4)).top(Math.round(h * 0.56)).size(Math.round(w * 0.2))
-      .rounded(Math.round(w * 0.1)).bg(sail).border(1.5).border_color("#a8431f").flex().items_center().justify_center()
-      .child(programIcon(program, Math.round(w * 0.13), ink))));
-  if (blocked) body.id(`jump-${id}`).loop("top", { from: 0, to: -Math.round(h * 0.18), period: 800 });
-  else if (octo && !done) body.id(`float-${id}`).loop("top", { from: 0, to: -6, period: working ? 1500 : 3200 });
-  else if (!done) body.id(`bob-${id}`).loop("top", { from: 0, to: 2, period: 2600 });
-  return v_flex().id(`critter-${id}`).absolute().left(x + scuttle).top(y).w(w + 30).items_center().cursor_pointer()
-    .transition("left", { duration: 1800, easing: "ease-in-out" })
-    .on_click((_e, cx) => { cx.stop_propagation(); onClick?.(); })
-    .when(blocked || Boolean(say), (el) => el.child(bubble(say ?? "! needs you")))
-    .when(done, (el) => el.child(div().absolute().top(0).right(4).text_size(14).font_weight(700).text_color(sail).child("zzz")))
-    .child(body)
-    .child(div().max_w(w + 30).truncate().px(5).rounded(4).bg("#173450aa").text_size(11).font_weight(600).text_color(sail).child(label));
+    .when(!octo && Boolean(program?.icon), (el) => el.child(div().absolute().left(Math.round(w * 0.35)).top(Math.round(h * 0.5)).size(dot)
+      .rounded(Math.round(dot / 2)).bg(t.surface).flex().items_center().justify_center().child(programIcon(program, Math.max(3, dot - 2), t.foreground))));
+  if (still.badge) body.child(div().absolute().right(-2).top(-2).size(9).rounded(5).bg(t.blocked).flex().items_center().justify_center().text_size(7).font_semibold().text_color(BADGE_TEXT).child("!"));
+  idle(body, `idle-${id}`, motionOf(kind, status), motion);
+  return div().id(`critter-${id}`).flex_none().cursor_pointer().tooltip(`${name}: ${status === "blocked" ? "needs you" : status}`)
+    .on_click((_e, cx) => { cx.stop_propagation(); onClick?.(); }).child(body);
 }
 
 // Asks before resuming a parked or gone run from its reef: a new orchestrator starts.
-function resumeAsk(view, r) {
-  const button = (id, label, bg, fg, onClick) => div().id(id).px(10).h(22).flex().items_center().rounded(5).bg(bg).text_color(fg)
-    .text_size(11.5).font_weight(700).cursor_pointer().hover((s) => s.opacity(0.85))
-    .on_click((_e, cx) => { cx.stop_propagation(); onClick(); view.confirm = null; cx.notify(); }).child(label);
-  return v_flex().absolute().left(12).right(12).top(64).gap(6).p(8).rounded(8).bg(sail).border(2).border_color("#a07a3f")
-    .child(div().text_size(12).font_weight(600).text_color(ink).child(`Resume ${r.branch}? A new orchestrator picks it up in ${r.repo}.`))
+function resumeAsk(view, t, r) {
+  const button = (id, label, primary, onClick) => actionButton(t, id, label, null, () => { onClick(); view.confirm = null; }, primary);
+  return v_flex().id(`ask-${r.key}`).absolute().left(0).right(0).top(0).bottom(0).p(10).gap(8).justify_center().rounded(10).bg(t.surface)
+    .on_click((_e, cx) => cx.stop_propagation())
+    .child(div().text_size(12).text_color(t.foreground).child(`Resume ${r.branch}? A new orchestrator picks it up in ${r.repo}.`))
     .child(h_flex().gap(6)
-      .child(button(`resume-yes-${r.key}`, "Resume", navy, sail, () => resumeRun(r)))
-      .child(button(`resume-no-${r.key}`, "Cancel", "#e9e2d0", ink, () => {})));
+      .child(button(`resume-yes-${r.key}`, "Resume", true, () => resumeRun(r)))
+      .child(button(`resume-no-${r.key}`, "Cancel", false, () => {})));
 }
 
-// `att`: the run's attentionOf, read once per draw by harbor().
-function reef(view, r, ctx, x, y, w, h, n, att) {
+// A PR as a small flag: a pole and a flag in the PR's tone (red when its checks fail), then its number.
+function prFlag(t, r, p, i) {
+  const fail = p.checks?.fail > 0;
+  const c = fail ? t.blocked : t[PR_TONE[p.state] ?? "dim"] ?? t.muted;
+  return h_flex().id(`flag-${r.key}-${i}`).flex_none().gap(3).items_center().cursor_pointer()
+    .tooltip(`${p.title ?? p.url} (${p.state.toLowerCase()}${fail ? ", checks failing" : ""})`)
+    .on_click((_e, cx) => { cx.stop_propagation(); openUrl(p.url); })
+    .child(h_flex().items_start().h(14).child(div().w(2).h(14).bg(c)).child(div().w(14).h(9).rounded_r(2).bg(c)))
+    .child(div().text_size(11).text_color(t.muted).child(p.number ? `#${p.number}` : "PR"));
+}
+
+// The path to merge as a row of buoys joined by a line, one per stage (mergepath.js).
+function buoys(t, motion, r, path) {
+  const color = { pass: PASS(t), amber: AMBER(t), blocked: t.blocked };
+  return h_flex().items_center().children(path.flatMap((s, i) => {
+    const look = buoyLook(s.state, motion);
+    const b = div().id(`buoy-${r.key}-${i}`).size(10).flex_none().rounded(5).tooltip(`${s.label}: ${s.tip}`)
+      .when(Boolean(look.fill), (el) => el.bg(color[look.fill]))
+      .when(Boolean(look.ring), (el) => el.border(1.5).border_color(t[look.ring]))
+      .when(look.halo, (el) => el.border(2).border_color(t.blocked + "88"));
+    idle(b, `pulse-${r.key}-${i}`, look.pulse ? { prop: "opacity", from: 0.5, to: 1, period: 1300 } : null, motion);
+    return i === 0 ? [b] : [div().w(10).h(1).flex_none().bg(t.border), b];
+  }));
+}
+
+// One reef card for a run. `att`: its attentionOf, read once per draw by harbor().
+function reef(view, t, motion, r, ctx, att, now) {
   const orch = orchestratorState(r, ctx);
-  // Needs you by the overview's and the Crew's rule (attend.js), so the harbor agrees with them.
+  const f = runFacts(r, ctx);
   const need = needsYouNow(r, ctx, att);
-  const reason = needWhy(r, ctx, att);
-  // Reefs are drawn for open runs and parked ones. A finished one here is docked: its
-  // work is done and its PR is up, so the reef goes quiet. A parked one is set aside
-  // for later: dimmed, with no octopus, and a click offers to resume it, as for a run
-  // whose orchestrator is gone.
   const parked = isParked(r);
-  const docked = r.phase === "finished" && !parked;
   const resumable = parked || (orch === "gone" && r.phase !== "finished");
   const asking = view.confirm?.key === r.key && view.confirm.action === "resume";
   const workers = workersOf(r.terminal, ctx);
   const prs = prsOf(r) ?? [];
-  const { done, planned } = taskCounts(r);
-  const big = Math.min(104, Math.max(70, w * 0.26));
-  const small = Math.min(74, Math.max(50, w * 0.17));
-  const cols = Math.max(1, Math.floor((w - big - 40) / (small + 24)));
+  const path = mergePath(pathInput(r, f, f.stages));
   const focusOrch = (_e, cx) => {
     if (resumable) { view.confirm = { key: r.key, action: "resume" }; cx?.notify(); }
     else if (orch !== "gone") focusAgent(r.terminal);
   };
-  const crabs = workers.map((term, i) => critter(view, {
-    kind: "crab", id: term.address, i: i + n * 7, status: agentStatus(term, ctx), w: small,
-    label: term.name || term.program?.name || term.address, program: term.program,
-    x: big + 36 + (i % cols) * (small + 24), y: 122 + Math.floor(i / cols) * (small * 0.75 + 32),
-    onClick: () => focusAgent(term.address),
-  }));
-  const sign = v_flex().absolute().left(12).top(10).max_w(w - 24 - Math.min(prs.length, 4) * 46).px(10).py(4).rounded(5)
-    .bg(need ? "#f6c28b" : rope).border(3).border_color(need ? "#c1562c" : "#a07a3f").text_color("#4a3418").opacity(docked ? 0.8 : 1)
-    .child(withTip(div().id(`sign-${r.key}`).truncate().text_size(13).font_weight(800), runName(r.branch, r.topic), `${OCTOPUS} ${r.type ? `${r.type} · ` : ""}`))
-    .child(div().truncate().text_size(10.5).font_weight(600).child(`${r.repo}${r.machine ? ` · ${r.machine}` : ""} · ${parked ? "PARKED · CLICK TO RESUME" : need ? "NEEDS YOU" : docked ? "FINISHED · PR UP" : orch === "gone" ? "GONE · CLICK TO RESUME" : r.phase.toUpperCase()}`));
-  // Buoys on a line along the bottom of the reef: one per task, lit as it is done.
-  const buoys = h_flex().absolute().left(14).bottom(8).gap(8).items_end()
-    .children(Array.from({ length: planned }, (_, i) => {
-      const task = r.tasks[i];
-      const st = task?.state ?? (i < done ? "merged" : "planned");
-      const tone = taskTone(st);
-      const c = tone === "done" ? "#3fa66b" : tone === "blocked" ? "#e2553f" : tone ? brass : "#c9cfd4";
-      return v_flex().id(`buoy-${r.key}-${i}`).items_center().tooltip(task ? `${task.id} ${task.name}: ${stateText(task.state)}` : `task ${i + 1}: ${stateText(st)}`)
-        .child(div().w(14).h(16).rounded_t(7).rounded_b(3).bg(c).border(1.5).border_color(deepNavy)
-          .child(div().mt(5).h(3).bg(sail))
-          .when(tone === "working" || tone === "blocked", (el) => el.loop("opacity", { from: 0.45, to: 1, period: 1300 })))
-        .child(div().w(2).h(14).bg(deepNavy));
-    }))
-    .when(planned > 0, (el) => el.child(div().pl(4).pb(1).px(5).rounded(4).bg("#173450aa").text_size(10.5).font_weight(700).text_color(sail).child(`${done}/${planned} done`)));
-  const flags = h_flex().absolute().right(12).top(8).gap(6)
-    .children(prs.map((p, i) => {
-      const c = FLAG[PR_TONE[p.state] ?? "dim"];
-      const fail = p.checks?.fail > 0;
-      return v_flex().id(`flag-${r.key}-${i}`).cursor_pointer().tooltip(`${p.title ?? p.url} (${p.state.toLowerCase()}${fail ? ", checks failing" : ""})`)
-        .on_click((_e, cx) => { cx.stop_propagation(); openUrl(p.url); })
-        .child(h_flex().child(div().w(3).h(40).bg("#dfe6ea"))
-          .child(div().self_start().px(5).h(18).flex().items_center().bg(c).rounded_r(3).text_size(10.5).font_weight(700).text_color("#fff")
-            .when(fail, (el) => el.border(2).border_color(brass))
-            .child(p.number ? `#${p.number}${fail ? " ✗" : p.state === "MERGED" ? " ✓" : ""}` : "PR")));
-    }));
-  return div().id(`reef-${r.key}`).absolute().left(x).top(y).w(w).h(h).rounded(14).opacity(parked && !asking ? 0.55 : 1)
-    .bg(need ? "#f6c28b33" : docked || parked ? "#ffffff0d" : "#ffffff1a").border(3).border_color(need ? "#f08a5d" : docked || parked ? "#e6cf9880" : rope).cursor_pointer()
-    .hover((s) => s.bg(need ? "#f6c28b55" : "#ffffff2e"))
-    .on_click(focusOrch)
-    .child(sign)
-    .child(flags)
-    .when(Boolean(r.progress) && !asking, (el) => el.child(div().absolute().left(16).right(16).top(64).truncate().text_size(11.5).italic().text_color(sail).child(`“${r.progress}”`)))
-    .when(asking, (el) => el.child(resumeAsk(view, r)))
-    .when(!parked, (el) => el.child(critter(view, {
-      kind: "octopus", id: r.terminal ?? r.key, i: n * 7, status: orch !== "gone" && need ? "blocked" : docked && orch !== "working" ? "done" : orch, w: big,
-      label: orch === "gone" ? "orchestrator (gone)" : docked ? "orchestrator (finished)" : "orchestrator", x: 10, y: 114, onClick: focusOrch,
-      say: need ? `${r.question ? "?" : "!"} ${reason}` : null,
-    })))
-    .children(crabs)
-    .child(buoys);
+  // The same line the Crew's row says, so the two agree.
+  const { lead, tone } = rowLead(att, now);
+  const leadText = parked ? "Parked · click to resume" : resumable ? "Orchestrator gone · click to resume" : lead;
+  const leadColor = resumable ? t.muted : tone === "amber" ? AMBER(t) : tone === "pass" ? PASS(t) : tone === "blocked" ? t.blocked : t.muted;
+  // The run's primary action; a picker or confirm needs more room than a reef has, so those open the run's pane.
+  const items = need && !parked ? needItemsOf(r, ctx, att) : [];
+  const p = primaryOf(items);
+  const act = p ? items[p.i].actions[p.j] : null;
+  const btnId = `need-reef-${r.key}`;
+  const button = !act ? null : opensPopup(act.kind)
+    ? actionButton(t, btnId, act.label, "Open this run's pane", () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) }), true)
+    : needButton(view, t, r, f, act, btnId, "card", true);
+  const name = runName(r.branch, r.topic);
+  const show = workers.slice(0, 5);
+  const creatures = h_flex().gap(6).items_end().min_w(0)
+    .when(!parked, (el) => el.child(critter(t, motion, { kind: "octopus", id: r.terminal ?? r.key, status: orch !== "gone" && need ? "blocked" : orch, name: orch === "gone" ? "Orchestrator (gone)" : "Orchestrator", w: 30, onClick: focusOrch })))
+    .children(show.map((term) => critter(t, motion, { kind: "crab", id: term.address, status: agentStatus(term, ctx), name: term.name || term.program?.name || term.address, program: term.program, w: 20, onClick: () => focusAgent(term.address) })))
+    .when(workers.length > show.length, (el) => el.child(div().text_size(11).text_color(t.dim).child(`+${workers.length - show.length}`)));
+  return v_flex().id(`reef-${r.key}`).relative().overflow_hidden().flex_1().min_w(240).max_w(380).h_full().gap(4).p(10).rounded(10)
+    .bg(t.surface + "d9").border(1).border_color(t.border).opacity(parked && !asking ? 0.55 : 1).cursor_pointer()
+    .hover((s) => s.bg(t.raised)).on_click(focusOrch)
+    .when(need && !parked, (el) => el.child(div().absolute().left(0).top(0).bottom(0).w(3).bg(t.blocked)))
+    .child(h_flex().gap(8).items_center().min_w(0)
+      .child(withTip(div().id(`name-${r.key}`).flex_1().min_w(0).truncate().text_size(12.5).font_semibold().text_color(t.foreground), name))
+      .when(prs.length > 0, (el) => el.child(h_flex().gap(8).items_center().flex_none()
+        .children(prs.slice(0, 3).map((x, i) => prFlag(t, r, x, i)))
+        .when(prs.length > 3, (e) => e.child(div().text_size(11).text_color(t.muted).child(`+${prs.length - 3}`))))))
+    .child(div().min_w(0).truncate().text_size(11).text_color(leadColor).child(leadText))
+    .child(div().pt(2).child(buoys(t, motion, r, path)))
+    .child(div().flex_1())
+    .child(h_flex().gap(8).items_end().justify_between().min_w(0)
+      .child(creatures)
+      .when(Boolean(button), (el) => el.child(button)))
+    .when(asking, (el) => el.child(resumeAsk(view, t, r)));
 }
 
-export function harbor(view) {
-  // on_size_change reports unzoomed px; everything here is drawn in zoomed px.
+// The captain's boat on the surface with its anchor, a badge for what needs you, a plain-words tooltip.
+function boat(view, t, motion, cap, capStatus, badge) {
+  const present = Boolean(cap.terminal);
+  const state = captainText({ present, watching: cap.watching, working: capStatus === "working" });
+  return v_flex().id("boat-col").flex_none().w(150).h_full().items_center().pb(14)
+    .child(div().id("boat").relative().flex_none().w(84).h(68).mt(2).tooltip(state).when(present, (el) => el.cursor_pointer().on_click(() => focusAgent(cap.terminal.address)))
+      .child(idle(div().w(84).h(68), "boat-rock", { prop: "top", to: 3, period: 2400 }, motion)
+        .child(image("mods/harbormaster/captain.svg").w(84).h(68).opacity(present ? 1 : 0.45)))
+      .when(badge.count > 0, (el) => el.child(div().id("boat-badge").absolute().right(-6).top(0).min_w(16).h(16).px(4).rounded(8).bg(t.blocked)
+        .flex().items_center().justify_center().text_size(11).text_color(BADGE_TEXT).tooltip(badge.tip).child(String(badge.count)))))
+    .when(cap.watching, (el) => el.child(div().w(2).flex_1().bg(t.border)))
+    .child(svg("mods/harbormaster/anchor.svg").flex_none().w(20).h(22).text_color(t.dim).mt(cap.watching ? 0 : 4));
+}
+
+// The sea. Everything is flex; only the seabed picture needs the strip's size (in zoomed px).
+export function harbor(view, t) {
   const z = zoom();
-  const W = (view.size?.width ?? 1400 * z) / z, H = (view.size?.height ?? 380 * z) / z;
-  // The seabed covers the water, anchored at the bottom so the sand stays in view.
-  const sea = H - SKY;
-  const bw = Math.max(W, sea * (1600 / 420)), bh = bw * (420 / 1600);
+  const W = (view.size?.width ?? 1400 * z) / z, H = (view.size?.height ?? 220 * z) / z;
+  const bw = Math.max(W, (H - SURFACE) * (1600 / 420)), bh = bw * (420 / 1600);
+  const motion = props()?.motion === true;
   const ctx = facts();
+  const now = Date.now();
   const s = stats(view.runs, ctx);
-  // Every open run: those still working, then finished ones until their tab is closed,
-  // then parked ones, set aside for later.
   const runs = [...s.shown, ...s.parked];
-  // One attention per run per draw: the harbor redraws on its animation timer.
-  const atts = new Map(runs.map((r) => [r, attentionOf(r, ctx)]));
+  const atts = new Map(runs.map((r) => [r, attOf(r, ctx)]));
   const need = runs.filter((r) => needsYouNow(r, ctx, atts.get(r)));
-  // The header counts as the overview's and the Crew's Needs you do (crewrows.js needCount): the
-  // runs, orchestrators without a run blocked on a dialog, and the captain's open decisions.
-  const needs = needCount(need, runlessOrchs(view.runs, ctx), view.decisions?.length ?? 0);
   const cap = captainOf(ctx);
-  // What the captain calls out: its own open decisions, then each run that needs you.
-  const calls = [...(view.decisions?.length ? [plural(view.decisions.length, "decision")] : []), ...need.map((r) => r.branch)];
+  const badge = boatBadge({ decisions: view.decisions?.length ?? 0, runNames: need.map((r) => r.branch) });
   const inRuns = new Set(runs.flatMap((r) => (r.terminal ? [r.terminal, ...workersOf(r.terminal, ctx).map((term) => term.address)] : [])));
   const drifters = adrift([cap.terminal?.address, ...runs.map((r) => r.terminal)], ctx);
-  const crabNames = agentNames(drifters.slice(0, 6));
+  const shownDrift = drifters.slice(0, 6);
+  const driftNames = agentNames(shownDrift);
   const capStatus = cap.terminal && agentStatus(cap.terminal, ctx);
   // Herdr asks a mod that shows agents to pass on their order while it draws them, so that
   // alt-up / alt-down step through the harbor in the order it shows (in memory only).
   setAgentOrder([cap.terminal?.address, ...inRuns, ...drifters.map((a) => a.address)].filter(Boolean));
 
-  const x0 = 190, x1 = W - (drifters.length ? 170 : 24), top = SKY + 26, bottom = H - 14;
-  const n = Math.max(runs.length, 1), gap = 18;
-  const rw = Math.max(240, Math.min(520, (x1 - x0 - gap * (n - 1)) / n));
-  const total = rw * runs.length + gap * (runs.length - 1);
-  const start = x0 + Math.max(0, (x1 - x0 - total) / 2);
-
-  // The captain's boat rides the surface; the anchor is down while the watcher runs.
-  const boat = div().id("boat").absolute().left(18).top(SKY - 82).cursor_pointer()
-    .when(Boolean(cap.terminal), (el) => el.on_click(() => focusAgent(cap.terminal.address)))
-    .child(div().relative().w(150).h(122).id("boat-rock").loop("top", { from: 0, to: 4, period: 2400 })
-      .child(image("mods/harbormaster/captain.svg").w(150).h(122).opacity(cap.terminal ? 1 : 0.45)))
-    .when(calls.length > 0 && Boolean(cap.terminal), (el) => el.child(div().absolute().top(132).left(4).px(9).py(3).rounded(10).bg(sail).border(2).border_color("#d4553e")
-      .text_size(11.5).font_weight(800).text_color("#a3301f").whitespace_nowrap().child(`Ahoy! ${calls[0]}${calls.length > 1 ? ` +${calls.length - 1}` : ""}`)))
-    .when(Boolean(cap.terminal) && !cap.watching, (el) => el.child(div().absolute().top(10).left(40).text_size(15).font_weight(700).text_color(navy).child("zzz")));
-  const chainLen = cap.watching ? Math.max(40, H - SKY - 120) : 26;
-  const anchor = v_flex().absolute().left(80).top(SKY + 30).items_center()
-    .child(div().w(2).h(chainLen).bg("#1a3550aa"))
-    .child(svg("mods/harbormaster/anchor.svg").w(26).h(28).text_color(deepNavy));
-  const capSign = v_flex().absolute().left(16).top(SKY + 82).px(10).py(4).rounded(5).bg(rope).border(3).border_color("#a07a3f").text_color("#4a3418")
-    .child(div().text_size(12).font_weight(800).child(`${CAPTAIN} THE CAPTAIN`))
-    .child(div().text_size(10.5).font_weight(600).child(!cap.terminal ? "ashore" : cap.watching ? (capStatus === "working" ? "plotting a course…" : "on watch") : "anchor up, not watching"));
-
-  return div().id("root").relative().size_full().overflow_hidden().bg("#4a9cc2")
+  return div().id("root").relative().size_full().overflow_hidden().bg(t.canvas ?? t.chrome)
     .on_size_change((size, cx) => { view.size = size; cx.notify(); })
-    .child(div().absolute().left(0).top(0).w(W).h(SKY).bg("#cfe9f3"))
-    .child(image("mods/harbormaster/seabed.svg").absolute().left((W - bw) / 2).top(H - bh).w(bw).h(bh))
-    .child(h_flex().absolute().left(0).top(SKY - 12).children(Array.from({ length: Math.ceil(W / 200) + 1 }, () => image("mods/harbormaster/waves.svg").w(200).h(24))))
-    .child(div().absolute().right(90).top(14).size(26).rounded(13).bg("#fff3b0"))
-    .child(v_flex().absolute().left(186).top(12).gap(2).text_color(ink)
-      .child(div().text_size(26).font_weight(800).child("The run harbor"))
-      .child(div().text_size(12.5).child(`${plural(runs.length, "reef")}, ${plural(runs.length, "octopus", "octopi")}, ${plural(s.workers, "crab")}, ${cap.terminal ? "one captain" : "no captain aboard"}.`)))
-    .child(h_flex().absolute().right(130).top(20).gap(16).text_size(12).font_weight(600).text_color(ink)
-      .child(div().child(plural(s.live.length, "run")))
-      .when(s.docked.length > 0, (el) => el.child(div().child(`${s.docked.length} finished`)))
-      .child(div().text_color(needs ? "#a3301f" : ink).child(`${needs} need you`))
-      .child(div().child(`${plural(s.open.length, "flag")} up`)))
-    .child(anchor)
-    .child(capSign)
-    .child(boat)
-    .when(runs.length === 0, (el) => el.child(div().absolute().left(x0 + 40).top(top + 60).px(14).py(8).rounded(8).bg("#fbf7eecc").text_size(13).text_color(ink)
-      .child("Calm waters. Ask the captain to start a run and a reef shows up here.")))
-    .children(runs.map((r, i) => reef(view, r, ctx, start + i * (rw + gap), top, rw, bottom - top, i, atts.get(r))))
-    .children(drifters.slice(0, 6).map((a, i) => critter(view, {
-      kind: "crab", id: a.address, i: 50 + i, status: a.status, w: 54, label: crabNames[i], program: a.program,
-      x: W - 150 + (i % 2) * 70, y: top + 10 + Math.floor(i / 2) * 82, onClick: () => focusAgent(a.address),
-    })))
-    .when(drifters.length > 0, (el) => el.child(div().absolute().right(24).top(top - 20).text_size(10.5).font_weight(700).text_color(sail).child("ADRIFT")));
+    .child(div().absolute().left(0).top(0).right(0).bottom(0).bg(t.accent + "12"))
+    .child(image("mods/harbormaster/seabed.svg").absolute().left((W - bw) / 2).top(H - bh).w(bw).h(bh).opacity(0.35))
+    .child(h_flex().absolute().left(0).top(SURFACE - 12).overflow_hidden().w(W)
+      .children(Array.from({ length: Math.ceil(W / 200) + 1 }, () => svg("mods/harbormaster/waves.svg").flex_none().w(200).h(24).text_color(t.border))))
+    .child(h_flex().absolute().left(0).top(0).right(0).bottom(0)
+      .child(boat(view, t, motion, cap, capStatus, badge))
+      .child(h_flex().id("reefs").flex_1().min_w(0).h_full().gap(12).pt(44).pb(10).items_stretch().overflow_x_scrollbar()
+        .children(runs.map((r) => reef(view, t, motion, r, ctx, atts.get(r), now)))
+        .when(runs.length === 0, (el) => el.child(div().flex_1().flex().items_center().justify_center().text_size(12.5).text_color(t.muted)
+          .child("No runs. Start one with + New run in the Crew, or from a terminal."))))
+      .when(drifters.length > 0, (el) => el.child(v_flex().id("adrift").flex_none().w(120).h_full().pt(44).pb(10).pl(12).pr(12).gap(6)
+        .child(div().text_size(11).text_color(t.dim).child("Adrift"))
+        .child(h_flex().flex_wrap().gap(8)
+          .children(shownDrift.map((a, i) => critter(t, motion, { kind: "crab", id: a.address, status: a.status, name: driftNames[i], program: a.program, w: 22, onClick: () => focusAgent(a.address) })))
+          .when(drifters.length > 6, (e) => e.child(div().text_size(11).text_color(t.dim).child(`+${drifters.length - 6}`)))))));
 }
 
-export function rail(view) {
-  const s = spaces().find((s) => s.active), tab = s?.tabs.find((t) => t.active);
-  return h_flex().size_full().bg(navy).px(20).items_center().justify_between().text_color(sail).text_size(13).font_weight(600)
-    .child(div().child(`${s?.name ?? ""}  /  ${tab?.name ?? ""}`))
+// The rail: one status line. Space and tab on the left; counts and the way back on the right.
+export function rail(view, t) {
+  const s = spaces().find((x) => x.active), tab = s?.tabs.find((x) => x.active);
+  const ctx = facts();
+  const st = stats(view.runs, ctx);
+  const runs = [...st.shown, ...st.parked];
+  const need = runs.filter((r) => needsYouNow(r, ctx, attOf(r, ctx)));
+  const needs = needCount(need, runlessOrchs(view.runs, ctx), view.decisions?.length ?? 0);
+  const counts = railCounts({ runs: runs.length, needs, prs: st.open.length });
+  return h_flex().id("rail").size_full().bg(t.chrome).border_t(1).border_b(1).border_color(t.border).px(14).items_center().justify_between().text_size(11).text_color(t.muted)
+    .child(h_flex().gap(4).child(div().text_color(t.foreground).child(`${s?.name ?? ""} / ${tab?.name ?? ""}`)))
     .child(h_flex().gap(14).items_center()
-      .child(div().id("to-main").text_size(11).px(8).h(20).flex().items_center().rounded(4).bg(deepNavy).cursor_pointer().hover((st) => st.bg("#10253a"))
-        .on_click(() => run("layout.switch", { name: "harbormaster-main" })).child("Back to main"))
-      .child(div().text_size(11).child("BELOW DECK")));
-}
-
-export function paneHeader(p) {
-  const pane = panes().find((x) => x.pane === p.pane);
-  const role = facts().terminals.find((t) => t.address === pane?.terminal)?.labels?.role;
-  const who = role === "captain" ? `${CAPTAIN} captain` : role === "orchestrator" ? `${OCTOPUS} orchestrator` : null;
-  return h_flex().size_full().px(12).gap(9).items_center().bg("#d9c39a").text_color("#3b2c17").text_size(12).font_weight(600)
-    .child(programIcon(pane?.program, 15, "#3b2c17")).child(div().child(pane?.program?.name ?? pane?.title ?? "Terminal"))
-    .when(Boolean(who), (el) => el.child(div().px(6).h(17).flex().items_center().rounded(4).bg(sail).text_size(10.5).child(who)))
-    .child(div().flex_1()).child(div().child(pane?.status === "blocked" ? "needs you" : pane?.status ?? ""));
+      .child(h_flex().gap(4).children(counts.flatMap((c, i) => [
+        ...(i ? [div().child("·")] : []),
+        div().text_color(c.tone ? t[c.tone] : t.muted).child(c.text)])))
+      .child(div().id("to-main").cursor_pointer().hover((x) => x.text_color(t.foreground)).on_click(() => run("layout.switch", { name: "harbormaster-main" })).child("Back to main")));
 }
