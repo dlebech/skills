@@ -29,13 +29,24 @@ test("crewEvents: a task becoming done is a cheer, a ship that casts off is a wa
   for (const odd of [undefined, {}, { tasks: "x", workers: 3, prs: null }]) assert.doesNotThrow(() => C.crewEvents(odd, odd))
 })
 
-test("crewStances: working walks, blocked hops, idle and done gather while the run goes on, and stand when it is finished", () => {
+test("crewStances: working walks, blocked hops, idle and done check in and then potter while the run goes on, and stand when it is finished", () => {
   const r = run({ workers: [{ id: "a", state: "working" }, { id: "b", state: "blocked" }, { id: "c", state: "idle" }, { id: "d", state: "done" }, { id: "e", state: "idle" }] })
-  assert.deepEqual(C.crewStances(r).map(s => s.stance), ["work", "hop", "gather", "gather", "gather"])
-  assert.deepEqual(C.crewStances(r).filter(s => s.spot).map(s => s.spot), [0, 1, 2].map(C.gatherSpot), "the gatherers take spots 0, 1, 2 in order")
-  assert.deepEqual(C.crewStances({ ...r, phase: "finished" }).map(s => s.stance), ["work", "hop", "stand", "stand", "stand"])
-  assert.deepEqual(C.crewStances(r, true).map(s => s.stance), Array(5).fill("roll"))
+  assert.deepEqual(C.crewStances(r).map(s => s.stance), ["work", "hop", "busy", "busy", "busy"], "nobody checking in: everyone at work")
+  const checking = new Set(["c", "e", "a"])
+  assert.deepEqual(C.crewStances(r, false, checking).map(s => s.stance), ["work", "hop", "gather", "busy", "gather"], "a working crab never checks in")
+  assert.deepEqual(C.crewStances(r, false, checking).filter(s => s.spot).map(s => s.spot), [0, 1].map(C.gatherSpot), "the crabs checking in take spots 0, 1 in order")
+  assert.deepEqual(C.crewStances({ ...r, phase: "finished" }, false, checking).map(s => s.stance), ["work", "hop", "stand", "stand", "stand"])
+  const rolled = C.crewStances(r, true, checking)
+  assert.deepEqual(rolled.map(s => s.stance), Array(5).fill("roll"))
+  assert.deepEqual(rolled.map(s => s.spot ?? null), [null, null, C.gatherSpot(0), null, C.gatherSpot(1)], "a roll call keeps a crab checking in at its spot")
   assert.deepEqual(C.crewStances(null), []); assert.deepEqual(C.crewStances({ workers: "x" }), [])
+})
+
+test("checksIn: a crab checks in when it has just gone idle or done, and a new one only on a berth already on screen", () => {
+  assert.equal(C.checksIn("working", "idle"), true); assert.equal(C.checksIn("working", "done"), true); assert.equal(C.checksIn("blocked", "done"), true)
+  assert.equal(C.checksIn("idle", "done"), false, "already resting"); assert.equal(C.checksIn("idle", "idle"), false)
+  assert.equal(C.checksIn("idle", "working"), false); assert.equal(C.checksIn(undefined, "working"), false)
+  assert.equal(C.checksIn(undefined, "idle", true), true); assert.equal(C.checksIn(undefined, "idle", false), false, "first sight of the berth")
 })
 
 test("crewStances: needs you stops everyone facing +Z; a blocked crab still hops; a parked run needs nobody", () => {
