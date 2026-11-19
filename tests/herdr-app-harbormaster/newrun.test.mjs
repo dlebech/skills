@@ -108,11 +108,15 @@ test("a request knows its local checkout and the live run reviewing it", () => {
   const [a, b] = withContext(parseReviewRequests(GH), repos, runs);
   assert.equal(a.local, null);
   assert.equal(a.run, "/runs/skills/pr-9");
-  assert.deepEqual(b.local, { space: "sp-1", root: "/home/d/skills", name: "skills" });
+  assert.deepEqual(b.local, { space: "sp-1", root: "/home/d/skills", name: "skills", machine: null });
   assert.equal(b.run, null);
   // A clone found beside the open spaces counts too (no space yet: a review opens one); an open space wins.
   const cloned = withContext(parseReviewRequests(GH), [{ space: null, name: "api", root: "/home/d/api", origin: "acme/api" }, ...repos], []);
-  assert.deepEqual(cloned[0].local, { space: null, root: "/home/d/api", name: "api" });
+  assert.deepEqual(cloned[0].local, { space: null, root: "/home/d/api", name: "api", machine: null });
+  // Another machine's open checkout counts (a review starts there); this machine's comes first.
+  const far = { space: "desk/sp-1", name: "skills", root: "/home/d/skills", origin: "dlebech/skills", machine: "desk" };
+  assert.equal(withContext(parseReviewRequests(GH), [far], [])[1].local.machine, "desk");
+  assert.equal(withContext(parseReviewRequests(GH), [...repos, far], [])[1].local.machine, null);
   assert.equal(runReviewing([{ dir: "/x", issues: ["https://github.com/acme/api/pull/9/"], related: [] }], "https://github.com/acme/api/pull/9"), "/x");
 });
 

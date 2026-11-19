@@ -49,10 +49,11 @@ beforeEach(() => {
   rejections = []; execs = []; globalThis.__herdrClosed = null;
   process.removeListener("unhandledRejection", onRejection);
   process.on("unhandledRejection", onRejection);
-  globalThis.__herdrExec = async (cmd, args) => {
+  globalThis.__herdrExec = async (cmd, args, opts) => {
     execs.push([cmd, ...args]);
+    execs.at(-1).on = opts?.on ?? null;
     const script = args[1] ?? "";
-    if (cmd === "bash") return { code: 0, stdout: "started t9\n", stderr: "" };
+    if (cmd === "bash" || script.includes('exec bash "$@"')) return { code: 0, stdout: "started t9\n", stderr: "" };
     if (script.includes("HERDR_ORCHESTRATION_ROOT")) return { code: 0, stdout: "/runs", stderr: "" };
     if (script.includes("start-agent.sh")) return { code: 0, stdout: "/s/herdr-app-orchestrator/scripts/start-agent.sh", stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
@@ -238,4 +239,30 @@ test("Agent: found on the login shell's PATH, a row only when more than one, and
   assert.deepEqual(rejections, []);
   const run = execs.find(([cmd]) => cmd === "bash");
   assert.equal(run[run.indexOf("--kind") + 1], "pi");
+});
+
+test("Start in another machine's folder runs everything there, with the space id as it names it", async () => {
+  let wrote = false;
+  globalThis.__herdrWrite = async (path) => { if (path.includes(".newrun-")) wrote = true; };
+  const view = dialog({ folder: "/home/u/projects/skills", name: "skills", space: "desk/sp-skills", machine: "desk" });
+  clickStart(view);
+  await settle();
+  assert.deepEqual(rejections, []);
+  const bash = execs.find(([cmd, , script]) => cmd === "sh" && script?.includes('exec bash "$@"'));
+  assert.ok(bash, "start-agent.sh ran, with the login PATH");
+  assert.equal(bash.on, "desk");
+  assert.ok(bash.includes("herdr.space=sp-skills"), "no machine prefix in the space label");
+  assert.ok(execs.some((e) => e.on === "desk" && e[2]?.includes('printf %s "$2" > "$1"')), "the task file was written on desk");
+  assert.equal(wrote, false, "the task file not with this machine's writeTextFile (the prefs are this machine's)");
+  assert.equal(globalThis.__herdrClosed, "ov1");
+  delete globalThis.__herdrWrite;
+});
+
+test("a Review button for another machine's checkout opens New run on that machine", async () => {
+  const { nextAction } = await import("../../herdr-app/mods/harbormaster/crew.js");
+  const it = { kind: "review", local: { space: "desk/sp-api", root: "/home/u/api", machine: "desk" }, number: 7, url: "https://github.com/o/api/pull/7" };
+  globalThis.__herdrOpened = null;
+  find(nextAction({ t: T }, it, "nx"), "nx-act").click({}, callCx());
+  await settle();
+  assert.deepEqual(globalThis.__herdrOpened.props, { role: "newrun", repo: "/home/u/api", machine: "desk", kind: "review", input: "7", url: it.url });
 });

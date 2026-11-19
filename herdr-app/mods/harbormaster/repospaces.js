@@ -14,69 +14,78 @@ export function ownerRepo(url) {
   return m ? `${m[1]}/${m[2]}`.toLowerCase() : null;
 }
 
-const sh = (script, args = []) => exec("sh", ["-c", script, "_", ...args], { timeout: 5000 });
+// `on`: the machine (a space's `machine`), null for this one.
+const sh = (script, args = [], on = null) => exec("sh", ["-c", script, "_", ...args], { timeout: 5000, ...(on ? { on } : {}) });
 const base = (p) => p.replace(/\/+$/, "").split("/").at(-1);
 
-const known = new Map(); // cwd → {root, kind, origin} | null; a folder's repository rarely changes
-async function inspect(cwd) {
-  if (known.has(cwd)) return known.get(cwd);
-  const rev = await exec("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], { timeout: 3000 }).catch(() => null);
+// "<machine>\n<cwd>" → {root, kind, origin} | null; a folder's repository rarely changes. The same
+// path on two machines is two folders: git is asked on the folder's own machine (`on`).
+const known = new Map();
+async function inspect(cwd, on = null) {
+  const k = `${on ?? ""}\n${cwd}`;
+  if (known.has(k)) return known.get(k);
+  const where = on ? { on } : {};
+  const rev = await exec("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], { timeout: on ? 8000 : 3000, ...where }).catch(() => null);
   const found = rev?.code === 0 ? repoOf(rev.stdout.trim()) : null;
   const repo = found ? { root: found.repo, kind: found.linked ? "worktree" : "primary", origin: null } : null;
   if (repo) {
-    const o = await exec("git", ["-C", repo.root, "remote", "get-url", "origin"]).catch(() => null);
+    const o = await exec("git", ["-C", repo.root, "remote", "get-url", "origin"], { timeout: 8000, ...where }).catch(() => null);
     repo.origin = o?.code === 0 ? ownerRepo(o.stdout) : null;
   }
-  if (repo) known.set(cwd, repo); // a folder that is no repository yet may become one
+  if (repo) known.set(k, repo); // a folder that is no repository yet may become one
   return repo;
 }
 
-// This machine's open repository spaces: [{space, name, root, origin}], one per repository. From
-// openFolders(), the spaces' own folders: the old way read only each space's first pane (whose
-// live folder may be elsewhere than the space's, and the dedupe by root hid a second space),
-// so a space could drop out of the list.
+// The open repository spaces on every machine: [{space, name, root, origin, machine}], one per
+// repository and machine, this machine's first. From openFolders(), the spaces' own folders: the
+// old way read only each space's first pane (whose live folder may be elsewhere than the space's,
+// and the dedupe by root hid a second space), so a space could drop out of the list. Another
+// machine's spaces count too: a review started there runs there (newrun.js).
 export async function repoSpaces() {
   const seen = new Set(), out = [];
-  for (const e of await openFolders()) {
-    if (e.machine || !e.space) continue; // start-agent.sh and git run here
-    const repo = await inspect(e.folder);
-    if (!repo || repo.kind !== "primary" || seen.has(repo.root)) continue;
-    seen.add(repo.root);
-    out.push({ space: e.space, name: base(repo.root), root: repo.root, origin: repo.origin });
-  }
-  return out;
+  const entries = (await openFolders()).filter((e) => e.space);
+  const found = await Promise.all(entries.map((e) => inspect(e.folder, e.machine).catch(() => null)));
+  entries.forEach((e, i) => {
+    const repo = found[i], k = `${e.machine ?? ""}\n${repo?.root}`;
+    if (!repo || repo.kind !== "primary" || seen.has(k)) return;
+    seen.add(k);
+    out.push({ space: e.space, name: base(repo.root), root: repo.root, origin: repo.origin, machine: e.machine ?? null });
+  });
+  return [...out.filter((r) => !r.machine), ...out.filter((r) => r.machine)];
 }
 
 // The space id start-agent.sh makes Herdr open for a repository with none ("sp-<name>": letters,
 // digits and "-"; as herdr-app-captain's Start a run does).
 
 // The repository a folder is in (its toplevel), else the folder itself: the key drafts modes are remembered under.
-export async function repoRoot(folder) {
-  return (await inspect(folder).catch(() => null))?.root ?? folder;
+export async function repoRoot(folder, on = null) {
+  return (await inspect(folder, on).catch(() => null))?.root ?? folder;
 }
 
 // Clones found beside the open repositories: the repositories in the parent folders of the open
-// repository spaces' roots (one level down), that are not open themselves. [{space: null, name,
-// root, origin}]. Cached a few minutes per parent folder, at most 60 folders each: one `ls`.
+// repository spaces' roots (one level down), on the same machine, that are not open themselves.
+// [{space: null, name, root, origin, machine}]. Cached a few minutes per machine and parent folder,
+// at most 60 folders each: one `ls`.
 const CLONES_MS = 5 * 60000, CLONES_MAX = 60;
-const cloneCache = new Map(); // parent → {at, list}
+const cloneCache = new Map(); // "<machine>\n<parent>" → {at, list}
 export async function cloneRepos(open) {
-  const isOpen = new Set(open.map((r) => r.root));
-  const parents = [...new Set(open.map((r) => r.root.replace(/\/[^/]+\/?$/, "")).filter(Boolean))];
+  const at = (r) => `${r.machine ?? ""}\n${r.root}`;
+  const isOpen = new Set(open.map(at));
+  const parents = [...new Map(open.map((r) => [`${r.machine ?? ""}\n${r.root.replace(/\/[^/]+\/?$/, "")}`, { on: r.machine ?? null, parent: r.root.replace(/\/[^/]+\/?$/, "") }])).values()].filter((p) => p.parent);
   const out = [];
-  for (const parent of parents) {
-    let c = cloneCache.get(parent);
+  for (const { on, parent } of parents) {
+    const ck = `${on ?? ""}\n${parent}`;
+    let c = cloneCache.get(ck);
     if (!c || Date.now() - c.at > CLONES_MS) {
-      const ls = await sh('ls -d "$1"/*/.git 2>/dev/null | head -n "$2"', [parent, String(CLONES_MAX)]).catch(() => null);
+      const ls = await sh('ls -d "$1"/*/.git 2>/dev/null | head -n "$2"', [parent, String(CLONES_MAX)], on).catch(() => null);
       const list = [];
       for (const g of String(ls?.stdout ?? "").split("\n").filter(Boolean)) {
-        const repo = await inspect(g.replace(/\/\.git$/, ""));
-        if (repo?.kind === "primary" && repo.origin) list.push({ space: null, name: base(repo.root), root: repo.root, origin: repo.origin });
+        const repo = await inspect(g.replace(/\/\.git$/, ""), on);
+        if (repo?.kind === "primary" && repo.origin) list.push({ space: null, name: base(repo.root), root: repo.root, origin: repo.origin, machine: on });
       }
-      c = { at: Date.now(), list };
-      cloneCache.set(parent, c);
+      if (ls) { c = { at: Date.now(), list }; cloneCache.set(ck, c); } else c = { list };
     }
-    out.push(...c.list.filter((r) => !isOpen.has(r.root) && !out.some((o) => o.root === r.root)));
+    out.push(...c.list.filter((r) => !isOpen.has(at(r)) && !out.some((o) => at(o) === at(r))));
   }
   return out;
 }
@@ -122,5 +131,5 @@ export async function scanFolders(entries, home) {
   return list;
 }
 
-// Whether a typed path is a folder here.
-export const isFolder = async (path) => (await sh('[ -d "$1" ]', [path]).catch(() => null))?.code === 0;
+// Whether a typed path is a folder here (or on machine `on`).
+export const isFolder = async (path, on = null) => (await sh('[ -d "$1" ]', [path], on).catch(() => null))?.code === 0;

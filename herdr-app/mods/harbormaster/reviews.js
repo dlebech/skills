@@ -38,11 +38,12 @@ export function runReviewing(runs, url) {
 }
 
 // Where owner/repo can be reviewed: an open space whose repository's origin it is (before a
-// clone found beside them, which has no space yet: `space` is null and a review opens one).
+// clone found beside them, which has no space yet: `space` is null and a review opens one). On
+// any machine; this machine's first, as knownRepos lists them. `machine` is null for this one.
 export const localCheckout = (repos, repo) => {
   const want = String(repo).toLowerCase();
   const r = repos.find((x) => x.origin === want && x.space) ?? repos.find((x) => x.origin === want);
-  return r ? { space: r.space ?? null, root: r.root, name: r.name } : null;
+  return r ? { space: r.space ?? null, root: r.root, name: r.name, machine: r.machine ?? null } : null;
 };
 
 // The requests with where they can be reviewed: pure over what the poll found.

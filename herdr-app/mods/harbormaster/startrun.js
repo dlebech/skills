@@ -259,8 +259,10 @@ export const draftsFor = (prefs, repo) => (["herdr", "pending"].includes(prefs?.
 // habit); its own reviewer and autonomy are kept apart, per agent. "direct" is never remembered, and leaves what the repository had.
 // The folder goes first in the recents (newest first, each once, at most RECENT_MAX).
 // The agent is remembered from any run's start; the profile under that agent.
-export function remember(prefs, { kind, profile, repo, drafts, agent = "claude" }) {
-  const folders = [repo, ...(prefs?.folders ?? []).filter((f) => f !== repo)].slice(0, RECENT_MAX);
+// `recent` false (a folder on another machine, `repo` being "<machine>:<folder>"): the recents,
+// which are this machine's folders, are left as they were.
+export function remember(prefs, { kind, profile, repo, drafts, agent = "claude", recent = true }) {
+  const folders = recent ? [repo, ...(prefs?.folders ?? []).filter((f) => f !== repo)].slice(0, RECENT_MAX) : [...(prefs?.folders ?? [])];
   const next = { profile: prefs?.profile ?? null, profiles: { ...(prefs?.profiles ?? {}) }, reviewProfiles: { ...(prefs?.reviewProfiles ?? {}) }, agent: prefs?.agent ?? null, drafts: { ...(prefs?.drafts ?? {}) }, folders };
   if (kind === "captain") return next; // only the folder is remembered
   next.agent = agent;

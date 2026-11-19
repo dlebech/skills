@@ -520,6 +520,9 @@ export function recordedCounts(run) {
 // ---- pull requests (gh), cached in shared state so every copy and layout reuses them ----
 
 // reviewRequests for "review from <name>"; headRefOid so each CI run is recorded once (tracking.js recordCi).
+// A gh call on a run's machine that hangs (over ssh, a sleeping laptop's dead link) fails after this, so the read
+// says why ("gh could not read …") instead of holding the run's reads for PR_STALE and showing it as stale.
+const GH_TIMEOUT = 30000;
 export const PR_FIELDS = "number,title,state,isDraft,reviewDecision,reviews,reviewRequests,author,statusCheckRollup,url,headRefName,headRefOid,body,updatedAt";
 // Run key → when its refresh started. Like a run read, a refresh whose task is cancelled
 // never ends, so one older than PR_STALE no longer holds the run back.
@@ -594,7 +597,7 @@ const viewers = new Map();
 async function viewerOf(run) {
   const key = run.machine ?? "";
   if (viewers.has(key)) return viewers.get(key);
-  const res = await exec("gh", ["api", "user", "-q", ".login"], { on: run.machine }).catch(() => null);
+  const res = await exec("gh", ["api", "user", "-q", ".login"], { on: run.machine, timeout: GH_TIMEOUT }).catch(() => null);
   const login = res?.code === 0 ? res.stdout.trim() : "";
   if (login) viewers.set(key, login);
   return login || null;
@@ -795,7 +798,7 @@ export async function refreshPrs(run, closed = false, opts = false) {
         if (!pr.url) continue;
         const done = closed ? before?.find((x) => x.url === pr.url && (x.state === "MERGED" || x.state === "CLOSED")) : null;
         if (done) { const { stale, ...kept } = done; out.push(kept); continue; }
-        const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+        const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine, timeout: GH_TIMEOUT }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
         const p = res?.code === 0 ? json(res.stdout) : null;
         if (p) { out.push(own ? await withComments(prSummary(p, pr.repo), run, before?.find((x) => x.url === pr.url)) : prSummary(p, pr.repo, own ? null : viewer)); continue; }
         error ??= `gh could not read ${pr.url}: ${(res?.stderr || res?.stdout || `exit ${res?.code}`).trim().split("\n")[0].slice(0, 200)}`;
@@ -859,7 +862,7 @@ export async function loadReviewers(run, repo) {
   if (!repo || reviewerBusy.has(id) || cachedReviewers(run, repo) !== null) return;
   reviewerBusy.add(id);
   try {
-    const res = await exec("gh", reviewersArgs(repo), { on: run.machine }).catch(() => null);
+    const res = await exec("gh", reviewersArgs(repo), { on: run.machine, timeout: GH_TIMEOUT }).catch(() => null);
     const prs = res?.code === 0 ? json(res.stdout) : null;
     reviewerCache.set(id, { at: Date.now(), ok: Array.isArray(prs), prs: Array.isArray(prs) ? prs : [], viewer: await viewerOf(run).catch(() => null) });
   } finally { reviewerBusy.delete(id); }
@@ -872,7 +875,7 @@ export async function loadReviewers(run, repo) {
 export async function requestReview(run, url, login, { draft = false } = {}) {
   const args = requestArgs(url, login);
   if (!args) return { error: "not a reviewer to ask" };
-  const gh = (a) => exec("gh", a, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  const gh = (a) => exec("gh", a, { on: run.machine, timeout: GH_TIMEOUT }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
   const why = (res) => (res?.stderr || res?.stdout || `gh exited ${res?.code}`).trim().split("\n")[0].slice(0, 200);
   if (draft) { const ready = await gh(["pr", "ready", url]); if (ready.code !== 0) return { error: why(ready) }; }
   const res = await gh(args);
@@ -896,7 +899,7 @@ export async function withComments(pr, run, old = null) {
   // A summary stored before comments were classed (no `threads`) is read again once.
   const prev = old?.url === pr.url && old.comments && !old.comments.error && old.comments.threads != null ? old.comments : null;
   if (prev && ((pr.updatedAt && prev.updatedAt === pr.updatedAt) || Date.now() - (prev.at ?? 0) < COMMENTS_TTL)) return { ...pr, comments: prev };
-  const res = await exec("gh", args, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  const res = await exec("gh", args, { on: run.machine, timeout: GH_TIMEOUT }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
   const summary = res?.code === 0 ? commentSummary(json(res.stdout)) : null;
   const error = summary ? null : (res?.code === 0 ? "gh gave no pull request" : (res?.stderr || res?.stdout || `exit ${res?.code}`).trim().split("\n")[0].slice(0, 200));
   return { ...pr, comments: summary ? { ...summary, updatedAt: pr.updatedAt ?? null, at: Date.now() } : { error } };
