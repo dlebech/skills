@@ -71,7 +71,7 @@ test("the box's one button: the most urgent item's primary action, else its firs
 });
 
 test("a Next for you row names its PR by repository name and number", () => {
-  assert.equal(prRef("dlebech/skills", 52), "skills#52");
+  assert.equal(prRef("acme/skills", 52), "skills#52");
   assert.equal(prRef("app", 7), "app#7");
 });
 

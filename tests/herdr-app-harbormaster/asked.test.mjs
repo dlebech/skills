@@ -125,10 +125,10 @@ test("a merely approved PR with no comments does not pull a working run into Nee
 });
 
 // What gh gives for a PR's comments (comments.js COMMENTS_QUERY): threads as [{id, bot, last}].
-const graph = (threads) => ({ data: { repository: { pullRequest: { author: { login: "dlebech" },
+const graph = (threads) => ({ data: { repository: { pullRequest: { author: { login: "anna" },
   reviewThreads: { nodes: threads.map((t) => ({ id: t.id, isResolved: false, path: "a.php", line: 1,
     first: { nodes: [{ author: { __typename: t.bot ? "Bot" : "User", login: t.bot ? "coderabbitai" : "kim" }, authorAssociation: t.bot ? "NONE" : "MEMBER", body: `Fix ${t.id}`, url: `u-${t.id}` }] },
-    last: { nodes: [{ body: t.reply ? "🤖 AI: done" : `Fix ${t.id}`, author: { login: "dlebech" }, authorAssociation: "MEMBER" }] } })) },
+    last: { nodes: [{ body: t.reply ? "🤖 AI: done" : `Fix ${t.id}`, author: { login: "anna" }, authorAssociation: "MEMBER" }] } })) },
   reviews: { nodes: [] }, comments: { nodes: [] } } } } });
 const sigOf = (threads) => commentsSig(null, { comments: commentSummary(graph(threads)) });
 

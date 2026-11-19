@@ -87,7 +87,7 @@ test("the new-run command's arguments", () => {
 });
 
 const GH = JSON.stringify([
-  { number: 5, title: "Older", url: "https://github.com/dlebech/skills/pull/5", author: { login: "ann" }, updatedAt: "2026-11-16T10:00:00Z", repository: { nameWithOwner: "dlebech/skills" } },
+  { number: 5, title: "Older", url: "https://github.com/acme/skills/pull/5", author: { login: "ann" }, updatedAt: "2026-11-16T10:00:00Z", repository: { nameWithOwner: "acme/skills" } },
   { number: 9, title: "Newer", url: "https://github.com/acme/api/pull/9", author: { login: "bo" }, updatedAt: "2026-11-17T10:00:00Z", repository: { nameWithOwner: "acme/api" } },
 ]);
 
@@ -100,10 +100,10 @@ test("gh's search output parses newest first, and garbage is no requests", () =>
 });
 
 test("a request knows its local checkout and the live run reviewing it", () => {
-  assert.equal(ownerRepo("git@github.com:dlebech/skills.git"), "dlebech/skills");
-  assert.equal(ownerRepo("https://github.com/DLebech/Skills/"), "dlebech/skills");
+  assert.equal(ownerRepo("git@github.com:acme/skills.git"), "acme/skills");
+  assert.equal(ownerRepo("https://github.com/Acme/Skills/"), "acme/skills");
   assert.equal(ownerRepo("https://gitlab.com/a/b"), null);
-  const repos = [{ space: "sp-1", name: "skills", root: "/home/d/skills", origin: "dlebech/skills" }];
+  const repos = [{ space: "sp-1", name: "skills", root: "/home/d/skills", origin: "acme/skills" }];
   const runs = [{ dir: "/runs/skills/pr-9", issues: [], related: [{ url: "https://github.com/acme/api/pull/9" }] }];
   const [a, b] = withContext(parseReviewRequests(GH), repos, runs);
   assert.equal(a.local, null);
@@ -114,7 +114,7 @@ test("a request knows its local checkout and the live run reviewing it", () => {
   const cloned = withContext(parseReviewRequests(GH), [{ space: null, name: "api", root: "/home/d/api", origin: "acme/api" }, ...repos], []);
   assert.deepEqual(cloned[0].local, { space: null, root: "/home/d/api", name: "api", machine: null });
   // Another machine's open checkout counts (a review starts there); this machine's comes first.
-  const far = { space: "desk/sp-1", name: "skills", root: "/home/d/skills", origin: "dlebech/skills", machine: "desk" };
+  const far = { space: "desk/sp-1", name: "skills", root: "/home/d/skills", origin: "acme/skills", machine: "desk" };
   assert.equal(withContext(parseReviewRequests(GH), [far], [])[1].local.machine, "desk");
   assert.equal(withContext(parseReviewRequests(GH), [...repos, far], [])[1].local.machine, null);
   assert.equal(runReviewing([{ dir: "/x", issues: ["https://github.com/acme/api/pull/9/"], related: [] }], "https://github.com/acme/api/pull/9"), "/x");

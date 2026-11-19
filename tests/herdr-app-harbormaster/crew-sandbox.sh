@@ -31,7 +31,7 @@
 # Fake runs (folder "skills", so the default self review flow; folder "acme" is set to peer in the
 # scratch app's shared state), each with a live "orchestrator"
 # terminal (a sleeping sh, labelled role=orchestrator and with set-status.sh's labels):
-#   run-stats     finished, PR dlebech/skills#42 (merged)                 -> Done
+#   run-stats     finished, PR acme/skills#42 (merged)                 -> Done
 #   pane-follows  finished, PR #41 (merged), related #40                  -> Done
 #   unreadable-pr finished, PR in a repo that does not exist (gh fails)   -> Everything else, can't tell
 #   quiet-run     running, "t2 implementing", no PR, nothing moves       -> idle, then stalled
@@ -163,11 +163,11 @@ make_runs() {
     'exec sleep infinity' >"$S/fake-orch.sh"
   local day; day=$(date -u +%Y-%m-%d)
   mkrun run-stats finished feat "Run stats" "${day}T08:10:00Z" 2/2 merged merged --progress "PR #42 up" \
-    --pr dlebech/skills https://github.com/dlebech/skills/pull/42
+    --pr acme/skills https://github.com/acme/skills/pull/42
   mkrun pane-follows finished feat "Pane follows" "${day}T06:40:00Z" 2/2 merged merged --progress "PRs up" \
-    --pr dlebech/skills https://github.com/dlebech/skills/pull/41 --related dlebech/skills https://github.com/dlebech/skills/pull/40
+    --pr acme/skills https://github.com/acme/skills/pull/41 --related acme/skills https://github.com/acme/skills/pull/40
   mkrun unreadable-pr finished fix "Unreadable PR" "${day}T09:05:00Z" 2/2 merged merged --progress "PR #1 up" \
-    --pr dlebech/no-such-repo-nyo https://github.com/dlebech/no-such-repo-nyo/pull/1
+    --pr acme/no-such-repo-nyo https://github.com/acme/no-such-repo-nyo/pull/1
   mkrun quiet-run running feat "Quiet run" "${day}T10:30:00Z" 1/2 merged implementing --progress "t2 implementing"
   ORCH_STATE=working mkrun busy-run running feat "Busy run" "${day}T07:00:00Z" 0/2 implementing implementing --progress "both tasks under way"
   # busy-run's workers, for its run pane's Agents list: two implementers (shells reporting a status, so no
@@ -208,7 +208,7 @@ make_runs() {
   printf '%s\tfinished\n' "$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)" >"$S/runs/skills/parked-open/parked"
   hc label "$parked" role= >/dev/null
   mkrun parked-merged finished fix "Parked merged" "${day}T04:00:00Z" 2/2 merged merged --progress "PR merged" \
-    --pr dlebech/skills https://github.com/dlebech/skills/pull/42
+    --pr acme/skills https://github.com/acme/skills/pull/42
   parked=$(jq -r .terminal "$S/runs/skills/parked-merged/orchestrator.json")
   printf '%s\tfinished\n' "$(date -u -d '5 days ago' +%Y-%m-%dT%H:%M:%SZ)" >"$S/runs/skills/parked-merged/parked"
   hc label "$parked" role= >/dev/null
