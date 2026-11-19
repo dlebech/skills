@@ -171,12 +171,18 @@ export const literalFolder = (text, home) => {
   return { folder, name: base(folder), space: null, machine: null, typed: true };
 };
 
-// The parents whose children typed text may find: those of the open spaces' and recent folders
-// (the folder holding several repositories is itself one, so its own children are found too).
+// The parents on this machine whose children typed text may find: those of the open spaces' and
+// recent folders (the folder holding several repositories is itself one, so its own children are
+// found too), and the parents of another machine's spaces, looked for here: the same folders are
+// often in both places, and a laptop used as a thin client may have no space of its own open.
 // The home folder is only ever read one level deep (`shallow`): two levels of it is a lot of disk.
 export function scanParents(entries, home = "") {
   const out = new Set();
-  for (const e of entries) if (!e.machine && e.folder.startsWith("/") && e.folder !== "/") { out.add(parentOf(e.folder)); out.add(e.folder); }
+  for (const e of entries) {
+    if (!e.folder?.startsWith("/") || e.folder === "/") continue;
+    out.add(parentOf(e.folder));
+    if (!e.machine) out.add(e.folder);
+  }
   out.delete("/");
   const shallow = home && out.delete(home) ? home : null;
   return { deep: [...out], shallow };

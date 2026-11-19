@@ -87,6 +87,8 @@ test("what is scanned: the parents of spaces and recents, and the folders themse
   const h = scanParents([{ folder: "/h/projects" }], "/h");
   assert.deepEqual(h, { deep: ["/h/projects"], shallow: "/h" });
   assert.deepEqual(parseFound("/a/b\n\nnoise\n/a/b/\n/c"), ["/a/b", "/c"]);
+  // another machine's space: its parent is looked for here too (the same folders in both places), not the folder itself
+  assert.deepEqual(scanParents([{ folder: "/h/projects/api", machine: "desk" }], "/h"), { deep: ["/h/projects"], shallow: null });
 });
 
 test("remembering a folder: newest first, once, capped; old prefs have none", () => {
