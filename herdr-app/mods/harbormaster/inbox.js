@@ -8,7 +8,8 @@
 // runs, never while this file loads: those files re-export the builders below, so they import
 // each other in a cycle.
 
-import { exec, shared, setShared } from "herdr";
+import { exec } from "herdr";
+import { shared, setShared } from "./store.js";
 import { detachedSend } from "./wake.js";
 import { reportedStatus, orchestratorState, facts } from "./live.js";
 import { stepSig } from "./attention.js";

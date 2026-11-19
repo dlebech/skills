@@ -3,7 +3,7 @@
 // of the need box, or the Proof section unfolded in a pane). A changed proof is a new signature,
 // so it reads as unread. Kept apart from telling.js, which imports attend.js, which reads this.
 
-import { shared, setShared } from "herdr";
+import { shared, setShared } from "./store.js";
 
 const KEY = "harbormaster.proofSeen";
 

@@ -13,7 +13,8 @@
 
 import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
-import { props, theme, nextCommand, checking, openOverlay, closeOverlay, shared, setShared } from "herdr";
+import { props, theme, nextCommand, checking, openOverlay, closeOverlay } from "herdr";
+import { shared, setShared, oneRead } from "./store.js";
 import { expireNote } from "./note.js";
 import { loadRuns, cachedRuns, refreshPrs, markOpened, refreshReviewed, isClosed, isParked, newestFirst, stats } from "./data.js";
 import { facts, crewAddresses, captainOf, adrift, agentNames, agentStatus, programOf } from "./live.js";
@@ -253,7 +254,9 @@ export default class Harbormaster extends View {
   render(cx) {
     const p = props() ?? {};
     const t = theme();
-    const el = this.view(p, t);
+    // Each shared key is read from Herdr once per draw (store.js): the closed runs' cards alone
+    // read the PR store over a hundred times.
+    const el = oneRead(() => this.view(p, t));
     startCopies(this, cx); // the proof images this render asked for
     return el;
   }
