@@ -158,6 +158,8 @@ small things itself and logs them; stops only for direction and design calls"; "
 …"), the run's own highlighted; hovering the type tag names the run's type. Clicking another level
 asks the orchestrator to change it: a message in the run's `inbox/` (`set autonomy to L2` or
 `set proof tier to T2`, and what that implies), written and woken like an answer from the queue.
+A closed run's tags can't change, so hovering one shows only its definition (and, for the tier,
+"Set by user" and the tasks without a tier).
 Harbormaster never changes `status.json` or `plan.md` itself; the orchestrator does, and until they
 show the new level, while its message is unhandled, the tag reads `L2 requested…` (`L2…` on a Crew card; also after a
 reload, because the unread request is still in the inbox; the click itself is kept 15 s in `harbormaster.asked`, so other copies show it too). A run without a known orchestrator lists its levels but can't be changed from here.
@@ -372,7 +374,8 @@ Ready to merge counts claims too: every claim proven or accepted, and no red che
 `Claims` line (not once the run is finished, parked or closed) and a small tier tag by its name (hover
 for every tier as a definition, "T2 — proved with passing tests, their output for the changed
 behaviour, and screenshots or a recording", from the table in `skills/proving/SKILL.md`, the run's own
-highlighted; click another to ask for it, see [Autonomy](#autonomy-and-decided-for-you)). The formats are in
+highlighted; click another to ask for it, see [Autonomy](#autonomy-and-decided-for-you); a closed
+run's tier tag shows only its definition, "Set by user" and the tasks without a tier). The formats are in
 [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
 ### Where the screenshots come from
@@ -458,6 +461,7 @@ Harbor 3D is a page in your browser that shows the runs as a working port, one b
 | `herdr-app/mods/harbormaster/note.js` | The action note's 20 s life (`setNote`, `noteText`, `expireNote`); no herdr imports. |
 | `herdr-app/mods/harbormaster/inbox.js` | Every inbox message Harbormaster sends to a run, in one kind table (answer, Ask what's blocking and the red-CI ask, Ask for changes, Address comments for one PR or all, Ask to prove, level request, Close): its text and file source name, the first-line prefixes that mark it unread (`NOT_ANSWERS`, kept equal to `answer_messages` in `skills/herdr-app-captain/scripts/lib.sh` by a test), the send and wake, and the asked state (`harbormaster.asked`) that says when a row still reads `asked…` |
 | `herdr-app/mods/harbormaster/askclick.js` | The click every button that sends an inbox message shares: marks it asked, sends, shows the note for a run that waits or is blocked on a dialog, and takes the mark back when nothing reached the inbox |
+| `herdr-app/mods/harbormaster/store.js` | Herdr's shared state read once per draw (`oneRead` around `render`): in Herdr each `shared()` read copies the whole value, and a render that takes over ~50 ms is interrupted. Every module reads and writes shared state through it. |
 | `herdr-app/mods/harbormaster/proofseen.js` | Whether a run's proof was read (`harbormaster.proofSeen`) |
 | `herdr-app/mods/harbormaster/needaction.js` | What a Needs-you box says to do: a line and its buttons per reason, the one button the sidebar's box shows (`primaryOf`), and the Crew hover's `Do:` line |
 | `herdr-app/mods/harbormaster/comments.js` | Review comments on approved PRs: what counts, how they read (`approved · 3 threads`), and the signature an Address comments ask is asked by (`commentsSig`); its message is in inbox.js |

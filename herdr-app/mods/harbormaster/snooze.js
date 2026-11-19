@@ -11,7 +11,8 @@
 // it was set, and a wake leaves a tombstone ({off: true}) until the woken entry's own time is up,
 // so a wake on one machine is not undone by the other's older entry. The newest `at` per URL wins.
 
-import { exec, shared, setShared, readTextFile, writeTextFile, machines } from "herdr";
+import { exec, readTextFile, writeTextFile, machines } from "herdr";
+import { shared, setShared } from "./store.js";
 
 export const SNOOZE_KEY = "harbormaster.snoozed";
 const HOUR = 3600000;

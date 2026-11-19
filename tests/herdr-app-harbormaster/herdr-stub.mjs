@@ -6,8 +6,10 @@ export const appHome = () => "/nonexistent", readTextFile = async (...a) => (glo
 export const terminals = () => globalThis.__herdrTerminals ?? [], agents = () => globalThis.__herdrAgents ?? [], panes = () => [], spaces = () => [], machines = () => globalThis.__herdrMachines ?? [];
 export const run = () => null, window = () => null, focused = () => null, settings = () => ({});
 // Herdr's shared state, kept in memory; a test calls resetShared() so one test's values don't reach the next.
+// sharedReads counts the reads by key: in Herdr each one copies the whole value (store.js).
 const sharedMap = new Map();
-export const shared = (key) => sharedMap.get(key) ?? null, setShared = (key, value) => { sharedMap.set(key, value); return null; }, resetShared = () => sharedMap.clear();
+export const sharedReads = new Map();
+export const shared = (key) => { sharedReads.set(key, (sharedReads.get(key) ?? 0) + 1); return sharedMap.get(key) ?? null; }, setShared = (key, value) => { sharedMap.set(key, value); return null; }, resetShared = () => { sharedMap.clear(); sharedReads.clear(); };
 // For the New run dialog (newrun.js): overlays, toasts and the props a dialog is opened with.
 // checking() is true, so the dialog's init does not list folders: a test sets them.
 export const openOverlay = (o) => { globalThis.__herdrOpened = o; return null; }, closeOverlay = (id) => { globalThis.__herdrClosed = id; }, notify = () => null;

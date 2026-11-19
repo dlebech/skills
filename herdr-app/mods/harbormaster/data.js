@@ -11,7 +11,8 @@
 // and <root>/.captain-decisions.json for the captain's open decisions. The same poll takes a
 // process snapshot for CPU and memory (resources.js), kept per run in .resources.json.
 
-import { exec, appHome, machines, spaces, shared, setShared, run as command } from "herdr";
+import { exec, appHome, machines, spaces, run as command } from "herdr";
+import { shared, setShared } from "./store.js";
 import { parseQuestion } from "./question.js";
 import { parseDecidedLines } from "./decided.js";
 import { pendingLevels } from "./levels.js";

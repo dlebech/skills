@@ -12,7 +12,8 @@
 // pane or a popup) run observeTelling, after each run read. Several of them may: each claims a
 // toast in the shared store (`by`) and posts it only if its claim still stands after writing.
 
-import { shared, setShared, notify } from "herdr";
+import { notify } from "herdr";
+import { shared, setShared } from "./store.js";
 import { cachedRuns, prsOf, isClosed, decisionQueue, filesFresh } from "./data.js";
 import { pruneAsked, migrateCommentsAsked } from "./inbox.js";
 import { claimRows } from "./claims.js";

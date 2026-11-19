@@ -30,7 +30,8 @@
 //     {text, at, label, sig}}: who the run waits on in the user's words, when it was marked, and the
 //     next step's label and signature then (attention.js waitSig), so a change on the PR lets it go.
 
-import { exec, shared, setShared } from "herdr";
+import { exec } from "herdr";
+import { shared, setShared } from "./store.js";
 import { STALL_MS, stepSig, trackSince, trackParts, stepParts, usualCi } from "./attention.js";
 import { clockNow, sleptThrough, awakeSince, machineWoke } from "./sleep.js";
 import { workersOf, exactStatus, orchestratorState } from "./live.js";
