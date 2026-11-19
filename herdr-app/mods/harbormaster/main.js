@@ -29,7 +29,8 @@ import { harbor, rail } from "./harbor.js";
 import { statsView } from "./stats.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
 import { observeTelling } from "./telling.js";
-import { parseCommand, runNamed, newRunArgs } from "./commands.js";
+import { parseCommand, runNamed, newRunArgs, flowArgs } from "./commands.js";
+import { setReviewFlow } from "./tracking.js";
 import { openNewRun, initNewRun, newRunView } from "./newrun.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
@@ -42,6 +43,7 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "harbor
 //   show-stats[:<branch | run dir>]                         open the Stats view (a run: focused on it)
 //   show-overview, show-crew                               open the runs overview, or the Crew block
 //   new-run[:repo=<name or folder> kind=<issue|review|describe> input=<text>]   the + New run dialog (a key binding's command)
+//   set-flow:<folder name>=<peer|self|default>             a folder's review flow, as a card's Review toggle sets it
 //   close-popup                                            close it
 //   open-run:key=<run key>                                 a toast's click (telling.js) for a run whose
 //                                                         orchestrator is gone: its card, kept open until closed
@@ -120,6 +122,7 @@ async function listen(view, cx) {
       else if (name === "show-crew") showView("crew", "crew", 360, 640);
       else if (name === "new-run") openNewRun(newRunArgs(arg));
       else if (name === "close-popup") closePopup();
+      else if (name === "set-flow") { const f = flowArgs(arg); if (f) setReviewFlow(f.key, f.flow); else console.log(`harbormaster: set-flow wants <folder>=peer|self|default, got "${arg}"`); }
       else if (name === "open-run") { markOpened(runNamed(view.runs, arg)); showPopup(view, arg, true); }
       cx.notify();
     } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }

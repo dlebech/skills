@@ -119,7 +119,7 @@ test("a question run's pill names its PR step, not the question (its box shows t
 test("the narrow sidebar's lead leaves out the comment count so the age survives; the pill keeps it", () => {
   const comments = { count: 24, threads: 23, notes: 1, bots: {}, items: [] };
   const list = [pr({ review: "APPROVED", approvedBy: ["m"], reviewedAt: ago(85), comments }), pr({ number: 43, url: "u2", review: "APPROVED", approvedBy: ["m"], reviewedAt: ago(80), comments: { count: 0, threads: 0, notes: 0, bots: {}, items: [] } })];
-  const a = at(run({ folder: "/p/snevagten" }), list, { flow: "peer" });
+  const a = at(run({ folder: "/p/acme" }), list, { flow: "peer" });
   assert.equal(rowLead(a, now).lead, "approved · 23 threads, 1 note · 2 PRs · 1h25m");
   assert.equal(rowLead(a, now, { narrow: true }).lead, "approved · 2 PRs · 1h25m");
   assert.equal(badgeOf(a, true).label, "approved · 23 threads, 1 note · 2 PRs");
@@ -145,15 +145,15 @@ test("tasks done count plan.md's done tasks, status.json's merged only without a
 });
 
 test("PRs that all say the same are said once; any difference keeps them apart", () => {
-  const approved = (o = {}) => pr({ review: "APPROVED", approvedBy: ["mfalkenbrink"], ...o });
+  const approved = (o = {}) => pr({ review: "APPROVED", approvedBy: ["kim"], ...o });
   const two = [approved(), approved({ number: 1372, url: "u2" })];
   const f = prFacts(two);
-  assert.deepEqual(f.map((x) => x.text), ["2 PRs open", "checks ✓", "Approved by mfalkenbrink"]);
+  assert.deepEqual(f.map((x) => x.text), ["2 PRs open", "checks ✓", "Approved by kim"]);
   assert.equal(f[0].kind, "prs");
   assert.deepEqual(f[0].prs, two);
   // Different checks: each PR on its own.
   const apart = prFacts([approved(), approved({ number: 1372, url: "u2", checks: { pass: 2, fail: 1, pending: 0 } })]);
-  assert.deepEqual(apart.map((x) => x.text), ["PR #42 open", "checks ✓", "Approved by mfalkenbrink", "PR #1372 open", "checks ✗ 1 failing", "Approved by mfalkenbrink"]);
+  assert.deepEqual(apart.map((x) => x.text), ["PR #42 open", "checks ✓", "Approved by kim", "PR #1372 open", "checks ✗ 1 failing", "Approved by kim"]);
   // A one-way door is never folded away.
   const door = prFacts(two.map((p) => ({ ...p, danger: "one-way: drops a table" })), { oneWay: (d) => /^one-way/.test(d) });
   assert.equal(door.filter((x) => x.text === "one-way door").length, 2);

@@ -122,11 +122,11 @@ test("waiting on a reviewer: the label, then the step", () => {
 
 test("a review wait has a colour of its own, and its hover names the reviewers and the PRs", () => {
   const a = at(run({ phase: "finished", progress: "done" }), { flow: "peer",
-    pr: read([pr({ number: 1799, requested: ["mfalkenbrink"] }), pr({ number: 1372, url: "u2", requested: ["mfalkenbrink"] })]) });
+    pr: read([pr({ number: 1799, requested: ["kim"] }), pr({ number: 1372, url: "u2", requested: ["kim"] })]) });
   assert.equal(a.group, "waiting");
-  assert.equal(rowLead(a, now).lead, "review from mfalkenbrink · 2 PRs");
+  assert.equal(rowLead(a, now).lead, "review from kim · 2 PRs");
   assert.equal(rowEdge(a), "review");
-  assert.equal(rowTip(a, now)[0], "Waiting for mfalkenbrink to review PR #1799 and #1372, since 20m ago");
+  assert.equal(rowTip(a, now)[0], "Waiting for kim to review PR #1799 and #1372, since 20m ago");
   const two = at(run({ phase: "finished" }), { flow: "peer", pr: read([pr({ requested: ["anna", "bo"] })]) });
   assert.match(rowTip(two, now)[0], /^Waiting for anna and bo to review PR #42/);
 });

@@ -30,11 +30,11 @@ const items = (r, list, o = {}, ctx = {}) => needActions(att(r, list, o), { run:
 const kinds = (it) => it.actions.map((a) => a.kind);
 
 test("approved — merge names the PRs, who approved and when, with a Merge on GitHub button for each", () => {
-  const list = [pr({ approvedBy: ["mfalkenbrink"], review: "APPROVED", reviewedAt: ago(65) }),
-    pr({ number: 1372, url: "https://github.com/o/skills/pull/1372", approvedBy: ["mfalkenbrink"], review: "APPROVED", reviewedAt: ago(70) })];
-  const [it] = items(run({ folder: "/p/snevagten" }), list, { flow: "peer" });
+  const list = [pr({ approvedBy: ["kim"], review: "APPROVED", reviewedAt: ago(65) }),
+    pr({ number: 1372, url: "https://github.com/o/skills/pull/1372", approvedBy: ["kim"], review: "APPROVED", reviewedAt: ago(70) })];
+  const [it] = items(run({ folder: "/p/acme" }), list, { flow: "peer" });
   assert.equal(it.key, "approved — merge");
-  assert.equal(it.line, "Merge #42 and #1372 · approved by mfalkenbrink 1h5m ago");
+  assert.equal(it.line, "Merge #42 and #1372 · approved by kim 1h5m ago");
   assert.deepEqual(it.actions, [
     { kind: "open", label: "Merge #42 on GitHub", url: list[0].url, primary: true },
     { kind: "open", label: "Merge #1372 on GitHub", url: list[1].url, primary: true },

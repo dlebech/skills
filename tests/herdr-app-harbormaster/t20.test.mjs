@@ -17,13 +17,13 @@ const now = Date.parse("2026-11-17T12:00:00Z");
 const ago = (m) => now - m * MIN;
 
 const run = (o = {}) => ({
-  key: ":/r/x", dir: "/r/x", folder: "/p/snevagten", repo: "snevagten", phase: "running", statusLine: "running", progress: "t1 implementing",
+  key: ":/r/x", dir: "/r/x", folder: "/p/acme", repo: "acme", phase: "running", statusLine: "running", progress: "t1 implementing",
   tasks: [], prs: [{ url: "a" }, { url: "b" }], question: null, ask: null, askedAt: null, away: null, updated: ago(60), started: ago(300),
   terminal: "w/orch", localTerminal: true, autonomy: "L1", ...o,
 });
 const cm = (count, ids) => ({ count, bots: {}, items: ids.map((thread) => ({ thread, text: thread, kind: "thread" })) });
 const pr = (number, count, o = {}) => ({
-  number, state: "OPEN", review: "APPROVED", approvedBy: ["mfalkenbrink"], changesBy: [], requested: [], checks: { pass: 3, fail: 0, pending: 0 },
+  number, state: "OPEN", review: "APPROVED", approvedBy: ["kim"], changesBy: [], requested: [], checks: { pass: 3, fail: 0, pending: 0 },
   url: `https://github.com/o/r/pull/${number}`, repo: "o/r", ci: { startedAt: ago(90), finishedAt: ago(80) }, reviewedAt: ago(500),
   comments: cm(count, Array.from({ length: count }, (_, i) => `t${number}-${i}`)), ...o,
 });
@@ -60,20 +60,20 @@ test("an approved PR on a run whose plan is open stays in Needs you, told withou
   assert.equal(a.reasons[0].key, "approved — merge");
   assert.equal(a.reasons[0].text, "approved · plan open");
   const [it] = needActions(a, { run: open, prs: l, now });
-  assert.equal(it.line, "#44 approved by mfalkenbrink 8h20m ago · merge once the plan is done (2/3 tasks)");
+  assert.equal(it.line, "#44 approved by kim 8h20m ago · merge once the plan is done (2/3 tasks)");
   assert.doesNotMatch(it.line, /^Merge/);
   // Done tasks: the same PR is told to merge.
   const done = run({ phase: "running", tasks: [{ id: "t1", state: "done" }], planned: 1 });
   const b = at(done, l);
   assert.equal(b.planOpen, false);
-  assert.equal(needActions(b, { run: done, prs: l, now })[0].line, "Merge #44 · approved by mfalkenbrink 8h20m ago");
+  assert.equal(needActions(b, { run: done, prs: l, now })[0].line, "Merge #44 · approved by kim 8h20m ago");
 });
 
 test("with comments and an open plan: address them, no 'then merge'", () => {
   const open = run({ phase: "running", tasks: [{ id: "t1", state: "done" }, { id: "t2", state: "planned" }], planned: 2 });
   const l = [pr(1372, 9)];
   const [it] = needActions(at(open, l), { run: open, prs: l, now });
-  assert.equal(it.line, "Approved by mfalkenbrink 8h20m ago with 9 comments on #1372: address them");
+  assert.equal(it.line, "Approved by kim 8h20m ago with 9 comments on #1372: address them");
 });
 
 // ---- 3. a bot's thread stays answered ----

@@ -32,22 +32,26 @@ export function spaceFolders(spaces, whereOf, rootOf = () => null) {
   return [...byKey.values()].filter((e) => e.mine || !own.has(`${e.machine ?? ""}\n${e.folder}`)).map(({ mine, ...e }) => e);
 }
 
+// A space's id as its own machine names it: Herdr prefixes another machine's ids with "<machine>/".
+export const ownId = (id, machine) => (machine && String(id ?? "").startsWith(`${machine}/`) ? String(id).slice(machine.length + 1) : id);
+
 // A space id for starting in a folder with none: sp-<name>, as the captain's Start a run makes it,
-// unless an open space of that id holds another folder; then the parent's name goes in too.
-export function newSpaceId(folder, openSpaces) {
+// unless an open space of that id on the same machine (`machine`, null for this one) holds another
+// folder; then the parent's name goes in too. The id is as that machine names it (no prefix).
+export function newSpaceId(folder, openSpaces, machine = null) {
   const slug = (x) => String(x).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const id = `sp-${slug(base(folder)) || "repo"}`;
-  const clash = openSpaces.some((s) => s.id === id && trim(s.folder || "") !== trim(folder));
+  const clash = openSpaces.some((s) => (s.machine ?? null) === machine && ownId(s.id, machine) === id && trim(s.folder || "") !== trim(folder));
   return clash ? `${id}-${slug(base(parentOf(folder))) || "root"}` : id;
 }
 
-// The local space a New run in `folder` starts in: the one whose own `folder` is it, else the one
-// with a terminal live in it (a space's `folder` can be stale, the folder it was launched in). Exact
-// folder only; remote spaces are never chosen. Null for none.
-export function spaceAt(folder, spaces, panes) {
+// The space a New run in `folder` starts in, on `machine` (null: this one): the one whose own
+// `folder` is it, else the one with a terminal live in it (a space's `folder` can be stale, the
+// folder it was launched in). Exact folder only; another machine's spaces never count. Null for none.
+export function spaceAt(folder, spaces, panes, machine = null) {
   const want = trim(String(folder || ""));
   if (!want) return null;
-  const local = spaces.filter((s) => !s.machine);
+  const local = spaces.filter((s) => (s.machine ?? null) === machine);
   const own = local.find((s) => trim(String(s.folder || "")) === want);
   if (own) return own.id;
   for (const s of local) {
@@ -93,21 +97,77 @@ export function fuzzyScore(query, text) {
   return score - Math.min(t.length, 99) / 100;
 }
 
-// The entries typed text finds: open spaces and recents by folder name (or space name), then the
-// folders found on disk, best match first. `entries` is listFolders(); `found` the scanned paths.
-export function matchFolders(query, entries, found = [], limit = 20) {
+// Words that pick this machine in a query: "local", "here", "this".
+const HERE = new Set(["local", "here", "this"]);
+
+// A query split into the machine it names and the rest: a word that is a machine's exact name
+// (any case), or "<name>:" before the rest, picks that machine; "local"/"here"/"this" this one
+// (null). Never a prefix: "des ign" must not hide a "design" folder behind a machine "desk".
+// `machine` is undefined when no word names one. `machines`: the other machines' names.
+export function machineQuery(query, machines = []) {
   const q = String(query).trim();
-  if (!q) return entries.slice(0, limit);
+  const names = [...new Set(machines.filter(Boolean))];
+  const named = (w) => {
+    const x = w.toLowerCase();
+    if (HERE.has(x)) return null;
+    return names.find((n) => n.toLowerCase() === x);
+  };
+  // "<name>:rest" (no space needed).
+  const colon = /^([^\s/~:]+):\s*(.*)$/s.exec(q);
+  if (colon) {
+    const m = named(colon[1]);
+    if (m !== undefined) return { machine: m, text: colon[2].trim() };
+  }
+  const words = q.split(/\s+/).filter(Boolean);
+  // A single word is a folder's name, maybe the same as a machine's.
+  if (words.length < 2) return { machine: undefined, text: q };
+  for (let i = 0; i < words.length; i++) {
+    const m = named(words[i]);
+    if (m !== undefined) return { machine: m, text: words.filter((_, j) => j !== i).join(" ") };
+  }
+  return { machine: undefined, text: q };
+}
+
+// How well a query matches an entry: its folder's name, its space's name, or its path, so
+// "work/api" or "work api" tell two folders of one name apart. A word with "/" or "~" is matched
+// against the path; any other word against the path only as a plain substring (letters scattered
+// along a long path match almost anything). Every word must match.
+export function entryScore(q, e, home = "") {
+  const words = String(q).trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return 1;
+  const path = tilde(e.folder, home);
+  let total = 0;
+  for (const w of words) {
+    const s = /[/~]/.test(w)
+      ? fuzzyScore(w, path) * 0.95
+      : Math.max(fuzzyScore(w, base(e.folder)), fuzzyScore(w, e.name ?? "") * 0.9, path.toLowerCase().includes(w.toLowerCase()) ? 200 : 0);
+    if (s <= 0) return 0;
+    total += s;
+  }
+  return total / words.length;
+}
+
+// The entries typed text finds: open spaces and recents by folder name (or space name, or path),
+// then the folders found on disk, best match first; a machine's name in the query keeps only that
+// machine's folders (machineQuery). `entries` is listFolders(); `found` this machine's scanned paths.
+export function matchFolders(query, entries, found = [], limit = 20, home = "") {
   const all = [...entries];
   const seen = new Set(entries.filter((e) => !e.machine).map((e) => e.folder));
   for (const folder of found) if (!seen.has(folder)) { seen.add(folder); all.push({ folder, name: base(folder), space: null, machine: null }); }
-  return all
-    .map((e, i) => ({ e, i, s: Math.max(fuzzyScore(q, base(e.folder)), fuzzyScore(q, e.name) * 0.9) }))
+  const { machine, text } = machineQuery(query, entries.map((e) => e.machine));
+  if (!String(query).trim()) return entries.slice(0, limit);
+  const pool = machine === undefined ? all : all.filter((e) => (e.machine ?? null) === machine);
+  if (!text) return pool.slice(0, limit);
+  return pool
+    .map((e, i) => ({ e, i, s: entryScore(text, e, home) }))
     .filter((x) => x.s > 0)
     .sort((a, b) => b.s - a.s || a.i - b.i)
     .slice(0, limit)
     .map((x) => x.e);
 }
+
+// Where an entry is, for the list and the input: "this computer" or the machine's name.
+export const machineLabel = (e) => e?.machine ?? "this computer";
 
 // A typed path ("~/x", "/x") as an entry, for the user to pick when it is a folder; else null.
 export const literalFolder = (text, home) => {
@@ -117,12 +177,18 @@ export const literalFolder = (text, home) => {
   return { folder, name: base(folder), space: null, machine: null, typed: true };
 };
 
-// The parents whose children typed text may find: those of the open spaces' and recent folders
-// (the folder holding several repositories is itself one, so its own children are found too).
+// The parents on this machine whose children typed text may find: those of the open spaces' and
+// recent folders (the folder holding several repositories is itself one, so its own children are
+// found too), and the parents of another machine's spaces, looked for here: the same folders are
+// often in both places, and a laptop used as a thin client may have no space of its own open.
 // The home folder is only ever read one level deep (`shallow`): two levels of it is a lot of disk.
 export function scanParents(entries, home = "") {
   const out = new Set();
-  for (const e of entries) if (!e.machine && e.folder.startsWith("/") && e.folder !== "/") { out.add(parentOf(e.folder)); out.add(e.folder); }
+  for (const e of entries) {
+    if (!e.folder?.startsWith("/") || e.folder === "/") continue;
+    out.add(parentOf(e.folder));
+    if (!e.machine) out.add(e.folder);
+  }
   out.delete("/");
   const shallow = home && out.delete(home) ? home : null;
   return { deep: [...out], shallow };

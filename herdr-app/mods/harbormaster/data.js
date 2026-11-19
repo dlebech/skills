@@ -111,7 +111,7 @@ export function runPhase(text) {
 //   a heading, "### t1 pin-spread — merged (45e5)", or with "status: merged" in it or in
 //     a "- Status: merged (595a5bd1)" line below it; else the words after its first dash;
 //   a table under a header row naming an `id` and a `status` column, such as
-//     "| id | repo | scope | ... | status |" and "| api | snevagten-api | ... | merged d3c8862d |";
+//     "| id | repo | scope | ... | status |" and "| api | acme-api | ... | merged d3c8862d |";
 //     its `scope`, `task` or `name` column is what the task is about. Without an `id`
 //     column, a `#` column is the id ("| # | task | ... | status |"; a "deal-assoc: what"
 //     task cell gives the name), else a `task` column is id and name ("| t14 dashboard + nav |");

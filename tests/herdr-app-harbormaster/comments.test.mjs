@@ -63,31 +63,31 @@ test("a review submitted with threads is a summary, not counted (the #1372 shape
   // Nine threads by the reviewer (one answered), two CodeRabbit threads, and an approval, the
   // review those threads came with, whose text sums them up: 8 threads, +2 from coderabbitai.
   const s = commentSummary(answer([
-    ...Array.from({ length: 8 }, (_, i) => thread(`M${i}`, "mfalkenbrink", `**S${i + 1}. point**`)),
-    thread("M8", "mfalkenbrink", "S9", { last: { nodes: [{ body: `${AI_PREFIX} leaving as is: out of scope`, author: by("me"), authorAssociation: "MEMBER" }] } }),
+    ...Array.from({ length: 8 }, (_, i) => thread(`M${i}`, "kim", `**S${i + 1}. point**`)),
+    thread("M8", "kim", "S9", { last: { nodes: [{ body: `${AI_PREFIX} leaving as is: out of scope`, author: by("me"), authorAssociation: "MEMBER" }] } }),
     thread("C1", "coderabbitai", "**Guard the index.**"),
     thread("C2", "coderabbitai", "**Clamp the zoom.**"),
-  ], [review("mfalkenbrink", "APPROVED", "#1 og #2 bør kigges på før merge", undefined, { comments: { totalCount: 9 } })]));
+  ], [review("kim", "APPROVED", "#1 and #2 should be looked at before merging", undefined, { comments: { totalCount: 9 } })]));
   assert.deepEqual([s.count, s.threads, s.notes, s.answered, s.summaries], [8, 8, 0, 1, 1]);
   assert.deepEqual(s.bots, { coderabbitai: 2 });
-  assert.deepEqual(s.items.at(-1), { kind: "summary", who: "mfalkenbrink", text: "#1 og #2 bør kigges på før merge", where: null, thread: null, url: `${URL}#pullrequestreview-mfalkenbrink` });
-  const p = { number: 1372, url: URL, state: "OPEN", review: "APPROVED", approvedBy: ["mfalkenbrink"], changesBy: [], requested: [], comments: s };
+  assert.deepEqual(s.items.at(-1), { kind: "summary", who: "kim", text: "#1 and #2 should be looked at before merging", where: null, thread: null, url: `${URL}#pullrequestreview-kim` });
+  const p = { number: 1372, url: URL, state: "OPEN", review: "APPROVED", approvedBy: ["kim"], changesBy: [], requested: [], comments: s };
   assert.equal(nextStepText(nextStep([p], "peer")), "approved · 8 threads");
   const lines = commentLines([p], 3);
-  assert.deepEqual(lines, ["Open threads:", "  mfalkenbrink on app/X.php:42: S1. point", "  mfalkenbrink on app/X.php:42: S2. point", "  mfalkenbrink on app/X.php:42: S3. point", "+5 more", "+2 from coderabbitai"]);
+  assert.deepEqual(lines, ["Open threads:", "  kim on app/X.php:42: S1. point", "  kim on app/X.php:42: S2. point", "  kim on app/X.php:42: S3. point", "+5 more", "+2 from coderabbitai"]);
   const all = commentLines([p], 20);
-  assert.ok(all.includes("Answered, waiting on mfalkenbrink (not counted):"));
-  assert.ok(all.includes("  mfalkenbrink on app/X.php:42: S9"));
+  assert.ok(all.includes("Answered, waiting on kim (not counted):"));
+  assert.ok(all.includes("  kim on app/X.php:42: S9"));
   assert.ok(all.includes("Review summaries (sum up their threads, not counted):"));
-  assert.ok(all.includes("  mfalkenbrink in a review: #1 og #2 bør kigges på før merge"));
+  assert.ok(all.includes("  kim in a review: #1 and #2 should be looked at before merging"));
   const msg = commentsRequest(p, "ask");
   assert.match(msg, /^Harbormaster counts 8 threads \(\+2 from coderabbitai\) on PR #1372 \(approved\)\.$/m);
-  assert.match(msg, /^Open threads:\n- mfalkenbrink on app\/X\.php:42: "\*\*S1\. point\*\*"|^Open threads:\n- mfalkenbrink on app\/X\.php:42: "S1\. point"/m);
+  assert.match(msg, /^Open threads:\n- kim on app\/X\.php:42: "\*\*S1\. point\*\*"|^Open threads:\n- kim on app\/X\.php:42: "S1\. point"/m);
   assert.match(msg, /^Bots' open threads \(counted apart\):\n- coderabbitai on app\/X\.php:42: "Guard the index\." \(thread C1\)$/m);
-  assert.match(msg, /^Answered, waiting on mfalkenbrink \(not counted\):$/m);
-  assert.match(msg, /^Review summaries \(sum up their threads, not counted\):\n- mfalkenbrink in a review: "#1 og #2/m);
+  assert.match(msg, /^Answered, waiting on kim \(not counted\):$/m);
+  assert.match(msg, /^Review summaries \(sum up their threads, not counted\):\n- kim in a review: "#1 and #2/m);
   // A review with no thread of its own is the only place its text lives: a note, counted.
-  const alone = commentSummary(answer([], [review("mfalkenbrink", "APPROVED", "#1 og #2 bør kigges på før merge")]));
+  const alone = commentSummary(answer([], [review("kim", "APPROVED", "#1 and #2 should be looked at before merging")]));
   assert.deepEqual([alone.count, alone.notes, alone.items[0].kind], [1, 1, "note"]);
   // Only bots: the label says so rather than hiding them.
   const onlyBots = { ...p, comments: commentSummary(answer([thread("C1", "coderabbitai", "x")])) };
@@ -98,15 +98,15 @@ test("the #1799 shape: every thread resolved, a standalone COMMENTED review is t
   // Fifteen resolved threads, all submitted with the approval; the earlier COMMENTED review has
   // none of its own and holds findings no thread has. Resolved threads appear nowhere.
   const s = commentSummary(answer(
-    Array.from({ length: 15 }, (_, i) => thread(`M${i}`, "mfalkenbrink", `point ${i}`, { isResolved: true, last: { nodes: [{ body: `${AI_PREFIX} Fixed in 6268`, author: by("me"), authorAssociation: "MEMBER" }] } })),
-    [review("mfalkenbrink", "COMMENTED", "S3: de betalte rute-POST'er har ingen throttle", "2026-11-16T21:38:14Z", { comments: { totalCount: 0 } }),
-      review("mfalkenbrink", "APPROVED", "Godkendt. Ingen blokerende fejl", undefined, { comments: { totalCount: 15 } })]));
+    Array.from({ length: 15 }, (_, i) => thread(`M${i}`, "kim", `point ${i}`, { isResolved: true, last: { nodes: [{ body: `${AI_PREFIX} Fixed in 6268`, author: by("me"), authorAssociation: "MEMBER" }] } })),
+    [review("kim", "COMMENTED", "S3: the paid route POSTs have no throttle", "2026-11-16T21:38:14Z", { comments: { totalCount: 0 } }),
+      review("kim", "APPROVED", "Approved. Nothing blocking", undefined, { comments: { totalCount: 15 } })]));
   assert.deepEqual([s.count, s.threads, s.notes, s.answered, s.summaries, s.bots], [1, 0, 1, 0, 1, {}]);
   assert.deepEqual(s.items.map((x) => x.kind), ["note", "summary"]);
-  const p = { number: 1799, url: URL, state: "OPEN", review: "APPROVED", approvedBy: ["mfalkenbrink"], changesBy: [], requested: [], comments: s };
+  const p = { number: 1799, url: URL, state: "OPEN", review: "APPROVED", approvedBy: ["kim"], changesBy: [], requested: [], comments: s };
   assert.equal(nextStepText(nextStep([p], "peer")), "approved · 1 review note");
   // The note, answered by a 🤖 AI: PR comment after it, stops counting and is listed as answered.
-  const done = commentSummary(answer([], [review("mfalkenbrink", "COMMENTED", "S3: the paid route POSTs have no throttle", "2026-11-16T21:38:14Z")], [{ body: `${AI_PREFIX} answered each point`, createdAt: "2026-11-16T22:00:00Z", author: by("me"), authorAssociation: "MEMBER" }]));
+  const done = commentSummary(answer([], [review("kim", "COMMENTED", "S3: the paid route POSTs have no throttle", "2026-11-16T21:38:14Z")], [{ body: `${AI_PREFIX} answered each point`, createdAt: "2026-11-16T22:00:00Z", author: by("me"), authorAssociation: "MEMBER" }]));
   assert.deepEqual([done.count, done.answered, done.items[0].kind], [0, 1, "answered"]);
 });
 
