@@ -127,19 +127,19 @@ test("New run finds the open space on its folder: its own folder, else a termina
 
 test("a machine's name in the query keeps only its folders; local/here this machine's", () => {
   const e = (folder, machine = null) => ({ folder, name: folder.split("/").at(-1), space: "x", machine });
-  const entries = [e("/h/projects/snevagten"), e("/h/projects/snevagten", "desk"), e("/h/projects/skills", "desk"), e("/h/work/snevagten")];
+  const entries = [e("/h/projects/api"), e("/h/projects/api", "desk"), e("/h/projects/skills", "desk"), e("/h/work/api")];
   const pick = (q) => matchFolders(q, entries, [], 20, "/h").map((x) => `${x.machine ?? "here"}:${x.folder}`);
-  assert.deepEqual(pick("desk snev"), ["desk:/h/projects/snevagten"]);
-  assert.deepEqual(pick("desk:snev"), ["desk:/h/projects/snevagten"]);
-  assert.deepEqual(pick("de snev"), ["desk:/h/projects/snevagten"], "a prefix of one machine's name");
-  assert.deepEqual(pick("local snev"), ["here:/h/projects/snevagten", "here:/h/work/snevagten"]);
+  assert.deepEqual(pick("desk ap"), ["desk:/h/projects/api"]);
+  assert.deepEqual(pick("desk:ap"), ["desk:/h/projects/api"]);
+  assert.deepEqual(pick("de ap"), ["desk:/h/projects/api"], "a prefix of one machine's name");
+  assert.deepEqual(pick("local ap"), ["here:/h/projects/api", "here:/h/work/api"]);
   assert.deepEqual(pick("desk"), [], "one word is a folder's name, not a machine");
-  assert.equal(pick("snev").length, 3);
+  assert.equal(pick("ap").length, 3);
   // a path piece tells two folders of one name apart
-  assert.deepEqual(pick("work/snev"), ["here:/h/work/snevagten"]);
-  assert.deepEqual(pick("work snev"), ["here:/h/work/snevagten"]);
-  assert.deepEqual(machineQuery("desk snev", ["desk"]), { machine: "desk", text: "snev" });
-  assert.deepEqual(machineQuery("snev", ["desk"]), { machine: undefined, text: "snev" });
+  assert.deepEqual(pick("work/ap"), ["here:/h/work/api"]);
+  assert.deepEqual(pick("work ap"), ["here:/h/work/api"]);
+  assert.deepEqual(machineQuery("desk ap", ["desk"]), { machine: "desk", text: "ap" });
+  assert.deepEqual(machineQuery("ap", ["desk"]), { machine: undefined, text: "ap" });
 });
 
 test("another machine's spaces: their own ids, and spaceAt/newSpaceId per machine", () => {
