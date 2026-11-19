@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A fake `gh` for crew-sandbox.sh's two-prs run: `pr view` and the review-comments query for
-# owner fake-two answer from here (PR 1799: 2 open threads, 1372: 9, 44, 60 and 61: none; 60-64 have one green check (10 min, a CI baseline of 3+ samples for fake-two/api); 70 has a check running for 45 min; all approved by
+# owner fake-two answer from here (PR 1799: 2 open threads, 1372: 9, 44 and 60 up: none; 60 and up have one green check (10 min, a CI baseline of 3+ samples for fake-two/api); 70 has a check running for 45 min; all approved by
 # kim but 72 and 90 (no review)). `api graphql` with a `viewer` query (mypr.js) answers 5 open PRs of dlebech: 11 red CI, 12 changes requested,
 # 13 approved and mergeable, 14 two new comments since the push, 15 quiet; 16 is in a run; 17-20 have no reviewDecision (repo without required reviews): 17 anna's APPROVED stands, 18 her CHANGES_REQUESTED, 19 approved but CI pending, 20 approved with mergeable UNKNOWN.
 # `search prs --review-requested` answers from <scratch>/review-requests.json (none without it). Anything else runs the real gh ($REAL_GH).

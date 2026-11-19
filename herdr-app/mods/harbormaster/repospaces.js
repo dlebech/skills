@@ -21,9 +21,13 @@ const base = (p) => p.replace(/\/+$/, "").split("/").at(-1);
 // "<machine>\n<cwd>" → {root, kind, origin} | null; a folder's repository rarely changes. The same
 // path on two machines is two folders: git is asked on the folder's own machine (`on`).
 const known = new Map();
+// Another machine's folders that are no repository, by when that was found: asked again after
+// NOT_REPO_MS, not on every poll (each ask is a remote call).
+const notRepo = new Map(), NOT_REPO_MS = 5 * 60000;
 async function inspect(cwd, on = null) {
   const k = `${on ?? ""}\n${cwd}`;
   if (known.has(k)) return known.get(k);
+  if (on && Date.now() - (notRepo.get(k) ?? -Infinity) < NOT_REPO_MS) return null;
   const where = on ? { on } : {};
   const rev = await exec("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], { timeout: on ? 8000 : 3000, ...where }).catch(() => null);
   const found = rev?.code === 0 ? repoOf(rev.stdout.trim()) : null;
@@ -33,6 +37,7 @@ async function inspect(cwd, on = null) {
     repo.origin = o?.code === 0 ? ownerRepo(o.stdout) : null;
   }
   if (repo) known.set(k, repo); // a folder that is no repository yet may become one
+  else if (on && rev) notRepo.set(k, Date.now()); // git answered: not one (a failed call is asked again)
   return repo;
 }
 
@@ -72,21 +77,20 @@ export async function cloneRepos(open) {
   const at = (r) => `${r.machine ?? ""}\n${r.root}`;
   const isOpen = new Set(open.map(at));
   const parents = [...new Map(open.map((r) => [`${r.machine ?? ""}\n${r.root.replace(/\/[^/]+\/?$/, "")}`, { on: r.machine ?? null, parent: r.root.replace(/\/[^/]+\/?$/, "") }])).values()].filter((p) => p.parent);
-  const out = [];
-  for (const { on, parent } of parents) {
+  // Every parent at once, and every clone in it at once: on another machine each git call is a round trip.
+  const lists = await Promise.all(parents.map(async ({ on, parent }) => {
     const ck = `${on ?? ""}\n${parent}`;
-    let c = cloneCache.get(ck);
-    if (!c || Date.now() - c.at > CLONES_MS) {
-      const ls = await sh('ls -d "$1"/*/.git 2>/dev/null | head -n "$2"', [parent, String(CLONES_MAX)], on).catch(() => null);
-      const list = [];
-      for (const g of String(ls?.stdout ?? "").split("\n").filter(Boolean)) {
-        const repo = await inspect(g.replace(/\/\.git$/, ""), on);
-        if (repo?.kind === "primary" && repo.origin) list.push({ space: null, name: base(repo.root), root: repo.root, origin: repo.origin, machine: on });
-      }
-      if (ls) { c = { at: Date.now(), list }; cloneCache.set(ck, c); } else c = { list };
-    }
-    out.push(...c.list.filter((r) => !isOpen.has(at(r)) && !out.some((o) => at(o) === at(r))));
-  }
+    const c = cloneCache.get(ck);
+    if (c && Date.now() - c.at <= CLONES_MS) return c.list;
+    const ls = await sh('ls -d "$1"/*/.git 2>/dev/null | head -n "$2"', [parent, String(CLONES_MAX)], on).catch(() => null);
+    const found = await Promise.all(String(ls?.stdout ?? "").split("\n").filter(Boolean).map((g) => inspect(g.replace(/\/\.git$/, ""), on).catch(() => null)));
+    const list = found.filter((repo) => repo?.kind === "primary" && repo.origin)
+      .map((repo) => ({ space: null, name: base(repo.root), root: repo.root, origin: repo.origin, machine: on }));
+    if (ls) cloneCache.set(ck, { at: Date.now(), list });
+    return list;
+  }));
+  const out = [];
+  for (const list of lists) out.push(...list.filter((r) => !isOpen.has(at(r)) && !out.some((o) => at(o) === at(r))));
   return out;
 }
 

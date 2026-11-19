@@ -100,32 +100,38 @@ export function fuzzyScore(query, text) {
 // Words that pick this machine in a query: "local", "here", "this".
 const HERE = new Set(["local", "here", "this"]);
 
-// A query split into the machine it names and the rest: a word (or "<word>:" before the rest) that
-// is a machine's name, or a prefix of only one, picks that machine; "local"/"here"/"this" this one
-// (null). `machine` is undefined when no word names one. `machines`: the other machines' names.
+// A query split into the machine it names and the rest: a word that is a machine's exact name
+// (any case), or "<name>:" before the rest, picks that machine; "local"/"here"/"this" this one
+// (null). Never a prefix: "des ign" must not hide a "design" folder behind a machine "desk".
+// `machine` is undefined when no word names one. `machines`: the other machines' names.
 export function machineQuery(query, machines = []) {
-  const words = String(query).trim().split(/\s+|(?<=^[^\s/~:]+):/).filter(Boolean);
+  const q = String(query).trim();
   const names = [...new Set(machines.filter(Boolean))];
   const named = (w) => {
-    const x = w.toLowerCase().replace(/:$/, "");
-    if (!x) return undefined;
+    const x = w.toLowerCase();
     if (HERE.has(x)) return null;
-    const exact = names.find((n) => n.toLowerCase() === x);
-    if (exact) return exact;
-    const pre = names.filter((n) => n.toLowerCase().startsWith(x));
-    return x.length >= 2 && pre.length === 1 ? pre[0] : undefined;
+    return names.find((n) => n.toLowerCase() === x);
   };
-  // Only one machine word counts, and never the whole query (that is a folder's name, maybe the same).
-  if (words.length < 2) return { machine: undefined, text: String(query).trim() };
+  // "<name>:rest" (no space needed).
+  const colon = /^([^\s/~:]+):\s*(.*)$/s.exec(q);
+  if (colon) {
+    const m = named(colon[1]);
+    if (m !== undefined) return { machine: m, text: colon[2].trim() };
+  }
+  const words = q.split(/\s+/).filter(Boolean);
+  // A single word is a folder's name, maybe the same as a machine's.
+  if (words.length < 2) return { machine: undefined, text: q };
   for (let i = 0; i < words.length; i++) {
     const m = named(words[i]);
     if (m !== undefined) return { machine: m, text: words.filter((_, j) => j !== i).join(" ") };
   }
-  return { machine: undefined, text: String(query).trim() };
+  return { machine: undefined, text: q };
 }
 
-// How well a query matches an entry: its folder's name, its space's name, or (a little less) its
-// path, so "proj/snev" or "work skills" tell two folders of one name apart. Every word must match.
+// How well a query matches an entry: its folder's name, its space's name, or its path, so
+// "work/api" or "work api" tell two folders of one name apart. A word with "/" or "~" is matched
+// against the path; any other word against the path only as a plain substring (letters scattered
+// along a long path match almost anything). Every word must match.
 export function entryScore(q, e, home = "") {
   const words = String(q).trim().split(/\s+/).filter(Boolean);
   if (!words.length) return 1;
@@ -134,7 +140,7 @@ export function entryScore(q, e, home = "") {
   for (const w of words) {
     const s = /[/~]/.test(w)
       ? fuzzyScore(w, path) * 0.95
-      : Math.max(fuzzyScore(w, base(e.folder)), fuzzyScore(w, e.name ?? "") * 0.9, fuzzyScore(w, path) * 0.5);
+      : Math.max(fuzzyScore(w, base(e.folder)), fuzzyScore(w, e.name ?? "") * 0.9, path.toLowerCase().includes(w.toLowerCase()) ? 200 : 0);
     if (s <= 0) return 0;
     total += s;
   }

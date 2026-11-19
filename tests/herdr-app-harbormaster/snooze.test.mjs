@@ -67,12 +67,13 @@ test("loadSnoozed merges the other machines' files and writes back where they la
     desk: JSON.stringify({ b: { until: Date.now() + HOUR, reason: "y" } }),
   };
   globalThis.__herdrMachines = [{ name: null, layout: "ready" }, { name: "desk", layout: "ready" }, { name: "off", layout: "unavailable" }];
-  globalThis.__herdrRead = async (_p, o) => files[o?.on ?? "local"];
+  globalThis.__herdrRead = async (_p, o) => { assert.ok(!o?.on, "another machine's file is read through sh, with a timeout"); return files.local; };
   globalThis.__herdrWrite = async (_p, text) => { files.local = text; };
   const asked = [];
   globalThis.__herdrExec = async (_c, args, o) => {
     asked.push(o?.on ?? null);
     if (args[1].includes("mv -f")) files[o.on] = args[4];
+    if (args[1].includes('cat "$1"')) { assert.ok(o.timeout > 0); return { code: 0, stdout: files[o.on], stderr: "" }; }
     return { code: 0, stdout: "/root", stderr: "" };
   };
   await loadSnoozed();
@@ -85,9 +86,13 @@ test("loadSnoozed merges the other machines' files and writes back where they la
 test("a snooze is pushed to the other machines too", async () => {
   const files = { local: "{}", desk: "{}" };
   globalThis.__herdrMachines = [{ name: "desk", layout: "ready" }];
-  globalThis.__herdrRead = async (_p, o) => files[o?.on ?? "local"];
+  globalThis.__herdrRead = async () => files.local;
   globalThis.__herdrWrite = async (_p, text) => { files.local = text; };
-  globalThis.__herdrExec = async (_c, args, o) => { if (args[1].includes("mv -f")) files[o.on] = args[4]; return { code: 0, stdout: "/root", stderr: "" }; };
+  globalThis.__herdrExec = async (_c, args, o) => {
+    if (args[1].includes("mv -f")) files[o.on] = args[4];
+    if (args[1].includes('cat "$1"')) return { code: 0, stdout: files[o.on], stderr: "" };
+    return { code: 0, stdout: "/root", stderr: "" };
+  };
   await setSnooze(it(), Date.now() + HOUR);
   assert.equal(parseSnoozed(files.desk)[it().url].reason, "approved — merge");
   await setSnooze(it(), null);
@@ -147,13 +152,15 @@ test("a woken item stays awake when the old reason comes back before its time is
   const back = splitSnoozed([it()], after, t0 + 2 * HOUR);
   assert.equal(back.shown.length, 1);
   assert.deepEqual(back.woke, []);
-  // and it is written once, for all urls
-  const file = { text: JSON.stringify(map) };
+  // and it is written once, for all urls, as a tombstone (times from now: the file write prunes what is up)
+  const now = Date.now();
+  const live = withSnooze({}, it(), now + 4 * HOUR, now);
+  const file = { text: JSON.stringify(live), writes: 0 };
   globalThis.__herdrRead = async () => file.text;
-  globalThis.__herdrWrite = async (_p, text) => { file.text = text; };
-  await wakeSnoozes([it().url], t0 + HOUR);
-  const left = parseSnoozed(file.text)[it().url];
-  assert.ok(!left || left.off, "woken: gone (its time is up) or a tombstone");
+  globalThis.__herdrWrite = async (_p, text) => { file.text = text; file.writes++; };
+  await wakeSnoozes([it().url, "u-other"], now + 1);
+  assert.equal(file.writes, 1);
+  assert.deepEqual(parseSnoozed(file.text)[it().url], { until: now + 4 * HOUR, reason: "", at: now + 1, off: true });
 });
 
 test("one more new comment is the same kind and stays snoozed", () => {

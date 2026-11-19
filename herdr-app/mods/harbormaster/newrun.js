@@ -180,7 +180,7 @@ export function withFolder(entries, want, machine) {
 // undefined: this one, or any when only a name is given). `url`: a review's PR, marked "starting…"
 // in Next for you once its Start starts it.
 export function openNewRun({ repo, machine, kind, input, url } = {}) {
-  return openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 760, props: { role: "newrun", repo, ...(machine ? { machine } : {}), kind, input, url } });
+  return openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 760, props: { role: "newrun", repo, ...(machine !== undefined ? { machine } : {}), kind, input, url } });
 }
 
 // The same dialog with only the folder, for starting the captain (the "no captain running" spots).
@@ -226,22 +226,23 @@ export function initNewRun(view, cx) {
     // The agents of the machine the folder is on (a review of another machine's checkout starts there).
     const on = pick?.machine ?? null;
     nr.agentsOn = on;
-    const agents = await installedAgents(on).catch(() => []);
-    nr.agents = agents;
-    nr.agent = agentFor(prefs, agents);
+    nr.agentsPending = true;
     nr.drafts = draftsFor(prefs, draftKey(nr));
-    setProfile(nr);
-    cx.notify();
-    // The folders typed text may find: scanned once the lists are known, cheap and cached.
-    // The models, to check the line against: started with the folders, in parallel.
-    const models = agentModels(agents, on).catch(() => ({}));
-    nr.found = await scanFolders(nr.entries, nr.home).catch(() => []);
-    cx.notify();
-    const got = await models;
-    if (nr.agentsOn !== on) return; // another machine's folder was chosen meanwhile: its own models come
-    nr.models = got;
-    nr.modelsReady = true;
-    cx.notify();
+    // The folders typed text may find: scanned once the lists are known, cheap and cached; with the agents, in parallel.
+    const scan = scanFolders(nr.entries, nr.home).catch(() => []).then((found) => { nr.found = found; cx.notify(); });
+    const agents = await installedAgents(on).catch(() => []);
+    // Another machine's folder chosen meanwhile: agentsFor asks that machine, and its answer is the one kept.
+    if (nr.agentsOn === on) {
+      nr.agents = agents;
+      nr.agent = agentFor(prefs, agents);
+      nr.agentsPending = false;
+      setProfile(nr);
+      cx.notify();
+      // The models, to check the line against.
+      const got = await agentModels(agents, on).catch(() => ({}));
+      if (nr.agentsOn === on) { nr.models = got; nr.modelsReady = true; cx.notify(); }
+    }
+    await scan;
   });
 }
 
@@ -275,10 +276,12 @@ function agentsFor(view, cx) {
   const nr = view.nr, on = nr.folder?.machine ?? null;
   if (nr.agentsOn === undefined || nr.agentsOn === on || checking()) return;
   nr.agentsOn = on;
+  nr.agentsPending = true;
   nr.modelsReady = false;
   cx.spawn(async (cx) => {
     const agents = await installedAgents(on).catch(() => []);
     if (nr.agentsOn !== on) return;
+    nr.agentsPending = false;
     nr.agents = agents;
     nr.agent = agentFor(nr.prefs, agents);
     setProfile(nr);
@@ -295,7 +298,8 @@ function agentsFor(view, cx) {
 export const sameReview = (kind, text, opened) => kind === "review" && String(text).trim() === String(opened ?? "").trim();
 const sameAsOpened = (nr) => sameReview(nr.kind, nr.text.value(), props()?.input);
 
-const draftKey = (nr) => nr.root ?? nr.folder?.folder;
+// Until git has said which repository root, the folder itself (on its machine).
+const draftKey = (nr) => nr.root ?? draftsKey(nr.folder?.folder, nr.folder?.machine);
 
 function choose(view, entry, cx) {
   const nr = view.nr;
@@ -373,6 +377,8 @@ function start(view, cx, fromList = false) {
   const captain = nr.kind === "captain";
   const { profile, bad } = captain ? { profile: null, bad: [] } : parseProfile(nr.profile.value(), prefillProfile(nr.prefs, nr.kind, nr.agent));
   const problem = !pick ? "Pick a folder from the list"
+    // Another machine's agents are still being asked for: a start now would use the wrong machine's pick.
+    : nr.agentsPending && pick.machine && nr.agentsOn === pick.machine ? `Checking the agents on ${pick.machine}…`
     : captain ? captainProblem(terminals())
     : bad.length ? `Not understood: ${bad.join(" ")}`
     : lineProblem(nr, profile) || inputProblem(nr.kind, nr.text.value());

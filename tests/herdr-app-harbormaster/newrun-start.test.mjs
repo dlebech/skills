@@ -159,7 +159,7 @@ test("Crew's Review button opens New run prefilled; nothing starts", async () =>
   globalThis.__herdrOpened = null;
   btn.click({}, callCx());
   await settle();
-  assert.deepEqual(globalThis.__herdrOpened.props, { role: "newrun", repo: "/home/u/projects/skills", kind: "review", input: "52", url: it.url });
+  assert.deepEqual(globalThis.__herdrOpened.props, { role: "newrun", repo: "/home/u/projects/skills", machine: null, kind: "review", input: "52", url: it.url });
   assert.deepEqual(execs.filter((e) => e[0] === "bash"), [], "no run was started");
 });
 
@@ -265,4 +265,22 @@ test("a Review button for another machine's checkout opens New run on that machi
   find(nextAction({ t: T }, it, "nx"), "nx-act").click({}, callCx());
   await settle();
   assert.deepEqual(globalThis.__herdrOpened.props, { role: "newrun", repo: "/home/u/api", machine: "desk", kind: "review", input: "7", url: it.url });
+});
+
+test("Start waits while another machine's agents are being asked for", async () => {
+  const view = dialog({ folder: "/home/u/projects/skills", name: "skills", space: "desk/sp-skills", machine: "desk" });
+  view.nr.agentsOn = "desk"; view.nr.agentsPending = true;
+  clickStart(view);
+  await settle();
+  assert.equal(view.nr.error, "Checking the agents on desk…");
+  assert.ok(!execs.some(([cmd, , script]) => cmd === "bash" || script?.includes('exec bash "$@"')), "nothing started");
+});
+
+test("a Review of this machine's checkout never lands on another machine's folder of the same path", async () => {
+  const { withFolder } = await import("../../herdr-app/mods/harbormaster/newrun.js");
+  const far = { folder: "/home/u/api", name: "api", space: "desk/sp-api", machine: "desk" };
+  const list = withFolder([far], "/home/u/api", null);
+  assert.equal(list.length, 2);
+  assert.equal(list[1].machine, null);
+  assert.equal(withFolder([far], "/home/u/api", "desk").length, 1);
 });

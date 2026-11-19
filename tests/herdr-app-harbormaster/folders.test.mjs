@@ -131,7 +131,8 @@ test("a machine's name in the query keeps only its folders; local/here this mach
   const pick = (q) => matchFolders(q, entries, [], 20, "/h").map((x) => `${x.machine ?? "here"}:${x.folder}`);
   assert.deepEqual(pick("desk ap"), ["desk:/h/projects/api"]);
   assert.deepEqual(pick("desk:ap"), ["desk:/h/projects/api"]);
-  assert.deepEqual(pick("de ap"), ["desk:/h/projects/api"], "a prefix of one machine's name");
+  assert.equal(pick("de ap").length, 0, "a prefix is not a machine: both words must match a folder");
+  assert.deepEqual(pick("DESK ap"), ["desk:/h/projects/api"], "any case");
   assert.deepEqual(pick("local ap"), ["here:/h/projects/api", "here:/h/work/api"]);
   assert.deepEqual(pick("desk"), [], "one word is a folder's name, not a machine");
   assert.equal(pick("ap").length, 3);
@@ -140,6 +141,13 @@ test("a machine's name in the query keeps only its folders; local/here this mach
   assert.deepEqual(pick("work ap"), ["here:/h/work/api"]);
   assert.deepEqual(machineQuery("desk ap", ["desk"]), { machine: "desk", text: "ap" });
   assert.deepEqual(machineQuery("ap", ["desk"]), { machine: undefined, text: "ap" });
+});
+
+test("a word is a path match only as a substring; scattered letters along a path are not", () => {
+  const e = (folder) => ({ folder, name: folder.split("/").at(-1), space: "x", machine: null });
+  const entries = [e("/h/projects/photo-site"), e("/h/projects/api"), e("/h/projects/web")];
+  assert.deepEqual(matchFolders("po", entries, [], 20, "/h").map((x) => x.folder), ["/h/projects/photo-site"]);
+  assert.equal(matchFolders("projects", entries, [], 20, "/h").length, 3, "a path word still finds them");
 });
 
 test("another machine's spaces: their own ids, and spaceAt/newSpaceId per machine", () => {

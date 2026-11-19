@@ -37,9 +37,13 @@ export function runReviewing(runs, url) {
   return r?.dir ?? null;
 }
 
-// Where owner/repo can be reviewed: an open space whose repository's origin it is (before a
-// clone found beside them, which has no space yet: `space` is null and a review opens one). On
-// any machine; this machine's first, as knownRepos lists them. `machine` is null for this one.
+const REPOS_WAIT_MS = 10000;
+
+// Where owner/repo can be reviewed: an open space whose repository's origin it is, on any machine
+// (this machine's before another's, as knownRepos lists them), before a clone found beside them,
+// which has no space yet (`space` is null and a review opens one). So a repository open only on
+// another machine is reviewed there, even when this machine has a clone of it. `machine` is null
+// for this one.
 export const localCheckout = (repos, repo) => {
   const want = String(repo).toLowerCase();
   const r = repos.find((x) => x.origin === want && x.space) ?? repos.find((x) => x.origin === want);
@@ -63,7 +67,11 @@ export function poller(args, parse, { partial = false } = {}) {
     cache.loading = true;
     try {
       const res = await exec("gh", args, { timeout: 20000 });
-      const repos = await knownRepos().catch(() => cache.repos);
+      // Where each repository is checked out, on any machine; a slow machine must not hold the list
+      // back, so after REPOS_WAIT_MS the last known ones are used and the next poll catches up.
+      let timer;
+      const repos = await Promise.race([knownRepos().catch(() => cache.repos), new Promise((r) => { timer = setTimeout(() => r(cache.repos), REPOS_WAIT_MS); })]);
+      clearTimeout(timer);
       const list = res.code === 0 || partial ? parse(res.stdout) : null;
       cache = list ? { at: Date.now(), list, repos, error: null, loading: false } : fail({ repos });
     } catch {

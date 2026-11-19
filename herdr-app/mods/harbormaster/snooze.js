@@ -112,11 +112,20 @@ const asText = (map) => JSON.stringify(map, null, 2) + "\n";
 // The other machines that answer (Herdr's machine list, `null` being this one).
 const others = () => { try { return machines().filter((m) => m.name && m.layout !== "unavailable").map((m) => m.name); } catch { return []; } };
 
+// Another machine's file, or null when absent: through sh with a timeout (Herdr's readTextFile has
+// none, and one read hanging on a half-dead link must not hold the sync for the rest of the session).
+async function readOn(on, file) {
+  const r = await sh('[ -e "$1" ] || exit 3; cat "$1"', [file], { on, timeout: 8000 });
+  if (r.code === 3) return null;
+  if (r.code !== 0) throw new Error(r.stderr || `exit ${r.code}`);
+  return r.stdout;
+}
+
 // Merges `map` into a machine's file and writes it when that changes it; never throws.
 async function pushTo(on, map) {
   try {
     const file = await snoozeFile(on);
-    const have = parseSnoozed(await readTextFile(file, { on }).catch(() => null) ?? "");
+    const have = parseSnoozed(await readOn(on, file) ?? "");
     const next = mergeSnoozed(have, map, Date.now());
     if (!sameMap(have, next)) await sh(WRITE, [file, asText(next)], { on, timeout: 8000 });
   } catch (e) { console.log(`harbormaster: could not share snoozes with ${on}: ${e?.message ?? e}`); }
@@ -129,7 +138,7 @@ async function readOthers(now) {
   await Promise.all(others().map(async (on) => {
     try {
       const file = await snoozeFile(on);
-      const text = await readTextFile(file, { on });
+      const text = await readOn(on, file);
       all = mergeSnoozed(all, parseSnoozed(text ?? ""), now);
       read.push(on);
     } catch { /* offline: its snoozes come with the next sync */ }
@@ -142,12 +151,14 @@ export const snoozed = () => shared(SNOOZE_KEY);
 // Reads this machine's file and the other machines' into the shared store, merged: at once when
 // the store is empty (a restart, a reload), else at most every SYNC_MS, so a snooze made on another
 // machine shows here within a minute. The merge is written back where it adds something, so each
-// machine's file catches up. Never throws.
+// machine's file catches up. Called while Next for you is drawn (crew.js). Never throws. A sync
+// still going after STUCK_MS (a call that never returns) no longer holds the next one back.
 export const SYNC_MS = 60000;
-let loading = false, lastSync = 0;
+const STUCK_MS = 2 * 60000;
+let loading = 0, lastSync = 0;
 export async function loadSnoozed() {
-  if (loading || (snoozed() != null && Date.now() - lastSync < SYNC_MS)) return;
-  loading = true;
+  if ((loading && Date.now() - loading < STUCK_MS) || (snoozed() != null && Date.now() - lastSync < SYNC_MS)) return;
+  const started = loading = Date.now();
   lastSync = Date.now();
   try {
     const now = Date.now();
@@ -160,7 +171,7 @@ export async function loadSnoozed() {
     if (!sameMap(all, pruneSnoozed(mine, now))) await update((m) => m, { push: false });
     await Promise.all(read.map((on) => pushTo(on, all)));
   } catch { if (snoozed() == null) setShared(SNOOZE_KEY, {}); }
-  finally { loading = false; }
+  finally { if (loading === started) loading = 0; }
 }
 
 // Applies `change` (map → map) to the store, then to this machine's file and (`push`) the other
