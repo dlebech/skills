@@ -1,5 +1,5 @@
 // Stands in for "gpui-kit" and "gpui-base", so a view's drawing can be built and its click
-// handlers found under node: every element records its id, children and on_click.
+// handlers found under node: every element records its id, children, on_click and tooltip.
 function el() {
   const t = { kids: [], click: null, idv: null };
   const p = new Proxy(t, {
@@ -9,6 +9,7 @@ function el() {
       return (...a) => {
         if (k === "id") o.idv = a[0];
         else if (k === "on_click") o.click = a[0];
+        else if (k === "tooltip") o.tip = a[0];
         else if (k === "child") o.kids.push(a[0]);
         else if (k === "children") o.kids.push(...a[0]);
         else if (k === "when" && a[0]) a[1](p);
@@ -19,7 +20,8 @@ function el() {
   return p;
 }
 export const div = el, v_flex = el, h_flex = el, svg = el, image = el;
-export const View = class {}, HoverCard = { new: () => el() };
+// A HoverCard records its id as `hoverCard`, so a test can count them.
+export const View = class {}, HoverCard = { new: (id) => { const e = el(); e.hoverCard = id; return e; } };
 export const Input = { new: () => el() }, Textarea = { new: () => el() };
 
 // The element with this id in a drawing, or null.

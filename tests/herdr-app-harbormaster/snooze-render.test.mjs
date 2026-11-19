@@ -65,7 +65,7 @@ test("Later opens the three choices, × closes it, a choice snoozes, Wake brings
   assert.match(text(find(d, "crew-group-next")), /Next for you · 2/);
   view.folds.set("crew-next-snoozed", true);
   find(draw(), "crew-next-z0-wake").click({}, cx);
-  assert.equal(shared(SNOOZE_KEY)[prs[0].url], undefined);
+  assert.equal(shared(SNOOZE_KEY)[prs[0].url]?.off ?? true, true, "woken: no entry, or a tombstone");
   assert.match(text(find(draw(), "crew-group-next")), /Next for you · 3/);
 });
 

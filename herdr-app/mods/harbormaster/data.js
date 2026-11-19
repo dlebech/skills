@@ -11,7 +11,8 @@
 // and <root>/.captain-decisions.json for the captain's open decisions. The same poll takes a
 // process snapshot for CPU and memory (resources.js), kept per run in .resources.json.
 
-import { exec, appHome, machines, spaces, shared, setShared, run as command } from "herdr";
+import { exec, appHome, machines, spaces, run as command } from "herdr";
+import { shared, setShared } from "./store.js";
 import { parseQuestion } from "./question.js";
 import { parseDecidedLines } from "./decided.js";
 import { pendingLevels } from "./levels.js";
@@ -20,7 +21,7 @@ import { dropCacheArgs } from "./media.js";
 import { proofOf, runTier, parseProofMd, parseAccepted, acceptedFile, pendingProofs, withAcceptance } from "./proof.js";
 import { parsePlanClaims, claimResultLine, finalReviews, pickFinal } from "./claims.js";
 import { SAMPLER, ingest, recordRuns, setStored } from "./resources.js";
-import { writeHistory, writeHistoryBeforeDelete } from "./history.js";
+import { writeHistory, writeHistoryBeforeDelete, deleteWait, historyWritten } from "./history.js";
 import { taskTone, taskCounts, taskStage } from "./tasks.js";
 // taskStage moved to tasks.js (claims.js reads it without herdr); still exported from here.
 export { taskStage };
@@ -111,7 +112,7 @@ export function runPhase(text) {
 //   a heading, "### t1 pin-spread — merged (45e5)", or with "status: merged" in it or in
 //     a "- Status: merged (595a5bd1)" line below it; else the words after its first dash;
 //   a table under a header row naming an `id` and a `status` column, such as
-//     "| id | repo | scope | ... | status |" and "| api | snevagten-api | ... | merged d3c8862d |";
+//     "| id | repo | scope | ... | status |" and "| api | acme-api | ... | merged d3c8862d |";
 //     its `scope`, `task` or `name` column is what the task is about. Without an `id`
 //     column, a `#` column is the id ("| # | task | ... | status |"; a "deal-assoc: what"
 //     task cell gives the name), else a `task` column is id and name ("| t14 dashboard + nav |");
@@ -1400,9 +1401,11 @@ const DELETE = [
   'rm -rf -- "$d" && rmdir -- "${d%/*}" 2>/dev/null; exit 0',
 ].join("\n");
 
-export async function deleteRun(run) {
+// cx: the caller's spawn cx, which times the wait for the history (see deleteWait). `historyTried`:
+// deleteRuns already waited for it, so it is not waited on again.
+export async function deleteRun(run, { cx = null, historyTried = false } = {}) {
   // Its summary goes to the history first, if not there; the delete goes ahead if that fails or takes too long.
-  await writeHistoryBeforeDelete(run);
+  if (!historyTried) await writeHistoryBeforeDelete(run, { cx });
   const out = await exec("sh", ["-c", DELETE, "sh", run.dir, run.folder ?? "", run.branch,
     run.localTerminal ?? "", run.away?.how === "closed" ? "1" : ""], { on: run.machine });
   if (out.code !== 0) throw new Error((out.stderr || "could not delete the run directory").trim());
@@ -1418,15 +1421,21 @@ export async function deleteRun(run) {
 
 // Deletes several closed runs, one at a time per machine and the machines at once, each as
 // deleteRun does, guards and all. Returns the runs it could not delete, each with why.
-export async function deleteRuns(runs) {
-  // Start every history write first, so the waits overlap instead of adding up per run.
-  await Promise.all(runs.map((r) => writeHistoryBeforeDelete(r)));
+export async function deleteRuns(runs, { cx = null } = {}) {
+  // Start every history write first, under one wait, so the waits overlap instead of adding up per run;
+  // a run whose write failed is not waited on again. No wait when every line is already there.
+  const unwritten = runs.filter((r) => !historyWritten(r));
+  if (unwritten.length) {
+    const late = deleteWait(cx);
+    await Promise.all(unwritten.map((r) => writeHistoryBeforeDelete(r, { late })));
+    late.cancel();
+  }
   const byMachine = new Map();
   for (const r of runs) byMachine.set(r.machine ?? "", [...(byMachine.get(r.machine ?? "") ?? []), r]);
   const failed = [];
   await Promise.all([...byMachine.values()].map(async (list) => {
     for (const run of list) {
-      try { await deleteRun(run); } catch (e) { failed.push({ run, error: e?.message ?? String(e) }); }
+      try { await deleteRun(run, { historyTried: true }); } catch (e) { failed.push({ run, error: e?.message ?? String(e) }); }
     }
   }));
   return failed;

@@ -37,12 +37,18 @@ export function runReviewing(runs, url) {
   return r?.dir ?? null;
 }
 
-// Where owner/repo can be reviewed: an open space whose repository's origin it is (before a
-// clone found beside them, which has no space yet: `space` is null and a review opens one).
+// How long a poll waits for knownRepos before using the last known ones (tests shorten it).
+export const tune = { reposWait: 10000 };
+
+// Where owner/repo can be reviewed: an open space whose repository's origin it is, on any machine
+// (this machine's before another's, as knownRepos lists them), before a clone found beside them,
+// which has no space yet (`space` is null and a review opens one). So a repository open only on
+// another machine is reviewed there, even when this machine has a clone of it. `machine` is null
+// for this one.
 export const localCheckout = (repos, repo) => {
   const want = String(repo).toLowerCase();
   const r = repos.find((x) => x.origin === want && x.space) ?? repos.find((x) => x.origin === want);
-  return r ? { space: r.space ?? null, root: r.root, name: r.name } : null;
+  return r ? { space: r.space ?? null, root: r.root, name: r.name, machine: r.machine ?? null } : null;
 };
 
 // The requests with where they can be reviewed: pure over what the poll found.
@@ -62,7 +68,12 @@ export function poller(args, parse, { partial = false } = {}) {
     cache.loading = true;
     try {
       const res = await exec("gh", args, { timeout: 20000 });
-      const repos = await knownRepos().catch(() => cache.repos);
+      // Where each repository is checked out, on any machine; a slow machine must not hold the list
+      // back, so after tune.reposWait the last known ones are used and the next poll catches up.
+      // Herdr's runtime has no setTimeout (calling it threw, so every poll said "can't reach GitHub")
+      // and a poll has no cx: the wait is a sleep process, which ends by itself.
+      const wait = exec("sleep", [String(tune.reposWait / 1000)], { timeout: tune.reposWait + 10000 }).then(() => cache.repos, () => cache.repos);
+      const repos = await Promise.race([knownRepos().catch(() => cache.repos), wait]);
       const list = res.code === 0 || partial ? parse(res.stdout) : null;
       cache = list ? { at: Date.now(), list, repos, error: null, loading: false } : fail({ repos });
     } catch {

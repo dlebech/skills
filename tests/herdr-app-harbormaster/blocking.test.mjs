@@ -54,8 +54,9 @@ test("a blocking ask and a red-CI ask stay asked across a reload: the mark is in
 });
 
 test("the review flow: the folder's default, the user's setting over it, and what a click stores", () => {
-  const snev = { folder: "/home/u/projects/snevagten" }, skills = { folder: "/home/u/projects/skills/" };
-  assert.deepEqual(flowState(snev, {}), { key: "snevagten", flow: "peer", fallback: "peer", isDefault: true });
+  const acme = { folder: "/home/u/projects/acme" }, skills = { folder: "/home/u/projects/skills/" };
+  assert.deepEqual(flowState(acme, {}), { key: "acme", flow: "self", fallback: "self", isDefault: true });
+  assert.deepEqual(flowState(acme, { acme: "peer" }), { key: "acme", flow: "peer", fallback: "self", isDefault: false });
   assert.deepEqual(flowState(skills, {}), { key: "skills", flow: "self", fallback: "self", isDefault: true });
   assert.deepEqual(flowState(skills, { skills: "peer" }), { key: "skills", flow: "peer", fallback: "self", isDefault: false });
   // Picking the default removes the setting; the other one stores it.
@@ -66,10 +67,10 @@ test("the review flow: the folder's default, the user's setting over it, and wha
   assert.deepEqual(store, { skills: "peer" });
   // Every run of that folder reads it.
   assert.equal(reviewFlow({ folder: "/elsewhere/skills", key: "other" }, store), "peer");
-  store = withFlow(store, "snevagten", flowSetting("self", "peer"));
-  assert.deepEqual(store, { skills: "peer", snevagten: "self" });
+  store = withFlow(store, "acme", flowSetting("peer", "self"));
+  assert.deepEqual(store, { skills: "peer", acme: "peer" });
   store = withFlow(store, "skills", flowSetting("self", "self"));
-  assert.deepEqual(store, { snevagten: "self" });
+  assert.deepEqual(store, { acme: "peer" });
   assert.equal(withFlow(store, "", "peer"), store);
 });
 

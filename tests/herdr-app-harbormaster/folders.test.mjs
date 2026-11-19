@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  spaceFolders, newSpaceId, spaceAt, recentFolders, listFolders, fuzzyScore, matchFolders, literalFolder, scanParents, parseFound, tilde,
+  spaceFolders, newSpaceId, spaceAt, machineQuery, ownId, recentFolders, listFolders, fuzzyScore, matchFolders, literalFolder, scanParents, parseFound, tilde,
 } from "../../herdr-app/mods/harbormaster/folders.js";
 import { parsePrefs, remember } from "../../herdr-app/mods/harbormaster/startrun.js";
 
@@ -10,9 +10,9 @@ const sp = (id, name, folder, machine = null) => ({ id, name, folder, machine })
 const none = () => "";
 
 test("every open space shows by its folder, names and folders crossed or not", () => {
-  const out = spaceFolders([sp("s1", "snelogin", "/h/projects/herdr"), sp("s2", "herdr", "/h/projects/snelogin"), sp("s3", "snevagten", "/h/projects/snevagten")], none);
+  const out = spaceFolders([sp("s1", "acme-login", "/h/projects/herdr"), sp("s2", "herdr", "/h/projects/acme-login"), sp("s3", "acme", "/h/projects/acme")], none);
   assert.deepEqual(out.map((e) => [e.name, e.folder, e.space]), [
-    ["snelogin", "/h/projects/herdr", "s1"], ["herdr", "/h/projects/snelogin", "s2"], ["snevagten", "/h/projects/snevagten", "s3"]]);
+    ["acme-login", "/h/projects/herdr", "s1"], ["herdr", "/h/projects/acme-login", "s2"], ["acme", "/h/projects/acme", "s3"]]);
 });
 
 test("a space with no folder uses where its first terminal is; one with neither is left out", () => {
@@ -61,15 +61,15 @@ test("the plain list: spaces, then recents that have no space", () => {
 
 test("fuzzy: names rank whole, prefix, word start, inside, then letters in order", () => {
   const s = (t) => fuzzyScore("fit", t);
-  assert.ok(s("fit") > s("fitkeep") && s("fitkeep") > s("my-fit") && s("my-fit") > s("outfit") && s("outfit") > s("f-i-t"));
-  assert.equal(fuzzyScore("fit", "snevagten"), 0);
-  assert.equal(fuzzyScore("FK", "fitkeep") > 0, true);
+  assert.ok(s("fit") > s("fitkit") && s("fitkit") > s("my-fit") && s("my-fit") > s("outfit") && s("outfit") > s("f-i-t"));
+  assert.equal(fuzzyScore("fit", "acme"), 0);
+  assert.equal(fuzzyScore("FK", "fitkit") > 0, true);
 });
 
 test("typed text finds folders on disk and in the list, best first", () => {
   const entries = listFolders({ spaces: spaceFolders([sp("s", "skills", "/h/projects/skills")], none), recents: [] });
-  const found = ["/h/projects/fitkeep", "/h/projects/snevagten/fit-api", "/h/projects/skills", "/h/projects/other"];
-  assert.deepEqual(matchFolders("fit", entries, found).map((e) => e.folder), ["/h/projects/fitkeep", "/h/projects/snevagten/fit-api"]);
+  const found = ["/h/projects/fitkit", "/h/projects/acme/fit-api", "/h/projects/skills", "/h/projects/other"];
+  assert.deepEqual(matchFolders("fit", entries, found).map((e) => e.folder), ["/h/projects/fitkit", "/h/projects/acme/fit-api"]);
   assert.deepEqual(matchFolders("skil", entries, found).map((e) => [e.folder, e.space]), [["/h/projects/skills", "s"]]);
   assert.equal(matchFolders("", entries, found).length, 1);
 });
@@ -81,12 +81,14 @@ test("a typed ~ path becomes a folder entry", () => {
 });
 
 test("what is scanned: the parents of spaces and recents, and the folders themselves", () => {
-  const e = [{ folder: "/h/projects/skills" }, { folder: "/h/projects/snevagten" }, { folder: "/x", machine: "box" }];
-  assert.deepEqual(scanParents(e).deep.sort(), ["/h/projects", "/h/projects/skills", "/h/projects/snevagten"]);
+  const e = [{ folder: "/h/projects/skills" }, { folder: "/h/projects/acme" }, { folder: "/x", machine: "box" }];
+  assert.deepEqual(scanParents(e).deep.sort(), ["/h/projects", "/h/projects/acme", "/h/projects/skills"]);
   // the home folder is read one level deep only
   const h = scanParents([{ folder: "/h/projects" }], "/h");
   assert.deepEqual(h, { deep: ["/h/projects"], shallow: "/h" });
   assert.deepEqual(parseFound("/a/b\n\nnoise\n/a/b/\n/c"), ["/a/b", "/c"]);
+  // another machine's space: its parent is looked for here too (the same folders in both places), not the folder itself
+  assert.deepEqual(scanParents([{ folder: "/h/projects/api", machine: "desk" }], "/h"), { deep: ["/h/projects"], shallow: null });
 });
 
 test("remembering a folder: newest first, once, capped; old prefs have none", () => {
@@ -103,9 +105,9 @@ test("New run finds the open space on its folder: its own folder, else a termina
   const tabbed = (id, name, folder, tabs, machine = null) => ({ ...sp(id, name, folder, machine), tabs: tabs.map((t) => ({ id: t })) });
   const pane = (tab, cwd) => ({ tab, cwd });
   // stale folder, its only terminal live in the picked folder
-  const stale = [tabbed("sp840046", "skills", "/h/worktrees/snevagten-api/issue-1235", ["t1"])];
+  const stale = [tabbed("sp840046", "skills", "/h/worktrees/acme-api/issue-1235", ["t1"])];
   assert.equal(spaceAt("/h/projects/skills", stale, [pane("t1", "/h/projects/skills")]), "sp840046");
-  assert.equal(spaceAt("/h/projects/skills", stale, [pane("t1", "/h/worktrees/snevagten-api/issue-1235")]), null);
+  assert.equal(spaceAt("/h/projects/skills", stale, [pane("t1", "/h/worktrees/acme-api/issue-1235")]), null);
   // a space whose own folder matches wins over another space with a live pane there
   const both = [tabbed("other", "a", "/h/x", ["t2"]), tabbed("own", "b", "/h/projects/skills", ["t3"])];
   assert.equal(spaceAt("/h/projects/skills", both, [pane("t2", "/h/projects/skills")]), "own");
@@ -121,4 +123,39 @@ test("New run finds the open space on its folder: its own folder, else a termina
   assert.equal(spaceAt("/h/projects/skills/", [sp("s1", "a", "/h/projects/skills")], []), "s1");
   assert.equal(spaceAt("/h/projects/skills", [sp("s2", "a", "/h/projects/skills/")], []), "s2");
   assert.equal(spaceAt("/h/projects/skills", [tabbed("s3", "a", "", ["t7"])], [pane("t7", "/h/projects/skills/")]), "s3");
+});
+
+test("a machine's name in the query keeps only its folders; local/here this machine's", () => {
+  const e = (folder, machine = null) => ({ folder, name: folder.split("/").at(-1), space: "x", machine });
+  const entries = [e("/h/projects/api"), e("/h/projects/api", "desk"), e("/h/projects/skills", "desk"), e("/h/work/api")];
+  const pick = (q) => matchFolders(q, entries, [], 20, "/h").map((x) => `${x.machine ?? "here"}:${x.folder}`);
+  assert.deepEqual(pick("desk ap"), ["desk:/h/projects/api"]);
+  assert.deepEqual(pick("desk:ap"), ["desk:/h/projects/api"]);
+  assert.equal(pick("de ap").length, 0, "a prefix is not a machine: both words must match a folder");
+  assert.deepEqual(pick("DESK ap"), ["desk:/h/projects/api"], "any case");
+  assert.deepEqual(pick("local ap"), ["here:/h/projects/api", "here:/h/work/api"]);
+  assert.deepEqual(pick("desk"), [], "one word is a folder's name, not a machine");
+  assert.equal(pick("ap").length, 3);
+  // a path piece tells two folders of one name apart
+  assert.deepEqual(pick("work/ap"), ["here:/h/work/api"]);
+  assert.deepEqual(pick("work ap"), ["here:/h/work/api"]);
+  assert.deepEqual(machineQuery("desk ap", ["desk"]), { machine: "desk", text: "ap" });
+  assert.deepEqual(machineQuery("ap", ["desk"]), { machine: undefined, text: "ap" });
+});
+
+test("a word is a path match only as a substring; scattered letters along a path are not", () => {
+  const e = (folder) => ({ folder, name: folder.split("/").at(-1), space: "x", machine: null });
+  const entries = [e("/h/projects/photo-site"), e("/h/projects/api"), e("/h/projects/web")];
+  assert.deepEqual(matchFolders("po", entries, [], 20, "/h").map((x) => x.folder), ["/h/projects/photo-site"]);
+  assert.equal(matchFolders("projects", entries, [], 20, "/h").length, 3, "a path word still finds them");
+});
+
+test("another machine's spaces: their own ids, and spaceAt/newSpaceId per machine", () => {
+  assert.equal(ownId("desk/sp-skills", "desk"), "sp-skills");
+  assert.equal(ownId("sp-skills", null), "sp-skills");
+  const open = [{ id: "desk/sp-skills", folder: "/h/proj/skills", machine: "desk" }];
+  assert.equal(spaceAt("/h/proj/skills", open, [], "desk"), "desk/sp-skills");
+  assert.equal(spaceAt("/h/proj/skills", open, []), null, "not this machine's");
+  assert.equal(newSpaceId("/h/work/skills", open, "desk"), "sp-skills-work");
+  assert.equal(newSpaceId("/h/work/skills", open), "sp-skills", "another machine's ids do not clash here");
 });

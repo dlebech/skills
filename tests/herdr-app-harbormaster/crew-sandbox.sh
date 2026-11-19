@@ -28,7 +28,8 @@
 #   env             print the environment lines (eval them to run herdr-app/hc by hand)
 #   down            stop the scratch app, its Xvfb and the scratch hc session; the scratch dir stays
 #
-# Fake runs (folder "skills", so the default self review flow), each with a live "orchestrator"
+# Fake runs (folder "skills", so the default self review flow; folder "acme" is set to peer in the
+# scratch app's shared state), each with a live "orchestrator"
 # terminal (a sleeping sh, labelled role=orchestrator and with set-status.sh's labels):
 #   run-stats     finished, PR dlebech/skills#42 (merged)                 -> Done
 #   pane-follows  finished, PR #41 (merged), related #40                  -> Done
@@ -39,7 +40,7 @@
 #                 run that is hidden or a restarted app starts over); hide the others with role= meanwhile.
 #   busy-run      running, both tasks implementing, claims C1 proven and C2 not yet (Proven 1/2), its orchestrator reporting working (OSC 7501),
 #                 status.json dated 75 minutes back                      -> Working, spinner, "t1 implementing 1h15m · +1 task"
-#   review-wait   finished, folder "snevagten" (peer), cli/cli#14846 with a reviewer requested
+#   review-wait   finished, folder "acme" (peer), cli/cli#14846 with a reviewer requested
 #                                                                         -> Waiting on others, "review from BagToad"
 #   asks-you      waiting for user, no PR                                -> Needs you, red, with its wait age
 #   gone-run      running, its orchestrator terminal killed              -> Needs you, "orchestrator gone", a row of its own
@@ -47,28 +48,28 @@
 #   parked-open   parked 3 days ago, open PR cli/cli#14927                 -> Parked, "review proof → merge · 3d…"
 #   parked-merged parked 5 days ago, PR #42 (merged)                      -> Parked, "merged — close run · 5d…"
 # For the Needs-you box's lines and buttons (t11), read-only gh views of real PRs:
-#   approved-merge  finished, folder "snevagten" (peer), snevagten/snelogin#1308 and #1372,
-#                   approved by a colleague                               -> approved — merge
-#   approved-plan-open  running, folder "snevagten" (peer), 1/2 tasks done, fake-two/api#44 (approved, no comments)
+#   approved-merge  finished, folder "acme" (peer), fake-two/web#80 and #81 (approved, green, no
+#                   comments, through fake-gh.sh)                         -> approved — merge
+#   approved-plan-open  running, folder "acme" (peer), 1/2 tasks done, fake-two/api#44 (approved, no comments)
 #                       -> Needs you "approved · plan open", the box: "merge once the plan is done (1/2 tasks)"
-#   peer-ask      finished, folder "snevagten" (peer), fake-two/api#72 with no reviewer, 5 claims, its Reviewed line two commits
-#                 behind -> request review, the AI-review caveat, Re-review first and the picker (mfalkenbrink, martinioyo,
+#   peer-ask      finished, folder "acme" (peer), fake-two/api#72 with no reviewer, 5 claims, its Reviewed line two commits
+#                 behind -> request review, the AI-review caveat, Re-review first and the picker (kim, lars,
 #                 anna from fake-gh.sh); a chip's `gh pr edit --add-reviewer` goes to <scratch>/gh-calls.txt only
 #   red-ci        finished, cli/cli#14927 (a public PR with a failing check) -> red CI, then
 #                 review proof → merge
-#   review-proof  finished, dlebech/wapi-beatbox#1, proof.md T2 1/2 pass  -> review proof → merge
+#   review-proof  finished, fake-two/app#90 (open, unreviewed, green), proof.md T2 1/2 pass  -> review proof → merge
 #   no-shot       finished, no PR, an old run's proof.md (task sections, no claims) with a Checks line
 #                                                                         -> its pane's Claims section is just the checks line
 #   claims-run    running, t1 merged, t2 implementing; plan.md's ## Claims (4, tier T2, C4 bar T3) and
 #                 proof.md's C1 proven (2 shots, 2 tests), C2 a pass without a shot, C4 failed, C3 still
 #                 being proved                                           -> Claims "1 of 4 proven · not yet: …" (#47)
-#   claims-merge  finished, folder "snevagten" (peer), fake-two/api#65 approved and green; 5 claims: C1 and C4
+#   claims-merge  finished, folder "acme" (peer), fake-two/api#65 approved and green; 5 claims: C1 and C4
 #                 proven with a shot, C2 a pass without its shot, C3 partial, C5 unproven -> approved — merge,
 #                 the box's merge ask: C2, C3, C5 worth a look, +2 more, the checks line (t10)
 #   reviewed-current  as claims-merge, its Reviewed line at the branch's HEAD (claims-merge itself: two commits since, amber)
 #   report-run    finished, no PR, shared/final-report.md (+ t1-report.md) -> finished — read and close
 #   asks-question running, question.md with Options, Recommended and Blocks -> a question box
-#   asks-and-pr   finished plan (2/2), open self-flow PR dlebech/wapi-beatbox#1 with proof, and a
+#   asks-and-pr   finished plan (2/2), open self-flow PR fake-two/app#90 with proof, and a
 #                 question.md                                            -> a question box with "Also needs you" under it
 #   plan-open     running, 1/3 tasks done, the same open PR                -> Working: no "review proof → merge" until the plan is done
 #   ready-run     finished, fake-two/api#60 (one green check), proof T1 2/2 pass -> review proof → merge;
@@ -77,8 +78,8 @@
 #   partial-run   the same with t2 partial (#61)                         -> read: "Proof read · 1/2 pass, 1 partial …"
 # For an approval over two PRs with comments (t17), fake PRs through fake-gh.sh (installed as
 # <scratch>/bin/gh, first on the app's PATH; it answers only owner "fake-two", the real gh the rest):
-#   two-prs       running, folder "snevagten" (peer), fake-two/api#1799 (2 comments) and fake-two/web#1372 (9; one PR per repo in status.json),
-#                 both approved by mfalkenbrink. Its orchestrator's state follows the file
+#   two-prs       running, folder "acme" (peer), fake-two/api#1799 (2 comments) and fake-two/web#1372 (9; one PR per repo in status.json),
+#                 both approved by kim. Its orchestrator's state follows the file
 #                 <scratch>/state-two-prs ("working" or "idle"; none = idle): `echo working > ...`
 #                 as the orchestrator does after Handle them
 # CREW_ORCH_STATE=idle makes every fake orchestrator report a status, so it is an agent Herdr can focus
@@ -186,8 +187,8 @@ make_runs() {
   # Dated back, so the first sight of its tasks (seeded by status.json's updated) shows an age.
   local sj=$S/runs/skills/busy-run/status.json
   jq --arg u "$(date -u -d '75 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" '.updated = $u' "$sj" >"$sj.tmp" && mv "$sj.tmp" "$sj"
-  mkdir -p "$S/work/snevagten" && git -C "$S/work/snevagten" init -q
-  RUN_FOLDER=$S/work/snevagten mkrun review-wait finished fix "Review wait" "${day}T05:00:00Z" 2/2 merged merged --progress "PR up for review" \
+  mkdir -p "$S/work/acme" && git -C "$S/work/acme" init -q
+  RUN_FOLDER=$S/work/acme mkrun review-wait finished fix "Review wait" "${day}T05:00:00Z" 2/2 merged merged --progress "PR up for review" \
     --pr cli/cli https://github.com/cli/cli/pull/14846
   mkdir -p "$S/runs/skills/asks-you"
   printf '# Which database should t2 use?\n\n## Question\nPostgres or SQLite?\n\n## Options\n1. Postgres\n2. SQLite\n\n## Recommended\n1, it is what production runs.\n' >"$S/runs/skills/asks-you/question.md"
@@ -211,16 +212,16 @@ make_runs() {
   parked=$(jq -r .terminal "$S/runs/skills/parked-merged/orchestrator.json")
   printf '%s\tfinished\n' "$(date -u -d '5 days ago' +%Y-%m-%dT%H:%M:%SZ)" >"$S/runs/skills/parked-merged/parked"
   hc label "$parked" role= >/dev/null
-  RUN_FOLDER=$S/work/snevagten mkrun two-prs running feat "Two PRs" "${day}T04:00:00Z" 2/2 merged merged --progress "PRs approved" \
+  RUN_FOLDER=$S/work/acme mkrun two-prs running feat "Two PRs" "${day}T04:00:00Z" 2/2 merged merged --progress "PRs approved" \
     --pr fake-two/api https://github.com/fake-two/api/pull/1799 --pr fake-two/web https://github.com/fake-two/web/pull/1372
-  RUN_FOLDER=$S/work/snevagten mkrun approved-merge finished feat "Approved merge" "${day}T07:00:00Z" 2/2 merged merged --progress "PRs approved" \
-    --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1308 --pr snevagten/snelogin https://github.com/snevagten/snelogin/pull/1372
-  RUN_FOLDER=$S/work/snevagten mkrun approved-plan-open running feat "Approved plan open" "${day}T07:10:00Z" 1/2 merged planned --progress "PR approved, t2 still to do" \
+  RUN_FOLDER=$S/work/acme mkrun approved-merge finished feat "Approved merge" "${day}T07:00:00Z" 2/2 merged merged --progress "PRs approved" \
+    --pr fake-two/web https://github.com/fake-two/web/pull/80 --pr fake-two/web https://github.com/fake-two/web/pull/81
+  RUN_FOLDER=$S/work/acme mkrun approved-plan-open running feat "Approved plan open" "${day}T07:10:00Z" 1/2 merged planned --progress "PR approved, t2 still to do" \
     --pr fake-two/api https://github.com/fake-two/api/pull/44
   mkrun red-ci finished fix "Red CI" "${day}T07:30:00Z" 2/2 merged merged --progress "PR up, CI red" \
     --pr cli/cli https://github.com/cli/cli/pull/14927
   mkrun review-proof finished feat "Review proof" "${day}T08:00:00Z" 2/2 merged merged --progress "PR up with proof" \
-    --pr dlebech/wapi-beatbox https://github.com/dlebech/wapi-beatbox/pull/1
+    --pr fake-two/app https://github.com/fake-two/app/pull/90
   printf '# Proof: review-proof\nTier: T2\n\n## t1 build\nTier: T1\nChecked: tests\nResult: pass — 12 tests\n\n## t2 polish\nTier: T1\nChecked: tests\nResult: fail — 1 of 9 fails\n' >"$S/runs/skills/review-proof/proof.md"
   # A T2 pass with no screenshot among its Files (t22): its pill reads "no screenshot", amber.
   mkrun no-shot finished feat "No shot" "${day}T07:30:00Z" 2/2 merged merged --progress "proof written"
@@ -237,7 +238,7 @@ make_runs() {
   printf '# Proof: claims-run\nTier: T2\nChecks: green — 1497 tests, build, lint, CI\n\n## C1 Drag a card to reorder the list\nResult: pass — dragging moves the card\nShot: shared/proof/t1-drag.png, shared/proof/t1-drop.png\nTest: reorder moves the card — pass\nTest: reorder keeps focus — pass\n\n## C2 The new order is saved across restarts\nResult: pass — 2 tests\nTest: order persists — pass\nTest: order survives a reload — pass\n\n## C4 A guided tour of reordering\nResult: fail — the tour stops at step 2\nTest: tour reaches the end — fail\n' >"$cr/proof.md"
   # An approved PR whose run has claims (t10): the box's merge ask shows the claims worth a look.
   local cm=$S/runs/skills/claims-merge
-  RUN_FOLDER=$S/work/snevagten mkrun claims-merge finished feat "Claims merge" "${day}T08:45:00Z" 2/2 merged merged --progress "PR approved" \
+  RUN_FOLDER=$S/work/acme mkrun claims-merge finished feat "Claims merge" "${day}T08:45:00Z" 2/2 merged merged --progress "PR approved" \
     --pr fake-two/api https://github.com/fake-two/api/pull/65
   printf '\nProof tier: T2\n\n## Claims\n- C1 Drag a card to reorder the list — AC 3 — tasks t1\n- C2 The new order is saved across restarts — AC 4 — tasks t1\n- C3 Undo puts the card back — AC 5 — tasks t2\n- C4 Keyboard reordering with Alt+arrows — AC 6 — tasks t2\n- C5 Screen readers announce the move — AC 7 — tasks t2\n' >>"$cm/plan.md"
   # Decisions the orchestrator made itself, and one from the user, for a finished run's Decisions lines (rp3d t3).
@@ -246,7 +247,7 @@ make_runs() {
   convert -size 640x400 xc:'#22324a' -fill '#e8eef7' -pointsize 34 -annotate +40+200 'Card dragged to row 2' "$cm/shared/proof/t1-drag.png"
   printf '# Proof: claims-merge\nTier: T2\nChecks: green — 1497 tests, build, lint, CI\n\n## C1 Drag a card to reorder the list\nResult: pass — dragging moves the card\nShot: shared/proof/t1-drag.png\nTest: reorder moves the card — pass\n\n## C2 The new order is saved across restarts\nResult: pass — 2 tests\nTest: order persists — pass\n\n## C3 Undo puts the card back\nResult: partial — undo works once, not twice\nTest: undo once — pass\n\n## C4 Keyboard reordering with Alt+arrows\nResult: pass — 3 tests\nShot: shared/proof/t1-drag.png\n' >"$cm/proof.md"
   # The branch's Reviewed line: claims-merge was reviewed two commits ago (amber), reviewed-current at its HEAD.
-  local sn=$S/work/snevagten g="git -C $S/work/snevagten -c user.name=t -c user.email=t@t"
+  local sn=$S/work/acme g="git -C $S/work/acme -c user.name=t -c user.email=t@t"
   $g checkout -q -B claims-merge && $g commit -q --allow-empty -m reviewed && local rsha; rsha=$($g rev-parse --short HEAD)
   echo 1 >"$sn/after" && $g add after && $g commit -q -m "after 1" && echo 2 >"$sn/after" && $g commit -q -am "after 2"
   sed -i "s/^Checks: .*/&\nReviewed: $rsha final review — 9 findings, all fixed/" "$cm/proof.md"
@@ -289,11 +290,11 @@ Low; labels only.
 t4 shots, t5 docs
 Q
   mkrun asks-and-pr running feat "Asks and PR" "${day}T09:20:00Z" 2/2 merged merged --progress "waiting on a decision" \
-    --pr dlebech/wapi-beatbox https://github.com/dlebech/wapi-beatbox/pull/1
+    --pr fake-two/app https://github.com/fake-two/app/pull/90
   cp "$S/runs/skills/review-proof/proof.md" "$S/runs/skills/asks-and-pr/proof.md"
   cp "$S/runs/skills/asks-question/question.md" "$S/runs/skills/asks-and-pr/question.md"
   mkrun plan-open running feat "Plan open" "${day}T09:10:00Z" 1/3 merged implementing --progress "t2 implementing" \
-    --pr dlebech/wapi-beatbox https://github.com/dlebech/wapi-beatbox/pull/1
+    --pr fake-two/app https://github.com/fake-two/app/pull/90
   # Ready to merge (t23): a self-flow PR with one green check, a finished plan and a proof that
   # passes in full (ready-run), or with one task partial (partial-run). Their proofs start unread.
   mkrun ready-run finished feat "Ready run" "${day}T08:30:00Z" 2/2 merged merged --progress "PR up with proof" \
@@ -315,6 +316,8 @@ case $cmd in
     mkdir -p "$S/bin" && cp "$(dirname "$0")/fake-gh.sh" "$S/bin/gh" && sed -i 's|\$REAL_GH|'"$(command -v gh)"'|' "$S/bin/gh"
     [ ! -e "$S/runs" ] || { echo "crew-sandbox: $S/runs exists; run down and remove it, or use a new dir" >&2; exit 1; }
     mkdir -p "$S/home" "$S/runs"
+    # The peer-flow runs' folder: no folder is peer by default (attention.js DEFAULT_FLOWS).
+    echo '{"harbormaster.reviewFlows":{"acme":"peer"}}' >"$S/home/shared.json"
     for f in layouts themes settings.json keys.json; do
       [ ! -e "$HOME/.config/herdr-app/$f" ] || cp -r "$HOME/.config/herdr-app/$f" "$S/home/"
     done

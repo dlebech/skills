@@ -13,7 +13,8 @@
 
 import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
-import { props, theme, nextCommand, checking, openOverlay, closeOverlay, shared, setShared } from "herdr";
+import { props, theme, nextCommand, checking, openOverlay, closeOverlay } from "herdr";
+import { shared, setShared, oneRead } from "./store.js";
 import { expireNote } from "./note.js";
 import { loadRuns, cachedRuns, refreshPrs, markOpened, refreshReviewed, isClosed, isParked, newestFirst, stats } from "./data.js";
 import { facts, crewAddresses, captainOf, adrift, agentNames, agentStatus, programOf } from "./live.js";
@@ -34,7 +35,8 @@ import { statsView } from "./stats.js";
 import { weekReads } from "./bridgeweek.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
 import { observeTelling } from "./telling.js";
-import { parseCommand, runNamed, newRunArgs } from "./commands.js";
+import { parseCommand, runNamed, newRunArgs, flowArgs } from "./commands.js";
+import { setReviewFlow } from "./tracking.js";
 import { openNewRun, initNewRun, newRunView } from "./newrun.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
@@ -47,6 +49,7 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "harbor
 //   show-stats[:<branch | run dir>]                         open the Stats view (a run: focused on it)
 //   show-overview[:<w>x<h>], show-crew                      open the Bridge (default 560x900, so one column), or the Crew block
 //   new-run[:repo=<name or folder> kind=<issue|review|describe> input=<text>]   the + New run dialog (a key binding's command)
+//   set-flow:<folder name>=<peer|self|default>             a folder's review flow, as a card's Review toggle sets it
 //   close-popup                                            close it
 //   open-run:key=<run key>                                 a toast's click (telling.js) for a run whose
 //                                                         orchestrator is gone: its card, kept open until closed
@@ -125,6 +128,7 @@ async function listen(view, cx) {
       else if (name === "show-crew") showView("crew", "crew", 360, 640);
       else if (name === "new-run") openNewRun(newRunArgs(arg));
       else if (name === "close-popup") closePopup();
+      else if (name === "set-flow") { const f = flowArgs(arg); if (f) setReviewFlow(f.key, f.flow); else console.log(`harbormaster: set-flow wants <folder>=peer|self|default, got "${arg}"`); }
       else if (name === "open-run") { markOpened(runNamed(view.runs, arg)); showPopup(view, arg, true); }
       cx.notify();
     } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }
@@ -259,7 +263,9 @@ export default class Harbormaster extends View {
   render(cx) {
     const p = props() ?? {};
     const t = theme();
-    const el = this.view(p, t);
+    // Each shared key is read from Herdr once per draw (store.js): the closed runs' cards alone
+    // read the PR store over a hundred times.
+    const el = oneRead(() => this.view(p, t));
     startCopies(this, cx); // the proof images this render asked for
     weekReads(this, cx); // the Bridge's This week block, if this render drew it
     return el;

@@ -187,8 +187,10 @@ fi
 if [ -n "$terminal" ]; then
   labels=$(jq -r '"run.status=\(.state)", "run.type=\(.type // "")", "run.autonomy=\(.autonomy // "L0")", "run.topic=\(.topic // "")", "progress=\(.progress // "")", "run.prs=\([.prs[].url] | join(" "))"' \
     "$dir/status.json")
-  mapfile -t labels <<<"$labels"
-  hc label "$terminal" "${labels[@]}" >/dev/null 2>&1 ||
+  # A loop rather than mapfile, which macOS's bash 3.2 lacks.
+  label_args=()
+  while IFS= read -r line; do label_args+=("$line"); done <<<"$labels"
+  hc label "$terminal" "${label_args[@]}" >/dev/null 2>&1 ||
     echo "warning: could not label terminal $terminal" >&2
 fi
 if [ -n "$tab" ]; then

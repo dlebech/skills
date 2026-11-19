@@ -54,7 +54,8 @@ fm() { # fm <file> <key>
   ' <"$1" 2>/dev/null || true
 }
 
-declare -A seen
+# Paths already listed, one per line; a string rather than declare -A, which macOS's bash 3.2 lacks.
+seen=$'\n'
 n=0
 out=()
 for entry in ${dirs[@]+"${dirs[@]}"}; do
@@ -65,8 +66,8 @@ for entry in ${dirs[@]+"${dirs[@]}"}; do
   for f in "$dir"/*/SKILL.md; do
     [ -f "$f" ] || continue
     real=$(readlink -f "$f" 2>/dev/null) || continue
-    [ -z "${seen[$real]:-}" ] || continue
-    seen[$real]=1
+    case $seen in *$'\n'"$real"$'\n'*) continue ;; esac
+    seen+="$real"$'\n'
     name=$(fm "$f" name)
     [ -n "$name" ] || name=$(basename "$(dirname "$real")")
     lower=$(printf '%s' "$prefix$name" | tr 'A-Z' 'a-z')

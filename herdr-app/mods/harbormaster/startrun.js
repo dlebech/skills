@@ -45,12 +45,12 @@ const LINE_ROLES = ["orchestrator", ...ROLES];
 
 // "implementer=sonnet reviewer=opus specialist=opus autonomy=L1": the line the user edits.
 // A role with no model (another agent's default) is left out. A role's value is a model of the
-// run's agent, or `<agent>:<model>` for another agent (`implementer=opencode:strata/qwen3`), or an agent alone.
+// run's agent, or `<agent>:<model>` for another agent (`implementer=opencode:lab/qwen3`), or an agent alone.
 export const profileText = (p) => [...LINE_ROLES.filter((r) => p[r]).map((r) => `${r}=${p[r]}`), `autonomy=${p.autonomy}`].join(" ");
 
 const AGENT_IDS = new Set(["claude", "pi", "opencode", "codex"]);
 
-// A role's value → {kind, model}: "opencode:strata/x" → opencode's strata/x; "pi" → pi's default;
+// A role's value → {kind, model}: "opencode:lab/x" → opencode's lab/x; "pi" → pi's default;
 // anything else a model of the run's agent (a "/" is a provider, as in opencode/big-pickle, never an agent).
 export function roleValue(value, agent = "claude") {
   const v = String(value ?? "");
@@ -69,11 +69,11 @@ const subsequence = (q, s) => { let i = 0; for (const c of s) if (c === q[i]) i+
 
 // The models that match what was typed, best first, as role values for a run of `agent`: from each
 // installed agent's list (`models`: {opencode: [...], pi: [...]}) and Claude's names. Typing
-// "qwen3.8flash" finds strata/qwen3.8-flash-next-coder-iq1_m; "opencode:qwen" looks only in opencode's.
+// "qwen3.8flash" finds lab/qwen3.8-flash-next-coder-iq1_m; "opencode:qwen" looks only in opencode's.
 export function matchModels(typed, { agent = "claude", models = {}, installed = ["claude"], max = 4 } = {}) {
   const { kind: only, model } = /^[a-z]+:/.test(typed) ? roleValue(typed, agent) : { kind: null, model: typed };
   const q = norm(model);
-  // A provider-looking prefix that is wrong ("opencode/qwen…" for a strata model) should not hide the rest.
+  // A provider-looking prefix that is wrong ("opencode/qwen…" for a lab model) should not hide the rest.
   const qTail = model.includes("/") ? norm(model.slice(model.indexOf("/") + 1)) : null;
   if (!q) return [];
   const pool = [];
@@ -259,8 +259,10 @@ export const draftsFor = (prefs, repo) => (["herdr", "pending"].includes(prefs?.
 // habit); its own reviewer and autonomy are kept apart, per agent. "direct" is never remembered, and leaves what the repository had.
 // The folder goes first in the recents (newest first, each once, at most RECENT_MAX).
 // The agent is remembered from any run's start; the profile under that agent.
-export function remember(prefs, { kind, profile, repo, drafts, agent = "claude" }) {
-  const folders = [repo, ...(prefs?.folders ?? []).filter((f) => f !== repo)].slice(0, RECENT_MAX);
+// `recent` false (a folder on another machine, `repo` being "<machine>:<folder>"): the recents,
+// which are this machine's folders, are left as they were.
+export function remember(prefs, { kind, profile, repo, drafts, agent = "claude", recent = true }) {
+  const folders = recent ? [repo, ...(prefs?.folders ?? []).filter((f) => f !== repo)].slice(0, RECENT_MAX) : [...(prefs?.folders ?? [])];
   const next = { profile: prefs?.profile ?? null, profiles: { ...(prefs?.profiles ?? {}) }, reviewProfiles: { ...(prefs?.reviewProfiles ?? {}) }, agent: prefs?.agent ?? null, drafts: { ...(prefs?.drafts ?? {}) }, folders };
   if (kind === "captain") return next; // only the folder is remembered
   next.agent = agent;

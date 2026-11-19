@@ -483,7 +483,8 @@ export function nextAction(m, it, id) {
     // Started from here and its run not seen yet (newrun.js reviewStarting): never a second Review.
     if (reviewStarting(it.url)) return div().flex_none().text_size(11).text_color(t.dim).tooltip("Its review run is starting; it shows as reviewing once its run files name the PR").child("starting…");
     if (!it.local) return null;
-    return smallButton(t, `${id}-act`, "Review", "Open New run for this PR: choose the agent and reviewer, then Start", () => openNewRun({ repo: it.local.root, kind: "review", input: String(it.number), url: it.url }));
+    const where = it.local.machine ? ` on ${it.local.machine}` : "";
+    return smallButton(t, `${id}-act`, "Review", `Open New run for this PR${where}: choose the agent and reviewer, then Start`, () => openNewRun({ repo: it.local.root, machine: it.local.machine ?? null, kind: "review", input: String(it.number), url: it.url }));
   }
   return it.action?.url ? smallButton(t, `${id}-act`, it.action.label, it.action.url, () => openUrl(it.action.url)) : null;
 }
@@ -517,7 +518,7 @@ function nextRow(m, it, i, snoozedRow = false) {
 function nextSection(m) {
   const { view, t } = m;
   // Snoozed items (snooze.js) are out of the list and its count; a dim line below unfolds them.
-  if (snoozed() == null) loadSnoozed(); // the next poll shows what it read
+  loadSnoozed(); // read at once when empty, else merged with the other machines at most once a minute; the next poll shows it
   const { shown: items, snoozed: asleep, woke } = splitSnoozed(nextItems({ runs: view.runs.filter((r) => !r.away) }), snoozed(), m.now ?? Date.now());
   if (woke.length) wakeSnoozes(woke);
   const sleepKey = "crew-next-snoozed";

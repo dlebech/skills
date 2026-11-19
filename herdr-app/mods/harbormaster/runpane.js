@@ -9,7 +9,7 @@ import { tokenText, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage } from "./resources.js";
 import { claimCounts, claimsVerdict, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, worthALook, hasClaims } from "./claims.js";
 import { thumbs } from "./viewer.js";
-import { levelChoices } from "./levels.js";
+import { levelChoices, autonomyTip, tierTip } from "./levels.js";
 import { stepText, quietText, flowState, ciState } from "./attention.js";
 import { mergePath } from "./mergepath.js";
 import { paneSections, agentsSummary, auditDecisions } from "./paneorder.js";
@@ -32,7 +32,7 @@ export function cardHeader(view, t, r, f, meta, lead = null) {
       .child(h_flex().gap(6).items_center().min_w(0)
         .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(TYPE.title).text_color(t.foreground), runName(r.branch, r.topic)))
         .when(Boolean(r.type), (el) => el.child(runTypeTag(t, r, r.key)))
-        .children(levelTags(view, t, r, r.key))
+        .children(levelTags(view, t, r, r.key, false, f.closed))
         .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(TYPE.meta).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
       .child(metaLine(t, r, meta, lead)))
     .map(withContext(view, t, `run-${r.key}`, r.terminal))
@@ -278,11 +278,27 @@ const PILL_COLOR = { pass: PASS, fail: (t) => t.blocked, amber: AMBER, dim: () =
 // The type tag on its own, apart from the level tags.
 export const runTypeTag = (t, r, id) => (r.type ? typeTag(t, r.type, `type-${id}`, T(10, "meta")) : null);
 
-export function levelTags(view, t, r, id, short = false) {
+// `closed`: a closed run's levels can't change, so its tags only say what they are, with the
+// definition on hover, and skip the level list: it is a whole card per tag, and the closed list
+// draws one or two per run (proof t1-timing).
+export function levelTags(view, t, r, id, short = false, closed = false) {
+  const tag = closed ? fixedLevelTag : levelTag;
   return [
-    levelTag(view, t, r, "autonomy", `auto-${id}`, short),
-    r.proof?.tier ? levelTag(view, t, r, "tier", `tier-${id}`, short) : null,
+    tag(view, t, r, "autonomy", `auto-${id}`, short),
+    r.proof?.tier ? tag(view, t, r, "tier", `tier-${id}`, short) : null,
   ].filter(Boolean);
+}
+
+// What a tier tag adds under its levels, the same on a closed run's tag: who set it, and the tasks
+// without a proof tier.
+const tierNotes = (r) => [r.proof.tier.byUser && "Set by user", r.tasks.some((k) => !k.proof) && `${plural(r.tasks.filter((k) => !k.proof).length, "task")} not scoped`].filter(Boolean);
+
+function fixedLevelTag(_view, t, r, kind, id) {
+  const cur = kind === "autonomy" ? r.autonomy : r.proof.tier.tier;
+  return div().id(id).flex_none().text_size(T(10, "meta")).font_semibold().px(5).rounded(4).bg(t.raised)
+    .text_color(kind === "autonomy" && cur === "L0" ? t.dim : t.muted)
+    .tooltip(kind === "autonomy" ? autonomyTip(cur) : [tierTip(cur), ...tierNotes(r)].join("\n"))
+    .child(kind === "autonomy" ? cur : `T${cur}`);
 }
 
 // An autonomy ("L1") or proof tier ("T2") tag. Resting the pointer on it opens a card that
@@ -302,7 +318,7 @@ function levelTag(view, t, r, kind, id, short = false) {
     .text_color(pending !== null ? t.foreground : kind === "autonomy" && cur === "L0" ? t.dim : t.muted)
     .child(pending !== null ? `${label(pending)}${short ? "…" : " requested…"}` : label(cur));
   const canAsk = Boolean(r.dir && r.localTerminal);
-  const notes = kind === "tier" ? [r.proof.tier.byUser && "Set by user", r.tasks.some((k) => !k.proof) && `${plural(r.tasks.filter((k) => !k.proof).length, "task")} not scoped`] : [];
+  const notes = kind === "tier" ? tierNotes(r) : [];
   const choice = (c) => {
     const ask = canAsk && !c.current && !c.pending;
     return h_flex().id(`${id}-${c.label}`).gap(8).items_start().px(6).py(4).rounded(5)
@@ -324,7 +340,7 @@ function levelTag(view, t, r, kind, id, short = false) {
       .child(div().px(6).pt(2).pb(4).text_size(11).font_semibold().text_color(t.dim)
         .child(kind === "autonomy" ? "Autonomy: how much the orchestrator decides itself" : "Proof tier: what proves a claim (its bar, unless it names its own)"))
       .children(levelChoices(kind, cur, pending).map(choice))
-      .children(notes.filter(Boolean).map((n) => div().px(6).text_size(10.5).text_color(t.dim).child(n)))
+      .children(notes.map((n) => div().px(6).text_size(10.5).text_color(t.dim).child(n)))
       .child(div().px(6).pt(4).text_size(10.5).text_color(t.dim)
         .child(canAsk ? "Click a level to ask the orchestrator to change it" : "Its orchestrator isn't known here, so it can't be changed from here")));
 }

@@ -10,7 +10,9 @@ repo=$(cd "$(dirname "$0")/../.." && pwd)
 script=$repo/skills/herdr-app-orchestrator/scripts/review-skill.sh
 command -v jq >/dev/null || { echo "needs jq" >&2; exit 1; }
 
-tmp=$(mktemp -d)
+# The real path: on macOS mktemp gives /var/..., a symlink to /private/var/..., and the
+# script prints resolved paths.
+tmp=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$tmp"' EXIT
 failed=0
 check() { # check <description> <got> <want>
@@ -20,6 +22,7 @@ skill() { # skill <dir> <folder> <name> [extra frontmatter line]
   mkdir -p "$1/$2"
   { echo "---"; echo "name: $3"; [ -n "${4:-}" ] && echo "$4"; echo "description: x"; echo "---"; echo body; } >"$1/$2/SKILL.md"
 }
+drop_name() { sed '/^name:/d' "$1" >"$1.new" && mv "$1.new" "$1"; } # without sed -i, which differs on macOS
 fresh() { rm -rf "$tmp/h" "$tmp/wt"; mkdir -p "$tmp/h" "$tmp/wt"; export HOME=$tmp/h; }
 run() { bash "$script" "$@" 2>&1; }
 H=$tmp/h W=$tmp/wt
@@ -40,16 +43,16 @@ fresh; skill "$H/.claude/skills" cr code-review "disable-model-invocation: true"
 check "disable-model-invocation: read-only" "$(run claude "$W" | cut -f3)" "read-only"
 
 fresh; skill "$H/.agents/skills" code-review code-review; mkdir -p "$H/.claude"; ln -s "$H/.agents/skills" "$H/.claude/skills"
-check "symlinked folder listed once" "$(run claude "$W" | wc -l)" "1"
+check "symlinked folder listed once" "$(run claude "$W" | wc -l | tr -d " ")" "1"
 check "symlink resolves to the real path" "$(run claude "$W" | cut -f2)" "$H/.agents/skills/code-review/SKILL.md"
 
 fresh; skill "$H/.claude/skills" a security-review; skill "$H/.claude/skills" b pr-writer; skill "$H/.claude/skills" c Review; skill "$H/.claude/skills" d codereview
 skill "$H/.claude/skills" e my-code-review; skill "$H/.claude/skills" f code-review
 check "ignores others, ranks the rest" "$(run claude "$W" | cut -f1 | tr '\n' ' ')" "code-review Review codereview my-code-review "
 
-fresh; skill "$H/.agents/skills" folder-name ""; sed -i '/^name:/d' "$H/.agents/skills/folder-name/SKILL.md"
+fresh; skill "$H/.agents/skills" folder-name ""; drop_name "$H/.agents/skills/folder-name/SKILL.md"
 check "no name: falls back to non-match" "$(run pi "$W")" ""
-fresh; skill "$H/.agents/skills" code-review ""; sed -i '/^name:/d' "$H/.agents/skills/code-review/SKILL.md"
+fresh; skill "$H/.agents/skills" code-review ""; drop_name "$H/.agents/skills/code-review/SKILL.md"
 check "no name: folder name used" "$(run pi "$W" | cut -f1)" "code-review"
 
 fresh; skill "$H/.agents/skills" code-review code-review

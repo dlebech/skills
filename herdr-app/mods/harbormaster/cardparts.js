@@ -254,7 +254,7 @@ export function confirmBlock(view, t, r, orch, counts, asking, id) {
         try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
       };
       try {
-        if (asking === "delete") await deleteRun(r);
+        if (asking === "delete") await deleteRun(r, { cx });
         else {
           const note = await putAway(r, asking === "park" ? "parked" : "closed", orch);
           if (note) setNote(view, `${r.branch}: ${note}`);
