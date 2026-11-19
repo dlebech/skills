@@ -158,6 +158,8 @@ small things itself and logs them; stops only for direction and design calls"; "
 …"), the run's own highlighted; hovering the type tag names the run's type. Clicking another level
 asks the orchestrator to change it: a message in the run's `inbox/` (`set autonomy to L2` or
 `set proof tier to T2`, and what that implies), written and woken like an answer from the queue.
+A closed run's tags can't change, so hovering one shows only its definition (and, for the tier,
+"Set by user" and the tasks without a tier).
 Harbormaster never changes `status.json` or `plan.md` itself; the orchestrator does, and until they
 show the new level, while its message is unhandled, the tag reads `L2 requested…` (`L2…` on a Crew card; also after a
 reload, because the unread request is still in the inbox; the click itself is kept 15 s in `harbormaster.asked`, so other copies show it too). A run without a known orchestrator lists its levels but can't be changed from here.
@@ -372,7 +374,8 @@ Ready to merge counts claims too: every claim proven or accepted, and no red che
 `Claims` line (not once the run is finished, parked or closed) and a small tier tag by its name (hover
 for every tier as a definition, "T2 — proved with passing tests, their output for the changed
 behaviour, and screenshots or a recording", from the table in `skills/proving/SKILL.md`, the run's own
-highlighted; click another to ask for it, see [Autonomy](#autonomy-and-decided-for-you)). The formats are in
+highlighted; click another to ask for it, see [Autonomy](#autonomy-and-decided-for-you); a closed
+run's tier tag shows only its definition, "Set by user" and the tasks without a tier). The formats are in
 [run-files.md](../skills/herdr-app-orchestrator/references/run-files.md).
 
 ### Where the screenshots come from
