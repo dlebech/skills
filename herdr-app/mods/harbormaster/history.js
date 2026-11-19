@@ -116,8 +116,8 @@ const inQueue = (machine, fn) => {
 // run Harbormaster saw closed, "delete" just before it goes (writes even without timing).
 export function writeHistory(run, how) {
   const closedMs = run.away?.how === "closed" ? run.away.at : null;
-  const id = closedMs ? `${run.key}|${closedMs}` : run.key;
-  if (done.has(id) || (closedMs && done.has(run.key))) return Promise.resolve(true);
+  const id = doneId(run);
+  if (historyWritten(run)) return Promise.resolve(true);
   if (pending.has(id)) return pending.get(id);
   if (how === "closed") {
     if (Date.now() - (failedAt.get(id) ?? 0) < tune.retry) return Promise.resolve(false);
@@ -152,12 +152,39 @@ export function writeHistory(run, how) {
   return p;
 }
 
+// The key a run's line is remembered by once written: a closed run's includes when it closed,
+// so a run closed again later gets a line of its own.
+const doneId = (run) => (run.away?.how === "closed" ? `${run.key}|${run.away.at}` : run.key);
+// Its line is in the history (written or found by this Harbormaster), so there is nothing to wait for.
+export const historyWritten = (run) => done.has(doneId(run)) || (run.away?.how === "closed" && done.has(run.key));
+
 // Before a run's directory goes: waits for the write, but only so long, then lets the
-// delete go ahead (and does not wait again for the same run).
+// delete go ahead (and does not wait again for the same run). `late`: a shared deleteWait()
+// when several runs go at once, so one wait covers them all; else `cx` (a spawn's) times its own.
 const gaveUp = new Set();
-export async function writeHistoryBeforeDelete(run) {
+export async function writeHistoryBeforeDelete(run, { late = null, cx = null } = {}) {
   if (gaveUp.has(run.key)) return false;
-  let timer;
-  const late = new Promise((resolve) => { timer = setTimeout(() => { gaveUp.add(run.key); resolve(false); }, tune.deleteWait); });
-  try { return await Promise.race([writeHistory(run, "delete"), late]); } finally { clearTimeout(timer); }
+  const write = writeHistory(run, "delete");
+  if (historyWritten(run)) return write;
+  const own = late ? null : deleteWait(cx);
+  try {
+    const out = await Promise.race([write, (late ?? own).done.then(() => "late")]);
+    if (out !== "late") return out;
+    gaveUp.add(run.key);
+    return false;
+  } finally { own?.cancel(); }
+}
+
+// The wait before a delete goes ahead without its history line: { done, cancel }. Herdr's
+// runtime has no setTimeout or clearTimeout (calling them throws, which failed every delete),
+// so it is the caller's cx.timer, cancelled once the write wins; without a cx, a sleep process,
+// which can't be cancelled and ends by itself. `done` resolves, never rejects.
+export function deleteWait(cx = null) {
+  if (cx?.timer) {
+    let task;
+    const done = new Promise((resolve) => { task = cx.timer.after(tune.deleteWait, () => resolve(), { owner: null }); });
+    return { done, cancel: () => { try { task?.cancel(); } catch { /* already ended */ } } };
+  }
+  const done = exec("sleep", [String(tune.deleteWait / 1000)], { timeout: tune.deleteWait + 10000 }).then(() => {}, () => {});
+  return { done, cancel() {} };
 }

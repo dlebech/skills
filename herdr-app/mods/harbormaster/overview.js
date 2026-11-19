@@ -268,7 +268,7 @@ function confirmBlock(view, t, r, orch, counts, asking, id) {
         try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
       };
       try {
-        if (asking === "delete") await deleteRun(r);
+        if (asking === "delete") await deleteRun(r, { cx });
         else {
           const note = await putAway(r, asking === "park" ? "parked" : "closed", orch);
           if (note) setNote(view, `${r.branch}: ${note}`);
@@ -1855,6 +1855,15 @@ function bulkRuns(closed, days) {
 const bulkText = (n, age) => (age.days ? `Delete ${plural(n, "run")} closed more than ${age.label} ago`
   : n === 1 ? "Delete the closed run" : `Delete all ${n} closed runs`);
 
+// "3 not deleted: its worktrees are still there… (feat-a, feat-b on box, +1 more)": the runs a
+// bulk delete could not take, grouped by why, so 40 alike read as one reason, not 40 lines.
+function failedText(failed) {
+  const why = new Map();
+  for (const f of failed) why.set(f.error, [...(why.get(f.error) ?? []), `${f.run.branch}${f.run.machine ? ` on ${f.run.machine}` : ""}`]);
+  const runs = (names) => (names.length > 3 ? [...names.slice(0, 3), `+${names.length - 3} more`] : names).join(", ");
+  return `${failed.length} not deleted: ${[...why].map(([error, names]) => `${error} (${runs(names)})`).join("; ")}`;
+}
+
 // "4 on local-ssh, 3 here", or nothing when they are all on this machine.
 function machinesText(runs) {
   const counts = new Map();
@@ -1865,7 +1874,19 @@ function machinesText(runs) {
 
 // The closed runs' header: the fold toggle and, while unfolded, Delete older than a preset;
 // after a preset is clicked, its question with a confirm and Cancel; while deleting, how many.
+// The runs a delete could not take are listed under it, where the click was, not at the list's
+// bottom 40 cards away.
 function closedHeader(view, t, closed) {
+  const row = closedHeaderRow(view, t, closed);
+  if (!view.bulkError) return row;
+  return v_flex().gap(4).child(row)
+    .child(h_flex().id("bulk-error").px(4).gap(6).items_start().text_size(T(11, "meta")).text_color(t.blocked)
+      .child(div().flex_1().min_w(0).child(view.bulkError))
+      .child(div().id("bulk-error-x").flex_none().cursor_pointer().px(3).text_size(T(14, "strong")).text_color(t.dim).hover((s) => s.text_color(t.foreground)).tooltip("Dismiss")
+        .on_click((_e, cx) => { cx.stop_propagation(); view.bulkError = null; cx.notify(); }).child("×")));
+}
+
+function closedHeaderRow(view, t, closed) {
   const toggle = h_flex().id("finished-toggle").gap(6).items_center().cursor_pointer()
     .hover((st) => st.text_color(t.foreground))
     .on_click((_e, cx) => { view.showDone = !view.showDone; view.confirm = view.confirm?.key === BULK_KEY ? null : view.confirm; cx.notify(); })
@@ -1877,7 +1898,7 @@ function closedHeader(view, t, closed) {
   if (!view.showDone) return head;
   // Runs a card's action is already deleting (or putting away) are left to it.
   closed = closed.filter((r) => !view.busy[r.key]);
-  const set = (cx, value) => { view.confirm = value; view.actionError = null; view.actionNote = null; cx.notify(); };
+  const set = (cx, value) => { view.confirm = value; view.actionError = null; view.bulkError = null; view.actionNote = null; cx.notify(); };
   const asking = view.confirm?.key === BULK_KEY ? BULK_AGES.find((a) => a.id === view.confirm.action) : null;
   if (!asking) {
     return head.child(div().flex_1())
@@ -1903,11 +1924,11 @@ function closedHeader(view, t, closed) {
     // As a card's action: owned by no view, notifying through cx.spawn's cx.
     cx.spawn(async (cx) => {
       let failed = [];
-      try { failed = await deleteRuns(runs); } catch (e) { failed = runs.map((run) => ({ run, error: e?.message ?? String(e) })); }
+      try { failed = await deleteRuns(runs, { cx }); } catch (e) { failed = runs.map((run) => ({ run, error: e?.message ?? String(e) })); }
       for (const key of [BULK_KEY, ...runs.map((r) => r.key)]) if (view.busy[key]?.at === at) delete view.busy[key];
       const done = runs.length - failed.length;
       if (done) setNote(view, `Deleted ${plural(done, "closed run")}.`);
-      if (failed.length) view.actionError = `${failed.length} not deleted: ${failed.map((f) => `${f.run.branch}${f.run.machine ? ` on ${f.run.machine}` : ""} (${f.error})`).join("; ")}`;
+      if (failed.length) view.bulkError = failedText(failed);
       view.redraw = true;
       try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
       try { await view.load(cx); } catch { /* the next refresh shows it */ }
