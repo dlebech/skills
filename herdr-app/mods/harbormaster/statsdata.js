@@ -352,6 +352,30 @@ export function timeSplit(m, top = 4) {
   return { working, idle: c.idle ?? 0, parts: all, shown, hidden: all.filter((p) => !shown.includes(p)) };
 }
 
+// The last `days` days across the runs list (mergeRuns): a run counts, whole, when it is live
+// or started, ended or was closed in the window. agentSecs is the agents' own working time
+// summed. The orchestrator's total also holds its agent_wait (waiting on the agents, whose own time is
+// counted) and its user_wait (waiting on you, which waitedSecs shows), so those two are left out of it;
+// another agent's agent_wait is its sub-agents' work, which only that record shows, so it stays. waitedSecs and split
+// come from the summed critical_path, the figures "Where the time goes" uses; `untimed` counts
+// the runs whose timing is not read yet.
+export function weekOf(runs, now = Date.now(), days = 7) {
+  const from = now - days * 86400000;
+  const within = (s) => { const at = Date.parse(s ?? ""); return at >= from && at <= now + 86400000; };
+  const week = arr(runs).filter((r) => r.live || within(r.started) || within(r.ended) || within(r.closed));
+  const path = {};
+  let agentSecs = 0, tokens = 0;
+  for (const r of week) {
+    addCats(path, r.critical_path);
+    tokens += num(r.tokens?.total);
+    for (const a of arr(r.agents)) {
+      const orch = a.role === "orchestrator" || a.name === "orchestrator";
+      agentSecs += Math.max(0, num(a.total) - (orch ? num(a.categories?.agent_wait) + num(a.categories?.user_wait) : 0));
+    }
+  }
+  return { runs: week.length, agentSecs, tokens, waitedSecs: num(path.user_wait), split: timeSplit(path), untimed: week.filter((r) => !r.timed).length };
+}
+
 // The runs list (from mergeRuns, live open runs first): every open run, then the newest `n`
 // others, unless all are asked for; `older` is how many past runs are folded.
 export const RECENT = 5;

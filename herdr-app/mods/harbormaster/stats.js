@@ -14,15 +14,15 @@ import { tokenText, tokenShort, tokenHeadline, tokenDetail } from "./context.js"
 import { runName, typeTag, ago, plural } from "./ui.js";
 
 // Each category's colour, from the theme, so light and dark both work; idle is the track's.
-const COLOR = {
+export const COLOR = {
   model: (t) => t.accent, test: (t) => t.ansi2, lint: (t) => t.ansi3, build: (t) => t.ansi5, install: (t) => t.ansi6,
   // agent_wait is usually the biggest part, so it gets a colour far from model's accent.
   ci_wait: (t) => t.ansi4, agent_wait: (t) => t.ansi13 ?? t.ansi5, review: (t) => t.ansi1, git: (t) => t.ansi11 ?? t.ansi3,
   user_wait: (t) => t.blocked, other: (t) => t.muted, idle: (t) => t.border,
 };
-const LABEL = { ...Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label])), idle: "idle" };
+export const LABEL = { ...Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label])), idle: "idle" };
 const ORDER = [...CATEGORIES.map((c) => c.key), "idle"];
-const colorOf = (t, k) => (COLOR[k]?.(t) ?? t.dim);
+export const colorOf = (t, k) => (COLOR[k]?.(t) ?? t.dim);
 
 const cpuText = (s) => (s == null ? "—" : s >= 3600 ? `${(s / 3600).toFixed(1)} CPU h` : s >= 60 ? `${Math.round(s / 60)} CPU min` : `${Math.round(s)} CPU s`);
 const mbText = (mb) => (mb == null ? "—" : memText(mb * 1024));

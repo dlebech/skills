@@ -515,16 +515,16 @@ test("an approval, a change request and red CI count while the plan is still ope
 // ---- finished review runs: what became of the review ----
 
 // The three real runs (acme-login#1394, acme-api#1821 approved; #1831 pending), as gh's reviews list gave them.
-const REV = { 1394: [["coderabbitai", "COMMENTED"], ["noor", "COMMENTED"], ["dlebech", "APPROVED"]], 1821: [["coderabbitai", "COMMENTED"], ["dlebech", "APPROVED"]],
-  1831: [["dlebech", "PENDING"], ["coderabbitai", "COMMENTED"], ["noor", "COMMENTED"]] };
+const REV = { 1394: [["coderabbitai", "COMMENTED"], ["noor", "COMMENTED"], ["kim", "APPROVED"]], 1821: [["coderabbitai", "COMMENTED"], ["kim", "APPROVED"]],
+  1831: [["kim", "PENDING"], ["coderabbitai", "COMMENTED"], ["noor", "COMMENTED"]] };
 const revPr = (n, state = "OPEN") => prSummary({ number: n, state, url: `https://github.com/o/r/pull/${n}`, author: { login: "x" },
-  reviews: REV[n].map(([login, st]) => ({ author: { login }, state: st })) }, "o/r", "dlebech");
+  reviews: REV[n].map(([login, st]) => ({ author: { login }, state: st })) }, "o/r", "kim");
 const revRun = (o = {}) => run({ type: "rev", phase: "finished", prs: [], ...o });
 const revAssess = (n, state, o = {}) => assess(revRun(), { related: [revPr(n, state)], orch: "idle", pr: read([]), now, ...o });
 
 test("viewerReview: the viewer's pending review wins, else their last submitted one, else none", () => {
   const rs = REV[1831].map(([login, state]) => ({ author: { login }, state }));
-  assert.equal(viewerReview(rs, "dlebech"), "PENDING");
+  assert.equal(viewerReview(rs, "kim"), "PENDING");
   assert.equal(viewerReview(rs, "nobody"), null);
   assert.equal(viewerReview([{ author: { login: "d" }, state: "COMMENTED" }, { author: { login: "d" }, state: "APPROVED" }], "d"), "APPROVED");
   assert.equal(prSummary({ number: 1, state: "OPEN", url: "u", reviews: [] }, "o/r").mine, null);
@@ -546,7 +546,7 @@ test("a review run with a pending review needs you: submit your pending review, 
 test("a review run whose PR is merged or closed is Done whatever the review; no review at all stays finished", () => {
   assert.equal(revAssess(1831, "MERGED").group, "done");
   assert.equal(revAssess(1831, "CLOSED").next.label, "reviewed — close run");
-  const none = assess(revRun(), { related: [prSummary({ number: 5, state: "OPEN", url: "u", reviews: [] }, "o/r", "dlebech")], orch: "idle", pr: read([]), now });
+  const none = assess(revRun(), { related: [prSummary({ number: 5, state: "OPEN", url: "u", reviews: [] }, "o/r", "kim")], orch: "idle", pr: read([]), now });
   assert.deepEqual([none.group, none.reasons[0].text], ["needs", "finished — read and close"]);
   assert.equal(reviewRunStep(revRun(), [{ state: "UNKNOWN", number: null }]), null);
   assert.equal(reviewRunStep(run({ prs: [] }), [revPr(1394)]), null);

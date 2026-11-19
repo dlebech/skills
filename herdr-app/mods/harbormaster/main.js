@@ -1,6 +1,6 @@
-// Harbormaster: an overview of herdr-app-orchestrator runs and the captain watching them.
+// Harbormaster: the Bridge (overview.js) for herdr-app-orchestrator runs, and the captain watching them.
 // props().role picks the view:
-//   (none) / "cards"  the runs overview: totals, what's waiting on you, the captain, run cards with progress, tasks, PRs
+//   (none) / "cards"  the Bridge: totals, the queue, open runs as lines, parked runs, this week, the captain
 //   "run"             one run's card (props().dir and .terminal name it), pinned beside its orchestrator
 //   "crew"            the sidebar: header, Needs-you box, Next for you, runs as one-line rows, agents adrift
 //   "viewer"          a proof screenshot, opened as an overlay by a click on a thumbnail (viewer.js)
@@ -9,7 +9,7 @@
 //   "stats"           where the time goes, tokens, CPU and memory: per run, task and agent, live, and past runs
 // Reads run directories on every machine (data.js) every 5 s, and a run's PRs from gh within ~30 s
 // of its own changes (its files, a push of a PR's head) or of being opened, else every 5 minutes (30 once parked or closed);
-// the crew and the overview also read each crew agent's context size (context.js).
+// the crew and the Bridge also read each crew agent's context size (context.js).
 
 import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
@@ -21,13 +21,18 @@ import { facts, crewAddresses, captainOf, adrift, agentNames, agentStatus, progr
 import { observeWaits } from "./attend.js";
 import { loadContexts } from "./context.js";
 import { hotSignature, sampleVersion } from "./resources.js";
-import { cards, runPane, runOfProps, submitReply, runProps, runFacts, pathInput } from "./overview.js";
+import { cards } from "./overview.js";
+import { runPane, runOfProps, pathInput } from "./runpane.js";
+import { submitReply, forgetSentToCaptain } from "./answers.js";
+import { runProps } from "./cardparts.js";
+import { runFacts } from "./needbox.js";
 import { mergePath } from "./mergepath.js";
 import { sceneFacts, exportFacts } from "./sceneexport.js";
 import { crew } from "./crew.js";
 import { viewer, startCopies } from "./viewer.js";
 import { harbor, rail } from "./harbor.js";
 import { statsView } from "./stats.js";
+import { weekReads } from "./bridgeweek.js";
 import { loadHistory, refreshTimings } from "./statsdata.js";
 import { observeTelling } from "./telling.js";
 import { parseCommand, runNamed, newRunArgs, flowArgs } from "./commands.js";
@@ -42,7 +47,7 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "harbor
 //   show-run:<branch | run dir | orchestrator terminal>   open it (no name: the newest unclosed run); one at a time;
 //                                                         "… details" / "… proof" unfold its question / its Proof list
 //   show-stats[:<branch | run dir>]                         open the Stats view (a run: focused on it)
-//   show-overview, show-crew                               open the runs overview, or the Crew block
+//   show-overview[:<w>x<h>], show-crew                      open the Bridge (default 560x900, so one column), or the Crew block
 //   new-run[:repo=<name or folder> kind=<issue|review|describe> input=<text>]   the + New run dialog (a key binding's command)
 //   set-flow:<folder name>=<peer|self|default>             a folder's review flow, as a card's Review toggle sets it
 //   close-popup                                            close it
@@ -50,7 +55,7 @@ const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "harbor
 //                                                         orchestrator is gone: its card, kept open until closed
 // Every shown Harbormaster copy hears a command, so the popup's id and time are in shared state and
 // a copy that sees the same command opened a moment ago leaves it alone (and one that lost a race closes its own).
-// The popup's own copy doesn't listen, so a Harbormaster copy that isn't the popup (the Crew block or the overview) must be shown. A popup nobody closed goes
+// The popup's own copy doesn't listen, so a Harbormaster copy that isn't the popup (the Crew block or the Bridge) must be shown. A popup nobody closed goes
 // after POPUP_LIMIT.
 const POPUP = "harbormaster.popup";
 const POPUP_LIMIT = 60000;
@@ -97,7 +102,7 @@ function showStats(view, arg) {
   setShared(POPUP, { id, at: Date.now(), arg: key });
 }
 
-// The runs overview (role "cards") or the Crew block (role "crew", sidebar-narrow) as the
+// The Bridge (role "cards") or the Crew block (role "crew", sidebar-narrow) as the
 // same brief popup, for screenshots of their cards.
 function showView(key, role, width, height, extra = {}) {
   const cur = shared(POPUP);
@@ -119,7 +124,7 @@ async function listen(view, cx) {
       const { name, arg } = parseCommand(c);
       if (name === "show-run") showPopup(view, arg);
       else if (name === "show-stats") showStats(view, arg);
-      else if (name === "show-overview") showView("overview", "cards", 560, 900);
+      else if (name === "show-overview") { const [w, h] = String(arg ?? "").split("x").map(Number); showView("overview", "cards", w || 560, h || 900); }
       else if (name === "show-crew") showView("crew", "crew", 360, 640);
       else if (name === "new-run") openNewRun(newRunArgs(arg));
       else if (name === "close-popup") closePopup();
@@ -184,11 +189,15 @@ export default class Harbormaster extends View {
     // compare a few references instead of serialising every run twice per copy.
     const changed = !sameItems(runs, this.runs) || JSON.stringify(decisions) !== JSON.stringify(this.decisions)
       || errors.join() !== this.errors.join() || hot !== this.hot;
+    // A resume's busy mark ends once its run is no longer parked or closed (cardparts.js confirmBlock).
+    let freed = false;
+    for (const [key, b] of Object.entries(this.busy)) if (b.resume && !runs.some((r) => r.key === key && r.away)) { delete this.busy[key]; freed = true; }
     this.hot = hot;
     this.runs = runs;
     this.decisions = decisions;
+    forgetSentToCaptain(decisions);
     this.errors = errors;
-    if (changed) cx.notify();
+    if (changed || freed) cx.notify();
     return runs;
   }
 
@@ -212,19 +221,19 @@ export default class Harbormaster extends View {
     expirePopup();
     cx.spawn(async (cx) => {
       const runs = await this.load(cx);
-      // The crew and the overview show each crew agent's context size; the harbor and stats do not.
+      // The crew and the Bridge show each crew agent's context size; the harbor and stats do not.
       if (props()?.role !== "harbor" && props()?.role !== "harbor-rail" && props()?.role !== "stats") {
         const contexts = await loadContexts(crewAddresses(facts()));
         if (JSON.stringify(contexts) !== JSON.stringify(this.contexts)) { this.contexts = contexts; cx.notify(); }
       }
       const ctx = facts();
       // Toasts and the decisions seen: from the copies that poll for the whole window only (the
-      // Crew block, the overview, the sea layout's harbor; the store's claim keeps it to one toast).
+      // Crew block, the Bridge, the sea layout's harbor; the store's claim keeps it to one toast).
       const role = props()?.role;
       if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) {
         try { observeTelling(runs, ctx); } catch (e) { console.log(`harbormaster: telling failed: ${e?.message ?? e}`); }
       }
-      // Harbor 3D's facts file, from any copy that polls for the whole window (the Crew block, the overview, the sea
+      // Harbor 3D's facts file, from any copy that polls for the whole window (the Crew block, the Bridge, the sea
       // layout's harbor): a layout without a Crew block still feeds it. Two copies may both write; they write the same
       // facts atomically. exportFacts does nothing without its want file.
       if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) await exportFacts(() => harborFacts(runs, ctx)).catch((e) => console.log(`harbormaster: harbor3d facts failed: ${e?.message ?? e}`));
@@ -258,6 +267,7 @@ export default class Harbormaster extends View {
     // read the PR store over a hundred times.
     const el = oneRead(() => this.view(p, t));
     startCopies(this, cx); // the proof images this render asked for
+    weekReads(this, cx); // the Bridge's This week block, if this render drew it
     return el;
   }
 

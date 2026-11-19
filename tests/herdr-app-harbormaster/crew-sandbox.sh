@@ -14,6 +14,16 @@
 #   click <x> <y>   left click at screen coordinates on the Xvfb display (XTest; never the user's)
 #   hover <x> <y>   move the pointer there (tooltips)
 #   scroll <x> <y> [n]  wheel down n notches (default 10) with the pointer there
+#   decisions [none]  write .captain-decisions.json in the scratch runs root: two open captain decisions, one naming no run
+#                   (board-1068, recommended Yes) and one about the run asks-you (recommended Not yet), asked 40 and
+#                   12 minutes ago; `none` removes the file. The sidebar shows them as rows in Needs you (#50)
+#   history [none]  write .history.jsonl in the scratch runs root: four closed runs from the last 6 days (with agent time,
+#                   tokens, user wait and a time split) and one from 20 days back, so the Bridge's This week shows
+#                   figures; `none` removes the file (#50)
+#   reviews [none]  write review-requests.json in the scratch dir (fake-gh.sh): one review request, api#88 from anna;
+#                   `none` removes it. The queue then lists it under Next for you (#50)
+#   captain on|off  start a fake captain (a tab in the focused space labelled role=captain, reporting idle),
+#                   or kill it; with none the decisions' button is Start captain
 #   hc <args>       hc against the scratch session (e.g. hc label t4 role=)
 #   env             print the environment lines (eval them to run herdr-app/hc by hand)
 #   down            stop the scratch app, its Xvfb and the scratch hc session; the scratch dir stays
@@ -21,7 +31,7 @@
 # Fake runs (folder "skills", so the default self review flow; folder "acme" is set to peer in the
 # scratch app's shared state), each with a live "orchestrator"
 # terminal (a sleeping sh, labelled role=orchestrator and with set-status.sh's labels):
-#   run-stats     finished, PR dlebech/skills#42 (merged)                 -> Done
+#   run-stats     finished, PR acme/skills#42 (merged)                 -> Done
 #   pane-follows  finished, PR #41 (merged), related #40                  -> Done
 #   unreadable-pr finished, PR in a repo that does not exist (gh fails)   -> Everything else, can't tell
 #   quiet-run     running, "t2 implementing", no PR, nothing moves       -> idle, then stalled
@@ -153,11 +163,11 @@ make_runs() {
     'exec sleep infinity' >"$S/fake-orch.sh"
   local day; day=$(date -u +%Y-%m-%d)
   mkrun run-stats finished feat "Run stats" "${day}T08:10:00Z" 2/2 merged merged --progress "PR #42 up" \
-    --pr dlebech/skills https://github.com/dlebech/skills/pull/42
+    --pr acme/skills https://github.com/acme/skills/pull/42
   mkrun pane-follows finished feat "Pane follows" "${day}T06:40:00Z" 2/2 merged merged --progress "PRs up" \
-    --pr dlebech/skills https://github.com/dlebech/skills/pull/41 --related dlebech/skills https://github.com/dlebech/skills/pull/40
+    --pr acme/skills https://github.com/acme/skills/pull/41 --related acme/skills https://github.com/acme/skills/pull/40
   mkrun unreadable-pr finished fix "Unreadable PR" "${day}T09:05:00Z" 2/2 merged merged --progress "PR #1 up" \
-    --pr dlebech/no-such-repo-nyo https://github.com/dlebech/no-such-repo-nyo/pull/1
+    --pr acme/no-such-repo-nyo https://github.com/acme/no-such-repo-nyo/pull/1
   mkrun quiet-run running feat "Quiet run" "${day}T10:30:00Z" 1/2 merged implementing --progress "t2 implementing"
   ORCH_STATE=working mkrun busy-run running feat "Busy run" "${day}T07:00:00Z" 0/2 implementing implementing --progress "both tasks under way"
   # busy-run's workers, for its run pane's Agents list: two implementers (shells reporting a status, so no
@@ -198,7 +208,7 @@ make_runs() {
   printf '%s\tfinished\n' "$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)" >"$S/runs/skills/parked-open/parked"
   hc label "$parked" role= >/dev/null
   mkrun parked-merged finished fix "Parked merged" "${day}T04:00:00Z" 2/2 merged merged --progress "PR merged" \
-    --pr dlebech/skills https://github.com/dlebech/skills/pull/42
+    --pr acme/skills https://github.com/acme/skills/pull/42
   parked=$(jq -r .terminal "$S/runs/skills/parked-merged/orchestrator.json")
   printf '%s\tfinished\n' "$(date -u -d '5 days ago' +%Y-%m-%dT%H:%M:%SZ)" >"$S/runs/skills/parked-merged/parked"
   hc label "$parked" role= >/dev/null
@@ -333,6 +343,49 @@ case $cmd in
     herdr-app status | jq -c '{layout, overlays, errors}'
     ;;
   runs) make_runs ;;
+  decisions)
+    f=$S/runs/.captain-decisions.json
+    if [ "${1:-}" = none ]; then rm -f "$f"; exit 0; fi
+    ago() { date -u -d "$1 minutes ago" +%Y-%m-%dT%H:%M:%SZ; }
+    jq -n --arg a1 "$(ago 40)" --arg a2 "$(ago 12)" --arg run "$S/runs/skills/asks-you" '[
+      {id: "board-1068", question: "Move #1068 to In Progress?", run: null, asked: $a1,
+       options: [{label: "Yes", text: "move it"}, {label: "No", text: "leave it"}], recommended: "Yes: it is started",
+       evidence: "A branch for it exists.", risk: "None.", blocks: "the board stays out of date until then"},
+      {id: "asks-you-park", question: "Park asks-you until Monday?", run: $run, asked: $a2,
+       options: [{label: "Not yet", text: "keep it running"}, {label: "Park it", text: "park the run"}], recommended: "Not yet: it is waiting on you",
+       evidence: "It has waited a while.", risk: "A parked run stops.", blocks: ""}]' >"$f"
+    ;;
+  history)
+    f=$S/runs/.history.jsonl
+    if [ "${1:-}" = none ]; then rm -f "$f"; exit 0; fi
+    iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
+    : >"$f"
+    for spec in "a:1:3600:2500000" "b:2:5400:4200000" "c:4:2400:1100000" "d:6:7200:9000000" "old:20:3000:500000"; do
+      IFS=: read -r n d wall tok <<<"$spec"
+      jq -cn --arg run "$S/runs/skills/hist-$n" --arg n "$n" --arg s "$(iso $(( $(date +%s) - d * 86400 )))" --arg e "$(iso $(( $(date +%s) - d * 86400 + wall )))" --argjson wall "$wall" --argjson tok "$tok" '{v: 1, run: $run, folder: "skills", branch: "hist-\($n)", type: "feat",
+        started: $s, ended: $e, closed: $e, status: "finished", tasks_merged: 3, tasks_planned: 3, wall: $wall,
+        critical_path: {model: ($wall * 0.5), tool: ($wall * 0.1), user_wait: ($wall * 0.15), review: ($wall * 0.1), idle: ($wall * 0.15)},
+        categories: {model: ($wall * 0.5)}, tasks: [],
+        agents: [{name: "orchestrator", role: "orchestrator", total: $wall, categories: {model: ($wall * 0.5), user_wait: ($wall * 0.15), agent_wait: ($wall * 0.2)}},
+                 {name: "impl", role: "impl", total: ($wall * 0.6), categories: {model: ($wall * 0.5), tool: ($wall * 0.1)}}],
+        tokens: {total: $tok, input: ($tok / 10), output: ($tok / 20), cache_read: ($tok * 0.8), cache_write: ($tok / 20)}}' >>"$f"
+    done
+    ;;
+  reviews)
+    f=$S/review-requests.json
+    if [ "${1:-}" = none ]; then rm -f "$f"; exit 0; fi
+    jq -n --arg u "$(date -u -d '3 hours ago' +%Y-%m-%dT%H:%M:%SZ)" '[{number: 88, title: "Rate limit headers", url: "https://github.com/fake-two/api/pull/88",
+      author: {login: "anna"}, updatedAt: $u, repository: {nameWithOwner: "fake-two/api"}}]' >"$f"
+    ;;
+  captain)
+    sandbox_env
+    if [ "${1:-}" = off ]; then
+      for t in $(hc ls --label role=captain --json | jq -r '.terminals[].address'); do hc kill "$t" >/dev/null 2>&1 || true; hc rm "$t" >/dev/null 2>&1 || true; done
+      exit 0
+    fi
+    out=$(herdr-app do tab.new --name captain --argv "[\"sh\",\"$S/fake-orch.sh\",\"captain\",\"idle\"]" --focus false)
+    hc label "$(jq -r .terminal <<<"$out")" role=captain >/dev/null
+    ;;
   do) sandbox_env; herdr-app do "$@" ;;
   shot) sandbox_env; herdr-app shot "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")" ;;
   root) sandbox_env; import -window root "$1" ;;

@@ -174,7 +174,7 @@ export function questionSections(q, raw) {
 }
 
 // The id view.replying holds for a queue item's Reply: the queue's as is, a need box's under
-// "box:" so a card and the queue in one overview never open the same Reply; and back to the
+// "box:" so a card and the queue in one Bridge never open the same Reply; and back to the
 // queue item's id, which is what submitReply answers.
 export const replyId = (slot, id) => `${slot ? `${slot}:` : ""}${id}`;
 export const replyItem = (rid) => rid?.replace(/^box:/, "") ?? null;

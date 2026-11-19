@@ -3,8 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assess, runDot, STALL_MS, waitSig } from "../../herdr-app/mods/harbormaster/attention.js";
 import { needsYouNow } from "../../herdr-app/mods/harbormaster/attend.js";
-import { decisionQueue } from "../../herdr-app/mods/harbormaster/data.js";
-import { GROUPS, groupRows, byNeed, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, cantWhy, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, runlessNeeds, captainNeedNote, watchingText, workerTree } from "../../herdr-app/mods/harbormaster/crewrows.js";
+import { decisionQueue, decisionItems } from "../../herdr-app/mods/harbormaster/data.js";
+import { GROUPS, groupRows, byNeed, rowLead, rowEdge, rowTip, badgeOf, needLine, closableDone, emptyNote, cantWhy, crewEntries, canExpand, needKey, needCount, needRunsOf, runlessNeeds, watchingText, workerTree } from "../../herdr-app/mods/harbormaster/crewrows.js";
 
 const MIN = 60000;
 const now = Date.parse("2026-11-16T12:00:00Z");
@@ -275,13 +275,9 @@ test("the Crew's Needs you count is the overview's, for the same facts", () => {
   // A parked run's orchestrator row is not counted, so it is not under Needs you either.
   assert.equal(entries.find((x) => x.r === parked).a.group, "working");
   assert.deepEqual(runlessNeeds(orchs), [blockedTerm]);
-  // No run needs you, but the captain asks: the heading counts it, and says where it is.
+  // No run needs you, but the captain asks: the heading counts it.
   assert.equal(needCount([], [], 1), 1);
   assert.equal(emptyNote(GROUPS[0], needCount([], [], 1), 3), null);
-  assert.equal(captainNeedNote(1), "+ the captain's decision, above");
-  assert.equal(captainNeedNote(2), "+ the captain's 2 decisions, above");
-  assert.equal(captainNeedNote(0), null);
-  assert.equal(captainNeedNote(2, false), "+ the captain's 2 decisions: no captain running, start one with ⚓+ above");
 });
 
 test("the captain says how many runs it watches, then how many of them are finished", () => {
@@ -331,18 +327,9 @@ test("a run's dot works while its orchestrator or any agent works, and is blocke
   assert.equal(runDot("done"), "done");
 });
 
-test("the Needs-you box opens the clicked entry while it still needs you, else the first with a run directory, else none", () => {
-  const e = (key, dir = "/r/" + key) => ({ r: { key, dir }, term: { address: "t" + key }, a: {} });
-  const list = [e("a"), e("b"), e("c")];
-  assert.equal(expandedNeed(list, "b"), list[1]);
-  assert.equal(expandedNeed(list, "gone"), list[0], "a clicked run that left Needs you falls back to the first");
-  assert.equal(expandedNeed(list, undefined), list[0]);
-  const runless = { r: null, term: { address: "t9" }, a: {} };
-  assert.equal(expandedNeed([runless, list[1]], null), list[1], "an orchestrator without a run directory stays a compact row");
-  assert.equal(expandedNeed([runless], "t9"), null);
-  assert.equal(expandedNeed([], "a"), null);
-  assert.equal(needKey(runless), "t9");
-  assert.equal(needKey(list[0]), "a");
+test("needKey is the run's key, else the orchestrator's address", () => {
+  assert.equal(needKey({ r: null, term: { address: "t9" } }), "t9");
+  assert.equal(needKey({ r: { key: "a" }, term: { address: "ta" } }), "a");
 });
 
 test("only entries with a run directory open on click in the Needs-you box; a runless orchestrator keeps its focus click", () => {
@@ -391,4 +378,11 @@ test("a run marked waiting on someone: its row, pill and hover say on whom and s
   assert.ok(rowTip(a, now).includes("Waiting on Kari — preview check, since 2h5m ago"));
   assert.equal(badgeOf(a, true).label, "waiting on Kari — preview check");
   assert.equal(needLine(a), null);
+});
+
+test("decisionItems is the decisions loop of decisionQueue, alone", () => {
+  const d = { key: ":a", id: "a", question: "Q?", run: null, asked: 5, options: [], recommended: null, why: "", evidence: "", risk: "", blocks: "" };
+  const items = decisionItems([d], []);
+  assert.deepEqual(items, decisionQueue([], [d], { terminals: [], agents: [] }));
+  assert.equal(items[0].kind, "decision");
 });

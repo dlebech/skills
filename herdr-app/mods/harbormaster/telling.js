@@ -2,13 +2,13 @@
 //   - harbormaster.notified, {[run key]: {told, cand, since, by?, at?}}: which Needs-you reasons
 //     of each run were told (tell.js nextToasts). Persisted, so a reload or a restart does not
 //     tell them again. Written only when a run's reasons change (rare).
-//   - harbormaster.toasts: false once the user turned the toasts off (the overview's header); on
+//   - harbormaster.toasts: false once the user turned the toasts off (the Bridge's header); on
 //     by default.
 //   - harbormaster.decisionsSeen, {[run key]: ms}: the newest decision's time when the user last
 //     unfolded the run's Decisions, so the card, pane and Crew hover can say "7 new since you looked".
 //   - harbormaster.proofSeen, {[run key]: signature}: the proof as shown when the user last read it
 //     (proofseen.js), so a run's box can say the proof is read and the merge is next.
-// Only the copies that poll for the whole window (the Crew block and the overview, not a run's
+// Only the copies that poll for the whole window (the Crew block and the Bridge, not a run's
 // pane or a popup) run observeTelling, after each run read. Several of them may: each claims a
 // toast in the shared store (`by`) and posts it only if its claim still stands after writing.
 

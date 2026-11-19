@@ -1,5 +1,5 @@
 // A run card's PR facts: each PR's state, checks, one-way door and review as the facts line
-// shows them, said once when several PRs agree. Pure, so the tests drive them; overview.js draws them.
+// shows them, said once when several PRs agree. Pure, so the tests drive them; runpane.js and runcard.js draw them.
 
 // A PR's state as a word ("Open", "Draft", "Merged"), or null when it could not be read.
 export const prStateText = (pr) => (pr.state === "UNKNOWN" ? null : pr.state === "DRAFT" ? "Draft" : pr.state[0] + pr.state.slice(1).toLowerCase());

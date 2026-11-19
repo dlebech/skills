@@ -4,7 +4,7 @@ import { div, svg, image } from "gpui-kit";
 import { settings } from "herdr";
 import { typeTip } from "./levels.js";
 
-// The run pane's and the overview cards' four text sizes: meta (section titles, labels, counts, tags,
+// The run pane's and the Bridge's cards' four text sizes: meta (section titles, labels, counts, tags,
 // pills, ages, anything dim), body (what you read), strong (the "Ready to merge" headline), title (the run's name).
 export const TYPE = { meta: 11, body: 12.5, strong: 13.5, title: 15 };
 

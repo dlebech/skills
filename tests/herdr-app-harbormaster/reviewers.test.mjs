@@ -10,8 +10,8 @@ const pr = (author, reviews = [], requests = []) => ({ author: { login: author }
 
 test("most frequent first; a tie goes to the newer PR; each PR counts a person once", () => {
   const prs = [
-    pr("dlebech", [rv("anna"), rv("anna", "COMMENTED")], ["bo"]),
-    pr("dlebech", [rv("cy")], []),
+    pr("kim", [rv("anna"), rv("anna", "COMMENTED")], ["bo"]),
+    pr("kim", [rv("cy")], []),
     pr("cy", [rv("bo")], ["anna"]),
   ];
   // anna: 2 PRs, bo: 2 PRs (newest on 0, so before anna? both newest on 0 and 2: anna 0, bo 0), cy: 1.
@@ -21,7 +21,7 @@ test("most frequent first; a tie goes to the newer PR; each PR counts a person o
 });
 
 test("leaves out the viewer, the PR's author, each PR's own author, bots and teams", () => {
-  const prs = [pr("dlebech", [rv("me"), rv("anna"), rv("dlebech", "COMMENTED"), rv("ci[bot]"), rv("sweep", "COMMENTED", { is_bot: true }), rv("rabbit", "COMMENTED", { __typename: "Bot" })], [null, "bo", "writer"]),
+  const prs = [pr("kim", [rv("me"), rv("anna"), rv("kim", "COMMENTED"), rv("ci[bot]"), rv("sweep", "COMMENTED", { is_bot: true }), rv("rabbit", "COMMENTED", { __typename: "Bot" })], [null, "bo", "writer"]),
     pr("writer", [rv("writer", "COMMENTED")], [])];
   assert.deepEqual(reviewerCandidates(prs, { viewer: "me", author: "writer" }), ["anna", "bo"]);
   assert.deepEqual(reviewerCandidates(prs, { viewer: "me", author: "writer", bots: false }), ["anna", "ci[bot]", "sweep", "rabbit", "bo"]);

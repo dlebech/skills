@@ -97,7 +97,7 @@ function proofReadState(run, stages) {
 export const runlessOrchs = (runs, ctx) => orchestratorsOf(ctx).filter((term) => !runs.some((r) => r.terminal === term.address))
   .map((term) => ({ term, r: null, a: attentionOf(null, ctx, Date.now(), term) }));
 
-// Whether a run needs you now, one rule for every view that counts it (the overview's header
+// Whether a run needs you now, one rule for every view that counts it (the Bridge's header
 // and order, its cards and panes, the harbor, the Crew): exactly the Crew's Needs you group (a
 // question, a blocker or dialog, or what its PRs, a stall or a gone orchestrator wait on you
 // for); never a parked or closed run (crewrows.js needsRun). A question read from a stale run

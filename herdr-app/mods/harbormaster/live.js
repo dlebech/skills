@@ -47,8 +47,18 @@ export function orchestratorLost(run, ctx) {
   return (term.program ?? pane?.program)?.shell === true;
 }
 
-// The orchestrator's status, or "gone" when its terminal has ended or is lost.
+// The orchestrator's status, or "gone" when its terminal has ended or is lost. Worked out once per run per
+// facts() snapshot: a render asks for it many times (the Crew, the Bridge's queue, its lines, each card).
+const states = new WeakMap();
+
 export function orchestratorState(run, ctx) {
+  let m = states.get(ctx);
+  if (!m) states.set(ctx, (m = new Map()));
+  if (!m.has(run)) m.set(run, orchestratorStateOf(run, ctx));
+  return m.get(run);
+}
+
+function orchestratorStateOf(run, ctx) {
   const term = run.terminal && ctx.terminals.find((t) => t.address === run.terminal);
   if (!ctx.agents.some((a) => a.address === run.terminal) && (!term || term.state !== "live")) return "gone";
   if (orchestratorLost(run, ctx)) return "gone";
@@ -101,7 +111,7 @@ export function agentNames(list, scope = () => "") {
 // The live orchestrators' terminals, as the Crew block lists them.
 export const orchestratorsOf = (ctx) => ctx.terminals.filter((t) => t.state === "live" && t.labels?.role === "orchestrator");
 
-// The addresses whose context size the crew and the overview show: the captain and the orchestrators.
+// The addresses whose context size the crew and the Bridge show: the captain and the orchestrators.
 export const crewAddresses = (ctx) => [captainOf(ctx).terminal?.address, ...orchestratorsOf(ctx).map((t) => t.address)].filter(Boolean);
 
 export function captainOf(ctx) {
@@ -157,7 +167,7 @@ export function captainPane(ctx) {
   return cap ? paneBeside(cap.address) : null;
 }
 
-// Shows a Harbormaster pane right of an agent (the runs overview, or with `props` another
+// Shows a Harbormaster pane right of an agent (the Bridge, or with `props` another
 // view, such as one run's card), or closes it again.
 export function togglePin(spot, props = undefined) {
   if (spot.pinned) run("pane.close", { pane: spot.pinned });
@@ -165,7 +175,7 @@ export function togglePin(spot, props = undefined) {
 }
 
 // Focuses an agent and makes sure a Harbormaster pane is open beside it (the runs
-// overview, or with `props` another view, such as one run's card). Never closes one, so
+// Bridge, or with `props` another view, such as one run's card). Never closes one, so
 // clicking again only focuses; close the pane with Herdr's own pane close.
 export function focusWithPane(address, props = undefined) {
   focusAgent(address);

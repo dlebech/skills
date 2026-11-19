@@ -11,7 +11,10 @@ import { facts, orchestratorState, agentStatus, workersOf, captainOf, adrift, ag
 import { needsYouNow, runlessOrchs } from "./attend.js";
 import { needCount, rowLead } from "./crewrows.js";
 import { zoom, programIcon, runName, withTip } from "./ui.js";
-import { runFacts, attOf, pathInput, needItemsOf, needButton, actionButton, drawnInPane, runProps, PASS, AMBER } from "./overview.js";
+import { runFacts, needButton } from "./needbox.js";
+import { attOf, needItemsOf } from "./needitems.js";
+import { pathInput } from "./runpane.js";
+import { actionButton, drawnInPane, runProps, PASS, AMBER } from "./cardparts.js";
 import { primaryOf } from "./needaction.js";
 import { mergePath } from "./mergepath.js";
 import { buoyLook, stillLook, idle, captainText, boatBadge, railCounts, opensPopup, motionOf, BADGE_TEXT } from "./sealook.js";

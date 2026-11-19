@@ -4,13 +4,13 @@
 import { div, svg } from "gpui-kit";
 import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { stats, runPhase, decisionQueue, markOpened } from "./data.js";
+import { stats, runPhase, decisionQueue, decisionItems, markOpened } from "./data.js";
 import { openUrl, facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, focusAgent, focusWithPane, currentAgent, adrift, agentNames } from "./live.js";
 import { programIcon, plural, runName } from "./ui.js";
 import { startedTip } from "./context.js";
 import { liveUsage } from "./resources.js";
 import { attentionOf } from "./attend.js";
-import { GROUPS, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, expandedNeed, canExpand, needKey, needCount, needRunsOf, captainNeedNote, captainMark, needsSlots, needCardLook, HOVER_TINT, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
+import { GROUPS, watchedText, groupRows, rowLead, rowEdge, rowTip, emptyNote, crewEntries, canExpand, needKey, needCount, needRunsOf, captainMark, needsSlots, needCardLook, HOVER_TINT, subtitleOf, prRef, reviewTitle, repoPrefixes } from "./crewrows.js";
 import { reviewError } from "./reviews.js";
 import { nextItems, mineError } from "./mypr.js";
 import { ageText } from "./attention.js";
@@ -18,12 +18,13 @@ import { SNOOZE_CHOICES, snoozed, splitSnoozed, loadSnoozed, setSnooze, wakeSnoo
 import { openNewRun, openStartCaptain, reviewStarting } from "./newrun.js";
 import { primaryOf, isMergeAsk, requestingFor } from "./needaction.js";
 import { claimsAsk, checksLine, reviewedLine, withSaid, withAsked, claimActions } from "./claims.js";
-import {
-  attOf, runStatus, levelTags, runTypeTag, statusDot, actionButton, closeAllControl, runFacts, needItemsOf,
-  newDecisionsNote, noteRows, watchedText, edgeColor, cardBesideOrchestrator, AMBER, PASS, SELECTED, withUsage, runProps,
-  needButton, needLines, answerParts, boxConfirm, proofAction, said, stagesOf,
-  waitOnField,
-} from "./overview.js";
+import { attOf, needItemsOf, said } from "./needitems.js";
+import { runStatus, runFacts, newDecisionsNote, needButton, needLines, boxConfirm, waitOnField } from "./needbox.js";
+import { levelTags, runTypeTag, cardBesideOrchestrator, proofAction } from "./runpane.js";
+import { statusDot, actionButton, closeAllControl, noteRows, edgeColor, AMBER, PASS, SELECTED, withUsage, runProps, stagesOf } from "./cardparts.js";
+import { answerParts, runUnreachable } from "./answers.js";
+import { needQueue, queueKey, decisionAction, expandedItem } from "./queue.js";
+import { queueLines } from "./question.js";
 
 // A run's title as the sidebar shows it: a review's "<repo>#<n> · <topic>", else runName's; with
 // the repository's name, muted, before it when another live row would read the same
@@ -57,8 +58,7 @@ function openRun(m, x) {
 const OPEN_HERE = "Click to open it here";
 
 // What every piece of the block reads, worked out once per render.
-function crewModel(view, t) {
-  const ctx = facts();
+function crewModel(view, t, ctx = facts(), s = stats(view.runs, ctx)) {
   const cap = captainOf(ctx);
   // A live run before a parked or closed one that recorded the same address (as runOfProps), or
   // the live run would get a second, "orchestrator gone" row with a Resume.
@@ -72,15 +72,18 @@ function crewModel(view, t) {
   const orchestrators = orchestratorsOf(ctx)
     .map((term) => ({ term, r: runOf(term) }))
     .map((o) => ({ ...o, state: o.r?.phase ?? runPhase(o.term.labels?.["run.status"]), a: o.r ? attOf(o.r, ctx) : attentionOf(null, ctx, now, o.term) }));
-  // Its Needs you is the overview's (crewrows.js crewEntries): a run that needs you whose
+  // Its Needs you is the Bridge's (crewrows.js crewEntries): a run that needs you whose
   // orchestrator is gone gets a row too, and the captain's open decisions count in its heading.
-  const needRuns = needRunsOf(stats(view.runs, ctx).shown, (r) => attOf(r, ctx));
+  const needRuns = needRunsOf(s.shown, (r) => attOf(r, ctx));
   const entries = crewEntries(orchestrators, needRuns, (r) => attOf(r, ctx));
-  const asks = view.decisions?.length ?? 0;
+  // The captain's open decisions as queue items (data.js decisionItems), for the Needs-you rows.
+  // Built with the runs, so a decision that names a live run carries it (the answer then goes to its inbox).
+  const decisions = decisionItems(view.decisions ?? [], view.runs ?? []);
+  const asks = decisions.length;
   const addresses = [cap.terminal?.address, ...orchestrators.map((o) => o.term.address)].filter(Boolean);
   // The focused agent, or the crew agent beside a focused Harbormaster pane.
   const current = currentAgent(ctx, addresses);
-  return { view, t, ctx, cap, now, narrow, orchestrators, needRuns, entries, asks, addresses, current };
+  return { view, t, ctx, cap, now, narrow, orchestrators, needRuns, entries, decisions, asks, addresses, current };
 }
 
 // Adrift: agents outside the crew, on any machine.
@@ -120,18 +123,18 @@ const toggleFold = (view, key, now) => (_e, cx) => { view.folds ??= new Map(); v
 // `report`; hc's own JSON in `status`.
 const statusMsg = (term) => term?.report?.msg ?? (typeof term?.status === "object" ? term.status?.msg : null) ?? null;
 
-// "captain ↗" at the header's right: red with a count while it has decisions for you, an eye
-// while it only watches, the spinner only while it really replies (crewrows.js captainMark).
-// Clicking does what the captain card did: focus it, with the overview beside it. No captain:
+// "captain ↗" at the header's right: an eye while it only watches, the spinner only while it
+// really replies (crewrows.js captainMark); its decisions are rows in Needs you, so no count here.
+// Clicking does what the captain card did: focus it, with the Bridge beside it. No captain:
 // a compact "⚓+" pill, styled like "+ New run" (a longer label squeezes the title), that opens the Start captain dialog (a folder to
-// start it in); "⚓+ · 3" while decisions wait for one.
+// start it in).
 function startCaptainLink(t, asks) {
   return h_flex().id("crew-start-captain").flex_none().px(7).h(22).items_center().rounded(5).bg(t.raised)
-    .text_size(11.5).font_medium().text_color(asks ? t.blocked : t.muted).cursor_pointer()
-    .hover((st) => st.text_color(asks ? t.blocked : t.foreground).bg(t.hover))
+    .text_size(11.5).font_medium().text_color(t.muted).cursor_pointer()
+    .hover((st) => st.text_color(t.foreground).bg(t.hover))
     .tooltip(`Start captain\n${asks ? `${plural(asks, "decision")} for you, and no captain running. ` : "No captain running. "}Pick the folder to start it in`)
     .on_click((_e, cx) => { cx.stop_propagation(); openStartCaptain(); })
-    .child(asks ? `⚓+ · ${asks}` : "⚓+");
+    .child("⚓+");
 }
 
 function captainLink(m) {
@@ -139,26 +142,34 @@ function captainLink(m) {
   const term = cap.terminal;
   if (!term) return startCaptainLink(t, asks);
   const mark = captainMark({ status: agentStatus(term, ctx), msg: statusMsg(term), watching: cap.watching });
-  const tone = asks ? t.blocked : t.muted;
+  const tone = t.muted;
   const icon = mark === "watching" ? svg("mods/harbormaster/eye.svg").size(12).flex_none().text_color(tone)
     : mark === "working" || mark === "blocked" ? statusDot(t, mark) : null;
   const state = { watching: `Watching: ${watchedText(stats(view.runs, ctx))}, idle until something needs it`, working: "Working", blocked: "Waiting on a prompt in its terminal",
     idle: cap.watching ? "Idle" : "Idle, not watching runs" }[mark];
-  const tip = [`The captain · ${state}`, asks ? `${plural(asks, "decision")} for you` : null, "Click to open it, with the overview beside it"].filter(Boolean).join("\n");
+  const tip = [`The captain · ${state}`, asks ? `${plural(asks, "decision")} for you` : null, "Click to open it, with the Bridge beside it"].filter(Boolean).join("\n");
   return h_flex().id("crew-captain-link").flex_none().gap(5).items_center().px(6).h(22).rounded(5)
     .text_size(11.5).text_color(tone).tooltip(tip)
-    .cursor_pointer().hover((st) => st.bg(t.hover).text_color(asks ? t.blocked : t.foreground))
+    .cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))
     .on_click(() => focusWithPane(term.address))
     .when(Boolean(icon), (el) => el.child(icon))
-    .child(asks ? `captain · ${asks} ↗` : "captain ↗");
+    .child("captain ↗");
 }
+
+// Opens the Bridge as a popup (the mod's default view), as ctrl-shift-h does. Its size must match `overlay` in mod.json,
+// which ctrl-shift-h opens it at.
+export const BRIDGE_SIZE = { width: 860, height: 680 };
+const openBridge = () => openOverlay({ mod: "harbormaster", kind: "dialog", ...BRIDGE_SIZE, props: {} });
 
 // The sidebar's one header row.
 export function harborHeader(m) {
   const { t } = m;
   // The label gives way first (it ellipsizes), then the spacer: the captain link never clips.
   return h_flex().id("crew-header").flex_none().h(36).pl(PAD * 2).pr(PAD).gap(8).items_center().min_w(0).overflow_hidden()
-    .child(div().min_w(0).truncate().text_size(13).font_semibold().text_color(t.foreground).child("⚓ Harbormaster"))
+    .child(div().id("crew-title").min_w(0).truncate().text_size(13).font_semibold().text_color(t.foreground).cursor_pointer().hover((st) => st.text_color(t.accent))
+      .tooltip("Open the Bridge: everything waiting on you, your runs, parked runs and this week")
+      .on_click((_e, cx) => { cx.stop_propagation(); openBridge(); })
+      .child("⚓ Harbormaster"))
     .child(h_flex().id("crew-new-run").flex_none().px(7).h(22).items_center().rounded(5).bg(t.raised)
       .text_size(11.5).font_medium().text_color(t.muted).cursor_pointer().hover((st) => st.text_color(t.foreground).bg(t.hover))
       .tooltip("Start a run in a repository's own space: issues, a PR to review, or a task in your words. No captain needed")
@@ -262,7 +273,7 @@ function boxActions(m, x, f, items) {
   const confirm = boxConfirm(view, t, r, f, "sidebar");
   const changes = view.replying === `changes:${r.key}` ? v_flex().id(`${key}-changes`).gap(4).on_click((_e, cx) => cx.stop_propagation()).child(Input.new(view.reply))
     .child(div().text_size(10.5).text_color(t.dim).child("What should change? Enter writes it to the run's inbox and tells its orchestrator")) : null;
-  // Waiting on someone…'s field (overview.js waitOnButton), under the box's buttons like Ask for changes'.
+  // Waiting on someone…'s field (needbox.js waitOnButton), under the box's buttons like Ask for changes'.
   const wait = waitOnField(view, t, r, `${key}-wait`);
   if (it) {
     // A question: its recommended option is the button (else Reply); the other options, Reply
@@ -302,7 +313,7 @@ function boxActions(m, x, f, items) {
 
 // The claims the box shows: those worth a look. The proven ones stay in the run's pane (the box
 // is for what needs you), so "+ n more" counts them with the rest. `stages` as the pane judges
-// "still being proved" (overview.js stagesOf).
+// "still being proved" (cardparts.js stagesOf).
 function boxClaims(r, stages) {
   const ask = claimsAsk(r, stages);
   const rows = ask.worthALook.filter((k) => k.look);
@@ -319,7 +330,7 @@ const boxReviewed = (r) => reviewedLine(r.proof?.md, r.reviewedGap, { finished: 
 function mergeClaims(m, r) {
   const { view, t } = m;
   const ask = boxClaims(r, stagesOf(r, m.ctx));
-  // A click shows at once, before the next read of the run's files (overview.js said).
+  // A click shows at once, before the next read of the run's files (needitems.js said).
   const rows = withAsked(withSaid(ask.rows.map((k) => ({ ...k })), said, r.key, r.proof), r);
   const checks = checksLine(r.proof?.md);
   const reviewed = boxReviewed(r);
@@ -377,27 +388,78 @@ function needCard(m, x) {
     .children(boxActions(m, x, f, items));
 }
 
-// Needs you: the entries in their stable order, the open one (the first, or the one clicked) drawn
-// as the box in its place, the others as compact rows, at most four before "+ n more". Nothing waiting: one calm line, with a little room above it.
+// A captain decision as a row under the box: its question on one line, then "captain · <age>"
+// muted, with the red bar of a run that needs you. A click opens it as the box; with a captain
+// running it also focuses it, as a run's row shows its orchestrator.
+function decisionRow(m, it, onOpen) {
+  const { t, now } = m;
+  const edge = edgeColor(t, "blocked");
+  return v_flex().id(`crew-need-${it.id}`).relative().overflow_hidden().flex_none().gap(1).pl(PAD + 3).pr(PAD).py(5).rounded(6)
+    .bg(edge + "14").cursor_pointer().hover((st) => st.bg(edge + "26"))
+    .tooltip([it.title, decisionAge(it, now), OPEN_HERE].filter(Boolean).join("\n")).on_click(onOpen)
+    .child(div().absolute().left(0).top(0).bottom(0).w(3).bg(edge))
+    .child(div().min_w(0).truncate().text_size(12.5).font_semibold().text_color(t.foreground).child(it.title))
+    .child(div().min_w(0).truncate().text_size(11).text_color(t.muted).child(decisionAge(it, now) ?? "captain"));
+}
+
+// "captain · 2h", or null without a time.
+const decisionAge = (it, now) => (it.since ? `captain · ${ageText(now - it.since)}` : null);
+
+// The open decision, as the box: its question in full, its Blocks line, and one button
+// (queue.js decisionAction): the recommended option, Open captain or Start captain; "N more"
+// unfolds the other options and Reply, whose answers go as the Bridge's queue sends them.
+function decisionCard(m, it) {
+  const { view, t, ctx, now, cap } = m;
+  const edge = edgeColor(t, "blocked");
+  const look = needCardLook(false);
+  const key = `crew-box-more-${it.id}`;
+  const more = unfolded(view, key, false);
+  const act = decisionAction(it, { captain: Boolean(cap.terminal), unreachable: runUnreachable(it, ctx) });
+  const a = answerParts(view, t, it, ctx, "box");
+  const main = act.kind === "answer" ? a.optionButton(act.option)
+    : act.kind === "open" ? (cap.terminal ? actionButton(t, `${key}-open`, "Open captain", "Focus the captain's terminal", () => focusAgent(cap.terminal.address), true) : a.replyBtn || null)
+    : actionButton(t, `${key}-start`, "Start captain", "No captain is running: pick the folder to start it in", () => openStartCaptain(), true);
+  const others = it.options.filter((_o, i) => act.kind !== "answer" || i !== act.option).length + (a.replyBtn && main !== a.replyBtn && act.kind !== "start-captain" ? 1 : 0);
+  const extra = act.kind === "start-captain" ? 0 : others;
+  const moreLink = quietLink(t, `${key}-toggle`, more ? "less" : `${extra} more`, more ? "Show only the main button" : "Every option, and a reply of your own", toggleFold(view, key, more));
+  const blocks = queueLines(it).find((x) => x.key === "blocks");
+  const all = h_flex().flex_wrap().gap(6).items_center().children(it.options.map((_o, i) => a.optionButton(i))).when(Boolean(a.replyBtn), (el) => el.child(a.replyBtn));
+  const input = a.input && div().id(`${key}-reply`).on_click((_e, cx) => cx.stop_propagation()).child(a.input);
+  return v_flex().id("crew-needs-box").relative().overflow_hidden().flex_none().min_w(0).gap(6).pl(PAD + 3).pr(PAD).pt(7).pb(8).rounded(6)
+    .bg(edge + look.tint).border(1).border_color(edge + look.border)
+    .child(div().absolute().left(0).top(0).bottom(0).w(look.bar).bg(edge))
+    .child(v_flex().gap(1).min_w(0)
+      .child(div().id(`crew-box-${it.id}-title`).min_w(0).text_size(12.5).font_semibold().text_color(t.foreground).child(it.title))
+      .child(div().min_w(0).truncate().text_size(11).text_color(t.muted).child(decisionAge(it, now) ?? "captain"))
+      .when(Boolean(blocks), (el) => el.child(div().min_w(0).text_size(11).text_color(t.muted)
+        .child(h_flex().gap(4).child(div().flex_none().font_semibold().text_color(t.blocked).child("Blocks")).child(div().flex_1().min_w(0).child(blocks.text))))))
+    .child(more ? all : h_flex().gap(10).items_center().flex_wrap().when(Boolean(main), (el) => el.child(main)).when(extra > 0, (el) => el.child(moreLink)))
+    .when(more, (el) => el.child(h_flex().gap(10).child(moreLink)))
+    .children([input || null, a.note || null].filter(Boolean));
+}
+
+// Needs you: the queue (queue.js needQueue: the entries in their stable order with the captain's
+// decisions among them), the open item (the first, or the one clicked) drawn as the box in its
+// place, the others as compact rows, at most four before "+ n more" (all of them with `all`).
+// Nothing waiting: one calm line, with a little room above it.
 function needsSection(m) {
-  const { view, t, groups, needs, entries, asks } = m;
+  const { view, t, groups, needs, entries, all } = m;
   const g = GROUPS[0];
   const none = emptyNote(g, needs, entries.length);
   if (none) return [h_flex().id("crew-group-needs").flex_none().pt(10).pb(4).px(PAD).gap(6).items_center().text_size(10.5)
     .child(div().flex_none().font_semibold().text_color(t.dim).child(g.title)).child(div().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(none))];
   if (!needs) return [];
-  const list = groups.needs;
-  const expanded = expandedNeed(list, view.needsOpen);
-  // A click expands it here and also shows its orchestrator; the sidebar stays, so the box is not lost.
-  const pick = (x) => (_e, cx) => { view.needsOpen = needKey(x); cx.notify(); if (x.term) openRun(m, x)(); };
+  const list = needQueue(groups.needs, m.decisions);
+  const expanded = expandedItem(list, view.needsOpen);
+  // A click expands it here and also shows its orchestrator (a decision: the captain, when it runs); the sidebar stays, so the box is not lost.
+  const pick = (q) => (_e, cx) => { view.needsOpen = queueKey(q); cx.notify(); if (q.kind === "decision") { if (m.cap.terminal) focusAgent(m.cap.terminal.address); } else if (q.x.term) openRun(m, q.x)(); };
   const moreKey = "crew-needs-more";
   const open = unfolded(view, moreKey, false);
-  const { slots, extra } = needsSlots(list, expanded, { open });
-  const capNote = captainNeedNote(asks, !!m.cap?.terminal);
+  const { slots, extra } = needsSlots(list, expanded, all ? { limit: Infinity } : { open });
   return [
     h_flex().id("crew-group-needs").flex_none().h(22).px(PAD).items_center().text_size(10.5).font_semibold().text_color(t.blocked).child(`${g.title} · ${needs}`),
-    ...(capNote ? [div().id("crew-needs-captain").flex_none().px(PAD).min_w(0).truncate().text_size(10.5).text_color(t.dim).child(capNote.replace(", above", ": captain ↗ above"))] : []),
-    ...slots.map(({ x, box }) => (box ? needCard(m, x) : needRow(m, x, canExpand(x) ? pick(x) : null))),
+    ...slots.map(({ x: q, box }) => (q.kind === "decision" ? (box ? decisionCard(m, q.it) : decisionRow(m, q.it, pick(q)))
+      : box ? needCard(m, q.x) : needRow(m, q.x, canExpand(q.x) ? pick(q) : null))),
     ...(extra > 0 ? [h_flex().id("crew-needs-more").flex_none().px(PAD).h(20).items_center()
       .child(quietLink(t, "crew-needs-more-toggle", open ? "show fewer" : `+ ${extra} more waiting`, open ? "Fold them back" : "Every other thing waiting on you", toggleFold(view, moreKey, open)))] : []),
   ];
@@ -469,7 +531,7 @@ function nextSection(m) {
   const moreKey = "crew-next-more";
   const open = unfolded(view, moreKey, false);
   // While more than one thing needs you, three rows, so the runs below stay in sight.
-  const max = m.needs > 1 ? 3 : NEXT_MAX;
+  const max = m.all ? Infinity : m.needs > 1 ? 3 : NEXT_MAX;
   const extra = Math.max(0, items.length - max);
   const err = reviewError() ?? mineError();
   // Nothing to list and no way to look: say so, rather than look like "nothing waits on you".
@@ -496,12 +558,25 @@ function driftSection(m) {
   return section(m, { key: "adrift", title: "Adrift", count: drift.rows.length, rows: () => drift.rows });
 }
 
-function calmCrew(m) {
-  const { view, t, entries, needRuns, orchestrators, asks, ctx } = m;
+// What the sections read besides the model: the groups, the count in Needs you's heading, and the
+// repository prefixes (rows that would read the same get their repository's name, the box's too).
+function withGroups(m) {
+  const { entries, needRuns, orchestrators, asks } = m;
   m.groups = groupRows(entries);
   m.needs = needCount(needRuns, orchestrators, asks);
-  // Rows that would read the same get their repository's name (every live row, the box's too).
   m.prefixes = repoPrefixes(entries.map((x) => ({ key: needKey(x), title: titleOf(x).title, repo: x.r?.folder ? String(x.r.folder).split("/").pop() : null })));
+  return m;
+}
+
+// The Needs-you and Next for you sections as the sidebar draws them, for the Bridge to put at its
+// top. `ctx` and `s`: the caller's facts() and stats(), so a render reads each run once. With `all`: every item, no "+ n more" (snoozed items stay behind their "snoozed · n" line).
+export function queueSections(view, t, { all = false, ctx, s } = {}) {
+  const m = withGroups({ ...crewModel(view, t, ctx, s), all });
+  return [...needsSection(m), ...nextSection(m)];
+}
+
+function calmCrew(m) {
+  const { view, t, entries, orchestrators, ctx } = withGroups(m);
   const closing = closeAllControl(view, t, m.groups.done, ctx);
   const rest = GROUPS.slice(1).flatMap((g) => section(m, {
     key: g.key, title: g.title, count: m.groups[g.key].length, folded: Boolean(g.folded),

@@ -1,6 +1,6 @@
 // Who a run's PR could ask for a review: the people who reviewed, or were asked to review, the
 // repository's recent pull requests. Pure (no herdr or gpui), so the tests drive it; data.js
-// fetches the list (`gh pr list`) and overview.js draws the picker.
+// fetches the list (`gh pr list`) and needbox.js draws the picker.
 
 // The most names the picker offers.
 export const MAX_REVIEWERS = 6;

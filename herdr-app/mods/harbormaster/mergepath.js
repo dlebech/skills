@@ -1,6 +1,6 @@
 // The path to merge: a run's stages (Build, Proven, AI review, Peer review, Merge; Spec while
 // planning), each done, current, waiting on you, wanting a look, failed or not reached. Pure
-// (no herdr or gpui), so the pane's strip (overview.js pathStrip) and its tests share one model.
+// (no herdr or gpui), so the pane's strip (runpane.js pathStrip) and its tests share one model.
 //
 // mergePath(input) → [{ key, label, value, state, tip, fold }]. `input` is plain data:
 //   { phase, away, counts: {done, planned}, blockedTasks, claims: null | {total, proven, accepted, failed, look},

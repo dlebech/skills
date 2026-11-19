@@ -537,7 +537,7 @@ const prSeen = new Map();
 const opened = new Map();
 
 // A PR's state → a theme tone; the harbor maps the same tones to its own colors. An open PR is
-// muted: no colour means fine (see overview.js AMBER); what it waits on has a colour of its own.
+// muted: no colour means fine (see cardparts.js AMBER); what it waits on has a colour of its own.
 export const PR_TONE = { OPEN: "muted", DRAFT: "dim", MERGED: "done", CLOSED: "blocked" };
 
 function checks(rollup) {
@@ -930,7 +930,7 @@ export function runTime(run) {
 }
 export const newestFirst = (a, b) => runTime(b) - runTime(a);
 
-// Totals across runs, for the summary bar, the overview header, the Crew block and the harbor.
+// Totals across runs, for the summary bar, the Bridge header, the Crew block and the harbor.
 // `live`: runs still working (not finished, not put away); `docked`: finished but still
 // open; `parked`: set aside for later; `shown`: live and docked, the runs the captain
 // keeps watching; `closed`: the rest.
@@ -957,7 +957,6 @@ export function stats(runs, ctx) {
     failing: open.filter((p) => p.checks?.fail).length,
     done: tasks.reduce((n, c) => n + c.done, 0),
     planned: tasks.reduce((n, c) => n + c.planned, 0),
-    workers: shown.reduce((n, r) => n + workersOf(r.terminal, ctx).length, 0),
   };
 }
 
@@ -995,15 +994,17 @@ export function decisionQueue(runs, decisions, ctx, fresh = filesFresh) {
       evidence: "", risk: "", blocks: "", since: r.updated ?? r.started, run: r,
     });
   }
-  for (const d of decisions) {
-    items.push({
-      id: `dec-${d.key}`, kind: "decision", title: d.question, options: d.options, recommended: d.recommended, why: d.why,
-      evidence: d.evidence, risk: d.risk, blocks: d.blocks, since: d.asked, decision: d,
-      run: decisionRun(d, runs),
-    });
-  }
+  items.push(...decisionItems(decisions, runs));
   return items.sort((a, b) => (a.since ?? Infinity) - (b.since ?? Infinity));
 }
+
+// The captain's open decisions as queue items (kind "decision"), each with the run it names, if any.
+// Alone, for the sidebar and the Bridge, which draw only these and need nothing of the runs' own items.
+export const decisionItems = (decisions, runs) => decisions.map((d) => ({
+  id: `dec-${d.key}`, kind: "decision", title: d.question, options: d.options, recommended: d.recommended, why: d.why,
+  evidence: d.evidence, risk: d.risk, blocks: d.blocks, since: d.asked, decision: d,
+  run: decisionRun(d, runs),
+}));
 
 // The run a captain decision is about, or null. Its `run` is a directory on the decision's own
 // machine, or "<machine>:<directory>" for a run on another (as herdr-app-captain's runs.sh names

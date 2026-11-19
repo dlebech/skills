@@ -1,5 +1,5 @@
 // The run pane's sections in the order and size that fit the run's state. Pure (no herdr or gpui),
-// so overview.js runDetail and the tests share it. The header, path strip, need box, live block and
+// so runpane.js runDetail and the tests share it. The header, path strip, need box, live block and
 // action row are fixed and not listed here.
 
 // A finished run is read before a review: what was decided, what is claimed, the PR, then the
