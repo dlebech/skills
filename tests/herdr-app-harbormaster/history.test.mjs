@@ -61,9 +61,13 @@ test("buildLine with nothing known gives nulls, not a throw", () => {
   assert.deepEqual(l.agents, []);
 });
 
+// The wait before a delete is a `sleep` process (Herdr has no setTimeout): it waits here too.
+const slept = async (args) => { await new Promise((r) => setTimeout(r, Number(args[0]) * 1000)); return { code: 0, stdout: "", stderr: "" }; };
+
 // exec on this machine for real, except timing.sh, which answers with the canned JSON.
 function withExec(timingOut = JSON.stringify(timing), counts = {}) {
   globalThis.__herdrExec = async (cmd, args) => {
+    if (cmd === "sleep") return slept(args);
     if (args[1] !== HISTORY) { counts.timing = (counts.timing ?? 0) + 1; return timingOut == null ? { code: 1, stdout: "", stderr: "" } : { code: 0, stdout: timingOut, stderr: "" }; }
     counts.history = (counts.history ?? 0) + 1;
     const r = spawnSync(cmd, args, { encoding: "utf8" });
@@ -230,6 +234,7 @@ test("deleteRun waits for the history, then deletes; a history that never answer
   try {
     const order = [];
     globalThis.__herdrExec = async (cmd, args) => {
+      if (cmd === "sleep") return slept(args);
       if (args[1] === HISTORY) { order.push(args[4]); const r = spawnSync(cmd, args, { encoding: "utf8" }); return { code: r.status, stdout: r.stdout, stderr: r.stderr }; }
       if (String(args[1]).includes("not a run directory")) { order.push("delete"); return { code: 0, stdout: "", stderr: "" }; }
       return { code: 0, stdout: JSON.stringify(timing), stderr: "" };
@@ -241,6 +246,7 @@ test("deleteRun waits for the history, then deletes; a history that never answer
     // Never answers: the delete goes ahead after the wait, and a second delete does not wait again.
     tune.deleteWait = 30;
     globalThis.__herdrExec = async (cmd, args) => {
+      if (cmd === "sleep") return slept(args);
       if (args[1] === HISTORY) return new Promise(() => {});
       if (String(args[1]).includes("not a run directory")) { order.push("delete2"); return { code: 0, stdout: "", stderr: "" }; }
       return { code: 0, stdout: "", stderr: "" };
