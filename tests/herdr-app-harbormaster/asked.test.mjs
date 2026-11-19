@@ -25,13 +25,13 @@ const now = Date.parse("2026-11-17T12:00:00Z");
 const ago = (m) => now - m * MIN;
 
 const run = (o = {}) => ({
-  key: ":/r/x", dir: "/r/x", folder: "/p/snevagten", repo: "snevagten", phase: "running", statusLine: "running", progress: "t1 implementing",
+  key: ":/r/x", dir: "/r/x", folder: "/p/acme", repo: "acme", phase: "running", statusLine: "running", progress: "t1 implementing",
   tasks: [], prs: [{ url: "a" }, { url: "b" }], question: null, ask: null, askedAt: null, away: null, updated: ago(60), started: ago(300),
   terminal: "w/orch", localTerminal: true, autonomy: "L1", ...o,
 });
 const cm = (count, ids) => ({ count, bots: {}, items: ids.map((thread) => ({ thread, text: thread, kind: "thread" })) });
 const pr = (number, count, o = {}) => ({
-  number, state: "OPEN", review: "APPROVED", approvedBy: ["mfalkenbrink"], changesBy: [], requested: [], checks: { pass: 3, fail: 0, pending: 0 },
+  number, state: "OPEN", review: "APPROVED", approvedBy: ["kim"], changesBy: [], requested: [], checks: { pass: 3, fail: 0, pending: 0 },
   url: `https://github.com/o/r/pull/${number}`, repo: "o/r", ci: { startedAt: ago(90), finishedAt: ago(80) }, reviewedAt: ago(500),
   comments: cm(count, Array.from({ length: count }, (_, i) => `t${number}-${i}`)), ...o,
 });
@@ -54,7 +54,7 @@ test("one PR asked, the orchestrator working: still Needs you, over the other PR
 test("its box has #1799 as asked… and #1372 with its buttons", () => {
   const l = list();
   const [it] = box(run(), l, { askedPrs: asking(l[0].url) });
-  assert.equal(it.line, "Approved by mfalkenbrink 8h20m ago with 9 comments on #1372: address them, then merge");
+  assert.equal(it.line, "Approved by kim 8h20m ago with 9 comments on #1372: address them, then merge");
   const of = (row) => it.actions.filter((x) => x.row === row).map((x) => x.kind === "address" ? x.label : x.kind);
   assert.deepEqual(of("#1799"), ["asked", "open"]);
   assert.deepEqual(of("#1372 · 9 comments"), ["Ask me", "Handle them", "open"]);
@@ -127,7 +127,7 @@ test("a merely approved PR with no comments does not pull a working run into Nee
 // What gh gives for a PR's comments (comments.js COMMENTS_QUERY): threads as [{id, bot, last}].
 const graph = (threads) => ({ data: { repository: { pullRequest: { author: { login: "dlebech" },
   reviewThreads: { nodes: threads.map((t) => ({ id: t.id, isResolved: false, path: "a.php", line: 1,
-    first: { nodes: [{ author: { __typename: t.bot ? "Bot" : "User", login: t.bot ? "coderabbitai" : "mfalkenbrink" }, authorAssociation: t.bot ? "NONE" : "MEMBER", body: `Fix ${t.id}`, url: `u-${t.id}` }] },
+    first: { nodes: [{ author: { __typename: t.bot ? "Bot" : "User", login: t.bot ? "coderabbitai" : "kim" }, authorAssociation: t.bot ? "NONE" : "MEMBER", body: `Fix ${t.id}`, url: `u-${t.id}` }] },
     last: { nodes: [{ body: t.reply ? "🤖 AI: done" : `Fix ${t.id}`, author: { login: "dlebech" }, authorAssociation: "MEMBER" }] } })) },
   reviews: { nodes: [] }, comments: { nodes: [] } } } } });
 const sigOf = (threads) => commentsSig(null, { comments: commentSummary(graph(threads)) });

@@ -19,6 +19,8 @@ const KEY = "harbormaster.waitingOn";
 let root;
 beforeEach(async () => {
   resetShared();
+  // The run's folder is peer by the user's setting: no folder is peer built in.
+  setShared("harbormaster.reviewFlows", { acme: "peer" });
   root = mkdtempSync(join(tmpdir(), "hm-wait-"));
   // A fresh read of the (empty) run root, so the runs below count as freshly read (data.js filesFresh).
   withRoot(root);
@@ -29,16 +31,16 @@ beforeEach(async () => {
 });
 afterEach(() => { rmSync(root, { recursive: true, force: true }); delete globalThis.__herdrExec; delete globalThis.__herdrTerminals; delete globalThis.__herdrAgents; });
 
-// A finished peer-flow run (snevagten) with one open PR and no reviewer: `request review`.
+// A finished peer-flow run (acme) with one open PR and no reviewer: `request review`.
 const runIn = (o = {}) => {
-  const dir = join(root, "snevagten", "issue-1371");
+  const dir = join(root, "acme", "issue-1371");
   mkdirSync(dir, { recursive: true });
-  return { key: ":" + dir, dir, folder: "/home/u/projects/snevagten", repo: "snevagten", branch: "issue-1371", terminal: "t99", localTerminal: "t99",
-    phase: "finished", statusLine: "finished", progress: "", tasks: [], prs: [{ url: "https://github.com/o/snevagten/pull/1397" }],
+  return { key: ":" + dir, dir, folder: "/home/u/projects/acme", repo: "acme", branch: "issue-1371", terminal: "t99", localTerminal: "t99",
+    phase: "finished", statusLine: "finished", progress: "", tasks: [], prs: [{ url: "https://github.com/o/acme/pull/1397" }],
     related: [], question: null, ask: null, away: null, updated: Date.now() - 3600000, started: Date.now() - 7200000, ...o };
 };
 const pr = (o = {}) => ({ number: 1397, state: "OPEN", review: null, approvedBy: [], changesBy: [], requested: [], checks: { pass: 3, fail: 0, pending: 0 },
-  url: "https://github.com/o/snevagten/pull/1397", repo: "o/snevagten", ci: { startedAt: 1, finishedAt: 2 }, reviewedAt: null, sha: "abc", ...o });
+  url: "https://github.com/o/acme/pull/1397", repo: "o/acme", ci: { startedAt: 1, finishedAt: 2 }, reviewedAt: null, sha: "abc", ...o });
 const readPrs = (run, list) => setShared("harbormaster.prs", { [run.key]: { list, at: Date.now(), okAt: Date.now() } });
 // A view with the reply field open on the run's Waiting on someone…
 const viewOn = (run, text) => {
@@ -107,17 +109,17 @@ test("an unreadable PR read keeps the mark; a closed or unlisted run's mark is p
 });
 
 test("marks of runs not read this poll are kept: a machine that did not answer, or a failed read", () => {
-  setWaitingOn("lab:/r/snevagten/x", { text: "Kari", at: 1, label: "request review", sig: "x" });
-  setWaitingOn(":/r/snevagten/y", { text: "Bo", at: 1, label: "request review", sig: "x" });
+  setWaitingOn("lab:/r/acme/x", { text: "Kari", at: 1, label: "request review", sig: "x" });
+  setWaitingOn(":/r/acme/y", { text: "Bo", at: 1, label: "request review", sig: "x" });
   // App restart with the lab machine offline: its run is not in the first read at all.
   observeWaits([], facts(), { failed: ["lab"], errors: [] });
-  assert.deepEqual(Object.keys(shared(KEY)), ["lab:/r/snevagten/x"]);
+  assert.deepEqual(Object.keys(shared(KEY)), ["lab:/r/acme/x"]);
   // This machine's own read failed: nothing is pruned for being unlisted.
-  setWaitingOn(":/r/snevagten/y", { text: "Bo", at: 1, label: "request review", sig: "x" });
+  setWaitingOn(":/r/acme/y", { text: "Bo", at: 1, label: "request review", sig: "x" });
   observeWaits([], facts(), { failed: [], errors: ["Error: sh failed"] });
-  assert.deepEqual(Object.keys(shared(KEY)).sort(), [":/r/snevagten/y", "lab:/r/snevagten/x"]);
+  assert.deepEqual(Object.keys(shared(KEY)).sort(), [":/r/acme/y", "lab:/r/acme/x"]);
   observeWaits([], facts(), { failed: [null], errors: [] });
-  assert.deepEqual(Object.keys(shared(KEY)).sort(), [":/r/snevagten/y"]);
+  assert.deepEqual(Object.keys(shared(KEY)).sort(), [":/r/acme/y"]);
 });
 
 test("Enter on a run whose step changed meanwhile sets nothing, closes the field and says why", () => {

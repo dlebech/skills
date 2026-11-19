@@ -21,6 +21,13 @@ export function runNamed(runs, name) {
 
 // "repo=skills kind=review input=123" → {repo, kind, input}; keys in any order, input= takes the rest
 // (so it may hold spaces and other key=value text).
+// "skills=peer" → {key: "skills", flow: "peer"}; "skills=default" → flow null (the built-in
+// default again); anything else null. The key is a folder name, as attention.js flowKey makes it.
+export function flowArgs(arg) {
+  const m = /^([^\s=/]+)=(peer|self|default)$/.exec(String(arg ?? "").trim());
+  return m ? { key: m[1], flow: m[2] === "default" ? null : m[2] } : null;
+}
+
 export function newRunArgs(arg) {
   const out = {};
   let rest = String(arg).trim();

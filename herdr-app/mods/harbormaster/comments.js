@@ -85,7 +85,7 @@ export const COMMENTS_KEEP = 40;
 // (`comments.totalCount` on the review, replies in older threads included) is a reviewer
 // submitting those, and its text sums them up; a review with none is a standalone message whose
 // findings exist nowhere else. A bare acknowledgement ("LGTM", "Approved") is a summary too: it
-// holds nothing to answer. On snevagten-api#1799 the approval carries 15 comments (a summary),
+// holds nothing to answer. On acme-api#1799 the approval carries 15 comments (a summary),
 // while the earlier COMMENTED review has 0 and holds findings no thread has (a note).
 export function commentSummary(data) {
   const pr = data?.data?.repository?.pullRequest;
@@ -193,8 +193,8 @@ export function commentGroups(items) {
 }
 
 // A PR's comments for a hover, grouped by class with a header each ("Open threads", "Review
-// notes", "Answered, waiting on mfalkenbrink (not counted)", "Review summaries (… not counted)"),
-// one line per comment: "mfalkenbrink on src/x.ts:42: Routes API errors never reach Sentry".
+// notes", "Answered, waiting on kim (not counted)", "Review summaries (… not counted)"),
+// one line per comment: "kim on src/x.ts:42: Routes API errors never reach Sentry".
 // "#1799 " before each line with several PRs, at most `max` lines, then "+N more", then bots'
 // threads as one line ("+2 from coderabbitai"). Every number the row shows can be found here.
 export function commentLines(prs, max = 12) {

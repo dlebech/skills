@@ -24,3 +24,13 @@ test("a toast's click opens the run it is about, not another machine's run at th
   // A directory alone still finds the first run at it, as show-run always did.
   assert.equal(runNamed(runs, "/home/u/run"), remote);
 });
+
+test("set-flow's argument: a folder name and peer, self or default", async () => {
+  const { flowArgs } = await import("../../herdr-app/mods/harbormaster/commands.js");
+  assert.deepEqual(flowArgs("acme=peer"), { key: "acme", flow: "peer" });
+  assert.deepEqual(flowArgs(" skills=self "), { key: "skills", flow: "self" });
+  assert.deepEqual(flowArgs("acme=default"), { key: "acme", flow: null });
+  assert.equal(flowArgs("acme=maybe"), null);
+  assert.equal(flowArgs("/a/acme=peer"), null);
+  assert.equal(flowArgs(""), null);
+});

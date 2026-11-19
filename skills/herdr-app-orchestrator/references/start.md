@@ -20,7 +20,7 @@ The orchestrator itself needs a capable model, whatever its kind: `claude`, `pi`
 
 Role overrides take precedence. With no configuration, use your own kind (the `status.app` of `hc get $HC_TERMINAL_ID`: `claude-code` means `claude`) and its normal default model. If it cannot start that kind, ask the user which kind to use.
 
-Check that each configured kind is installed with `<skill-dir>/scripts/agent-path.sh <kind>`, never `command -v`: it also finds programs on the user's login-shell PATH that your own shell and Herdr lack (opencode's `~/.opencode/bin`), and `start-agent.sh` starts them by that path, so a kind it finds is available. Check models with the kind's own list, through that path (`"$(agent-path.sh opencode)" models`, `pi --list-models`). If a requested model cannot be verified, or a kind is unavailable, ask the user rather than silently substituting. A role may be given as `<role>=<kind>:<model>` (`implementer=opencode:strata/qwen3.8-flash-next-coder-iq1_m`): the kind before the first `:`, the model after it.
+Check that each configured kind is installed with `<skill-dir>/scripts/agent-path.sh <kind>`, never `command -v`: it also finds programs on the user's login-shell PATH that your own shell and Herdr lack (opencode's `~/.opencode/bin`), and `start-agent.sh` starts them by that path, so a kind it finds is available. Check models with the kind's own list, through that path (`"$(agent-path.sh opencode)" models`, `pi --list-models`). If a requested model cannot be verified, or a kind is unavailable, ask the user rather than silently substituting. A role may be given as `<role>=<kind>:<model>` (`implementer=opencode:lab/qwen3.8-flash-next-coder-iq1_m`): the kind before the first `:`, the model after it.
 
 ## Options
 

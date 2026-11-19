@@ -120,7 +120,7 @@ export function rowTip(a, now = Date.now()) {
   return lines;
 }
 
-// The review comments of a next step, for a hover: a heading, then who said what ("mfalkenbrink
+// The review comments of a next step, for a hover: a heading, then who said what ("kim
 // on src/x.ts:42: …"), or [] without any.
 export function reviewCommentLines(next) {
   const c = next?.comments;

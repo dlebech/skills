@@ -30,13 +30,13 @@ const settled = (r, list, o = {}) => assess(r, { orch: "idle", working: false, p
 
 // ---- review flow ----
 
-test("the review flow defaults to self, snevagten to peer, and a setting overrides both", () => {
+test("the review flow defaults to self for every folder, and a setting overrides it", () => {
   assert.equal(reviewFlow(run()), "self");
-  assert.equal(reviewFlow(run({ folder: "/home/u/projects/snevagten" })), "peer");
-  assert.equal(reviewFlow(run({ folder: "/home/u/projects/snevagten/" }), { snevagten: "self" }), "self");
+  assert.equal(reviewFlow(run({ folder: "/home/u/projects/acme" })), "self", "no folder is peer built in");
+  assert.equal(reviewFlow(run({ folder: "/home/u/projects/acme/" }), { acme: "peer" }), "peer");
   assert.equal(reviewFlow(run(), { skills: "peer" }), "peer");
   assert.equal(reviewFlow(run(), { skills: "bogus" }), "self");
-  assert.equal(flowKey({ folder: "", repo: "omhu" }), "omhu");
+  assert.equal(flowKey({ folder: "", repo: "widgets" }), "widgets");
 });
 
 // ---- labels ----
@@ -514,9 +514,9 @@ test("an approval, a change request and red CI count while the plan is still ope
 
 // ---- finished review runs: what became of the review ----
 
-// The three real runs (snelogin#1394, snevagten-api#1821 approved; #1831 pending), as gh's reviews list gave them.
-const REV = { 1394: [["coderabbitai", "COMMENTED"], ["mykz", "COMMENTED"], ["dlebech", "APPROVED"]], 1821: [["coderabbitai", "COMMENTED"], ["dlebech", "APPROVED"]],
-  1831: [["dlebech", "PENDING"], ["coderabbitai", "COMMENTED"], ["mykz", "COMMENTED"]] };
+// The three real runs (acme-login#1394, acme-api#1821 approved; #1831 pending), as gh's reviews list gave them.
+const REV = { 1394: [["coderabbitai", "COMMENTED"], ["noor", "COMMENTED"], ["dlebech", "APPROVED"]], 1821: [["coderabbitai", "COMMENTED"], ["dlebech", "APPROVED"]],
+  1831: [["dlebech", "PENDING"], ["coderabbitai", "COMMENTED"], ["noor", "COMMENTED"]] };
 const revPr = (n, state = "OPEN") => prSummary({ number: n, state, url: `https://github.com/o/r/pull/${n}`, author: { login: "x" },
   reviews: REV[n].map(([login, st]) => ({ author: { login }, state: st })) }, "o/r", "dlebech");
 const revRun = (o = {}) => run({ type: "rev", phase: "finished", prs: [], ...o });
@@ -555,7 +555,7 @@ test("a review run whose PR is merged or closed is Done whatever the review; no 
 // ---- waiting on someone (the user's mark) ----
 
 // A finished peer-flow run with one open PR and no reviewer: `request review`, as in the user's world.
-const peerRun = (o = {}) => run({ phase: "finished", statusLine: "finished", progress: "", folder: "/home/u/projects/snevagten", repo: "snevagten", ...o });
+const peerRun = (o = {}) => run({ phase: "finished", statusLine: "finished", progress: "", folder: "/home/u/projects/acme", repo: "acme", ...o });
 const peer = (r, list, o = {}) => settled(r, list, { flow: "peer", ...o });
 // The mark as Waiting on someone… sets it: the step's label and signature as they are now.
 const markOf = (a, text = "Kari — preview check", at = ago(120)) => ({ text, at, label: a.next.label, sig: waitSig(a.next) });

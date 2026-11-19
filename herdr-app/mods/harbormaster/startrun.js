@@ -45,12 +45,12 @@ const LINE_ROLES = ["orchestrator", ...ROLES];
 
 // "implementer=sonnet reviewer=opus specialist=opus autonomy=L1": the line the user edits.
 // A role with no model (another agent's default) is left out. A role's value is a model of the
-// run's agent, or `<agent>:<model>` for another agent (`implementer=opencode:strata/qwen3`), or an agent alone.
+// run's agent, or `<agent>:<model>` for another agent (`implementer=opencode:lab/qwen3`), or an agent alone.
 export const profileText = (p) => [...LINE_ROLES.filter((r) => p[r]).map((r) => `${r}=${p[r]}`), `autonomy=${p.autonomy}`].join(" ");
 
 const AGENT_IDS = new Set(["claude", "pi", "opencode", "codex"]);
 
-// A role's value → {kind, model}: "opencode:strata/x" → opencode's strata/x; "pi" → pi's default;
+// A role's value → {kind, model}: "opencode:lab/x" → opencode's lab/x; "pi" → pi's default;
 // anything else a model of the run's agent (a "/" is a provider, as in opencode/big-pickle, never an agent).
 export function roleValue(value, agent = "claude") {
   const v = String(value ?? "");
@@ -69,11 +69,11 @@ const subsequence = (q, s) => { let i = 0; for (const c of s) if (c === q[i]) i+
 
 // The models that match what was typed, best first, as role values for a run of `agent`: from each
 // installed agent's list (`models`: {opencode: [...], pi: [...]}) and Claude's names. Typing
-// "qwen3.8flash" finds strata/qwen3.8-flash-next-coder-iq1_m; "opencode:qwen" looks only in opencode's.
+// "qwen3.8flash" finds lab/qwen3.8-flash-next-coder-iq1_m; "opencode:qwen" looks only in opencode's.
 export function matchModels(typed, { agent = "claude", models = {}, installed = ["claude"], max = 4 } = {}) {
   const { kind: only, model } = /^[a-z]+:/.test(typed) ? roleValue(typed, agent) : { kind: null, model: typed };
   const q = norm(model);
-  // A provider-looking prefix that is wrong ("opencode/qwen…" for a strata model) should not hide the rest.
+  // A provider-looking prefix that is wrong ("opencode/qwen…" for a lab model) should not hide the rest.
   const qTail = model.includes("/") ? norm(model.slice(model.indexOf("/") + 1)) : null;
   if (!q) return [];
   const pool = [];

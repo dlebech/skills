@@ -68,12 +68,13 @@ export const CI_MIN_SAMPLES = 3;
 
 // ---- review flow ----
 
-// Projects reviewed by a colleague on GitHub; every other one is "self" (the user reviews
-// the proof and merges). The user's own settings (tracking.js reviewFlows) override these.
-export const DEFAULT_FLOWS = { snevagten: "peer" };
+// Built-in review flows by folder name: none, so every folder is "self" (the user reviews the
+// proof and merges) until the user sets "peer" (a colleague reviews on GitHub) with a card's
+// Review toggle (tracking.js reviewFlows, kept per machine in Herdr's shared state).
+export const DEFAULT_FLOWS = {};
 
 // The key a run's review flow is stored under: its repository folder's name
-// ("/home/david/projects/snevagten" → "snevagten"), else the run directory's folder segment.
+// ("/home/u/projects/acme" → "acme"), else the run directory's folder segment.
 export const flowKey = (run) => (run?.folder ?? "").replace(/\/+$/, "").split("/").pop() || run?.repo || "";
 
 // "peer" | "self" for a run: the user's setting for its folder, else the built-in default, else self.

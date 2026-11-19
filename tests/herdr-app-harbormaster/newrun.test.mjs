@@ -183,27 +183,27 @@ test("the agent and each agent's profile are remembered apart; a captain start t
   assert.deepEqual(parsePrefs(JSON.stringify(p)), p);
 });
 
-const OPENCODE = ["ollama/qwen3.8:27b", "opencode/big-pickle", "opencode/hy4-flash-free", "strata/qwen3.8-flash-next-coder-iq1_m"];
+const OPENCODE = ["ollama/qwen3.8:27b", "opencode/big-pickle", "opencode/hy4-flash-free", "lab/qwen3.8-flash-next-coder-iq1_m"];
 const env = { agent: "claude", installed: ["claude", "pi", "opencode"], models: { opencode: OPENCODE, pi: ["ollama/gemma4:26b"] } };
 
 test("a role's value: a model of the run's agent, <agent>:<model>, or an agent; a provider is never an agent", () => {
   assert.deepEqual(roleValue("sonnet"), { kind: "claude", model: "sonnet" });
-  assert.deepEqual(roleValue("opencode:strata/x"), { kind: "opencode", model: "strata/x" });
+  assert.deepEqual(roleValue("opencode:lab/x"), { kind: "opencode", model: "lab/x" });
   assert.deepEqual(roleValue("pi"), { kind: "pi", model: "" });
   assert.deepEqual(roleValue("opencode/big-pickle", "opencode"), { kind: "opencode", model: "opencode/big-pickle" });
 });
 
-test("the run that guessed: implementer=opencode/qwen3.8flash is caught, with strata's flash model first", () => {
+test("the run that guessed: implementer=opencode/qwen3.8flash is caught, with lab's flash model first", () => {
   const profile = { ...DEFAULT_PROFILE, implementer: "opencode/qwen3.8flash" };
   const [p] = modelProblems(profile, env);
   assert.equal(p.role, "implementer");
-  assert.equal(p.suggestions[0], "opencode:strata/qwen3.8-flash-next-coder-iq1_m");
+  assert.equal(p.suggestions[0], "opencode:lab/qwen3.8-flash-next-coder-iq1_m");
   const fixed = setRole(profileText(profile), "implementer", p.suggestions[0]);
-  assert.equal(fixed, "implementer=opencode:strata/qwen3.8-flash-next-coder-iq1_m reviewer=opus specialist=opus autonomy=L1");
+  assert.equal(fixed, "implementer=opencode:lab/qwen3.8-flash-next-coder-iq1_m reviewer=opus specialist=opus autonomy=L1");
   const again = parseProfile(fixed).profile;
   assert.deepEqual(modelProblems(again, env), []);
   assert.equal(buildPrompt({ kind: "issue", input: "1371", profile: again }),
-    "/herdr-app-orchestrator 1371 implementer=opencode implementer-model=strata/qwen3.8-flash-next-coder-iq1_m reviewer-model=opus specialist-model=opus autonomy=L1");
+    "/herdr-app-orchestrator 1371 implementer=opencode implementer-model=lab/qwen3.8-flash-next-coder-iq1_m reviewer-model=opus specialist-model=opus autonomy=L1");
 });
 
 test("model checks: Claude's names, an uninstalled agent, an unlisted agent, the orchestrator's own", () => {
@@ -211,22 +211,22 @@ test("model checks: Claude's names, an uninstalled agent, an unlisted agent, the
   assert.equal(modelProblems({ implementer: "sonet" }, env)[0].suggestions[0], "sonnet");
   assert.match(modelProblems({ implementer: "codex:gpt" }, env)[0].why, /codex is not installed/);
   assert.deepEqual(modelProblems({ implementer: "pi:anything" }, { ...env, models: {} }), []); // no list: not checked
-  assert.deepEqual(modelProblems({ orchestrator: "strata/qwen3.8-flash-next-coder-iq1_m" }, { ...env, agent: "opencode" }), []);
+  assert.deepEqual(modelProblems({ orchestrator: "lab/qwen3.8-flash-next-coder-iq1_m" }, { ...env, agent: "opencode" }), []);
   assert.match(modelProblems({ orchestrator: "pi:x" }, env)[0].why, /Agent above/);
   assert.deepEqual(matchModels("pi:gemma", env), ["pi:ollama/gemma4:26b"]);
   assert.equal(matchModels("big pickle", { ...env, agent: "opencode" })[0], "opencode/big-pickle");
 });
 
 test("the orchestrator's model goes to start-agent.sh, not the prompt", () => {
-  const { profile } = parseProfile("orchestrator=strata/q autonomy=L2", profileFor("issue", null, "opencode"));
+  const { profile } = parseProfile("orchestrator=lab/q autonomy=L2", profileFor("issue", null, "opencode"));
   assert.equal(buildPrompt({ kind: "issue", input: "1", profile, agent: "opencode" }), "Use the herdr-app-orchestrator skill with these arguments: 1 agent=opencode autonomy=L2");
   const args = startArgs({ name: "n", cwd: "/r", taskFile: "/t", spaceId: "s", kind: "opencode", model: roleValue(profile.orchestrator, "opencode").model });
-  assert.deepEqual(args.slice(4, 8), ["--kind", "opencode", "--model", "strata/q"]);
+  assert.deepEqual(args.slice(4, 8), ["--kind", "opencode", "--model", "lab/q"]);
 });
 
 test("the model lists are read from each agent's own output", () => {
   assert.deepEqual(parsePiModels("provider   model   context\nollama     gemma4:26b  64K\nllama.cpp  ggml-org/x:Q4  16K\n"), ["ollama/gemma4:26b", "llama.cpp/ggml-org/x:Q4"]);
-  assert.deepEqual(parseOpencodeModels("Loading...\nstrata/qwen3\nopencode/big-pickle\n"), ["strata/qwen3", "opencode/big-pickle"]);
+  assert.deepEqual(parseOpencodeModels("Loading...\nlab/qwen3\nopencode/big-pickle\n"), ["lab/qwen3", "opencode/big-pickle"]);
 });
 
 test("the last review's reviewer is remembered per agent and prefills the next review", () => {
