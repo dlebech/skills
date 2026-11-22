@@ -51,6 +51,12 @@ state=existing
 mkdir -p "$dir/inbox" "$dir/shared"
 chmod 700 "$root"
 me=$(hc get "$HC_TERMINAL_ID" --json)
+# Codex started without --no-daemon runs its commands in a shared server whose HC_TERMINAL_ID is that of
+# the terminal that first started it, often one long gone. Registering that would orphan this run.
+[ "$(jq -r '.state // empty' <<<"$me")" = live ] || {
+  echo "HC_TERMINAL_ID=$HC_TERMINAL_ID is not a live terminal; if this is Codex, restart it with: codex --no-daemon" >&2
+  exit 1
+}
 tab=$(jq -r '.labels["herdr.tab"] // empty' <<<"$me")
 [ -n "$tab" ] ||
   echo "warning: this terminal has no tab (no herdr.tab label), so the run's tab cannot be renamed or closed" >&2

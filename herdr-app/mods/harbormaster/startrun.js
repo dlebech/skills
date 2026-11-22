@@ -25,6 +25,10 @@ export const AGENTS = [
   { id: "opencode", label: "opencode" },
   { id: "codex", label: "Codex", tip: "Untested with the orchestrator" },
 ];
+// The command that starts an agent in a tab (start-agent.sh does the same). Codex without --no-daemon
+// shares one background server whose environment, HC_TERMINAL_ID included, is that of the terminal
+// that first started it, so a run would register that terminal, not its own.
+export const agentArgv = (id) => (id === "codex" ? ["codex", "--no-daemon"] : [id]);
 export const agentLabel = (id) => AGENTS.find((a) => a.id === id)?.label ?? id;
 
 // The agent a start uses: the remembered one while it is installed, else Claude Code, else the first installed.

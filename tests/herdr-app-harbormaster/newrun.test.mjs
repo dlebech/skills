@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  DEFAULT_PROFILE, AGENTS, agentFor, lastProfile, skillPrompt, roleValue, matchModels, modelProblems, setRole, parsePiModels, parseOpencodeModels, profileText, parseProfile, profileFor, buildPrompt, inputProblem, prRef, runAgentName, startArgs,
+  DEFAULT_PROFILE, AGENTS, agentFor, agentArgv, lastProfile, skillPrompt, roleValue, matchModels, modelProblems, setRole, parsePiModels, parseOpencodeModels, profileText, parseProfile, profileFor, buildPrompt, inputProblem, prRef, runAgentName, startArgs,
   startOutcome, parsePrefs, draftsFor, remember, prefillProfile, lastReviewProfile,
 } from "../../herdr-app/mods/harbormaster/startrun.js";
 import { newRunArgs } from "../../herdr-app/mods/harbormaster/commands.js";
@@ -154,6 +154,11 @@ test("the agent: the remembered one while installed, else Claude Code, else the 
   assert.equal(agentFor({}, ["pi", "opencode"]), "pi");
   assert.equal(agentFor(null, []), "claude"); // nothing found: as before there was a choice
   assert.deepEqual(AGENTS.map((a) => a.id), ["claude", "pi", "opencode", "codex"]);
+});
+
+test("Codex starts without its shared server, so its commands get its own HC_TERMINAL_ID", () => {
+  assert.deepEqual(agentArgv("codex"), ["codex", "--no-daemon"]);
+  assert.deepEqual(agentArgv("claude"), ["claude"]);
 });
 
 test("each agent runs the skill its own way, with agent= for any but Claude Code", () => {
