@@ -175,3 +175,10 @@ test("a gap read before a final line was added does not measure from the old pic
   // A gap without a key (older callers) still names its sha.
   assert.equal(reviewedLine(grown, { sha: shas[1], count: 3, same: false }).tone, "amber");
 });
+
+test("a passing fix check after the final review's fixes counts as the final review (finish.md)", () => {
+  const m = md("Reviewed: 4ad8528 final review — 4 must-fix\nReviewed: 9ab12cd final review (fix check) — 4 of 4 fixed");
+  const l = reviewedLine(m, { sha: "9ab12cd", count: 0, same: true });
+  assert.deepEqual([l.text, l.tone], ["Reviewed · final review (fix check) at 9ab12cd", "dim"]);
+  assert.equal(reviewedState(m, { sha: "9ab12cd", count: 0, same: true }).kind, "current");
+});

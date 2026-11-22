@@ -13,8 +13,10 @@ If `final-review` is on, or T0 tasks merged without a task review ([speed.md](sp
 - It reviews `<default>...<integration>` in each against `spec.md` for what per-task reviews miss: bugs across task and repository boundaries, such as an API and its client disagreeing, unmet acceptance criteria, duplication across tasks, dead code, inconsistencies, modules grown too large. Same rules as the skill's section 4: read-only, findings to a file, at most about 15.
 - Triage them, and fix must-fix findings as one more task with no task review.
 - With rounds left, remove the reviewer and start another fresh one, named `rev-<prefix>-final-<round>`, on the branch with those fixes merged.
-- After the last round, let the user pick among the nice-to-haves, or record them as follow-ups. The rounds are the only review of the review fixes; do not loop.
+- After the last round, let the user pick among the nice-to-haves, or record them as follow-ups.
 - After each final review round, append `Reviewed: <short sha of the HEAD it reviewed> final review — <result>` to `proof.md`'s header (run-files.md); Harbormaster warns the user in amber when commits come after the latest one.
+- Fix check: when the last round's must-fix fixes are merged, the fixer's commits come after that line. Keep the last round's reviewer until then, and ask it to review only `<reviewed sha>..HEAD`: is each must-fix finding fixed, and does the fix diff break anything? It looks for nothing else, stays read-only, and writes its answer to a file. If that reviewer is gone, start a fresh one, `rev-<prefix>-final-check`, with the findings file, your triage decisions and that range. Skip the fix check when the last round fixed nothing, and after earlier rounds (the next round reviews their fixes).
+- If the fix check passes, append `Reviewed: <short sha of HEAD> final review (fix check) — <n> of <n> fixed`. If it fails, append no line, so Harbormaster stays amber, and do not fix again: name what is not fixed in the finish report and the PR's follow-ups. The rounds and this one check are the only review of the review fixes; do not loop.
 - Remove the final reviewer and any fixer once they are done.
 
 ## 2. Push and open the PR
