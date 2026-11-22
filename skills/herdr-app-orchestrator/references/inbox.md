@@ -21,7 +21,7 @@ Ask for changes, on a run that was ready to merge. Set the status back to runnin
 
 ## re-review asked from Harbormaster: …
 
-Harbormaster's Re-review first, asked before the user requests a peer's review because the final AI review is behind the branch or missing. Set the status to running, run the final review again on the integration branch as it is now, as [finish.md](finish.md) describes (fix what it finds as tasks under the normal review rules), append the new `Reviewed:` line to `proof.md`, finish again, and rename the message `.handled`. Never merge.
+Harbormaster's Re-review first, asked before the user requests a peer's review because the final AI review is behind the branch or missing. Set the status to running, run the final review again on the integration branch as it is now, as [finish.md](finish.md) describes, with its fix check, append the new `Reviewed:` lines to `proof.md`, finish again, and rename the message `.handled`. Never merge.
 
 ## set autonomy to L<n> / set proof tier to T<n>
 

@@ -176,9 +176,22 @@ test("a gap read before a final line was added does not measure from the old pic
   assert.equal(reviewedLine(grown, { sha: shas[1], count: 3, same: false }).tone, "amber");
 });
 
-test("a passing fix check after the final review's fixes counts as the final review (finish.md)", () => {
-  const m = md("Reviewed: 4ad8528 final review — 4 must-fix\nReviewed: 9ab12cd final review (fix check) — 4 of 4 fixed");
-  const l = reviewedLine(m, { sha: "9ab12cd", count: 0, same: true });
-  assert.deepEqual([l.text, l.tone], ["Reviewed · final review (fix check) at 9ab12cd", "dim"]);
-  assert.equal(reviewedState(m, { sha: "9ab12cd", count: 0, same: true }).kind, "current");
+// finish.md's fix check: the last round reviewed c3, a fixer committed c4 and c5 (HEAD).
+test("a passing fix check at HEAD is the final review, over the round's line before the fixes", async () => {
+  const { dir, shas } = repo();
+  const r = asRun(dir, [`Reviewed: ${shas[2]} final review — 4 must-fix`, `Reviewed: ${shas[4]} final review (fix check) — 4 of 4 fixed`], 10);
+  await refreshReviewed(r);
+  assert.equal(r.reviewedGap.sha, shas[4]);
+  const l = reviewedLine(r.proof.md, r.reviewedGap);
+  assert.deepEqual([l.text, l.tone], [`Reviewed · final review (fix check) at ${shas[4]}`, "dim"]);
+  assert.equal(reviewedState(r.proof.md, r.reviewedGap).kind, "current");
+});
+
+test("a failed fix check writes no line, so the fixer's commits stay amber", async () => {
+  const { dir, shas } = repo();
+  const r = asRun(dir, [`Reviewed: ${shas[2]} final review — 4 must-fix`], 11);
+  await refreshReviewed(r);
+  const l = reviewedLine(r.proof.md, r.reviewedGap);
+  assert.deepEqual([l.text, l.tone], [`Reviewed at ${shas[2]} · 2 commits since, not reviewed`, "amber"]);
+  assert.deepEqual(reviewedState(r.proof.md, r.reviewedGap).kind, "behind");
 });

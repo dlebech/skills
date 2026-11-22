@@ -260,7 +260,7 @@ test("the re-review message: behind or none, then what to do, never merge", () =
   assert.equal(rereviewRequest({ behind: 1, sha: null }).split("\n")[0], "re-review asked from Harbormaster: the final review is 1 commit behind the branch");
   const none = rereviewRequest({ behind: null }).split("\n");
   assert.equal(none[0], "re-review asked from Harbormaster: there is no final review of the branch yet");
-  assert.match(none[1], /^Asked from Harbormaster: run the final review again on the integration branch as it is now, fix what it finds as tasks under the normal review rules, update proof\.md's Reviewed line, then finish again\. Never merge\.$/);
+  assert.match(none[1], /^Asked from Harbormaster: run the final review again on the integration branch as it is now, fix what it finds and run the fix check as finish\.md describes, append the new Reviewed lines to proof\.md, then finish again\. Never merge\.$/);
   assert.equal(rereviewPending("changes asked from Harbormaster: x\nre-review asked from Harbormaster: there is no final review of the branch yet"), true);
   assert.equal(rereviewPending("what is blocking? x"), false);
 });
