@@ -32,6 +32,7 @@ import { reviewerCandidates, reviewersArgs, requestArgs } from "./reviewers.js";
 import { commentsArgs, commentSummary, pendingComments } from "./comments.js";
 import { observeRuns, recordCi } from "./tracking.js";
 import { detachedSend } from "./wake.js";
+import { skillPrompt } from "./startrun.js";
 import { exactStatus, reportedStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f", GS = "\u001d";
@@ -1447,7 +1448,7 @@ export async function deleteRuns(runs, { cx = null } = {}) {
 // only a shell now, is closed once the new one is started, so it does not linger.
 export function resumeRun(run) {
   const kind = run.kind || "claude";
-  const prompt = `${kind === "pi" ? "/skill:" : "/"}herdr-app-orchestrator ${run.dir}/spec.md`;
+  const prompt = skillPrompt(kind, "herdr-app-orchestrator", `${run.dir}/spec.md`);
   const lostTab = orchestratorLost(run, facts()) ? tabOf(run) : null;
   const space = homeSpace(run);
   if (space) command("tab.new", { space: space.id, folder: run.folder, argv: [kind], task: prompt });

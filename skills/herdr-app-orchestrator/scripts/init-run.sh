@@ -54,8 +54,11 @@ me=$(hc get "$HC_TERMINAL_ID" --json)
 tab=$(jq -r '.labels["herdr.tab"] // empty' <<<"$me")
 [ -n "$tab" ] ||
   echo "warning: this terminal has no tab (no herdr.tab label), so the run's tab cannot be renamed or closed" >&2
-# The agent kind start-agent.sh takes: claude-code reports itself as claude-code.
-kind=$(jq -r '.status.app // empty | if . == "claude-code" then "claude" else . end' <<<"$me")
+# The agent kind start-agent.sh takes: claude-code reports itself as claude-code. An agent that has not
+# reported a status yet (codex, at its first command) is named by the program in the foreground, so a
+# resume starts the same kind rather than defaulting to claude.
+kind=$(jq -r '(.status.app // .foreground.name // empty) | if . == "claude-code" then "claude" else . end
+  | if IN("claude","codex","pi","opencode") then . else empty end' <<<"$me")
 jq -n --arg terminal "$HC_TERMINAL_ID" --arg tab "$tab" --arg folder "$folder" --arg branch "$branch" \
   --arg kind "$kind" --arg started "$started" '{terminal: $terminal, tab_id: $tab, folder: $folder, branch: $branch}
   + (if $kind == "" then {} else {kind: $kind} end)
