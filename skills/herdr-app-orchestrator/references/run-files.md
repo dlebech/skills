@@ -112,7 +112,8 @@ describes them in text. Harbormaster lists the file names (up to 40) and reads `
 # Proof: <branch>
 Tier: T2
 Checks: green — 1497 tests, build, lint, CI
-Reviewed: 4ad8528 final review — 9 findings, all fixed
+Reviewed: 4ad8528 final review — 4 must-fix
+Reviewed: 9ab12cd final review (fix check) — 4 of 4 fixed
 
 ## C1 Drag a card to reorder the list
 Result: pass | fail | partial | pending — <one line>
@@ -131,7 +132,7 @@ ran. `Checks: green — …` or `Checks: red — …` in the header is the whole
 CI): one line under the claims, `Checks ✓ 1497 tests, build, lint, CI`, red on failure, dim for
 any other word (`Checks: pending — CI`, still running). `Reviewed: <short sha> <which review> — <result>`
 (`Reviewed: 3def855 task t9b — 3 must-fix fixed`) is repeatable and says what was reviewed at which
-commit; the newest final (whole-branch) review on the branch is the one Harbormaster reports (the one with the
+commit. A final round's line counts the must-fix findings; whether they were fixed is the `final review (fix check)` line at the fixes' HEAD, written only when the check passes ([finish.md](finish.md)), so a failed check leaves the fixes amber; the newest final (whole-branch) review on the branch is the one Harbormaster reports (the one with the
 fewest commits from its sha to the branch, whatever the order of the lines; a sha that is not on the branch is
 used only when no other final line is), as `Reviewed · final
 review at 4ad8528`, or amber `Reviewed at 4ad8528 · 5 commits since, not reviewed` once the integration
@@ -299,12 +300,12 @@ it. It writes a message (source `harbormaster-review`, woken like an answer) who
 
 ```
 re-review asked from Harbormaster: the final review is 2 commits behind 3f9a1c2
-Asked from Harbormaster: run the final review again on the integration branch as it is now, fix what it finds as tasks under the normal review rules, update proof.md's Reviewed line, then finish again. Never merge.
+Asked from Harbormaster: run the final review again on the integration branch as it is now, fix what it finds and run the fix check as finish.md describes, append the new Reviewed lines to proof.md, then finish again. Never merge.
 ```
 
 (`…: there is no final review of the branch yet` when the run has no `Reviewed:` line for the
-branch.) The orchestrator sets the status back to `running`, runs the final review again as
-[finish.md](finish.md) describes, appends the new `Reviewed:` line, finishes again and renames the
+branch.) The orchestrator sets the status back to `running`, runs the final review and its fix check again as
+[finish.md](finish.md) describes, appends the new `Reviewed:` lines, finishes again and renames the
 message `.handled`. Until the run's status or `Reviewed:` line changes, or while the message is
 unhandled, the button reads `asked…`. Like the other asks it answers no open `question.md`.
 

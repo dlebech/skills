@@ -41,8 +41,8 @@ export function rereviewRequest({ behind = null, sha = null } = {}) {
     ? `the final review is ${behind} ${behind === 1 ? "commit" : "commits"} behind ${sha ? String(sha).slice(0, 7) : "the branch"}`
     : "there is no final review of the branch yet";
   return `re-review asked from Harbormaster: ${head}\n`
-    + "Asked from Harbormaster: run the final review again on the integration branch as it is now, fix what it finds as tasks under the normal review rules, "
-    + "update proof.md's Reviewed line, then finish again. Never merge.";
+    + "Asked from Harbormaster: run the final review again on the integration branch as it is now, fix what it finds and run the fix check as finish.md describes, "
+    + "append the new Reviewed lines to proof.md, then finish again. Never merge.";
 }
 
 // The message, in the user's voice: what Harbormaster sees, then what to do.
