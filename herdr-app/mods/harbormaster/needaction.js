@@ -221,12 +221,19 @@ function reasonItem(r, a, ctx) {
       }
       // The proof was read but is not clean: say what stands in the way; the merge link stays the
       // main button, Proof a plain one, the user decides (accept the row, ask to prove it, or merge).
-      if (a.proofRead && (proof?.gaps || a.tasksShort) && !red && !draft) {
+      // A draft is never ready, so a read proof on one says so too, with marking it ready (on
+      // GitHub) as what is left: else the box reads as before the Proof click, as if it did nothing.
+      if (a.proofRead && (proof?.gaps || a.tasksShort || draft) && !red) {
         const tc = taskCounts(run ?? {});
         const gaps = [a.tasksShort ? `${tc.done}/${tc.planned} tasks done` : null, proof?.gaps].filter(Boolean).join(", ");
-        const todo = proof?.gaps ? "accept it or ask to prove it" : "finish or drop the rest";
-        return { line: `Proof read · ${gaps} — ${todo} before merging ${prsText(same)}`,
-          actions: [...mergePrs(same), { kind: "proof", label: "Proof", primary: false }] };
+        const todo = proof?.gaps ? "accept it or ask to prove it" : gaps ? "finish or drop the rest" : null;
+        const head = `Proof read${gaps ? ` · ${gaps}` : ""} — `;
+        const proofBtn = { kind: "proof", label: "Proof", primary: false };
+        if (draft) {
+          return { line: `${head}${todo ? `${todo}, then mark ${prsText(same)} ready and merge` : `mark ${prsText(same)} ready, then merge ${it}`}`,
+            actions: [...openPrs(same).map((x) => ({ ...x, primary: true })), proofBtn] };
+        }
+        return { line: `${head}${todo} before merging ${prsText(same)}`, actions: [...mergePrs(same), proofBtn] };
       }
       return { line: p ? `Read the proof (${p})${merge(prsText(same))}` : `Review ${prsText(same)}${merge(it)}`,
         actions: [...(p ? [{ kind: "proof", label: "Proof" }] : []), ...openPrs(same)] };

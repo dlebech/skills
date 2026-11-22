@@ -69,6 +69,22 @@ test("review proof never says merge while CI is red, and a draft is marked ready
   assert.equal(bare.line, "Review #42, then mark it ready and merge");
 });
 
+// A draft is never ready to merge, so a read proof must not read as unread (the Proof button would
+// then seem to do nothing): it says the proof was read and what is left, with the PR to mark ready.
+test("a read proof on a draft says so and points at marking the PR ready", () => {
+  const done = (id) => ({ id, name: id, state: "done" });
+  const fin = run({ phase: "finished", statusLine: "finished", progress: null, tasks: [done("t1")] });
+  const draft = [pr({ state: "DRAFT" })];
+  const [clean] = items(fin, draft, { flow: "self", proofRead: true, proofClean: true }, { proof: { tier: 2, pass: 6, total: 6 } });
+  assert.equal(clean.line, "Proof read — mark #42 ready, then merge it");
+  assert.deepEqual(clean.actions.slice(0, 2), [{ kind: "open", label: "Open #42", url: draft[0].url, primary: true }, { kind: "proof", label: "Proof", primary: false }]);
+  const [gaps] = items(fin, draft, { flow: "self", proofRead: true }, { proof: { tier: 2, pass: 3, total: 6, gaps: "3 below their bar" } });
+  assert.equal(gaps.line, "Proof read · 3 below their bar — accept it or ask to prove it, then mark #42 ready and merge");
+  // Unread, it still says to read it.
+  const [unread] = items(fin, draft, { flow: "self" }, { proof: { tier: 2, pass: 6, total: 6 } });
+  assert.equal(unread.line, "Read the proof (T2 · 6/6 proven), then mark #42 ready and merge");
+});
+
 test("request review names one action: Request review, then a quiet link to the PR", () => {
   const [draft] = items(run(), [pr({ state: "DRAFT" })], { flow: "peer" });
   assert.equal(draft.line, "Ask a peer to review #42");
