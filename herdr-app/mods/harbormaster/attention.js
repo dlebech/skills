@@ -230,15 +230,16 @@ export function nextStepAsking(prs, flow, asked) {
 //   red       CI is red on the run: "review proof", no "→ merge" (needaction.js says the same)
 //   failed    a proof task failed: "proof failed", never "→ merge" (the box says to read it first)
 //   ready     the run is ready to merge (assess's `ready`): "ready to merge"
+//   markReady the proof was read and all that is left is a draft to mark ready (assess's `markReady`): "mark ready → merge"
 //   changes   an Ask for changes is still unread (assess's `changesAsked`): "changes asked…"
 //   plan      the run's plan is still open (tasks.js planOpen): an approval reads "approved · plan open",
 //             never "→ merge", since the run's own tasks come before the merge
 // A self-flow draft reads "review proof → ready": it is marked ready before it is merged.
-export function nextStepText(step, { comments = true, red = false, failed = false, plan = false, ready = false, changes = false } = {}) {
+export function nextStepText(step, { comments = true, red = false, failed = false, plan = false, ready = false, markReady = false, changes = false } = {}) {
   if (!step) return "";
   const said = commentsText(step.comments);
   const label = step.label === "review from" ? `review from ${step.who.join(", ") || "a reviewer"}`
-    : step.label === "review proof → merge" ? (changes ? "changes asked…" : ready ? "ready to merge" : failed ? "proof failed" : red ? "review proof" : step.draft ? "review proof → ready" : step.label)
+    : step.label === "review proof → merge" ? (changes ? "changes asked…" : ready ? "ready to merge" : markReady ? "mark ready → merge" : failed ? "proof failed" : red ? "review proof" : step.draft ? "review proof → ready" : step.label)
     : said && step.label === "approved — merge" ? (comments ? `approved · ${said}` : "approved")
     : plan && step.label === "approved — merge" ? "approved · plan open"
     : said && comments ? `${step.label} · ${said}`
@@ -249,7 +250,7 @@ export function nextStepText(step, { comments = true, red = false, failed = fals
 // nextStepText for an assessed run (assess), with what it knows beside the step: red CI and a
 // failed proof. One rule for the views that word the step outside assess (parkedLabel, toasts).
 export const stepTextOf = (att, opts = {}) => nextStepText(att?.next, {
-  red: Boolean(att?.reasons?.some((r) => r.key === "red-ci")), failed: Boolean(att?.proofFailed), plan: Boolean(att?.planOpen), ready: Boolean(att?.ready), changes: Boolean(att?.changesAsked), ...opts,
+  red: Boolean(att?.reasons?.some((r) => r.key === "red-ci")), failed: Boolean(att?.proofFailed), plan: Boolean(att?.planOpen), ready: Boolean(att?.ready), markReady: Boolean(att?.markReady), changes: Boolean(att?.changesAsked), ...opts,
 });
 
 
@@ -454,7 +455,7 @@ export function assess(run, { related = null, orch = null, working = false, pr =
   const readable = Boolean(run) && filesOk !== false;
   const prs = pr?.readable ? pr.list : [];
   const step = stepOf(run, { prs, stages, since, ages });
-  const base = { held: false, planOpen: false, cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), proofRead: Boolean(proofRead), changesAsked: Boolean(changesAsked), tasksShort: false, ready: false, working: Boolean(working), askedPrs: askedPrs ?? new Set() };
+  const base = { held: false, planOpen: false, cantTell: false, why: null, next: null, step, stall: false, reasons: [], proofFailed: Boolean(proofFailed), proofRead: Boolean(proofRead), changesAsked: Boolean(changesAsked), tasksShort: false, ready: false, markReady: false, working: Boolean(working), askedPrs: askedPrs ?? new Set() };
   // Whether the mark is judged: only once the PRs were read, and then on PR grounds only while
   // nothing works on the run or its CI (a working run is in Working whatever the mark says, and
   // keeps it for when it settles); a question or a gone orchestrator lets it go even while agents work.
@@ -533,12 +534,15 @@ export function assess(run, { related = null, orch = null, working = false, pr =
       // Ready to merge: a self-flow PR whose proof was read and passes in full, with green (or no)
       // checks, no draft to mark ready first, and nothing else the run waits on you for.
       // Every listed task done too (a finished run's plan is never "open", planOpen), and no ask for
-      // changes still unread: the orchestrator is about to work on it.
+      // changes still unread: the orchestrator is about to work on it. All that with a draft is
+      // `markReady`: marking it ready on GitHub is the one thing left before the merge.
       const tc = taskCounts(run);
       base.tasksShort = tc.planned > 0 && tc.done < tc.planned;
-      base.ready = next.label === "review proof → merge" && proofRead && proofClean && !proofFailed && !next.draft && !reasons.length
+      const clear = next.label === "review proof → merge" && proofRead && proofClean && !proofFailed && !reasons.length
         && !base.tasksShort && !changesAsked && (ci.state === "green" || ci.state === null);
-      const opts = { red: ci.state === "red", failed: Boolean(proofFailed), plan: base.planOpen, ready: base.ready, changes: base.changesAsked && next.label === "review proof → merge" };
+      base.ready = clear && !next.draft;
+      base.markReady = clear && Boolean(next.draft);
+      const opts = { red: ci.state === "red", failed: Boolean(proofFailed), plan: base.planOpen, ready: base.ready, markReady: base.markReady, changes: base.changesAsked && next.label === "review proof → merge" };
       reasons.push({ key: next.label, text: nextStepText(next, opts), short: nextStepText(next, { ...opts, comments: false }), since: reviewed ?? settled });
     }
   }
@@ -548,7 +552,7 @@ export function assess(run, { related = null, orch = null, working = false, pr =
   // Marked "waiting on <someone>": while its step is the only thing it needs the user for, it waits on them.
   if (marked && reasons.length === 1 && reasons[0].key === waitOn.label) {
     const waitingOn = { text: waitOn.text, at: waitOn.at ?? null };
-    return out("waiting", { reasons: [{ key: "waiting-on", text: `waiting on ${waitOn.text}`, since: waitingOn.at }], next, waitingOn, ready: false });
+    return out("waiting", { reasons: [{ key: "waiting-on", text: `waiting on ${waitOn.text}`, since: waitingOn.at }], next, waitingOn, ready: false, markReady: false });
   }
   if (reasons.length) return out("needs", { reasons, next, stall });
   const why = working ? { key: "working", text: "agents working" }

@@ -139,7 +139,9 @@ test("a failing proof, red CI and a draft keep their own wording", () => {
   const lines = needActions(at(run(), red), ctxFor(run(), red)).map((x) => x.line);
   assert.ok(lines.every((l) => !/Ready to merge/.test(l)), lines.join("|"));
   const draft = [pr({ state: "DRAFT" })];
-  assert.match(needActions(at(run(), draft), ctxFor(run(), draft))[0].line, /then mark #44 ready and merge/);
+  // Read and clean, a draft is still not ready: what is left is marking it ready.
+  assert.match(needActions(at(run(), draft), ctxFor(run(), draft))[0].line, /^Proof read — mark #44 ready, then merge it$/);
+  assert.match(needActions(at(run(), draft, { proofRead: false }), ctxFor(run(), draft))[0].line, /then mark #44 ready and merge/);
 });
 
 test("agreement: the Crew lead, the pill, the toast and the parked label all say ready to merge", () => {

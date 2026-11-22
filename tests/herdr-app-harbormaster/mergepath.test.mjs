@@ -62,6 +62,19 @@ test("self flow: review proof → merge, not ready then ready", () => {
   assert.equal(by(b, "merge").state, "you");
 });
 
+test("self flow: a read proof is done even before the run is ready; a clear draft is marked ready next", () => {
+  const next = { label: "review proof → merge", who: [] };
+  const read = mergePath(finished({ flow: "self", next, proofRead: true }));
+  assert.equal(by(read, "human").state, "done");
+  assert.equal(by(read, "merge").state, "todo");
+  // Only when marking the draft ready is all that is left (assess's markReady) is Merge yours.
+  const draft = mergePath(finished({ flow: "self", next, proofRead: true, markReady: true }));
+  assert.equal(by(draft, "human").state, "done");
+  assert.equal(by(draft, "merge").state, "you");
+  assert.equal(by(draft, "merge").value, "mark ready");
+  assert.equal(by(mergePath(finished({ flow: "self", next })), "merge").state, "todo");
+});
+
 test("approved: review done, merge waits on you", () => {
   const s = mergePath(finished({ next: { label: "approved — merge", who: ["anna"] } }));
   assert.equal(by(s, "human").state, "done");

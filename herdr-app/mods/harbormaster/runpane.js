@@ -132,6 +132,7 @@ export function pathInput(r, f, stages) {
     next: f.att?.next ? { label: f.att.next.label, who: f.att.next.who ?? [] } : null,
     held: Boolean(f.att?.held), ready: Boolean(f.att?.ready), ci: ciState(f.prs).state,
     waitingOn: f.att?.waitingOn?.text ?? null,
+    proofRead: Boolean(f.att?.proofRead), markReady: Boolean(f.att?.markReady),
   };
 }
 

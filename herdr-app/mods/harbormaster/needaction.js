@@ -201,7 +201,7 @@ function reasonItem(r, a, ctx) {
       const p = proofText(proof);
       // No "then merge" while CI is red (its own line above says so), and a draft is marked ready first.
       const red = a.reasons.some((x) => x.key === "red-ci");
-      const draft = same.some((x) => x.state === "DRAFT");
+      const draft = Boolean(next?.draft);
       const it = same.length > 1 ? "them" : "it";
       const merge = (what) => (red ? "" : draft ? `, then mark ${what} ready and merge` : `, then merge ${what}`);
       // A failed proof task is never merged past: name it and say to read it first.
@@ -213,21 +213,33 @@ function reasonItem(r, a, ctx) {
       // Ready to merge: the proof was read and passes, the checks are green, nothing else waits on
       // you. A headline in the pass colour, the merge link as the main button (see readyItem).
       if (a.ready) return readyItem(a, ctx, same);
+      const proofBtn = { kind: "proof", label: "Proof", primary: false };
       // Changes were asked and not yet picked up: the orchestrator is about to work on it, so
-      // merging now would merge what the user just asked to change. Merge is there, but plain.
-      if (a.changesAsked && !red && !draft) {
+      // merging now would merge what the user just asked to change. Merge is there, but plain;
+      // with red CI or a draft there is nothing to merge yet, only the PR to open.
+      if (a.changesAsked) {
+        if (red || draft) return { line: "Changes asked… its orchestrator plans them", actions: [...openPrs(same), proofBtn] };
         return { line: `Changes asked… its orchestrator plans them; merge ${prsText(same)} once they are done`,
-          actions: [...mergePrs(same).map((x) => ({ ...x, primary: false })), { kind: "proof", label: "Proof", primary: false }] };
+          actions: [...mergePrs(same).map((x) => ({ ...x, primary: false })), proofBtn] };
+      }
+      // Read, clean and a draft (assess's markReady): marking it ready on GitHub is what is left.
+      if (a.markReady) {
+        return { line: `Proof read — mark ${prsText(same)} ready, then merge ${it}`, actions: [...openPrs(same).map((x) => ({ ...x, primary: true })), proofBtn] };
       }
       // The proof was read but is not clean: say what stands in the way; the merge link stays the
-      // main button, Proof a plain one, the user decides (accept the row, ask to prove it, or merge).
-      if (a.proofRead && (proof?.gaps || a.tasksShort) && !red && !draft) {
+      // main button (a draft's: its Open, to mark it ready first), Proof a plain one, the user
+      // decides (accept the row, ask to prove it, or merge).
+      if (a.proofRead && (proof?.gaps || a.tasksShort) && !red) {
         const tc = taskCounts(run ?? {});
         const gaps = [a.tasksShort ? `${tc.done}/${tc.planned} tasks done` : null, proof?.gaps].filter(Boolean).join(", ");
         const todo = proof?.gaps ? "accept it or ask to prove it" : "finish or drop the rest";
-        return { line: `Proof read · ${gaps} — ${todo} before merging ${prsText(same)}`,
-          actions: [...mergePrs(same), { kind: "proof", label: "Proof", primary: false }] };
+        const prefix = `Proof read · ${gaps} — ${todo}`;
+        if (draft) return { line: `${prefix}, then mark ${prsText(same)} ready and merge`, actions: [...openPrs(same).map((x) => ({ ...x, primary: true })), proofBtn] };
+        return { line: `${prefix} before merging ${prsText(same)}`, actions: [...mergePrs(same), proofBtn] };
       }
+      // Anything else (red CI, another reason beside it): a read proof still says it was read, so
+      // the Proof click always changes the box; Proof is then a plain button.
+      if (a.proofRead && p) return { line: `Proof read (${p})${merge(prsText(same))}`, actions: [...openPrs(same), proofBtn] };
       return { line: p ? `Read the proof (${p})${merge(prsText(same))}` : `Review ${prsText(same)}${merge(it)}`,
         actions: [...(p ? [{ kind: "proof", label: "Proof" }] : []), ...openPrs(same)] };
     }
