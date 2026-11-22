@@ -6,8 +6,8 @@
 //   { phase, away, counts: {done, planned}, blockedTasks, claims: null | {total, proven, accepted, failed, look},
 //     checks: null | "green" | "red" | "pending", reviewed: {kind: "none" | "current" | "behind" | "task-only", behind, sha},
 //     flow: "self" | "peer", prs, allMerged, next: null | {label, who}, held, ready, ci: null | "green" | "red" | "running",
-//     waitingOn: null | "<who and why, the user's words>", proofRead (the user opened the proof as it is now),
-//     draft (a PR is still a draft) }
+//     waitingOn: null | "<who and why, the user's words>", proofRead: boolean (the user opened the proof as it is now),
+//     markReady: boolean (attention.js assess: read and clean, only a draft to mark ready before the merge) }
 // `fold` is the pane fold the stage opens ("claims", "tasks"), or null.
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -66,7 +66,7 @@ function humanStage({ flow, prs, next, held, ready, waitingOn, proofRead }) {
     case "request review": return st("you", "ask", "No reviewer has been asked yet");
     case "review from": return st("current", who, who ? `Waiting for a review from ${who}` : "Waiting for a review");
     case "changes requested": return st("you", "changes requested", who ? `${who} asked for changes` : "A reviewer asked for changes");
-    // Read is done, clean or not: what a read proof still wants is the Proven stage's to say.
+    // Once the proof is read this step is done, clean or not: the Proven stage says what is still missing.
     case "review proof → merge": return ready ? st("done", "read the proof", "You read the proof and it is clean")
       : proofRead ? st("done", "read the proof", "You read the proof") : st("you", "read the proof", "Read the proof, then merge");
     case "approved — merge": return st("done", null, "The pull request is approved");
@@ -76,12 +76,12 @@ function humanStage({ flow, prs, next, held, ready, waitingOn, proofRead }) {
 }
 
 // The Merge stage.
-function mergeStage({ allMerged, ci, next, held, ready, proofRead, draft }) {
+function mergeStage({ allMerged, ci, next, held, ready, markReady }) {
   const st = (state, value, tip, label = "Merge") => ({ key: "merge", label, value, state, tip, fold: null });
   if (allMerged) return st("done", null, "Every pull request is merged", "Merged");
   if (ci === "red") return st("fail", "CI red", "CI is failing on a pull request");
   if ((next?.label === "approved — merge" && !held) || ready) return st("you", null, "Ready for you to merge");
-  if (next?.label === "review proof → merge" && proofRead && draft) return st("you", "mark ready", "The pull request is a draft: mark it ready for review on GitHub, then merge");
+  if (markReady) return st("you", "mark ready", "The pull request is a draft: mark it ready for review on GitHub, then merge");
   return st("todo", null, "Not ready to merge yet");
 }
 

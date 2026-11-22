@@ -75,7 +75,11 @@ test("a read proof on a draft says so and points at marking the PR ready", () =>
   const done = (id) => ({ id, name: id, state: "done" });
   const fin = run({ phase: "finished", statusLine: "finished", progress: null, tasks: [done("t1")] });
   const draft = [pr({ state: "DRAFT" })];
-  const [clean] = items(fin, draft, { flow: "self", proofRead: true, proofClean: true }, { proof: { tier: 2, pass: 6, total: 6 } });
+  const a = att(fin, draft, { flow: "self", proofRead: true, proofClean: true });
+  assert.equal(a.markReady, true);
+  assert.equal(a.ready, false);
+  assert.equal(a.reasons[0].text, "mark ready → merge");
+  const [clean] = needActions(a, { run: fin, prs: draft, now, proof: { tier: 2, pass: 6, total: 6 } });
   assert.equal(clean.line, "Proof read — mark #42 ready, then merge it");
   assert.deepEqual(clean.actions.slice(0, 2), [{ kind: "open", label: "Open #42", url: draft[0].url, primary: true }, { kind: "proof", label: "Proof", primary: false }]);
   const [gaps] = items(fin, draft, { flow: "self", proofRead: true }, { proof: { tier: 2, pass: 3, total: 6, gaps: "3 below their bar" } });
@@ -83,6 +87,24 @@ test("a read proof on a draft says so and points at marking the PR ready", () =>
   // Unread, it still says to read it.
   const [unread] = items(fin, draft, { flow: "self" }, { proof: { tier: 2, pass: 6, total: 6 } });
   assert.equal(unread.line, "Read the proof (T2 · 6/6 proven), then mark #42 ready and merge");
+  // Changes asked on a draft: never "merge", whatever the proof says.
+  const changes = att(fin, draft, { flow: "self", proofRead: true, proofClean: true, changesAsked: true });
+  assert.equal(changes.markReady, false);
+  const [asked] = needActions(changes, { run: fin, prs: draft, now, proof: { tier: 2, pass: 6, total: 6 } });
+  assert.equal(asked.line, "Changes asked… its orchestrator plans them");
+  assert.ok(asked.actions.every((x) => !/Merge/.test(x.label ?? "")));
+});
+
+test("a read proof with red CI says it was read, without merge", () => {
+  const done = (id) => ({ id, name: id, state: "done" });
+  const fin = run({ phase: "finished", statusLine: "finished", progress: null, tasks: [done("t1")] });
+  const red = [pr({ checks: checks(2, 1), failed: { name: "lint", url: null } })];
+  const proof = { proof: { tier: 2, pass: 6, total: 6 } };
+  const read = items(fin, red, { flow: "self", proofRead: true, proofClean: true }, proof);
+  assert.deepEqual(read.map((x) => x.key), ["red-ci", "review proof → merge"]);
+  assert.equal(read[1].line, "Proof read (T2 · 6/6 proven)");
+  assert.deepEqual(read[1].actions.slice(0, 2).map((x) => x.label), ["Open #42", "Proof"]);
+  assert.equal(items(fin, red, { flow: "self" }, proof)[1].line, "Read the proof (T2 · 6/6 proven)");
 });
 
 test("request review names one action: Request review, then a quiet link to the PR", () => {
