@@ -31,10 +31,11 @@ const label = v => (typeof v === "string" ? [...v.replace(/[\u0000-\u001f\u007f-
 const num = v => (typeof v === "number" && Number.isFinite(v) ? v : 0)
 const sizeOf = tokens => (tokens < 10e6 ? "S" : tokens < 50e6 ? "M" : tokens < 150e6 ? "L" : "XL")
 
-// Build the scene for one mode ("private" shows real names, "shared" never does).
-// `names` is the listener's key -> sea name map (kept for the server's lifetime, see seaName).
-export function sanitize(facts, { mode, secret, now, viewers = 0, stale = false, names = new Map(), slots = createSlots() }) {
-  const priv = mode === "private"
+// Build the scene for one mode ("private" shows real names, "shared" does not unless `realNames` is true,
+// which `share --real-names` asks for). `names` is the listener's key -> sea name map (kept for the server's
+// lifetime, see seaName).
+export function sanitize(facts, { mode, realNames = mode === "private", secret, now, viewers = 0, stale = false, names = new Map(), slots = createSlots() }) {
+  const priv = realNames === true
   const f = isObj(facts) ? facts : {}
   const runs = [], runKeys = []
   for (const r of list(f.runs, MAX.runs)) {
@@ -86,5 +87,5 @@ export function sanitize(facts, { mode, secret, now, viewers = 0, stale = false,
   }
   slots.adrift = assignSlots(slots.adrift, adriftKeys, MAX_ADRIFT)
   adrift.forEach((a, i) => { a.slot = slots.adrift.get(adriftKeys[i]) ?? -1 })
-  return { v: 1, at: num(f.at), mode: priv ? "private" : "shared", stale: stale === true, viewers, captain: { state: pick(isObj(f.captain) ? f.captain.state : null, E.captain, "none") }, runs, adrift }
+  return { v: 1, at: num(f.at), mode: mode === "private" ? "private" : "shared", stale: stale === true, viewers, captain: { state: pick(isObj(f.captain) ? f.captain.state : null, E.captain, "none") }, runs, adrift }
 }

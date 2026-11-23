@@ -10,6 +10,7 @@ const HELP = `harbor3d: a 3D harbor of your Herdr runs.
   harbor3d [serve] [--port 4173]    private listener on 127.0.0.1, real names
   harbor3d share [--minutes 60]     also a shared listener (pseudonyms only) behind a cloudflared tunnel
       --no-tunnel                   shared listener on 127.0.0.1 only, no cloudflared
+      --real-names                  the shared page shows real names, repos, PR and agent names
   harbor3d --help
 
 Reads <runs root>/.harbor3d.json (runs root: $HERDR_ORCHESTRATION_ROOT or ~/.herdr/hc-orchestration).`
@@ -44,9 +45,10 @@ process.on("SIGTERM", quit)
 
 if (cmd === "share") {
   try {
-    share = await startShare(app, { minutes, tunnel: !flag("--no-tunnel"), log: m => console.log(m) })
+    share = await startShare(app, { minutes, tunnel: !flag("--no-tunnel"), realNames: flag("--real-names"), log: m => console.log(m) })
   } catch (e) { console.error(`harbor3d: ${e.message}`); app.stop(); await priv.close(); process.exit(1) }
   if (flag("--no-tunnel")) console.log(`Shared (local only): ${share.localUrl}`)
   else console.log(`Share: ${share.shareUrl}\nStops in ${minutes} min or on Ctrl-C.`)
+  if (flag("--real-names")) console.log("Real names: anyone with the link sees run names, repos, PR numbers and agent names.")
   share.done.then(why => console.log(`Sharing ended (${why}). The private harbor keeps running.`))
 }

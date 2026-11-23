@@ -39,6 +39,19 @@ test("share --no-tunnel: shared listener under /s/<token>/ only, shared scene, t
   await assert.rejects(fetch(sh.localUrl), "the shared listener is closed after stop")
 })
 
+test("share --real-names: the shared page shows the private page's names, still only under /s/<token>/", async () => {
+  const app = mkApp()
+  const sh = await startShare(app, { tunnel: false, realNames: true })
+  try {
+    assert.equal((await fetch(`http://127.0.0.1:${sh.port}/`)).status, 404)
+    const r = await fetch(sh.localUrl + "events"), rd = r.body.getReader(); let t = ""; while (!t.includes("data: ")) t += Buffer.from((await rd.read()).value).toString()
+    const scene = JSON.parse(/data: (.*)/.exec(t)[1])
+    assert.equal(scene.mode, "shared")
+    assert.ok(JSON.stringify(scene).includes("Checkout") && JSON.stringify(scene).includes("shop"))
+    await rd.cancel()
+  } finally { await sh.stop(); app.stop() }
+})
+
 test("share with a tunnel: cloudflared is started on the shared port only, URL printed, killed on stop", async () => {
   const app = mkApp()
   const dir = fakeCloudflared('echo "$@" > "$0.args"\necho "INF |  https://fake-name-1.trycloudflare.com  |" >&2\nexec sleep 30')

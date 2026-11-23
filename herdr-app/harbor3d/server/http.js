@@ -115,8 +115,9 @@ function resolveStatic(root, rel) {
 }
 
 // Create a listener. `snapshot()` gives { facts, stale }. mode "private" or "shared"; base "/" or "/s/<token>/".
+// `realNames` (default: private only) lets a shared listener show the same names as the private page.
 // `pollHoldMs` is how long a long-poll waits for news (12 s; tests shorten it).
-export function createListener({ base = "/", mode, secret, snapshot, now = Date.now, publicDir, vendorDir, modelsDir = MODELS_DIR, hub, maxSse = mode === "shared" ? 20 : 8, keepAliveMs = 20000, maxBuffer = 256 * 1024, pollHoldMs = 12000, names = new Map(), slots = createSlots() }) {
+export function createListener({ base = "/", mode, realNames = mode === "private", secret, snapshot, now = Date.now, publicDir, vendorDir, modelsDir = MODELS_DIR, hub, maxSse = mode === "shared" ? 20 : 8, keepAliveMs = 20000, maxBuffer = 256 * 1024, pollHoldMs = 12000, names = new Map(), slots = createSlots() }) {
   const hash = importMapHash(publicDir)
   const HEAD = { ...HEADERS, "Content-Security-Policy": HEADERS["Content-Security-Policy"].replace("script-src 'self'", `script-src 'self'${hash ? " " + hash : ""}`) }
   const clients = new Set()
@@ -146,7 +147,7 @@ export function createListener({ base = "/", mode, secret, snapshot, now = Date.
   // Rebuild the scene; true when it differs from the last one sent.
   function rebuild() {
     const { facts, stale } = snapshot()
-    scene = sanitize(facts, { mode, secret, now: now(), viewers: hub.viewerCount(), stale, names, slots })
+    scene = sanitize(facts, { mode, realNames, secret, now: now(), viewers: hub.viewerCount(), stale, names, slots })
     const next = JSON.stringify(scene)
     const changed = next !== json
     json = next
