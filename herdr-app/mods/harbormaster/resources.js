@@ -15,6 +15,9 @@
 
 import { exec } from "herdr";
 
+// A hung write must not hold the poll; a timed-out one counts as a failed write.
+const WRITE_TIMEOUT = 10000;
+
 // When a row gets a badge: above either limit. Calm otherwise.
 export const HOT = { cpu: 50, rssKb: 2 * 1024 * 1024 };
 // The top processes outside every agent's tree that the snapshot keeps.
@@ -419,7 +422,7 @@ export async function recordRuns(runs, termsOf, sampled) {
     if (prev && now - (prev.sampled_ms ?? 0) < MIN_WRITE_GAP) return;
     const next = mergeRun(prev, terms, live.terminals, now, info.os);
     const text = JSON.stringify(next);
-    const out = await exec("sh", ["-c", WRITE, "sh", r.dir, String(prev?.sampled_ms ?? 0), ...chunks(text)], { on: r.machine }).catch(() => null);
+    const out = await exec("sh", ["-c", WRITE, "sh", r.dir, String(prev?.sampled_ms ?? 0), ...chunks(text)], { on: r.machine, timeout: WRITE_TIMEOUT }).catch(() => null);
     // The next poll reads back exactly this text, which then needs no parsing.
     if (out?.code === 0) { stored.set(r.key, next); storedText.set(r.key, text); }
   }));

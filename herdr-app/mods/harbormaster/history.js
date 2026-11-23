@@ -11,6 +11,8 @@ import { attributeResources, taskResources } from "./attribute.js";
 // A cycle with data.js (it writes the history), safe: only called, never read at load.
 import { recordedCounts } from "./data.js";
 
+const HISTORY_TIMEOUT = 20000;
+
 const r1 = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 
@@ -129,7 +131,7 @@ export function writeHistory(run, how) {
   }
   const p = inQueue(run.machine, async () => {
     const parts = [frag("run", run.dir), run.started ? frag("started", iso(run.started)) : "", closedMs ? frag("closed", iso(closedMs)) : ""];
-    const on = { on: run.machine };
+    const on = { on: run.machine, timeout: HISTORY_TIMEOUT };
     // A closing already recorded costs one grep, not a timing read.
     const seen = await exec("sh", ["-c", HISTORY, "sh", run.dir, "check", ...parts], on);
     if (seen.code === 5) return true;
