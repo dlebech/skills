@@ -4,11 +4,11 @@
 // history line. Pure helpers first (tests drive them), then the loading.
 
 import { exec, machines } from "herdr";
-
-const READ_TIMEOUT = 8000, READ_TIMEOUT_REMOTE = 20000;
 import { loadTiming, cachedTiming, pruneTiming } from "./timing.js";
 import { attributeResources, taskResources } from "./attribute.js";
 import { recordedCounts } from "./data.js";
+
+const READ_TIMEOUT = 8000, READ_TIMEOUT_REMOTE = 20000;
 
 export { taskOfName } from "./attribute.js";
 

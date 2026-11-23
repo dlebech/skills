@@ -38,7 +38,7 @@ import { observeTelling } from "./telling.js";
 import { parseCommand, runNamed, newRunArgs, flowArgs } from "./commands.js";
 import { setReviewFlow } from "./tracking.js";
 import { openNewRun, initNewRun, newRunView } from "./newrun.js";
-import { startOnce, begin, tagOf } from "./inflight.js";
+import { startOnce, begin, tagOf, commandLoop, tune } from "./inflight.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
 const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "harbor-rail", "stats"]);
@@ -121,14 +121,14 @@ const sameItems = (a, b) => a.length === b.length && a.every((x, i) => x === b[i
 // loop outlived its build shows in the counts.
 async function listenCounted(view, cx) {
   const end = begin(`${tagOf(view)}/listen`);
-  try { await listen(view, cx); } catch { /* the build was replaced: its cx threw, the loop ended */ } finally { end(); }
+  try { await listen(view, cx); } catch { /* the build was replaced or closed: its cx threw, the loop ended */ } finally { end(); }
 }
 
-async function listen(view, cx) {
-  for (;;) {
-    const c = String(await nextCommand());
-    // A replaced build's cx throws here, before the command is handled with its stale code: the loop ends.
-    cx.notify();
+// Waits for commands, and wakes every 30 s to use its cx (commandLoop): a replaced or closed build's
+// cx throws then, so its loop ends within 30 s instead of living on until the next command.
+function listen(view, cx) {
+  return commandLoop({ next: nextCommand, sleep: (ms) => cx.sleep(ms), alive: () => cx.notify(), handle: (cmd) => {
+    const c = String(cmd);
     // A throw here would end the loop and this copy would never hear a command again.
     try {
       const { name, arg } = parseCommand(c);
@@ -141,10 +141,7 @@ async function listen(view, cx) {
       else if (name === "set-flow") { const f = flowArgs(arg); if (f) setReviewFlow(f.key, f.flow); else console.log(`harbormaster: set-flow wants <folder>=peer|self|default, got "${arg}"`); }
       else if (name === "open-run") { markOpened(runNamed(view.runs, arg)); showPopup(view, arg, true); }
     } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }
-    // Outside the try: a replaced build's cx throws here, which ends this loop (it would otherwise
-    // live on, taking commands, for the rest of the runtime).
-    cx.notify();
-  }
+  } });
 }
 
 // The facts Harbor 3D is told (sceneexport.js), from the runs the Crew shows and the same live facts.
@@ -251,27 +248,46 @@ export default class Harbormaster extends View {
       // layout's harbor): a layout without a Crew block still feeds it. Two copies may both write; they write the same
       // facts atomically. exportFacts does nothing without its want file.
       if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) await exportFacts(() => harborFacts(runs, ctx)).catch((e) => console.log(`harbormaster: harbor3d facts failed: ${e?.message ?? e}`));
-      // PRs land in shared state, which re-renders every copy by itself. Each run is asked every
-      // poll, and refreshPrs reads only when something calls for it: the run's files changed, a PR's
-      // head was pushed or the run was opened (markOpened; at most every 30 s), else its backstop
-      // (5 min open, 30 min parked or closed).
-      // A parked run's PRs are read as rarely as a closed run's: nobody works on them, they only
-      // show what they wait on. Runs are read one after another, never all at once.
       // A run pane's first sight of a run is an opening, as a click elsewhere is (a popup, a new split):
-      // the loop below reads its PRs when they are over a minute old.
+      // the PR reads (prs below) read its PRs when they are over a minute old.
       if (role === "run") {
         const shown = runOfProps(runs, props() ?? {});
         this.seenRuns ??= new Set();
         if (shown && !this.seenRuns.has(shown.key)) { this.seenRuns.add(shown.key); markOpened(shown); }
       }
-      for (const r of runs) await refreshPrs(r, isClosed(r, ctx) || isParked(r)).catch(() => {});
-      // The waiting-on marks that let go are deleted here, after the PR reads, never in a render.
-      try { observeWaits(runs, facts(), cachedRuns()); } catch (e) { console.log(`harbormaster: waiting-on marks failed: ${e?.message ?? e}`); }
-      // The commits since each run's last review (not for closed runs: their line is never shown): module memory, so a change re-renders by hand.
-      let moved = false;
-      for (const r of runs) if (!isClosed(r, ctx)) moved = (await refreshReviewed(r, isClosed(r, ctx) || isParked(r)).catch(() => false)) || moved;
-      if (moved) cx.notify();
     });
+    // The PR and Reviewed reads are their own body: a copy's slow PR loop never holds back its
+    // 5 s run read above.
+    startOnce(this, "prs", (b) => cx.spawn(b), (cx) => this.readPrs(cx));
+  }
+
+  // PRs land in shared state, which re-renders every copy by itself. Each run is asked every poll,
+  // and refreshPrs reads only when something calls for it: the run's files changed, a PR's head was
+  // pushed or the run was opened (markOpened; at most every 30 s), else its backstop (5 min open,
+  // 30 min parked or closed). A parked run's PRs are read as rarely as a closed run's: nobody works on
+  // them, they only show what they wait on. Runs are read one after another, never all at once.
+  // After tune.prsDeadline (60 s) no further run's reads start: the body ends and the next poll goes
+  // on from the run it stopped at. A run passed over loses nothing: what calls for its reads (changed
+  // files, pushed heads, an opening mark, the backstop's age) is kept until refreshPrs and
+  // refreshReviewed decide on it.
+  async readPrs(cx) {
+    const runs = this.runs, ctx = facts();
+    const from = Math.max(0, runs.findIndex((r) => r.key === this.prsFrom));
+    const order = [...runs.slice(from), ...runs.slice(0, from)];
+    const start = tune.now();
+    this.prsFrom = null;
+    let moved = false;
+    for (const r of order) {
+      if (tune.now() - start >= tune.prsDeadline) { this.prsFrom = r.key; break; }
+      const away = isClosed(r, ctx) || isParked(r);
+      await refreshPrs(r, away).catch(() => {});
+      // The commits since the run's last review (not for closed runs: their line is never shown):
+      // module memory, so a change re-renders by hand.
+      if (!isClosed(r, ctx)) moved = (await refreshReviewed(r, away).catch(() => false)) || moved;
+    }
+    // The waiting-on marks that let go are deleted here, after the PR reads, never in a render.
+    try { observeWaits(runs, facts(), cachedRuns()); } catch (e) { console.log(`harbormaster: waiting-on marks failed: ${e?.message ?? e}`); }
+    if (moved) cx.notify();
   }
 
   render(cx) {
