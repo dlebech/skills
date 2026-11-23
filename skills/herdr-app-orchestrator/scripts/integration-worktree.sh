@@ -13,8 +13,9 @@
 # The space is made the way the worktree mod's "Open worktree" makes it: space.new
 # on the worktree's folder, unnamed, so the sidebar names it after the folder (the
 # branch), nests it under the repository's own space, and shows its branch,
-# ahead/behind, and changes. space.new always shows the new space, so this switches
-# back to the space that was showing, a brief flicker. Only the integration worktree
+# ahead/behind, and changes. The sidebar nests it only under an open space, so the
+# repository's own space is opened first when none shows it. space.new always shows
+# the new space, so this switches back to the space that was showing, a brief flicker. Only the integration worktree
 # gets a space; task worktrees stay hidden.
 # (This replaced a space made by starting a plain shell with only a herdr.space
 # label. A resumed orchestrator once started inside that shell and moved its folder
@@ -65,14 +66,15 @@ live_folder() {
 if ! spaces=$(herdr-app ls 2>/dev/null); then
   echo "warning: could not reach the Herdr window; the worktree has no space (with the window on another computer, Harbormaster there opens it)" >&2
 else
-  shown= drifted=
+  shown= drifted= home=
   while IFS=$'\t' read -r id made first; do
     # As the sidebar does: a space without a terminal folder is where it was made.
     at=
     [ -z "$first" ] || at=$(live_folder "$first")
     at=${at:-$made}
     case $at in
-      "$path" | "$path"/*) shown=$id; break ;;
+      "$path" | "$path"/*) shown=$id ;;
+      "$repo" | "$repo"/*) home=$id ;;
     esac
     [ "$made" != "$path" ] || drifted+="$id (now in $at) "
   done < <(jq -r '.spaces[] | select(.machine == null)
@@ -81,6 +83,13 @@ else
     [ -z "$drifted" ] ||
       echo "warning: spaces made on $path no longer show it, since their terminal moved: $drifted; opening a new one" >&2
     before=$(herdr-app status 2>/dev/null | jq -r '.space // empty')
+    # The sidebar nests a worktree's space under its repository's own space only while
+    # that one is open: without it, the worktree shows as a space of its own. So the
+    # repository's space is opened first when none shows it (as for a run started in a
+    # folder holding several repositories, or a repository whose space was closed).
+    if [ -z "$home" ] && ! herdr-app do space.new --folder "$repo" >/dev/null 2>&1; then
+      echo "warning: could not open a space for $repo; the worktree's space shows unnested" >&2
+    fi
     if herdr-app do space.new --folder "$path" >/dev/null 2>&1; then
       [ -z "$before" ] || herdr-app do space.select --id "$before" >/dev/null 2>&1 ||
         echo "warning: could not switch back to space $before" >&2

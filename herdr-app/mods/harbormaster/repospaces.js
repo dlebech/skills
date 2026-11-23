@@ -2,11 +2,11 @@
 // same idea as skills/herdr-app-captain/scripts/repo-spaces.sh, from the window's own spaces,
 // plus the clones found beside them (a review can open a space for one). A space counts when its
 // first tab's first pane (else its folder) is in a repository's own checkout (a "primary" space);
-// linked worktrees belong to runs and are left out. Which repository a folder is: spacegroups.js (whereOf, repoOf).
+// linked worktrees belong to runs and are left out. Which repository a folder is: spacegroups.js (repoOf); where a space is: folders.js (placeOf).
 
 import { exec, spaces, panes } from "herdr";
-import { whereOf, repoOf } from "./spacegroups.js";
-import { spaceFolders, parseFound, scanParents, FIND_SCRIPT } from "./folders.js";
+import { repoOf } from "./spacegroups.js";
+import { spaceFolders, placeOf, parseFound, scanParents, FIND_SCRIPT } from "./folders.js";
 
 // "git@github.com:o/r.git", "https://github.com/o/r" → "o/r" (lower-cased: GitHub ignores case).
 export function ownerRepo(url) {
@@ -108,11 +108,11 @@ export async function knownRepos() {
 export async function openFolders() {
   const ps = panes(), all = spaces(), roots = new Map(); // linked worktree folder → its repository
   await Promise.all(all.map(async (s) => {
-    const where = s.folder || whereOf(s, ps);
+    const where = placeOf(s, ps);
     const repo = where && !s.machine ? await inspect(where).catch(() => null) : null;
     if (repo?.kind === "worktree") roots.set(where, repo.root);
   }));
-  return spaceFolders(all, (s) => whereOf(s, ps), (f) => roots.get(f) ?? null);
+  return spaceFolders(all, (s) => placeOf(s, ps), (f) => roots.get(f) ?? null);
 }
 
 // The `folder` of every run directory (<runs root>/<folder>/<branch>/orchestrator.json).

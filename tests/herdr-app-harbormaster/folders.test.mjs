@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  spaceFolders, newSpaceId, spaceAt, machineQuery, ownId, recentFolders, listFolders, fuzzyScore, matchFolders, literalFolder, scanParents, parseFound, tilde,
+  spaceFolders, placeOf, newSpaceId, spaceAt, machineQuery, ownId, recentFolders, listFolders, fuzzyScore, matchFolders, literalFolder, scanParents, parseFound, tilde,
 } from "../../herdr-app/mods/harbormaster/folders.js";
 import { parsePrefs, remember } from "../../herdr-app/mods/harbormaster/startrun.js";
 
@@ -123,6 +123,19 @@ test("New run finds the open space on its folder: its own folder, else a termina
   assert.equal(spaceAt("/h/projects/skills/", [sp("s1", "a", "/h/projects/skills")], []), "s1");
   assert.equal(spaceAt("/h/projects/skills", [sp("s2", "a", "/h/projects/skills/")], []), "s2");
   assert.equal(spaceAt("/h/projects/skills", [tabbed("s3", "a", "", ["t7"])], [pane("t7", "/h/projects/skills/")]), "s3");
+});
+
+test("a space made in one folder whose terminal works in another is that other folder's", () => {
+  // "kids" was made in /h/p/art (Herdr kept that as its folder), but its terminal is in /h/p/kids
+  const kids = { ...sp("k", "kids", "/h/p/art"), tabs: [{ id: "t1" }, { id: "t2" }] };
+  const ps = [{ tab: "t1", cwd: "/h/p/kids" }, { tab: "t2", cwd: "/h/p/art" }];
+  assert.equal(placeOf(kids, ps), "/h/p/kids");
+  assert.equal(placeOf(kids, [{ tab: "t1", cwd: "/h/p/art/src" }]), "/h/p/art", "inside its folder: still its folder");
+  assert.equal(placeOf(kids, []), "/h/p/art", "no terminal known: its folder");
+  // so New run offers it for /h/p/kids, and /h/p/art (only a second tab there) gets a space of its own
+  assert.deepEqual(spaceFolders([kids], (s) => placeOf(s, ps)).map((e) => [e.folder, e.space]), [["/h/p/kids", "k"]]);
+  assert.equal(spaceAt("/h/p/art", [kids], ps), null);
+  assert.equal(spaceAt("/h/p/kids", [kids], ps), "k");
 });
 
 test("a machine's name in the query keeps only its folders; local/here this machine's", () => {
