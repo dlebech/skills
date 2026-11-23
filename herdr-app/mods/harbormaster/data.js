@@ -419,8 +419,14 @@ export function carryRuns(prev, failed) {
   return (prev ?? []).filter((r) => out.has(r.machine ?? null)).map((r) => (r.stale ? r : { ...r, stale: true }));
 }
 
+// Asks for a new read at the next loadRuns, after an action changed a run's files (close,
+// park, delete). Only `due` is set: `at` stays when the last read was, since filesFresh
+// judges every run by it, and zeroing it put every run under Can't tell until the read
+// came back. The next read's cache has no `due`.
+export function rereadRuns(c = cache) { c.due = true; }
+
 export function loadRuns() {
-  if (Date.now() - cache.at < 2500) return Promise.resolve(cache);
+  if (!cache.due && Date.now() - cache.at < 2500) return Promise.resolve(cache);
   if (cache.pending && Date.now() - cache.pendingAt < STALE_READ) return cache.pending;
   const read = ++reads;
   cache.pendingAt = Date.now();
@@ -1367,12 +1373,12 @@ export async function putAway(run, how, orch) {
     if (run.phase === "finished" && (orch === "done" || orch === "idle") && paths?.length === 0) {
       await mark(run, "closed");
       await tidyClosed(run, facts());
-      cache.at = 0;
+      rereadRuns();
       return null;
     }
     const { note, blocked } = await askToClose(run);
     if (!blocked) await closeWorktreeSpaces(run, paths ?? []);
-    cache.at = 0;
+    rereadRuns();
     return note;
   }
   const tab = tabOf(run);
@@ -1380,7 +1386,7 @@ export async function putAway(run, how, orch) {
   if (how === "parked" || run.phase !== "finished") await mark(run, how);
   if (how === "parked") await closeWorktreeSpaces(run);
   if (tab) command("tab.close", { id: tab, confirmed: true });
-  cache.at = 0;
+  rereadRuns();
   return null;
 }
 
@@ -1430,7 +1436,7 @@ export async function deleteRun(run, { cx = null, historyTried = false } = {}) {
   setShared("harbormaster.prs", prs);
   const seen = { ...(shared(WORKTREES_KEY) ?? {}) };
   if (seen[run.key]) { delete seen[run.key]; setShared(WORKTREES_KEY, seen); }
-  cache.at = 0;
+  rereadRuns();
 }
 
 // Deletes several closed runs, one at a time per machine and the machines at once, each as
@@ -1467,5 +1473,5 @@ export function resumeRun(run) {
   if (space) command("tab.new", { space: space.id, folder: run.folder, argv: agentArgv(kind), task: prompt });
   else command("space.new", { folder: run.folder, argv: agentArgv(kind), task: prompt, machine: run.machine ?? "" });
   if (lostTab) command("tab.close", { id: lostTab, confirmed: true });
-  cache.at = 0;
+  rereadRuns();
 }
