@@ -26,9 +26,10 @@
 //     run's duration, and it counts only CI an agent watched.
 //   - the review flow per repository folder: shared state harbormaster.reviewFlows,
 //     {[folder name]: "peer" | "self"}, the user's choices over attention.js DEFAULT_FLOWS.
-//   - the user's "waiting on someone…" marks: shared state harbormaster.waitingOn, {[run key]:
-//     {text, at, label, sig}}: who the run waits on in the user's words, when it was marked, and the
-//     next step's label and signature then (attention.js waitSig), so a change on the PR lets it go.
+//   - the user's "waiting on someone…" marks: waiting-on.json in each run's directory, {text, at,
+//     label, sig}: who the run waits on in the user's words, when it was marked, and the next
+//     step's label and signature then (attention.js waitSig), so a change on the PR lets it go.
+//     Kept with the run, so Harbormaster on every machine sees it (see "waiting on someone" below).
 
 import { exec } from "herdr";
 import { shared, setShared } from "./store.js";
@@ -39,7 +40,6 @@ import { workersOf, exactStatus, orchestratorState } from "./live.js";
 const STEPS_KEY = "harbormaster.steps";
 const CI_KEY = "harbormaster.ci";
 const FLOWS_KEY = "harbormaster.reviewFlows";
-const WAITS_KEY = "harbormaster.waitingOn";
 const AGENTS_KEY = "harbormaster.agents";
 export const CI_KEEP = 20;
 const PROBE_EVERY = 60000;
@@ -281,46 +281,93 @@ export function setReviewFlow(key, flow) {
 
 // ---- waiting on someone ----
 
-// The user's waiting-on marks: {[run key]: {text, at, label, sig}}.
-export const waitingOn = () => shared(WAITS_KEY) ?? {};
+// A run's "waiting on someone…" mark lives in its run directory, waiting-on.json, on the run's
+// machine: data.js reads it with the run's other files (run.waitOn), so every Harbormaster that
+// shows the run, on any machine, sees the same mark. Between a click and the read that sees it,
+// the change is kept in shared state harbormaster.waitingOnSaid, {[run key]: {mark (null: cleared),
+// at}}, so every view shows it at once; a read that agrees, or SAID_MS, lets it go.
+const SAID_KEY = "harbormaster.waitingOnSaid";
+// Before waiting-on.json: the marks themselves, in this machine's shared state only. Moved into
+// the runs' files as their runs are read (observeWaits).
+const OLD_WAITS_KEY = "harbormaster.waitingOn";
+export const SAID_MS = 2 * 60000;
+const WRITE_WAIT = 'printf "%s\\n" "$2" >"$1/.waiting-on.json.$$" && mv "$1/.waiting-on.json.$$" "$1/waiting-on.json"';
+const CLEAR_WAIT = 'rm -f "$1/waiting-on.json"';
 
-// A run's mark, or null.
-export const waitingOnOf = (run) => (run?.key ? waitingOn()[run.key] ?? null : null);
+// A mark as kept, {text, at (ms), label, sig}, or null when it has no text.
+export function waitMark(m) {
+  const text = String(m?.text ?? "").trim();
+  if (!m || !text) return null;
+  const at = typeof m.at === "number" ? m.at : Date.parse(m.at ?? "") || null;
+  return { text, at, label: m.label ?? null, sig: m.sig ?? "" };
+}
 
-// The marks store with a run's mark set (`mark`: {text, at, label, sig}, the text not blank), or
-// with null removed. The same store when nothing changes.
-export function withWait(store, key, mark) {
-  if (!key) return store;
-  const text = String(mark?.text ?? "").trim();
-  if (mark && text) return { ...(store ?? {}), [key]: { text, at: mark.at ?? null, label: mark.label ?? null, sig: mark.sig ?? "" } };
-  if (!store?.[key]) return store;
+// waiting-on.json's text → the mark, or null (missing, blank or not a mark).
+export function parseWait(text) {
+  if (!text?.trim()) return null;
+  try { return waitMark(JSON.parse(text)); } catch { return null; }
+}
+
+// The mark as waiting-on.json holds it: its time as an ISO date, for a person reading the file.
+export const waitText = (m) => JSON.stringify({ text: m.text, at: m.at ? new Date(m.at).toISOString() : null, label: m.label, sig: m.sig });
+
+// Whether two marks are the same one (both none, or the same text set at the same time).
+const sameWait = (a, b) => (!a && !b) || (Boolean(a && b) && a.text === b.text && a.at === b.at);
+
+const saidStore = () => shared(SAID_KEY) ?? {};
+function say(key, entry) {
+  const store = saidStore();
   const next = { ...store };
-  delete next[key];
-  return next;
+  if (entry) next[key] = entry;
+  else delete next[key];
+  setShared(SAID_KEY, next);
 }
 
-// The marks store without the keys in `drop`, nor marks of runs no longer listed (`keys`: the run
-// keys a poll listed), but for those `unread(key)` says were not read (their machine did not
-// answer: the run may well still be there). The same store when nothing goes.
-export function prunedWaits(store, keys, drop = [], unread = () => false) {
-  const gone = Object.keys(store ?? {}).filter((k) => drop.includes(k) || (!keys.has(k) && !unread(k)));
-  if (!gone.length) return store;
-  const next = { ...store };
-  for (const k of gone) delete next[k];
-  return next;
+// A run's mark, or null: what was just set or cleared here, until a read of its files shows it, else its file's.
+export function waitingOnOf(run) {
+  if (!run?.key) return null;
+  const said = saidStore()[run.key];
+  return said ? said.mark : run.waitOn ?? null;
 }
 
-// Sets a run's mark, or with null clears it. Every view reads it at its next render.
-export function setWaitingOn(key, mark) {
-  const store = waitingOn();
-  const next = withWait(store, key, mark);
-  if (next !== store) setShared(WAITS_KEY, next);
+// Sets a run's mark (`mark`: {text, at, label, sig}, the text not blank) or with null clears it,
+// in waiting-on.json on the run's machine. Every view shows it at its next render; throws when
+// the write fails, and the run then shows as its files say.
+export async function setWaitingOn(run, mark) {
+  const next = waitMark(mark);
+  say(run.key, { mark: next, at: Date.now() });
+  try {
+    const out = await exec("sh", ["-c", next ? WRITE_WAIT : CLEAR_WAIT, "sh", run.dir, ...(next ? [waitText(next)] : [])],
+      { on: run.machine, timeout: run.machine ? 20000 : 8000 });
+    if (out?.code) throw new Error((out.stderr || "").trim() || `exit ${out.code}`);
+  } catch (e) {
+    say(run.key, null);
+    throw e;
+  }
 }
 
-// Deletes the marks of `drop` (run keys) and of runs not among `keys` but for unread ones, in one write.
-export function pruneWaitingOn(keys, drop = [], unread = () => false) {
-  const store = shared(WAITS_KEY);
-  if (!store) return;
-  const next = prunedWaits(store, keys, drop, unread);
-  if (next !== store) setShared(WAITS_KEY, next);
+// After a poll's read: lets go of what was said once the run's files agree (or after SAID_MS), and
+// moves this machine's old shared-state marks into the files of the runs read (`runs`, not stale).
+export async function settleWaits(runs, now = Date.now()) {
+  const byKey = new Map(runs.filter((r) => !r.stale).map((r) => [r.key, r]));
+  const said = saidStore();
+  const done = Object.keys(said).filter((k) => (byKey.has(k) && sameWait(byKey.get(k).waitOn ?? null, said[k].mark)) || now - said[k].at > SAID_MS);
+  if (done.length) {
+    const next = { ...saidStore() };
+    for (const k of done) delete next[k];
+    setShared(SAID_KEY, next);
+  }
+  const old = shared(OLD_WAITS_KEY);
+  const moving = Object.keys(old ?? {}).filter((k) => byKey.has(k));
+  if (!moving.length) return;
+  const rest = { ...old };
+  for (const k of moving) {
+    const run = byKey.get(k);
+    const mark = waitMark(old[k]);
+    if (mark && !run.waitOn && !saidStore()[k]) {
+      try { await setWaitingOn(run, mark); } catch { continue; }
+    }
+    delete rest[k];
+  }
+  setShared(OLD_WAITS_KEY, Object.keys(rest).length ? rest : null);
 }

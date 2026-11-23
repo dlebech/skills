@@ -7,7 +7,8 @@
 // skills/herdr-app-orchestrator/references/run-files.md. In short, per run, under
 // <root>/<folder>/<branch>/: orchestrator.json, plan.md, status.json (with the token
 // totals tokens.sh counts into it; this mod never reads session files for them), question.md,
-// inbox/*.message (written here on an answer, Close or a level request from a tag), parked and closed markers;
+// inbox/*.message (written here on an answer, Close or a level request from a tag), parked and closed markers,
+// waiting-on.json (the user's "waiting on someone…" mark, written here);
 // and <root>/.captain-decisions.json for the captain's open decisions. The same poll takes a
 // process snapshot for CPU and memory (resources.js), kept per run in .resources.json.
 
@@ -30,7 +31,7 @@ import { checkKind, ciTimes, prTtl, isOpenPr, prOffset, fnv1a, PR_EVENT_FLOOR_MS
 import { NOT_ANSWERS, blockingPending, changesPending, rereviewPending, send, writeMessage, wakeRun } from "./inbox.js";
 import { reviewerCandidates, reviewersArgs, requestArgs } from "./reviewers.js";
 import { commentsArgs, commentSummary, pendingComments } from "./comments.js";
-import { observeRuns, recordCi } from "./tracking.js";
+import { observeRuns, recordCi, parseWait } from "./tracking.js";
 import { detachedSend } from "./wake.js";
 import { skillPrompt, agentArgv } from "./startrun.js";
 import { exactStatus, reportedStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
@@ -74,6 +75,8 @@ const SCRIPT = [
   // shared/'s Markdown file names, capped, for a finished run's Needs-you box: needaction.js
   // runReports picks the run's reports among them (one rule, so the two never drift apart).
   '  ls "$d/shared" 2>/dev/null | grep -iE "\\.md$" | head -200; printf \'\\037\'',
+  // The user's "waiting on someone…" mark (tracking.js), capped.
+  '  head -c 4000 "$d/waiting-on.json" 2>/dev/null; printf \'\\037\'',
   // The run's CPU and memory totals so far (resources.js adds each sample to them).
   '  head -c 1000000 "$d/.resources.json" 2>/dev/null',
   "done",
@@ -235,7 +238,7 @@ function parse(machine, stdout) {
 }
 
 function parseRun(machine, chunk) {
-  const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile, requests, acceptedFile, reportNames] = chunk.split(US);
+  const [dir, orchFile, statusFile, plan, question, asked, parkedFile, closedFile, inbox, proofFile, proofNames, decidedFile, requests, acceptedFile, reportNames, waitFile] = chunk.split(US);
   const orch = json(orchFile) ?? {};
   const status = json(statusFile) ?? {};
   const tasks = tasksOf(plan);
@@ -318,6 +321,8 @@ function parseRun(machine, chunk) {
     },
     // shared/'s Markdown files (names, as ls sorts them); needaction.js runReports picks its reports.
     reports: (reportNames ?? "").split("\n").map((f) => f.trim()).filter(Boolean),
+    // The user's "waiting on someone…" mark (waiting-on.json), or null; tracking.js waitingOnOf reads it.
+    waitOn: parseWait(waitFile),
     // What every agent name of the run starts with after its role: impl-<prefix>-<task>.
     prefix: /^Prefix:\s*`?([\w-]+)/m.exec(plan ?? "")?.[1]?.toLowerCase() ?? null,
   };

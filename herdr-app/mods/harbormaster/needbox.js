@@ -352,7 +352,17 @@ export function waitNote(t, r, f, id) {
   if (!w) return null;
   return h_flex().id(id).gap(8).items_center().flex_wrap()
     .child(div().min_w(0).text_size(T(11.5, "body")).text_color(t.ansi6 ?? t.accent).child(`Waiting on ${w.text}${w.at ? ` · ${ageText(Date.now() - w.at)}` : ""}`))
-    .child(actionButton(t, `${id}-clear`, "Not waiting any more", "Clear the mark: the run is back in Needs you", (cx) => { setWaitingOn(r.key, null); cx.notify(); }));
+    .child(actionButton(t, `${id}-clear`, "Not waiting any more", "Clear the mark: the run is back in Needs you", (cx) => {
+      // Started here, so the mark is gone in the render below; a failed clear puts it back.
+      const failed = setWaitingOn(r, null).then(() => null, (e) => e);
+      cx.spawn(async (cx) => {
+        const e = await failed;
+        if (!e) return;
+        console.log(`harbormaster: could not clear the waiting-on mark of ${r.branch}: ${e?.message ?? e}`);
+        try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+      });
+      cx.notify();
+    }));
 }
 
 // The need items as lines, each with its buttons; the first item's first button stands out, unless

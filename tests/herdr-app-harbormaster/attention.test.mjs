@@ -7,7 +7,7 @@ import {
   trackSince, stepSig, stalled, quietText, assess, byWait, STALL_MS, prMaxAge, prTtl, trackParts, stepParts, taskKey, progressKey, reviewRunStep,
   waitSig, IDLE_ASK_MS, IDLE_ASK_TEXT, idleAsking,
 } from "../../herdr-app/mods/harbormaster/attention.js";
-import { addCiSample, nextSteps, screenSig, CI_KEEP, probeEvery, withWait, prunedWaits } from "../../herdr-app/mods/harbormaster/tracking.js";
+import { addCiSample, nextSteps, screenSig, CI_KEEP, probeEvery, waitMark, parseWait, waitText } from "../../herdr-app/mods/harbormaster/tracking.js";
 import { prSummary, viewerReview, PR_FIELDS, carryRuns, withReadTimes, prEntrySame } from "../../herdr-app/mods/harbormaster/data.js";
 import { filesFresh } from "../../herdr-app/mods/harbormaster/attend.js";
 
@@ -606,13 +606,11 @@ test("each let-go event drops the mark and puts the run back where the rules say
 
 test("the mark is never revived: a let-go is a delete, and the same step without it is Needs you", () => {
   const before = peer(peerRun(), [pr()]);
-  const store = withWait({}, peerRun().key, markOf(before));
-  // The reviewer request comes and goes again: the poll deleted the mark at the first read.
-  const gone = peer(peerRun(), [pr({ requested: ["anna"] })], { waitOn: store[peerRun().key] });
+  const mark = markOf(before);
+  // The reviewer request comes and goes again: the poll deleted the mark (its file) at the first read.
+  const gone = peer(peerRun(), [pr({ requested: ["anna"] })], { waitOn: mark });
   assert.equal(gone.dropWait, true);
-  const after = prunedWaits(store, new Set([peerRun().key]), [peerRun().key]);
-  assert.deepEqual(after, {});
-  assert.equal(peer(peerRun(), [pr()], { waitOn: after[peerRun().key] ?? null }).group, "needs");
+  assert.equal(peer(peerRun(), [pr()], { waitOn: null }).group, "needs");
 });
 
 test("an unreadable PR read neither applies nor drops the mark; nor does a working run", () => {
@@ -658,22 +656,17 @@ test("a question or red CI wins over the mark; a quiet stall does not", () => {
   assert.deepEqual([held.group, held.reasons[0].key], ["waiting", "waiting-on"]);
 });
 
-test("the waiting-on store: set, clear, prune unlisted and dropped runs", () => {
-  const m = { text: "  Kari — preview check ", at: 5, label: "request review", sig: "s" };
-  const one = withWait({}, "a", m);
-  assert.deepEqual(one, { a: { text: "Kari — preview check", at: 5, label: "request review", sig: "s" } });
-  assert.deepEqual(withWait(one, "a", { ...m, text: "   " }), {});
-  assert.deepEqual(withWait(one, "a", null), {});
-  const none = {};
-  assert.equal(withWait(none, "b", null), none);
-  assert.equal(withWait(one, "", m), one);
-  const two = withWait(one, "b", m);
-  assert.equal(prunedWaits(two, new Set(["a", "b"])), two);
-  assert.deepEqual(Object.keys(prunedWaits(two, new Set(["a"]))), ["a"]);
-  assert.deepEqual(Object.keys(prunedWaits(two, new Set(["a", "b"]), ["a"])), ["b"]);
-  // An unread run (its machine did not answer) keeps its mark though it is not listed; a drop still goes.
-  assert.equal(prunedWaits(two, new Set(), [], () => true), two);
-  assert.deepEqual(Object.keys(prunedWaits(two, new Set(), ["a"], () => true)), ["b"]);
+test("waiting-on.json: a mark round-trips, with its time as an ISO date; blank or broken is none", () => {
+  const m = { text: "  Kari — preview check ", at: 1700000000000, label: "request review", sig: "s" };
+  const kept = waitMark(m);
+  assert.deepEqual(kept, { text: "Kari — preview check", at: 1700000000000, label: "request review", sig: "s" });
+  assert.equal(JSON.parse(waitText(kept)).at, "2023-11-14T22:13:20.000Z");
+  assert.deepEqual(parseWait(waitText(kept)), kept);
+  assert.equal(waitMark({ ...m, text: "   " }), null);
+  assert.equal(waitMark(null), null);
+  for (const bad of [undefined, "", "  \n", "{", "[]", "null", '{"text":""}']) assert.equal(parseWait(bad), null, String(bad));
+  // A hand-written file with no time or label still holds the run's text.
+  assert.deepEqual(parseWait('{"text":"Bo"}'), { text: "Bo", at: null, label: null, sig: "" });
 });
 
 // ---- idle-ask: an orchestrator that stopped without asking through Harbormaster ----
