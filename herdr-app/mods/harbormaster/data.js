@@ -389,7 +389,7 @@ function marker(how, text) {
 // The cache is module state, so it outlives every copy. A read whose task is cancelled
 // (its view closed) never settles, so a read pending longer than STALE_READ is given up
 // and a new one started; the abandoned one, should it ever settle, is ignored.
-let cache = { at: 0, runs: [], decisions: [], errors: [], failed: [], pending: null, pendingAt: 0 };
+let cache = { at: 0, runs: [], decisions: [], errors: [], failed: [], pending: null, pendingAt: 0, due: false };
 const STALE_READ = 45000;
 // A read that never answers must not hold the poll: each exec below carries a timeout (a timed-out one fails like any other failure).
 const RUNS_READ = 8000, RUNS_READ_REMOTE = 20000, GH_READ = 20000, GH_COMMENTS_READ = 30000, SH_READ = 8000;
@@ -420,16 +420,21 @@ export function carryRuns(prev, failed) {
 }
 
 // Asks for a new read at the next loadRuns, after an action changed a run's files (close,
-// park, delete). Only `due` is set: `at` stays when the last read was, since filesFresh
-// judges every run by it, and zeroing it put every run under Can't tell until the read
-// came back. The next read's cache has no `due`.
-export function rereadRuns(c = cache) { c.due = true; }
+// park, resume, delete). Only `due` is set: `at` stays when the last read was, since
+// filesFresh judges every run by it, and zeroing it put every run under Can't tell until
+// the read came back. `due` means asked since the latest read began: starting a read
+// clears it, so a read already under way when the action wrote its files is not taken
+// for the new one, and one asked during a read is still due once that read is done.
+export function askReread(c = cache) {
+  c.due = true;
+}
 
 export function loadRuns() {
   if (!cache.due && Date.now() - cache.at < 2500) return Promise.resolve(cache);
-  if (cache.pending && Date.now() - cache.pendingAt < STALE_READ) return cache.pending;
+  if (cache.pending && !cache.due && Date.now() - cache.pendingAt < STALE_READ) return cache.pending;
   const read = ++reads;
   cache.pendingAt = Date.now();
+  cache.due = false;
   cache.pending = (async () => {
     const all = machines();
     const names = all.filter((m) => m.layout !== "unavailable").map((m) => m.name);
@@ -460,7 +465,7 @@ export function loadRuns() {
     // `failed`: the machines (null for this one) whose runs could not be read this time; their
     // runs from the last read stay in `runs`, marked `stale` (carryRuns). Only the runs just
     // read (`fresh`) are acted on below: nothing is done on a stale read.
-    cache = { at: Date.now(), runs, decisions, errors, failed, pending: null, pendingAt: 0 };
+    cache = { at: Date.now(), runs, decisions, errors, failed, pending: null, pendingAt: 0, due: cache.due };
     const ctx = facts();
     observeRuns(runs, ctx, answered, (r) => r.tasks.map((k) => shownStage(k, taskAgents(k, r, ctx))));
     for (const [on, sample] of samples) ingest(on, sample);
@@ -1373,12 +1378,12 @@ export async function putAway(run, how, orch) {
     if (run.phase === "finished" && (orch === "done" || orch === "idle") && paths?.length === 0) {
       await mark(run, "closed");
       await tidyClosed(run, facts());
-      rereadRuns();
+      askReread();
       return null;
     }
     const { note, blocked } = await askToClose(run);
     if (!blocked) await closeWorktreeSpaces(run, paths ?? []);
-    rereadRuns();
+    askReread();
     return note;
   }
   const tab = tabOf(run);
@@ -1386,7 +1391,7 @@ export async function putAway(run, how, orch) {
   if (how === "parked" || run.phase !== "finished") await mark(run, how);
   if (how === "parked") await closeWorktreeSpaces(run);
   if (tab) command("tab.close", { id: tab, confirmed: true });
-  rereadRuns();
+  askReread();
   return null;
 }
 
@@ -1436,7 +1441,7 @@ export async function deleteRun(run, { cx = null, historyTried = false } = {}) {
   setShared("harbormaster.prs", prs);
   const seen = { ...(shared(WORKTREES_KEY) ?? {}) };
   if (seen[run.key]) { delete seen[run.key]; setShared(WORKTREES_KEY, seen); }
-  rereadRuns();
+  askReread();
 }
 
 // Deletes several closed runs, one at a time per machine and the machines at once, each as
@@ -1473,5 +1478,5 @@ export function resumeRun(run) {
   if (space) command("tab.new", { space: space.id, folder: run.folder, argv: agentArgv(kind), task: prompt });
   else command("space.new", { folder: run.folder, argv: agentArgv(kind), task: prompt, machine: run.machine ?? "" });
   if (lostTab) command("tab.close", { id: lostTab, confirmed: true });
-  rereadRuns();
+  askReread();
 }

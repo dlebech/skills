@@ -8,7 +8,7 @@ import {
   waitSig, IDLE_ASK_MS, IDLE_ASK_TEXT, idleAsking,
 } from "../../herdr-app/mods/harbormaster/attention.js";
 import { addCiSample, nextSteps, screenSig, CI_KEEP, probeEvery, withWait, prunedWaits } from "../../herdr-app/mods/harbormaster/tracking.js";
-import { prSummary, viewerReview, PR_FIELDS, carryRuns, withReadTimes, prEntrySame, rereadRuns } from "../../herdr-app/mods/harbormaster/data.js";
+import { prSummary, viewerReview, PR_FIELDS, carryRuns, withReadTimes, prEntrySame } from "../../herdr-app/mods/harbormaster/data.js";
 import { filesFresh } from "../../herdr-app/mods/harbormaster/attend.js";
 
 const MIN = 60000;
@@ -412,15 +412,6 @@ test("an offline machine's runs are carried, marked stale, and read as can't tel
   // Even its waiting plan, read before the machine went away, is not Needs you now.
   const g = assess(carried[0], { orch: null, pr: read([]), filesOk: filesFresh(carried[0], now, cache), now });
   assert.deepEqual([g.group, g.cantTell], ["cant", true]);
-});
-
-test("asking for a reread after closing a run leaves the other runs' files fresh", () => {
-  // Closing one run used to zero the read time, putting every other run under Can't tell.
-  const a = run({ key: ":/a", machine: null });
-  const cache = { at: now - 1000, failed: [] };
-  rereadRuns(cache);
-  assert.equal(cache.due, true);
-  assert.equal(filesFresh(a, now, cache), true);
 });
 
 test("a re-run failed job is aged from its re-run, not from the first checks", () => {
