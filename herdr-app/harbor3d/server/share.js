@@ -11,10 +11,11 @@ const URL_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/
 
 // Start sharing. Returns { token, port, localUrl, shareUrl, stop, done }. `done` resolves when sharing
 // ended (time limit, stop(), or cloudflared exiting). With tunnel false there is no cloudflared.
-export async function startShare(app, { minutes = 60, tunnel = true, urlTimeoutMs = 30000, log = () => {}, setTimer = setTimeout } = {}) {
+// With realNames the shared page shows real names, repos, PR numbers and agent names, like the private one.
+export async function startShare(app, { minutes = 60, tunnel = true, realNames = false, urlTimeoutMs = 30000, log = () => {}, setTimer = setTimeout } = {}) {
   const token = randomBytes(16).toString("hex")
   const base = `/s/${token}/`
-  const listener = app.listener({ mode: "shared", base })
+  const listener = app.listener({ mode: "shared", base, realNames: realNames === true })
   const port = await listener.listen(0)
   const localUrl = `http://127.0.0.1:${port}${base}`
   let child = null, timer = null, ended = false, finish

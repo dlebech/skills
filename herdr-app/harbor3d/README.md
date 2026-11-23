@@ -66,7 +66,7 @@ The sky follows the time of day on your computer, with an Auto, Day and Night to
 ## Share it
 
 ```sh
-node bin/harbor3d.js share [--minutes 60]
+node bin/harbor3d.js share [--minutes 60] [--real-names]
 ```
 
 This starts a second listener for colleagues and points a `cloudflared tunnel --url` (a quick tunnel, no account; `cloudflared` must be installed) at that listener only. The private page is never tunnelled. It prints a link with a 128-bit random token, `https://<random>.trycloudflare.com/s/<token>/`; everything outside that path answers 404 with nothing in it. Anyone with the link can look, so send it only to people you would show the screen to.
@@ -78,6 +78,8 @@ At most 20 people can watch the shared page and 8 the private one. A viewer on t
 **What a shared viewer sees.** Each run is a made-up sea name (Kelp Reef, Gull Rock, Coral Shelf…) chosen by a keyed hash of the run, so it stays the same while the server runs and changes when it restarts. The order of the ships is the same for every viewer: the server gives each run a berth slot (and each parked ship and adrift agent its place) and keeps it while the run stays in the facts; a new run takes the lowest free slot. A server restart may change the order. Everything else is the shape of the run: its type (feature, fix, review, explore), whether it is planning, running, finished or parked, whether it needs you and the kind of need, the path-to-merge stages and their states, each task's stage, each PR's state and checks (not its number), whether CI runs, each agent's state and kind, counts, the ship's size bucket, the run's age to the nearest five minutes, the captain's state and how many people are viewing.
 
 **What they never see.** No repository, issue or PR number, branch, run name, topic, folder, machine, agent or terminal name, token count, URL, progress line, question, decision, claim, PR title, or any other text an agent or you wrote. The server builds each run field by field from an allow-list, an unknown value becomes a safe default instead of passing through, and identifiers are keyed hashes that differ after every restart. A unit test feeds the server runs full of marker strings and asserts that none appears in anything the shared listener sends. Only the private page shows names, repository, PR numbers and agent names.
+
+**Sharing real names.** `share --real-names` drops the sea names: the shared page then shows what the private page shows (run names, repositories, PR numbers, agent names, exact ages). Use it only with people who may see all of that. Everything else stays: the token path, the time limit, the viewer cap, the pokes, and no text from a viewer.
 
 ## What viewers can do
 
@@ -94,7 +96,7 @@ A poke is a `POST /poke` with a `kind` of `wave` or `feed`. `feed` takes the tar
 
 1. The browser only ever receives the scene, built field by field from an allow-list (`server/sanitize.js`). Nothing is spread or copied from the facts.
 2. Every enum is checked and falls back to a safe default; labels are stripped of control characters and cut to 60.
-3. Shared mode shows sea names only: no repo, PR number or agent name; ids are keyed hashes that change on every restart.
+3. Shared mode shows sea names only: no repo, PR number or agent name, unless started with `--real-names`; ids are keyed hashes that change on every restart.
 4. The shared listener serves only `/s/<128-bit token>/`, compares the token in constant time, and is the only thing the tunnel points at.
 5. The private listener rejects any `Host` or POST `Origin` that is not localhost (DNS rebinding, cross-site POST).
 6. Pokes carry only an enum `kind` and a scene id; the body is capped at 200 bytes; the broadcast is rebuilt from validated values; rate limits are 1/s per viewer and 5/s in all, per listener. An accepted poke reaches the viewers of both listeners through one small hub in `server/app.js`; only the rebuilt `{kind, target, at}` crosses, never a label. A polling viewer is identified by its `x-viewer` header; it may hold one poll and start two per second.
