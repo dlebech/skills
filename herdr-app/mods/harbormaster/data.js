@@ -391,6 +391,9 @@ function marker(how, text) {
 // and a new one started; the abandoned one, should it ever settle, is ignored.
 let cache = { at: 0, runs: [], decisions: [], errors: [], failed: [], pending: null, pendingAt: 0 };
 const STALE_READ = 45000;
+// A read that never answers must not hold the poll: each exec below carries a timeout (a timed-out one fails like any other failure).
+const RUNS_READ = 8000, RUNS_READ_REMOTE = 20000, GH_READ = 20000, GH_COMMENTS_READ = 30000, SH_READ = 8000;
+const readTimeout = (on, local = SH_READ, remote = RUNS_READ_REMOTE) => (on ? remote : local);
 let reads = 0;
 
 export function cachedRuns() {
@@ -430,7 +433,7 @@ export function loadRuns() {
     const runs = [], decisions = [], errors = [], answered = new Set(), samples = [];
     await Promise.all(names.map(async (on) => {
       try {
-        const out = await exec("sh", ["-c", SCRIPT], { on });
+        const out = await exec("sh", ["-c", SCRIPT], { on, timeout: readTimeout(on, RUNS_READ) });
         // A machine that could not be reached prints nothing and fails.
         if (out.code !== 0 && !out.stdout.trim()) throw new Error((out.stderr || `exit ${out.code}`).trim());
         const [files, sample] = out.stdout.split(GS);
@@ -596,7 +599,7 @@ const viewers = new Map();
 async function viewerOf(run) {
   const key = run.machine ?? "";
   if (viewers.has(key)) return viewers.get(key);
-  const res = await exec("gh", ["api", "user", "-q", ".login"], { on: run.machine }).catch(() => null);
+  const res = await exec("gh", ["api", "user", "-q", ".login"], { on: run.machine, timeout: GH_READ }).catch(() => null);
   const login = res?.code === 0 ? res.stdout.trim() : "";
   if (login) viewers.set(key, login);
   return login || null;
@@ -707,7 +710,7 @@ export async function headsMoved(run, list) {
   if (Date.now() - (headChecks.get(run.key) ?? 0) < HEADS_TTL) return null;
   headChecks.set(run.key, Date.now());
   const branches = [...new Set(open.map((p) => p.head))];
-  const out = await exec("sh", ["-c", HEADS, "sh", run.folder, ...branches], { on: run.machine, timeout: 8000 }).catch(() => null);
+  const out = await exec("sh", ["-c", HEADS, "sh", run.folder, ...branches], { on: run.machine, timeout: readTimeout(run.machine) }).catch(() => null);
   if (out?.code !== 0) return null;
   const read = new Set(open.map((p) => p.sha));
   const moved = new Set();
@@ -797,7 +800,7 @@ export async function refreshPrs(run, closed = false, opts = false) {
         if (!pr.url) continue;
         const done = closed ? before?.find((x) => x.url === pr.url && (x.state === "MERGED" || x.state === "CLOSED")) : null;
         if (done) { const { stale, ...kept } = done; out.push(kept); continue; }
-        const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+        const res = await exec("gh", ["pr", "view", pr.url, "--json", PR_FIELDS], { on: run.machine, timeout: GH_READ }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
         const p = res?.code === 0 ? json(res.stdout) : null;
         if (p) { out.push(own ? await withComments(prSummary(p, pr.repo), run, before?.find((x) => x.url === pr.url)) : prSummary(p, pr.repo, own ? null : viewer)); continue; }
         error ??= `gh could not read ${pr.url}: ${(res?.stderr || res?.stdout || `exit ${res?.code}`).trim().split("\n")[0].slice(0, 200)}`;
@@ -861,7 +864,7 @@ export async function loadReviewers(run, repo) {
   if (!repo || reviewerBusy.has(id) || cachedReviewers(run, repo) !== null) return;
   reviewerBusy.add(id);
   try {
-    const res = await exec("gh", reviewersArgs(repo), { on: run.machine }).catch(() => null);
+    const res = await exec("gh", reviewersArgs(repo), { on: run.machine, timeout: GH_READ }).catch(() => null);
     const prs = res?.code === 0 ? json(res.stdout) : null;
     reviewerCache.set(id, { at: Date.now(), ok: Array.isArray(prs), prs: Array.isArray(prs) ? prs : [], viewer: await viewerOf(run).catch(() => null) });
   } finally { reviewerBusy.delete(id); }
@@ -874,7 +877,7 @@ export async function loadReviewers(run, repo) {
 export async function requestReview(run, url, login, { draft = false } = {}) {
   const args = requestArgs(url, login);
   if (!args) return { error: "not a reviewer to ask" };
-  const gh = (a) => exec("gh", a, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  const gh = (a) => exec("gh", a, { on: run.machine, timeout: GH_READ }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
   const why = (res) => (res?.stderr || res?.stdout || `gh exited ${res?.code}`).trim().split("\n")[0].slice(0, 200);
   if (draft) { const ready = await gh(["pr", "ready", url]); if (ready.code !== 0) return { error: why(ready) }; }
   const res = await gh(args);
@@ -898,7 +901,7 @@ export async function withComments(pr, run, old = null) {
   // A summary stored before comments were classed (no `threads`) is read again once.
   const prev = old?.url === pr.url && old.comments && !old.comments.error && old.comments.threads != null ? old.comments : null;
   if (prev && ((pr.updatedAt && prev.updatedAt === pr.updatedAt) || Date.now() - (prev.at ?? 0) < COMMENTS_TTL)) return { ...pr, comments: prev };
-  const res = await exec("gh", args, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
+  const res = await exec("gh", args, { on: run.machine, timeout: GH_COMMENTS_READ }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
   const summary = res?.code === 0 ? commentSummary(json(res.stdout)) : null;
   const error = summary ? null : (res?.code === 0 ? "gh gave no pull request" : (res?.stderr || res?.stdout || `exit ${res?.code}`).trim().split("\n")[0].slice(0, 200));
   return { ...pr, comments: summary ? { ...summary, updatedAt: pr.updatedAt ?? null, at: Date.now() } : { error } };
@@ -1052,12 +1055,12 @@ export const WRITE_ACCEPTED = [
 async function changeAccepted(run, id, entry) {
   for (let i = 0; i < 5; i++) {
     if (i > 0) await exec("sleep", ["0.3"]).catch(() => {});
-    const got = await exec("sh", ["-c", READ_ACCEPTED, "sh", run.dir], { on: run.machine });
+    const got = await exec("sh", ["-c", READ_ACCEPTED, "sh", run.dir], { on: run.machine, timeout: readTimeout(run.machine) });
     if (got.code !== 0) throw new Error(`could not read proof-accepted.json: ${(got.stderr || "").trim() || `exit ${got.code}`}`);
     let file;
     try { file = acceptedFile(got.stdout); } catch { throw new Error("proof-accepted.json is not a JSON object; fix or delete it, then try again"); }
     const was = got.stdout.replace(/\n+$/, "");
-    const out = await exec("sh", ["-c", WRITE_ACCEPTED, "sh", run.dir, was, withAcceptance(file, id, entry)], { on: run.machine });
+    const out = await exec("sh", ["-c", WRITE_ACCEPTED, "sh", run.dir, was, withAcceptance(file, id, entry)], { on: run.machine, timeout: readTimeout(run.machine) });
     if (out.code === 0) return;
     if (out.code !== 3) throw new Error(out.stderr || "could not write proof-accepted.json");
   }
@@ -1149,7 +1152,7 @@ export async function refreshReviewed(run, done = false) {
   const started = Date.now();
   reviewBusy.set(run.key, started);
   try {
-    const out = await exec("sh", ["-c", SINCE, "sh", run.folder, run.branch, ...new Set(finals.map((x) => x.sha))], { on: run.machine, timeout: 8000 }).catch(() => null);
+    const out = await exec("sh", ["-c", SINCE, "sh", run.folder, run.branch, ...new Set(finals.map((x) => x.sha))], { on: run.machine, timeout: readTimeout(run.machine) }).catch(() => null);
     const measured = {};
     if (out?.code === 0) for (const line of out.stdout.split("\n")) {
       const m = /^(\S+) (\d+) ([01]) ([01])$/.exec(line.trim());
@@ -1179,7 +1182,7 @@ const WORKTREES = [
 // has no folder to ask in).
 async function integrationWorktrees(run) {
   if (!run.folder) return null;
-  const out = await exec("sh", ["-c", WORKTREES, "sh", run.folder, run.branch], { on: run.machine }).catch(() => null);
+  const out = await exec("sh", ["-c", WORKTREES, "sh", run.folder, run.branch], { on: run.machine, timeout: readTimeout(run.machine) }).catch(() => null);
   return out?.code === 0 ? out.stdout.split("\n").filter(Boolean) : null;
 }
 
@@ -1226,7 +1229,7 @@ async function tidyClosed(run, ctx) {
   writeHistory(run, "closed");
   const spaces = leftoverSpaces(run);
   if (spaces.length) {
-    const out = await exec("sh", ["-c", MISSING, "sh", ...new Set(spaces.map((s) => s.path))], { on: run.machine }).catch(() => null);
+    const out = await exec("sh", ["-c", MISSING, "sh", ...new Set(spaces.map((s) => s.path))], { on: run.machine, timeout: readTimeout(run.machine) }).catch(() => null);
     const gone = new Set(out?.code === 0 ? out.stdout.split("\n").filter(Boolean) : []);
     for (const s of spaces) if (gone.has(s.path)) once(s.id, () => command("space.close", { id: s.id, confirmed: true }));
   }

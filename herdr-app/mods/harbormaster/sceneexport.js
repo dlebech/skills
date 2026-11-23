@@ -12,6 +12,9 @@ import { taskStage, isDropped } from "./tasks.js";
 import { runName } from "./ui.js";
 import { chunks } from "./resources.js";
 
+// A hung shell must not hold the Crew refresh: the want read and the write each time out.
+const WANT_TIMEOUT = 5000, PUT_TIMEOUT = 5000;
+
 // At most this many drifting agents go out, as many as the Crew draws.
 const ADRIFT_MAX = 12;
 // The want file must be this young, and a changed file is written at most this often unchanged.
@@ -124,7 +127,7 @@ let last = { json: null, at: 0 };
 // facts file when they changed or 15 s passed. `build()` makes the facts; it only runs when asked.
 export async function exportFacts(build) {
   if (checking()) return;
-  const w = await exec("sh", ["-c", WANT]).catch(() => null);
+  const w = await exec("sh", ["-c", WANT], { timeout: WANT_TIMEOUT }).catch(() => null);
   const lines = (w?.stdout ?? "").split("\n").filter(Boolean);
   if (!lines.length || lines[1] !== "1") return;
   const facts = build();
@@ -132,6 +135,6 @@ export async function exportFacts(build) {
   const json = JSON.stringify(rest);
   const now = Date.now();
   if (!shouldWrite({ wantAgeMs: 0, lastJson: last.json, json, sinceLastMs: now - last.at })) return;
-  const r = await exec("sh", ["-c", PUT, "sh", lines[0], ...chunks(JSON.stringify({ v: facts.v, at, ...rest }))]).catch(() => null);
+  const r = await exec("sh", ["-c", PUT, "sh", lines[0], ...chunks(JSON.stringify({ v: facts.v, at, ...rest }))], { timeout: PUT_TIMEOUT }).catch(() => null);
   if (r?.code === 0) last = { json, at: now };
 }

@@ -13,7 +13,7 @@ export const shared = (key) => { sharedReads.set(key, (sharedReads.get(key) ?? 0
 // For the New run dialog (newrun.js): overlays, toasts and the props a dialog is opened with.
 // checking() is true, so the dialog's init does not list folders: a test sets them.
 export const openOverlay = (o) => { globalThis.__herdrOpened = o; return null; }, closeOverlay = (id) => { globalThis.__herdrClosed = id; }, notify = () => null;
-export const props = () => globalThis.__herdrProps ?? {}, home = () => "/home/u", checking = () => true;
+export const props = () => globalThis.__herdrProps ?? {}, home = () => "/home/u", checking = () => globalThis.__herdrChecking ?? true;
 export const writeTextFile = async (...a) => (globalThis.__herdrWrite ?? (async () => null))(...a);
 // The rest of what the mod imports, so a module that draws (crew.js) loads under node.
 export const layout = () => null, nextCommand = () => new Promise(() => {}), setAgentOrder = () => null, theme = () => ({});

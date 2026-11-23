@@ -4,6 +4,8 @@
 // history line. Pure helpers first (tests drive them), then the loading.
 
 import { exec, machines } from "herdr";
+
+const READ_TIMEOUT = 8000, READ_TIMEOUT_REMOTE = 20000;
 import { loadTiming, cachedTiming, pruneTiming } from "./timing.js";
 import { attributeResources, taskResources } from "./attribute.js";
 import { recordedCounts } from "./data.js";
@@ -403,7 +405,7 @@ export function loadHistory() {
   history.pending = (async () => {
     const names = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
     if (!names.includes(null)) names.unshift(null);
-    const runs = (await Promise.all(names.map((on) => exec("sh", ["-c", HISTORY], { on })
+    const runs = (await Promise.all(names.map((on) => exec("sh", ["-c", HISTORY], { on, timeout: on ? READ_TIMEOUT_REMOTE : READ_TIMEOUT })
       .then((out) => parseHistory(out.stdout, on)).catch(() => [])))).flat();
     history = { at: Date.now(), runs, pending: null };
     return runs;

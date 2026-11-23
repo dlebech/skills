@@ -12,6 +12,9 @@
 
 import { exec } from "herdr";
 
+// A read that never answers must not hold the poll (and cache.pending): it times out and the contexts stay as they were.
+const READ_TIMEOUT = 8000, READ_TIMEOUT_REMOTE = 20000;
+
 // Prints "<address>\t<tokens>\t<model>" for each address it can read. The addresses
 // come in as arguments, never spliced into the text. Each line is parsed as JSON (grep
 // only narrows them down): a match can sit inside another entry, a synthetic message
@@ -104,7 +107,7 @@ export function loadContexts(addresses) {
     }
     const contexts = {};
     await Promise.all([...byMachine].map(async ([on, list]) => {
-      const out = await exec("sh", ["-c", SCRIPT, "sh", ...list.map((x) => x.local)], { on }).catch(() => null);
+      const out = await exec("sh", ["-c", SCRIPT, "sh", ...list.map((x) => x.local)], { on, timeout: on ? READ_TIMEOUT_REMOTE : READ_TIMEOUT }).catch(() => null);
       for (const line of (out?.stdout ?? "").split("\n")) {
         const [local, tokens, model] = line.split("\t");
         const hit = list.find((x) => x.local === local);
