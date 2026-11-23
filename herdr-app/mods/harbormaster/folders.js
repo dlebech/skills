@@ -13,15 +13,28 @@ export const expandHome = (p, home) => (p === "~" ? home : p.startsWith("~/") ? 
 // The folder with the home folder as "~", for display.
 export const tilde = (p, home) => (home && p === home ? "~" : home && p.startsWith(`${home}/`) ? `~/${p.slice(home.length + 1)}` : p);
 
+// Where a space is, as Herdr's Spaces list names it: where its first terminal is now, unless that
+// is its `folder` or inside it. Herdr's `folder` is only where it was made and goes stale: a space
+// made in one folder whose terminal now works in another is that other folder's space, not the
+// first one's, so New run must not start a run in it for the first. Its `folder` when no
+// terminal's folder is known (`ps`: panes()).
+export function placeOf(space, ps) {
+  const folder = trim(String(space.folder || ""));
+  const first = space.tabs?.[0]?.id;
+  const cwd = trim(String((first ? ps.find((p) => p.tab === first)?.cwd : null) || ""));
+  if (!cwd || (folder && (cwd === folder || cwd.startsWith(`${folder}/`)))) return folder;
+  return cwd;
+}
+
 // The open spaces as folder entries: [{folder, name, space, machine}] in the Spaces list's
-// order. A space counts by the folder it starts terminals in (its `folder`, else where its first
-// terminal is: `whereOf`). Two spaces on one folder both show when their names differ. A linked
-// worktree (`rootOf(folder)` names its main repository) is replaced by that repository, which
-// has an entry of its own only when no space of its own is open.
+// order. A space counts by where it is (`whereOf`: placeOf, else its `folder`). Two spaces on
+// one folder both show when their names differ. A linked worktree (`rootOf(folder)` names its
+// main repository) is replaced by that repository, which has an entry of its own only when no
+// space of its own is open.
 export function spaceFolders(spaces, whereOf, rootOf = () => null) {
   const byKey = new Map(), own = new Set();
   for (const s of spaces) {
-    const where = trim(s.folder || whereOf(s) || "");
+    const where = trim(whereOf(s) || s.folder || "");
     if (!where) continue;
     const root = (!s.machine && rootOf(where)) || where;
     const mine = root === where, m = s.machine ?? "";
@@ -45,20 +58,14 @@ export function newSpaceId(folder, openSpaces, machine = null) {
   return clash ? `${id}-${slug(base(parentOf(folder))) || "root"}` : id;
 }
 
-// The space a New run in `folder` starts in, on `machine` (null: this one): the one whose own
-// `folder` is it, else the one with a terminal live in it (a space's `folder` can be stale, the
-// folder it was launched in). Exact folder only; another machine's spaces never count. Null for none.
+// The space a New run in `folder` starts in, on `machine` (null: this one): one that is there
+// (placeOf), one whose own `folder` is it too first. Exact folder only; a space with only some
+// other tab there does not count, nor do another machine's spaces. Null for none.
 export function spaceAt(folder, spaces, panes, machine = null) {
   const want = trim(String(folder || ""));
   if (!want) return null;
-  const local = spaces.filter((s) => (s.machine ?? null) === machine);
-  const own = local.find((s) => trim(String(s.folder || "")) === want);
-  if (own) return own.id;
-  for (const s of local) {
-    const tabs = new Set((s.tabs ?? []).map((t) => t.id));
-    if (panes.some((p) => tabs.has(p.tab) && trim(String(p.cwd || "")) === want)) return s.id;
-  }
-  return null;
+  const here = spaces.filter((s) => (s.machine ?? null) === machine && placeOf(s, panes) === want);
+  return (here.find((s) => trim(String(s.folder || "")) === want) ?? here[0])?.id ?? null;
 }
 
 // The folders runs were started in or have: the dialog's own history first (newest first), then

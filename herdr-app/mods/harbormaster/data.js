@@ -1183,6 +1183,13 @@ async function integrationWorktrees(run) {
   return out?.code === 0 ? out.stdout.split("\n").filter(Boolean) : null;
 }
 
+// A worktree's repository (its main checkout) on `on`, or null when git cannot say.
+async function mainCheckout(path, on) {
+  const out = await exec("git", ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"], { on, timeout: 8000 }).catch(() => null);
+  const common = out?.code === 0 ? out.stdout.trim() : "";
+  return common.endsWith("/.git") ? common.slice(0, -5) : null;
+}
+
 // Closes the spaces that show the run's integration worktrees: to declutter the
 // sidebar while the run is parked (the worktrees stay, and the resumed orchestrator's
 // integration-worktree.sh opens their spaces again), or before its orchestrator
@@ -1279,8 +1286,8 @@ function tidyParked(run, paths) {
 // only reaches a window on its own computer: when Herdr runs on another one, connected
 // over ssh, it cannot, and the worktree has no space. So Harbormaster opens it, as the
 // script does: space.new on the worktree's folder on the run's machine, unnamed, so the
-// sidebar nests it under the repository's space, then shows the space that was showing
-// again. Only for an open run whose orchestrator is there and not closing.
+// sidebar nests it under the repository's space (opened first when none shows it), then
+// shows the space that was showing again. Only for an open run whose orchestrator is there and not closing.
 // A worktree gets a space once per orchestrator: the ones Harbormaster opened or saw
 // open are kept in shared state (harbormaster.worktrees, {[run key]: {terminal, paths}},
 // persisted), so a space the person closes stays closed. Every such run has an entry, with or without
@@ -1327,6 +1334,9 @@ async function showWorktreesOnce(runs, ctx, answered) {
       known.add(path);
       if (worktreeSpaces(r, [path]).length) continue;
       const before = spaces().find((sp) => sp.active)?.id;
+      // The sidebar nests it only under an open space of its repository: open that first.
+      const repo = await mainCheckout(path, r.machine);
+      if (repo && !worktreeSpaces(r, [repo]).length) command("space.new", { folder: repo, machine: r.machine });
       command("space.new", { folder: path, machine: r.machine });
       if (before) command("space.select", { id: before });
     }
