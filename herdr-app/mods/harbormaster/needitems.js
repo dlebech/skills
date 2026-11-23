@@ -58,7 +58,8 @@ export const firstToOpen = (r, stages) => {
   return rows.find(worthALook) ?? rows.find((k) => k.state === "pending") ?? null;
 };
 
-// Marks the run as waiting on `text` (not blank), with its step as it is now; the field closes.
+// Marks the run as waiting on `text` (not blank), with its step as it is now, in its
+// waiting-on.json (tracking.js; shown at once, written in the background); the field closes.
 // Only while that step is still all the run needs the user for (as needaction.js offers the
 // button): a reviewer requested or red CI since the field opened would let the mark go at the
 // next poll, so nothing is set and a note says why.
@@ -68,8 +69,16 @@ export function markWaiting(view, key, text, cx) {
   const a = run ? attOf(run, facts()) : null;
   const next = a?.next;
   const can = a?.group === "needs" && a.reasons.length === 1 && WAIT_LABELS.has(a.reasons[0].key) && next?.label === a.reasons[0].key;
-  if (can) setWaitingOn(key, { text, at: Date.now(), label: next.label, sig: waitSig(next) });
-  else setNote(view, `Not marked waiting on ${text}: ${!a ? "the run is gone" : a.group === "needs" ? `it now needs you for ${a.reasons.map((x) => x.text).join(" · ")}` : "it no longer waits on you for that step"}`);
+  if (can) {
+    // Started here, so the mark shows in the render below; the spawn only waits for the write.
+    const failed = setWaitingOn(run, { text, at: Date.now(), label: next.label, sig: waitSig(next) }).then(() => null, (e) => e);
+    cx.spawn(async (cx) => {
+      const e = await failed;
+      if (!e) return;
+      setNote(view, `Not marked waiting on ${text}: ${e?.message ?? e}`);
+      try { cx.notify(); } catch { /* no view to redraw; the timer will */ }
+    });
+  } else setNote(view, `Not marked waiting on ${text}: ${!a ? "the run is gone" : a.group === "needs" ? `it now needs you for ${a.reasons.map((x) => x.text).join(" · ")}` : "it no longer waits on you for that step"}`);
   view.reply.set_value("");
   view.replying = null;
   cx.notify();

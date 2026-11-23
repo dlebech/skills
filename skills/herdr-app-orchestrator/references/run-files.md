@@ -25,6 +25,7 @@ and it keeps nothing the files do not.
 | `shared/` | orchestrator, agents | orchestrator, agents | Briefs, findings, reports. Not committed. `shared/proof/` holds captured proof. |
 | `proof.md` | orchestrator, `proving` skill | Harbormaster, you | Each claim's result and evidence (below). Not committed. |
 | `proof-accepted.json` | Harbormaster | Harbormaster, orchestrator | Claims you accepted as they are (below). Nobody else writes it. |
+| `waiting-on.json` | Harbormaster | Harbormaster | Your **Waiting on someone…** mark: `{text, at, label, sig}`, who the run waits on in your words, when (ISO time), and the step and a signature of its PRs then. Kept with the run so Harbormaster on every machine shows the same mark; deleted when you clear it or the step changes. The orchestrator ignores it. |
 | `parked`, `closed` | captain, Harbormaster, orchestrator | everyone | You put the run away. One line, `<UTC time>\t<plan status then>`; `init-run.sh` deletes them when an orchestrator resumes the run. |
 
 The root also holds `.captain-decisions.json`, the captain's own open decisions (below).

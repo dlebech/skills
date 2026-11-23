@@ -286,7 +286,7 @@ export default class Harbormaster extends View {
       if (!isClosed(r, ctx)) moved = (await refreshReviewed(r, away).catch(() => false)) || moved;
     }
     // The waiting-on marks that let go are deleted here, after the PR reads, never in a render.
-    try { observeWaits(runs, facts(), cachedRuns()); } catch (e) { console.log(`harbormaster: waiting-on marks failed: ${e?.message ?? e}`); }
+    try { await observeWaits(runs, facts()); } catch (e) { console.log(`harbormaster: waiting-on marks failed: ${e?.message ?? e}`); }
     if (moved) cx.notify();
   }
 
