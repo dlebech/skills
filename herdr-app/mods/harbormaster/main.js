@@ -38,6 +38,7 @@ import { observeTelling } from "./telling.js";
 import { parseCommand, runNamed, newRunArgs, flowArgs } from "./commands.js";
 import { setReviewFlow } from "./tracking.js";
 import { openNewRun, initNewRun, newRunView } from "./newrun.js";
+import { startOnce, begin, tagOf } from "./inflight.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
 const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "harbor-rail", "stats"]);
@@ -116,9 +117,18 @@ function showView(key, role, width, height, extra = {}) {
 
 const sameItems = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
+// The listen loop counts as one in-flight task for its whole life (inflight.js), so a copy whose
+// loop outlived its build shows in the counts.
+async function listenCounted(view, cx) {
+  const end = begin(`${tagOf(view)}/listen`);
+  try { await listen(view, cx); } catch { /* the build was replaced: its cx threw, the loop ended */ } finally { end(); }
+}
+
 async function listen(view, cx) {
   for (;;) {
     const c = String(await nextCommand());
+    // A replaced build's cx throws here, before the command is handled with its stale code: the loop ends.
+    cx.notify();
     // A throw here would end the loop and this copy would never hear a command again.
     try {
       const { name, arg } = parseCommand(c);
@@ -130,8 +140,10 @@ async function listen(view, cx) {
       else if (name === "close-popup") closePopup();
       else if (name === "set-flow") { const f = flowArgs(arg); if (f) setReviewFlow(f.key, f.flow); else console.log(`harbormaster: set-flow wants <folder>=peer|self|default, got "${arg}"`); }
       else if (name === "open-run") { markOpened(runNamed(view.runs, arg)); showPopup(view, arg, true); }
-      cx.notify();
     } catch (e) { console.log(`harbormaster: command "${c}" failed: ${e?.message ?? e}`); }
+    // Outside the try: a replaced build's cx throws here, which ends this loop (it would otherwise
+    // live on, taking commands, for the rest of the runtime).
+    cx.notify();
   }
 }
 
@@ -164,13 +176,13 @@ export default class Harbormaster extends View {
     if (role === "newrun") { initNewRun(this, cx); return; }
     if (!DATA_ROLES.has(role)) return;
     // The popup's own copy doesn't listen: a command that closed or replaced the popup would end it.
-    if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards" || role === "crew") && props()?.overlay)) cx.spawn((cx) => listen(this, cx));
+    if (!checking() && role !== "harbor" && !((role === "run" || role === "stats" || role === "cards" || role === "crew") && props()?.overlay)) cx.spawn((cx) => listenCounted(this, cx));
     this.refresh(cx);
     cx.timer.every(5000, (cx) => this.refresh(cx));
     // Run timing is read in the background, one run at a time, each at most every 90 s while
     // open (statsdata.js); the history when a run may have closed. Never blocks drawing.
     if (role === "stats") {
-      const slow = (cx) => cx.spawn(async (cx) => {
+      const slow = (cx) => startOnce(this, "slow", (b) => cx.spawn(b), async (cx) => {
         await Promise.all([loadHistory(), this.load(cx)]);
         cx.notify();
         await refreshTimings(this.runs, () => { try { cx.notify(); } catch { /* closed */ } });
@@ -219,7 +231,9 @@ export default class Harbormaster extends View {
     // A note past its time goes with the same refresh, so no timer is needed for it.
     if (this.expireBusy() | expireNote(this)) cx.notify();
     expirePopup();
-    cx.spawn(async (cx) => {
+    // One refresh body per copy: a tick that finds the last one still running (an exec that never
+    // answers) starts nothing, so hung bodies cannot pile up toward Herdr's task limit.
+    startOnce(this, "refresh", (b) => cx.spawn(b), async (cx) => {
       const runs = await this.load(cx);
       // The crew and the Bridge show each crew agent's context size; the harbor and stats do not.
       if (props()?.role !== "harbor" && props()?.role !== "harbor-rail" && props()?.role !== "stats") {

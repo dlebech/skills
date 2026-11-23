@@ -10,6 +10,7 @@ import { statsRuns, colorOf, LABEL } from "./stats.js";
 import { tokenText } from "./context.js";
 import { openStats } from "./live.js";
 import { plural } from "./ui.js";
+import { startOnce } from "./inflight.js";
 
 const STATS_TIP = "Where the time goes, tokens, CPU and memory: per run, task and agent, and past runs";
 const WEEK_TIP = "Runs active in the last 7 days, open and closed, each counted whole.";
@@ -68,7 +69,8 @@ export function weekReads(view, cx) {
   if (Date.now() - (view.weekReadAt ?? 0) < READ_EVERY) return;
   view.weekReadAt = Date.now();
   // The render's cx is dead once it returns: the redraws go through the one cx.spawn hands the task.
-  cx.spawn(async (cx) => {
+  // At most one read at a time: one that never answers must not let another start every READ_EVERY.
+  startOnce(view, "week", (b) => cx.spawn(b), async (cx) => {
     const again = () => { try { cx.notify(); } catch { /* closed */ } };
     await loadHistory();
     again();

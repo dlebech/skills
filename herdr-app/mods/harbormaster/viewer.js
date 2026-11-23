@@ -9,6 +9,7 @@ import { exec, writeTextFile, appHome, openOverlay, closeOverlay } from "herdr";
 import { makeCopier, isImage, isVideo, mediaPath } from "./media.js";
 import { openUrl } from "./live.js";
 import { setNote } from "./note.js";
+import { startOnce, LIMITS } from "./inflight.js";
 
 const copier = () => makeCopier({ exec, writeTextFile, home: appHome() });
 const RECHECK = 60000; // a shown file is looked at again after this long, in case it changed
@@ -23,7 +24,8 @@ function want(view, run, rel) {
   const k = keyOf(run, rel);
   const have = view.media.get(k);
   const bad = have?.state === "error" || have?.state === "large";
-  if (have && (have.state === "loading" || Date.now() - have.at < (bad ? RECHECK_BAD : RECHECK))) return have;
+  // A copy still loading is not asked for again until the copy limit (a copy that never answers: one retry per limit).
+  if (have && (have.state === "loading" ? Date.now() - have.at < LIMITS.copy : Date.now() - have.at < (bad ? RECHECK_BAD : RECHECK))) return have;
   // A copy that was ready, failed or was too large keeps showing while it is looked at again.
   const next = have && have.state !== "loading" ? { ...have, at: Date.now() } : { state: "loading", at: Date.now() };
   view.media.set(k, next);
@@ -36,14 +38,14 @@ export function startCopies(view, cx) {
   const list = view.wanted ?? [];
   view.wanted = [];
   for (const w of list) {
-    cx.spawn(async (cx) => {
+    startOnce(view, "copy", (b) => cx.spawn(b), async (cx) => {
       let res;
       try { res = { ...(await copier()(w.run, w.rel)), at: Date.now() }; }
       catch (e) { res = { state: "error", error: e?.message ?? String(e), at: Date.now() }; }
       const was = view.media.get(w.k);
       view.media.set(w.k, res);
       if (was?.state !== res.state || was?.path !== res.path) cx.notify();
-    });
+    }, { key: w.k });
   }
 }
 
