@@ -13,9 +13,9 @@
 
 import { View } from "gpui-kit";
 import { InputState } from "gpui-base";
-import { props, theme, nextCommand, checking, openOverlay, closeOverlay } from "herdr";
+import { props, theme, nextCommand, checking, openOverlay, closeOverlay, notify } from "herdr";
 import { shared, setShared, oneRead } from "./store.js";
-import { expireNote } from "./note.js";
+import { expireNote, setNote } from "./note.js";
 import { loadRuns, cachedRuns, refreshPrs, markOpened, refreshReviewed, isClosed, isParked, newestFirst, stats } from "./data.js";
 import { facts, crewAddresses, captainOf, adrift, agentNames, agentStatus, programOf } from "./live.js";
 import { observeWaits } from "./attend.js";
@@ -39,6 +39,8 @@ import { parseCommand, runNamed, newRunArgs, flowArgs } from "./commands.js";
 import { setReviewFlow } from "./tracking.js";
 import { openNewRun, initNewRun, newRunView } from "./newrun.js";
 import { startOnce, begin, tagOf, commandLoop, tune } from "./inflight.js";
+import { reviveRuns } from "./revive.js";
+import { wakeOrchestrator } from "./inbox.js";
 
 const BUSY_LIMIT = 2 * 60000; // a Close can run several 30 s commands in a row
 const DATA_ROLES = new Set([undefined, "cards", "run", "crew", "harbor", "harbor-rail", "stats"]);
@@ -243,6 +245,15 @@ export default class Harbormaster extends View {
       const role = props()?.role;
       if ((role === "crew" || role === undefined || role === "cards" || role === "harbor") && !props()?.overlay && !checking()) {
         try { observeTelling(runs, ctx); } catch (e) { console.log(`harbormaster: telling failed: ${e?.message ?? e}`); }
+        // Orchestrators lost to a restart come back in their own terminals (revive.js); the
+        // machine's guard lets only one copy type each, and that copy tells.
+        const resumed = await reviveRuns(runs, { wake: wakeOrchestrator }).catch((e) => { console.log(`harbormaster: resume after restart failed: ${e?.message ?? e}`); return []; });
+        if (resumed.length) {
+          const text = `Resumed after the restart: ${resumed.join(", ")}`;
+          try { notify({ title: resumed.length === 1 ? "Orchestrator resumed" : `${resumed.length} orchestrators resumed`, body: resumed.join(", "), level: "info" }); } catch { /* no toast mod */ }
+          setNote(this, text);
+          cx.notify();
+        }
       }
       // Harbor 3D's facts file, from any copy that polls for the whole window (the Crew block, the Bridge, the sea
       // layout's harbor): a layout without a Crew block still feeds it. Two copies may both write; they write the same

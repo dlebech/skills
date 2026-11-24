@@ -15,7 +15,9 @@
 # a run's text, and a shell argument could run part of it; it goes to the agent as
 # one argv entry, never through a shell.
 #
-#   --kind     claude, pi or opencode (tested), codex (untested), or any program
+#   --kind     claude, pi or opencode (tested), codex or copilot (untested), or any
+#              program. copilot starts on a session id of its own (--session-id), so it
+#              can be resumed
 #   --model    claude: sonnet; pi: provider/id; opencode: provider/id
 #   --shared   claude only: allow reading and writing this absolute directory
 #              without a permission prompt. Claude is also allowed `hc send`, so
@@ -99,6 +101,11 @@ case $kind in
     [ -z "$model" ] ||
       argv=(env "OPENCODE_CONFIG_CONTENT=$(jq -cn --arg m "$model" '{model: $m}')" "$bin" --standalone) ;;
   codex) argv=("$bin" --no-daemon ${model:+--model "$model"}) ;; # hc --skill requires --no-daemon
+  copilot)
+    # Its session id is ours, on its command line, so tokens.sh records it and Harbormaster can
+    # resume the conversation after a restart (copilot --resume=<id>).
+    sid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null | tr 'A-F' 'a-f')
+    argv=("$bin" ${model:+--model "$model"} ${sid:+"--session-id=$sid"}) ;;
   *) argv=("$bin" ${model:+--model "$model"}) ;;
 esac
 argv+=(${extra[@]+"${extra[@]}"})

@@ -290,7 +290,7 @@ async function writeInbox(run, source, text) {
 // window reports it) is not sent to at all, as hc would refuse it; the message waits in its
 // inbox. A dialog that opens while a wake is held drops that wake the same way, with no sign;
 // the orchestrator reads its inbox at its next step.
-async function wakeOrchestrator(run, file) {
+export async function wakeOrchestrator(run, file) {
   const fail = (why) => Object.assign(new Error(`the message is in its inbox, but its orchestrator could not be told: ${why}`), { inInbox: true });
   const hc = (args) => exec("hc", args, { on: run.machine }).catch((e) => ({ code: -1, stderr: e?.message ?? String(e) }));
   const got = await hc(["get", run.localTerminal]);

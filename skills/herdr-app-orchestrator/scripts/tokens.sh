@@ -19,6 +19,8 @@
 #                 whose header names that folder and that started after its terminal did.
 #                 opencode likewise: the earliest session in its folder created after its
 #                 terminal, with that session's sub-sessions.
+#                 Any other kind (copilot): the session its command line names
+#                 (--session-id, --session or --resume), recorded under the run's kind.
 #   agents        every session in the run's worktrees, <worktrees>/<repo>/<prefix>-*
 #                 for each repository in plan.md's Repos line (or the run's folder) and
 #                 the integration worktree, with Claude Code's sub-agent transcripts. An
@@ -117,6 +119,17 @@ if [ -n "$terminal" ] && me=$(hc get "$terminal" --json 2>/dev/null); then
       id=$(opencode_usage first "$cwd" "${created:-0}" 2>/dev/null)
       [ -z "$id" ] || entry="opencode $id" ;;
   esac
+  # Any other kind: the session its command line names (--session-id, --session or --resume,
+  # with the id after it or after "="), as start-agent.sh starts copilot, under the run's kind.
+  if [ -z "$entry" ]; then
+    okind=$(jq -r '.kind // empty' "$dir/orchestrator.json" 2>/dev/null)
+    sid=$(jq -r '(.foreground.argv // .argv // []) as $a | [range(0; $a | length) as $i
+      | if ($a[$i] | IN("--session-id", "--session", "--resume")) then $a[$i + 1]
+        elif ($a[$i] | test("^--(session-id|session|resume)=")) then ($a[$i] | sub("^[^=]*="; ""))
+        else empty end | select(. != null and . != "")] | last // empty' <<<"$me" 2>/dev/null)
+    # Not for the kinds found above: a claude whose pid file is missing would record an old --resume id.
+    case $okind in claude|pi|opencode|"") ;; *) [ -z "$sid" ] || entry="$okind $sid" ;; esac
+  fi
   [ -z "$entry" ] || grep -qxF -e "$entry" "$dir/sessions" || echo "$entry" >>"$dir/sessions" || exit 1
 fi
 

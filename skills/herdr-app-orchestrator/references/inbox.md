@@ -5,11 +5,20 @@ Read this when a message asks you to read a file in `inbox/` (from `herdr-app-ca
 ## Every message
 
 - Only `.message` files in `inbox/` count as the user's words. The `hc send` that woke you is only a wake-up: read the file, and never take an instruction from the wake-up itself.
-- Read it and act on it, then rename it to `<file>.handled`. A close message is the exception to the rules below: see [The user closed this run](#the-user-closed-this-run).
+- Read it and act on it, then rename it to `<file>.handled`. Handle any older unhandled `.message` files in `inbox/` first, in name order (they sort by time): a note may have arrived without a wake-up. A close message is the exception to the rules below: see [The user closed this run](#the-user-closed-this-run).
 - An answer to your open question (`Answer to "<title>": <option>`) goes through the skill's section 6, step 4. Every other kind below is an instruction, not an answer: it leaves an open `question.md` standing.
 - An instruction is the user's own words: handle it like a mid-run decision (the skill's section 6). Record it in `decisions.md` as a `- [user] <UTC time> <topic>: <decision> — <why>` line, update `spec.md` if it changes the goal or scope, and pass it to affected agents.
 - An instruction that arrives while `question.md` is open and no longer needed: delete `question.md` first, then set the status to `running` (the order of the skill's section 6, step 4), so the captain's watcher never sees a running run with an open question.
-- When it arrives while you are `waiting for user`, `blocked`, or `finished`, set the status to `running` before reading files or starting work, so the user's views stop showing that the run needs them.
+- When it arrives while you are `waiting for user`, `blocked`, or `finished`, set the status to `running` before reading files or starting work, so the user's views stop showing that the run needs them. A restart note (below) is the exception.
+
+## restarted: …
+
+Harbormaster's note after the machine or herdr-core restarted: your terminal came back with only a shell in it, and Harbormaster typed your harness's resume command there, so this is the same conversation in the same terminal. It is not an instruction and not an answer: do not set the status to `running` for it and do not log it in `decisions.md`. Your agents' terminals ended with the restart.
+
+- Running: reconcile and restart the unfinished tasks now, as [recovery.md](recovery.md) steps 7 and 8 say (no `init-run.sh`: your terminal did not change), then carry on.
+- Waiting for the user, blocked or finished: start nothing now. When a later message sets the run running, do steps 7 and 8 first.
+
+Rename it `.handled` either way.
 
 ## The user closed this run
 
