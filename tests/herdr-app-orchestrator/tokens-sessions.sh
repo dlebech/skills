@@ -41,4 +41,8 @@ check "a resumed one's --resume <id> is added after it" "$(tail -n 1 "$run/sessi
 export HC_GET='{"state":"live","foreground":{"pid":1,"argv":["/bin/bash"]}}'
 "$tokens" --print "$run" >/dev/null 2>&1
 check "a shell adds nothing" "$(wc -l <"$run/sessions" | tr -d ' ')" "2"
+export HC_GET='{"state":"live","foreground":{"pid":999999,"argv":["claude","--resume","old-id"]},"status":{"app":"claude-code"}}'
+jq '.kind = "claude"' "$run/orchestrator.json" >"$run/o.tmp" && mv "$run/o.tmp" "$run/orchestrator.json"
+"$tokens" --print "$run" >/dev/null 2>&1
+check "a claude without its pid file adds no --resume id from its command line" "$(wc -l <"$run/sessions" | tr -d ' ')" "2"
 exit $fail

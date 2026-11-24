@@ -64,7 +64,7 @@ tab=$(jq -r '.labels["herdr.tab"] // empty' <<<"$me")
 # reported a status yet (codex, at its first command) is named by the program in the foreground, so a
 # resume starts the same kind rather than defaulting to claude.
 kind=$(jq -r '(.status.app // .foreground.name // empty) | if . == "claude-code" then "claude" else . end
-  | if IN("claude","codex","pi","opencode") then . else empty end' <<<"$me")
+  | if IN("claude","codex","pi","opencode","copilot") then . else empty end' <<<"$me")
 jq -n --arg terminal "$HC_TERMINAL_ID" --arg tab "$tab" --arg folder "$folder" --arg branch "$branch" \
   --arg kind "$kind" --arg started "$started" '{terminal: $terminal, tab_id: $tab, folder: $folder, branch: $branch}
   + (if $kind == "" then {} else {kind: $kind} end)

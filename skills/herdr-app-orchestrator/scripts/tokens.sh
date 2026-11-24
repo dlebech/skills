@@ -127,7 +127,8 @@ if [ -n "$terminal" ] && me=$(hc get "$terminal" --json 2>/dev/null); then
       | if ($a[$i] | IN("--session-id", "--session", "--resume")) then $a[$i + 1]
         elif ($a[$i] | test("^--(session-id|session|resume)=")) then ($a[$i] | sub("^[^=]*="; ""))
         else empty end | select(. != null and . != "")] | last // empty' <<<"$me" 2>/dev/null)
-    [ -z "$okind" ] || [ -z "$sid" ] || entry="$okind $sid"
+    # Not for the kinds found above: a claude whose pid file is missing would record an old --resume id.
+    case $okind in claude|pi|opencode|"") ;; *) [ -z "$sid" ] || entry="$okind $sid" ;; esac
   fi
   [ -z "$entry" ] || grep -qxF -e "$entry" "$dir/sessions" || echo "$entry" >>"$dir/sessions" || exit 1
 fi

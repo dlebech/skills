@@ -9,14 +9,15 @@
 // in its terminal: the same conversation comes back in the same terminal, and nothing else about
 // the run changes. A resumed conversation waits for a message, so this costs no tokens by itself.
 //
-// Once per shell: the run's machine keeps a `.revived-<sum>` directory in the run directory, the
-// sum of the terminal, the shell's pid and that process's start time, made with mkdir (atomic, so
-// two Harbormaster copies or windows cannot both type it). A shell left after the resumed agent
-// exits is the same shell, so it is never typed into twice; the next restart's shell is a new one.
+// Only a restart's shell, and once: the terminal must be older than the running herdr-core server
+// with nothing reported in it since (see REVIVE), so a shell left after the person exits an agent is
+// left alone; and the run's machine keeps a `.revived-<sum>` directory in the run directory, made
+// with mkdir (atomic, so two Harbormaster copies or windows cannot both type it).
 //
-// A run that was working when it stopped gets an inbox note and, once its agent reports, the
-// wake-up to read it (its agents ended with the restart, recovery.md step 7). One that was
-// waiting or finished gets the note only, read with the next message it is sent.
+// The run's inbox gets a note once the line is typed (its agents ended with the restart,
+// recovery.md step 7). A run that was working is woken to read it once its agent reports; one that
+// was waiting or finished is not (a wake costs a full read of its context), and reads it with the
+// next message it is sent (inbox.md: older unhandled messages first).
 
 import { exec } from "herdr";
 import { facts, orchestratorLost, exactStatus } from "./live.js";
@@ -60,29 +61,44 @@ export function latestSession(text, kind) {
 
 // The note left in the run's inbox. Informational: it must not move a waiting or finished run.
 export const RESTART_NOTE = "restarted: the machine or herdr-core restarted, and Harbormaster resumed your session in the same terminal. "
-  + "Your agents' terminals ended with it. Do not change the run's status for this note. If the run has unfinished tasks, "
-  + "reconcile and restart them as recovery.md steps 7 and 8 say, then carry on; if it is waiting or finished, there is nothing else to do.";
+  + "Your agents' terminals ended with it. This is not an instruction: do not change the run's status for it. If the run is running, "
+  + "reconcile and restart its unfinished tasks now, as recovery.md steps 7 and 8 say, then carry on. If it is waiting for the user, "
+  + "blocked or finished, start nothing now: when a later message sets it running, do steps 7 and 8 first.";
 
 // Which runs to bring back: open (not parked or closed), their orchestrator lost, of a kind with
-// a resume command, and not tried already in this Harbormaster (`tried`, by terminal and when the
-// terminal was last seen lost: the machine's guard decides for good, this only saves the exec).
-export function revivable(runs, ctx, { lost = orchestratorLost, tried = new Set() } = {}) {
-  return runs.filter((r) => !r.away && r.localTerminal && RESUME[r.kind || "claude"] && !tried.has(r.key) && lost(r, ctx));
+// a resume command, and not held back in this Harbormaster (`tried`: run key -> until when; the
+// machine's guard decides for good, this only saves execs).
+export function revivable(runs, ctx, { lost = orchestratorLost, tried = new Map(), now = Date.now() } = {}) {
+  return runs.filter((r) => !r.away && r.localTerminal && RESUME[r.kind || "claude"] && !((tried.get(r.key) ?? 0) > now) && lost(r, ctx));
 }
 
-// One sh script on the run's machine: checks the terminal is live with a shell in front, reads the
-// session, takes the guard, writes the note, types the line. Prints one word:
-//   resumed | done (guard already taken) | nosession | notshell | unsafe | gone
+// One sh script on the run's machine: checks the terminal is a restart's shell, reads the session,
+// takes the guard, types the line, then writes the note. Prints one word:
+//   resumed | done (guard already taken) | notrestart | nosession | notshell | unsafe | gone | nojq
+// A restart's shell: the terminal is older than the running herdr-core server, and nothing has
+// reported in it since that server started (herdr-core resets status_ms when it gives a kept terminal
+// its shell). An agent the person exited in a terminal, or one started after the restart, reported
+// since, so its shell is left alone.
+// The guard is the sum of the terminal, the shell's pid and start time and herdr-core's holder
+// instance, so a pid that repeats after the next restart is still a new shell.
 // $1 run dir, $2 terminal, $3 kind, $4 folder, $5 note file name, $6 note text.
 // The line is built here in sh as resumeLine builds it in JS (tested against each other).
 export const REVIVE = `
 d=$1 t=$2 kind=$3 folder=$4 nf=$5 note=$6
+command -v jq >/dev/null || { echo nojq; exit 0; }
 j=$(hc get "$t" --json 2>/dev/null) || { echo gone; exit 0; }
-set -- $(printf '%s' "$j" | jq -r '[.state, (.foreground.pid // .pid // ""), ((.foreground.argv[0] // .argv[0] // "") | split("/") | last), (.status.state // "")] | map(if . == "" then "-" else tostring end) | join(" ")')
+srv=$(hc server status --json 2>/dev/null) || { echo gone; exit 0; }
+set -- $(jq -rn --argjson j "$j" --argjson s "$srv" --argjson now "$(date +%s)" '
+  ($now - ($s.uptime_ms // 0) / 1000) as $start
+  | [$j.state, ($j.foreground.pid // $j.pid // ""), (($j.foreground.argv[0] // $j.argv[0] // "") | split("/") | last),
+     ($j.status.state // ""), ($s.holder.instance // $s.core.id // ""),
+     (if ($j.created_ms // 0) / 1000 < $start - 1 and (($j.status_ms // 0) / 1000 < $start + 60) then "restart" else "" end)]
+  | map(if . == "" or . == null then "-" else tostring end) | join(" ")')
 [ "$1" = live ] || { echo gone; exit 0; }
 case $3 in bash|zsh|fish|sh|dash|ksh|-bash|-zsh|-fish|-sh) ;; *) echo notshell; exit 0 ;; esac
 [ "$4" = - ] || { echo notshell; exit 0; }
-pid=$2
+[ "$6" = restart ] || { echo notrestart; exit 0; }
+pid=$2 inst=$5
 id=$(awk -v k="$kind" '$1 == k { $1 = ""; sub(/^ +/, ""); v = $0 } END { print v }' "$d/sessions" 2>/dev/null)
 [ -n "$id" ] || { echo nosession; exit 0; }
 case $kind in
@@ -93,14 +109,17 @@ case $kind in
   *) echo nosession; exit 0 ;;
 esac
 case $id in *[!A-Za-z0-9._/~:-]*) echo unsafe; exit 0 ;; esac
-case $folder in *"'"*|*\\\\*) echo unsafe; exit 0 ;; esac
+nl='
+'
+cr=$(printf '\\r')
+case $folder in *"'"*|*\\\\*|*"$nl"*|*"$cr"*) echo unsafe; exit 0 ;; esac
 [ -z "$folder" ] || cmd="cd '$folder' && $cmd"
 started=$(ps -o lstart= -p "$pid" 2>/dev/null)
-sum=$(printf '%s %s %s' "$t" "$pid" "$started" | cksum | cut -d' ' -f1)
+sum=$(printf '%s %s %s %s' "$t" "$pid" "$started" "$inst" | cksum | cut -d' ' -f1)
 mkdir "$d/.revived-$sum" 2>/dev/null || { echo done; exit 0; }
 for o in "$d"/.revived-*; do [ "$o" = "$d/.revived-$sum" ] || rmdir "$o" 2>/dev/null; done
-mkdir -p "$d/inbox" && printf '%s\\n' "$note" >"$d/inbox/.$nf.tmp" && mv "$d/inbox/.$nf.tmp" "$d/inbox/$nf"
 hc send "$t" "$cmd" >/dev/null 2>&1 || { rmdir "$d/.revived-$sum"; echo gone; exit 0; }
+mkdir -p "$d/inbox" && printf '%s\\n' "$note" >"$d/inbox/.$nf.tmp" && mv "$d/inbox/.$nf.tmp" "$d/inbox/$nf"
 echo resumed
 `;
 
@@ -110,18 +129,23 @@ export function noteName(now = new Date()) {
   return `${iso.replace(/[-:]|\.\d+/g, "")}-${iso.slice(20, 23)}-harbormaster-restart.message`;
 }
 
-// Module memory: runs tried in this copy (so one poll each, not one every 5 s), and runs resumed
-// that were working, whose wake waits for their agent to report.
-const tried = new Set();
+// Module memory: runs tried in this copy, until when they are held back. A definite answer holds
+// while the orchestrator stays lost (dropped once it is not, so a later restart is tried again); a
+// machine not reached is tried again after a minute. And the runs resumed that were working,
+// whose wake waits for their agent to report (shared, so one copy wakes each).
+const tried = new Map();
+const RETRY = 60000;
+const WAKE_LIMIT = 600000;
 const WAKES = "harbormaster.revive-wakes";
 
 // Brings back what revivable() picks, one run after another. Resolves to the names of the runs
 // resumed, for the view's note. `wake(run, file)` tells a resumed orchestrator to read its note.
-export async function reviveRuns(runs, { wake, now = () => new Date() } = {}) {
+export async function reviveRuns(runs, { wake, now = () => new Date(), lost = orchestratorLost } = {}) {
   const ctx = facts();
+  for (const r of runs) if (tried.has(r.key) && !lost(r, ctx)) tried.delete(r.key);
   const resumed = [];
-  for (const r of revivable(runs, ctx, { tried })) {
-    tried.add(r.key);
+  for (const r of revivable(runs, ctx, { tried, lost, now: Date.now() })) {
+    tried.set(r.key, Infinity);
     const nf = noteName(now());
     const out = await exec("sh", ["-c", REVIVE, "sh", r.dir, r.localTerminal, r.kind || "claude", r.folder ?? "", nf, RESTART_NOTE], { on: r.machine })
       .catch((e) => ({ code: -1, stdout: "", stderr: e?.message ?? String(e) }));
@@ -129,21 +153,23 @@ export async function reviveRuns(runs, { wake, now = () => new Date() } = {}) {
     if (word === "resumed") {
       resumed.push(r.topic || r.branch);
       if (r.phase === "running") setShared(WAKES, { ...(shared(WAKES) ?? {}), [r.key]: { file: nf, at: Date.now() } });
-    } else if (out.code !== 0 || word === "gone") tried.delete(r.key); // a machine not reached: try again next poll
-    else console.log(`harbormaster: not resumed ${r.branch}: ${word || out.stderr}`);
+    } else if (out.code !== 0 || word === "gone") tried.set(r.key, Date.now() + RETRY);
+    else if (word !== "done" && word !== "notrestart") console.log(`harbormaster: not resumed ${r.branch}: ${word || out.stderr}`);
   }
-  // A run that was working: wake it once its agent reports idle or done (10 minutes at most).
-  const wakes = shared(WAKES) ?? {};
-  const left = { ...wakes };
-  for (const [key, w] of Object.entries(wakes)) {
+  // A run that was working: wake it once its agent reports idle or done. The entry is taken out of
+  // the shared store before the wake, so two copies never both send it.
+  for (const [key, w] of Object.entries(shared(WAKES) ?? {})) {
     const r = runs.find((x) => x.key === key);
     const st = r && exactStatus(r.terminal, ctx);
     const ready = st === "idle" || st === "done";
-    if (r && !ready && Date.now() - w.at < 600000) continue;
-    delete left[key];
+    if (r && !ready && Date.now() - w.at < WAKE_LIMIT) continue;
+    const cur = shared(WAKES) ?? {};
+    if (!cur[key]) continue;
+    const { [key]: _taken, ...rest } = cur;
+    setShared(WAKES, rest);
     if (ready) await wake(r, w.file).catch((e) => console.log(`harbormaster: restart wake failed for ${r.branch}: ${e?.message ?? e}`));
+    else console.log(`harbormaster: ${r?.branch ?? key} was resumed after a restart but never reported ready (${st ?? "gone"}); its restart note waits in its inbox`);
   }
-  if (Object.keys(left).length !== Object.keys(wakes).length) setShared(WAKES, left);
   return resumed;
 }
 
