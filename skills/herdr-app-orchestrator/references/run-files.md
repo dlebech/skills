@@ -14,7 +14,8 @@ and it keeps nothing the files do not.
 | `spec.md` | orchestrator | orchestrator, agents | The goal, scope and acceptance criteria. |
 | `plan.md` | orchestrator | everyone | First line `Status: <one line>` (`running`, `waiting for user: <summary>`, `blocked: <reason>`, `finished`), then `Prefix:` and the tasks with their states. |
 | `status.json` | `set-status.sh`, `tokens.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated, tokens, budget, budget_asked, budget_answered}`. Outlives the orchestrator. `set-status.sh` keeps fields other scripts write. |
-| `sessions` | `tokens.sh` | `tokens.sh` | Every session the orchestrator's terminal has had, one `<kind> <session id or file>` a line (below). |
+| `sessions` | `tokens.sh` | `tokens.sh`, Harbormaster | Every session the orchestrator's terminal has had, one `<kind> <session id or file>` a line (below). Harbormaster resumes the last one of the run's kind after a restart. |
+| `.revived-<sum>/` | Harbormaster | Harbormaster | An empty directory: the orchestrator's shell (terminal, pid and start time, summed) that Harbormaster typed the resume command into after a restart, so it types into each shell once. |
 | `.tokens/` | `tokens.sh` | `tokens.sh` | Its cache: each session file's parsed usage and how far it was read (below). |
 | `.resources.json` | Harbormaster | Harbormaster, run history | CPU and memory per agent and program, added to on each 5 s poll while the run is open (below). |
 | `.history.jsonl` | Harbormaster | stats view | In the runs root, not a run directory: one summary line per closed run (below). Outlives the run. |
@@ -451,7 +452,8 @@ that used the same prefix, is not this run's):
   `pi <file>` is the earliest session in its folder whose header names that folder and that started
   after its terminal did; a session started there with `/new` later is missed. opencode is the same
   (`opencode <session id>`, in a terminal whose `status.app` starts with `opencode`), with the
-  session's sub-sessions counted too.
+  session's sub-sessions counted too. Any other kind (copilot, which `start-agent.sh` starts with `--session-id=<uuid>`) is recorded from
+  the session its command line names (`--session-id`, `--session` or `--resume`), under the run's `kind`.
 - **Agents**: every session in the run's worktrees, `~/.herdr/worktrees/<repo>/<prefix>-*` for each
   repository in plan.md's `Repos:` (or the run's folder) and the integration worktree, found by Claude
   Code's (`~/.claude/projects/<folder with each character other than A-Z a-z 0-9 - as ->/`, with

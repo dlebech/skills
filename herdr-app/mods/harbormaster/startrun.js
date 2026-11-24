@@ -28,7 +28,10 @@ export const AGENTS = [
 // The command that starts an agent in a tab (start-agent.sh does the same). Codex without --no-daemon
 // shares one background server whose environment, HC_TERMINAL_ID included, is that of the terminal
 // that first started it, so a run would register that terminal, not its own.
-export const agentArgv = (id) => (id === "codex" ? ["codex", "--no-daemon"] : [id]);
+// Copilot starts on a session id of ours, so it can be resumed after a restart (revive.js), as start-agent.sh does.
+export const agentArgv = (id, uuid = newUuid) => (id === "codex" ? ["codex", "--no-daemon"] : id === "copilot" ? ["copilot", `--session-id=${uuid()}`] : [id]);
+// A random (version 4) UUID, without crypto, which the mod runtime may not have.
+export const newUuid = (rand = Math.random) => "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => ((c === "x" ? 0 : 8) + Math.floor(rand() * (c === "x" ? 16 : 4))).toString(16));
 export const agentLabel = (id) => AGENTS.find((a) => a.id === id)?.label ?? id;
 
 // The agent a start uses: the remembered one while it is installed, else Claude Code, else the first installed.
