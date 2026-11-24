@@ -80,9 +80,10 @@ export function thumbs(view, t, run, taskId, files) {
 }
 
 // The viewer is its own overlay copy of the mod (role "viewer"); it copies and shows the files itself.
+// It takes most of the window (a share, not pixels), since proof screenshots are often full screens.
 function openViewer(run, files, index) {
   openOverlay({
-    mod: "harbormaster", kind: "dialog", width: 880, height: 620,
+    mod: "harbormaster", kind: "dialog", width: 0.94, height: 0.94,
     props: { role: "viewer", dir: run.dir, machine: run.machine ?? null, files, index, title: run.branch ?? "" },
   });
 }
@@ -108,7 +109,14 @@ function playVideo(view, run, rel, cx) {
   });
 }
 
-// The viewer overlay's view: the image scaled to fit, its name, and previous/next.
+// Opens a shown image in the system's image app, at full size: on this machine the file itself,
+// on another the copy the viewer already made.
+function openFull(run, rel, m) {
+  try { openUrl(run.machine ? m.abs : mediaPath(run.dir, rel)); } catch (e) { console.log(`harbormaster: ${e.message}`); }
+}
+
+// The viewer overlay's view: the image scaled to fit, its name, open in the image app, and previous/next.
+// A click on the image opens it in the image app too.
 export function viewer(view, t, p) {
   const files = p.files ?? [];
   const n = files.length;
@@ -128,9 +136,11 @@ export function viewer(view, t, p) {
     .child(h_flex().gap(8).px(12).h(40).flex_none().items_center()
       .child(div().flex_1().min_w(0).truncate().font_semibold().text_color(t.foreground).tooltip(rel ?? "").child(rel ? rel.split("/").pop() : ""))
       .child(div().flex_none().text_color(t.dim).child(p.title ? `${p.title} · ${i + 1}/${n}` : `${i + 1}/${n}`))
+      .child(btn("v-open", "↗", m?.state === "ready" ? () => openFull(run, rel, m) : null, "Open full size in the image app"))
       .child(btn("v-prev", "‹", i > 0 ? go(i - 1) : null, "Previous"))
       .child(btn("v-next", "›", i < n - 1 ? go(i + 1) : null, "Next"))
       .child(btn("v-close", "✕", () => closeOverlay(p.overlay), "Close (Esc)")))
     .child(div().flex_1().min_h(0).p(12).flex().items_center().justify_center().text_color(t.dim)
-      .child(body ?? image(m.path).size_full()));
+      .child(body ?? div().id("v-image").size_full().cursor_pointer().tooltip("Open full size in the image app")
+        .on_click(() => openFull(run, rel, m)).child(image(m.path).size_full())));
 }
