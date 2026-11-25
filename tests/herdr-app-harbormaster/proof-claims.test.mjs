@@ -264,3 +264,27 @@ test("a click shows at once (withSaid) and goes once the files show it", () => {
   const back = withSaid(claimRows({ ...p, accepted: { C2: { result: "partial — half" } } }, r), said, "k", { ...p, accepted: { C2: { result: "partial — half" } } }, 2000);
   assert.equal(back[1].state, "partial");
 });
+
+test("a Result: line in Harbormaster's own words reads: proven, passed and ok are a pass", () => {
+  const md = parseProofMd("## C1 x\nResult: proven (T2)\nShot: shared/proof/t1-drag.png\n\n## C2 y\nResult: passed — 2 tests\n\n## C3 z\nResult: failed: the drop jumps\n");
+  assert.deepEqual([md.claims.C1.result, md.claims.C1.why], ["pass", "(T2)"]);
+  assert.deepEqual([md.claims.C2.result, md.claims.C3.result], ["pass", "fail"]);
+  const rows = claimRows(run({ md }).proof, run(), ["done", "done", "done"]);
+  assert.equal(rows[0].state, "proven", "a T2 claim with its screenshot is proven");
+});
+
+test("a Result: line it can't read shows as such, wanting a look, not as not proven", () => {
+  const md = parseProofMd("## C1 x\nResult: looks good to me\nShot: shared/proof/t1-drag.png\n\n## C3 z\nResult: verified\n");
+  assert.equal(md.claims.C1.result, null);
+  assert.equal(md.claims.C1.unreadable, "looks good to me");
+  const rows = claimRows(run({ md }).proof, run(), STAGES);
+  assert.equal(rows[0].state, "unreadable");
+  assert.equal(rows[2].state, "unreadable", "even while its tasks are under way: it is not being proved, it was written wrong");
+  assert.deepEqual(claimPill(rows[0]), { text: "can't read result", tone: "amber" });
+  assert.equal(rows[0].why, "Result: looks good to me");
+  assert.equal(claimResultLine(rows[0]), "unreadable — looks good to me");
+  assert.deepEqual(claimActions(rows[0]), ["accept", "ask"]);
+  assert.equal(claimCounts(rows).first.id, "C1");
+  // A claim with no Result: line at all is still just not proven.
+  assert.equal(rows[1].unreadable, null);
+});

@@ -359,8 +359,9 @@ A claim row is its id, its words, its evidence and a pill:
   and `4 tests ✓` with the tests' names on hover (`1 of 4 tests ✗` in red when one failed);
 - **pill**: `proven` (green), `not proven yet` (dim: its tasks are still under way, or proof.md says
   `pending — <why>`), `needs a screenshot` / `needs a clip` (amber: a pass below its bar), `partial`
-  (amber), `fail` (red), `not proven` (amber: nothing proves it and its tasks are done, or the run is
-  finished), or `accepted` (muted).
+  (amber), `fail` (red), `can't read result` (amber: its `Result:` line starts with a word
+  Harbormaster doesn't know; the row shows the line), `not proven` (amber: nothing proves it and its
+  tasks are done, or the run is finished), or `accepted` (muted).
 
 Tiers are each claim's **bar**: the run's tier (`Proof tier:` in plan.md), or the claim's own when it
 asks for more (never less). T0 and T1 ask for tests, T2 a screenshot (a clip will do), T3 a clip, from a guided demo where
