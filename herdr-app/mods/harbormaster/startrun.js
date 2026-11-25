@@ -30,6 +30,20 @@ export const AGENTS = [
 // that first started it, so a run would register that terminal, not its own.
 // Copilot starts on a session id of ours, so it can be resumed after a restart (revive.js), as start-agent.sh does.
 export const agentArgv = (id, uuid = newUuid) => (id === "codex" ? ["codex", "--no-daemon"] : id === "copilot" ? ["copilot", `--session-id=${uuid()}`] : [id]);
+// The lines of skills/herdr-app-orchestrator/scripts/in-shell.sh, without its comments (a test checks
+// they match): run the agent through the user's interactive shell, which execs it, so it has what
+// ~/.bashrc sets up (nvm's node and npx) and is still the terminal's root program, ending its terminal
+// when it exits. Inline, since Herdr runs the argv on the run's machine, whose skill path this does not know.
+export const IN_SHELL = `s=\${SHELL:-}
+[ -x "$s" ] || exec "$@"
+case \${s##*/} in
+  bash|zsh|ksh|ksh93|mksh) exec "$s" -ic 'printf "\\033[H\\033[2J\\033[3J"; exec "$0" "$@"' "$@" ;;
+  fish) exec "$s" -ic 'printf "\\x1b[H\\x1b[2J\\x1b[3J"; exec $argv' "$@" ;;
+esac
+exec "$@"
+`;
+// The argv Herdr starts an agent of `id` with in a tab: agentArgv, through the user's interactive shell.
+export const launchArgv = (id, uuid = newUuid) => ["sh", "-c", IN_SHELL, "sh", ...agentArgv(id, uuid)];
 // A random (version 4) UUID, without crypto, which the mod runtime may not have.
 export const newUuid = (rand = Math.random) => "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => ((c === "x" ? 0 : 8) + Math.floor(rand() * (c === "x" ? 16 : 4))).toString(16));
 export const agentLabel = (id) => AGENTS.find((a) => a.id === id)?.label ?? id;

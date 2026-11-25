@@ -13,7 +13,11 @@
 # take a first task (opencode's --prompt only fills its input box, pi sits idle
 # while a local model loads). The task is a file, because it can hold the user's or
 # a run's text, and a shell argument could run part of it; it goes to the agent as
-# one argv entry, never through a shell.
+# one argv entry, never parsed by a shell.
+#
+# The agent starts through the user's interactive shell (in-shell.sh), which execs it, so it has
+# what ~/.bashrc sets up (nvm's node and npx, an installer's PATH), not only herdr-core's
+# environment. It is still the terminal's root program, and its terminal ends when it exits.
 #
 #   --kind     claude, pi or opencode (tested), codex or copilot (untested), or any
 #              program. copilot starts on a session id of its own (--session-id), so it
@@ -97,7 +101,7 @@ case $kind in
     # Its full-screen interface has no --model flag, and `opencode mini`, which
     # has, reports no status. Config from the environment needs a private server,
     # since the background service ignores it, and hc run does not pass on the
-    # caller's environment, so the variable goes in the command.
+    # caller's environment, so the variable goes in the command (in-shell.sh execs env).
     [ -z "$model" ] ||
       argv=(env "OPENCODE_CONFIG_CONTENT=$(jq -cn --arg m "$model" '{model: $m}')" "$bin" --standalone) ;;
   codex) argv=("$bin" --no-daemon ${model:+--model "$model"}) ;; # hc --skill requires --no-daemon
@@ -110,6 +114,7 @@ case $kind in
 esac
 argv+=(${extra[@]+"${extra[@]}"})
 [ -z "$prompt_arg" ] || argv+=(-- "$task")
+argv=("$(cd "$(dirname "$0")" && pwd)/in-shell.sh" "${argv[@]}")
 
 status() { hc get "$name" --json 2>/dev/null | jq -r '.status.state // empty'; }
 state() { hc get "$name" --json 2>/dev/null | jq -r '.state // "gone"'; }
