@@ -8,7 +8,10 @@
 # opencode's add their folder (~/.opencode/bin). `hc run -- opencode` then fails with "No such
 # file or directory". So this looks on PATH, then on the user's interactive login shell's PATH,
 # then in the folders installers commonly use, and start-agent.sh runs the program by the path
-# it prints.
+# it prints. The program's environment is a separate matter: start-agent.sh starts it through
+# in-shell.sh, the user's interactive shell, so it also gets the rest of what ~/.bashrc sets up
+# (nvm's node and npx). The path still matters when that shell cannot be used (no $SHELL, or
+# one in-shell.sh does not know), and for a program in an installer's folder on no PATH at all.
 set -uo pipefail
 
 prog=${1:-}
