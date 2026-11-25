@@ -88,27 +88,31 @@ export function claimRows(proof, run = {}, stages = null, finished = false) {
     const missing = e.result === "pass" && (tier === 3 ? !clips.some(isVideo) : tier === 2 ? media.length === 0 : false);
     const k = {
       id: c.id, name: c.text, ac: c.ac, tasks: c.tasks, tier, claim: true,
-      result: e.result, why: e.why, shots, tests: e.tests, clips, files: media, missing,
+      result: e.result, why: e.result ? e.why : e.unreadable ? `Result: ${e.unreadable}` : e.why,
+      unreadable: e.result ? null : e.unreadable ?? null, shots, tests: e.tests, clips, files: media, missing,
     };
     const line = claimResultLine(k);
     const a = proof?.accepted?.[k.id];
     const pass = isProven(k);
     k.accepted = !pass && a && a.result === line ? a : null;
     k.asked = !pass && !k.accepted && proof?.asks?.get?.(k.id) === line;
-    k.pending = !pass && !k.accepted && !finished && (k.result === "pending" || (gatheringOf(c) && k.result !== "fail"));
+    k.pending = !pass && !k.accepted && !finished && !k.unreadable && (k.result === "pending" || (gatheringOf(c) && k.result !== "fail"));
     k.state = stateOf(k);
     return k;
   });
 }
 
 // A row's one state: "proven" | "accepted" | "pending" | "fail" | "below" (a pass under its bar) |
-// "partial" | "unproven" (nothing proves it, and nobody is proving it).
+// "partial" | "unreadable" (proof.md has a Result: line whose first word Harbormaster doesn't
+// know, so it shows the line rather than "not proven") | "unproven" (nothing proves it, and nobody
+// is proving it).
 export function stateOf(k) {
   if (isProven(k)) return "proven";
   if (k.accepted) return "accepted";
   if (k.pending) return "pending";
   if (k.result === "fail") return "fail";
   if (k.missing) return "below";
+  if (k.unreadable) return "unreadable";
   return k.result === "partial" ? "partial" : "unproven";
 }
 
@@ -118,7 +122,7 @@ export const isProven = (k) => k.result === "pass" && !k.missing;
 // The result as one line, the way an acceptance or an ask records it: "pass — 4 tests
 // (needs a screenshot)", "partial — the drop is not shown", "not proven yet".
 export function claimResultLine(k) {
-  if (!k.result) return "not proven yet";
+  if (!k.result) return k.unreadable ? `unreadable — ${k.unreadable}` : "not proven yet";
   return `${k.result}${k.why ? ` — ${k.why}` : ""}${k.missing ? ` (needs ${BAR_NEEDS[k.tier]})` : ""}`;
 }
 
@@ -132,13 +136,15 @@ export function claimPill(k, finished = false) {
     case "fail": return { text: "fail", tone: "fail" };
     case "below": return { text: `needs ${BAR_NEEDS[k.tier]}`, tone: "amber" };
     case "partial": return { text: "partial", tone: "amber" };
+    case "unreadable": return { text: "can't read result", tone: "amber" };
     default: return { text: finished ? "not proven" : "not proven yet", tone: "amber" };
   }
 }
 
 // Whether a claim wants a look before a merge: not proven and not being proved (failed, partial,
-// below its bar, or nothing proves it once its tasks are done). An accepted one doesn't.
-export const worthALook = (k) => ["fail", "partial", "below", "unproven"].includes(k.state);
+// below its bar, a result line it can't read, or nothing proves it once its tasks are done). An
+// accepted one doesn't.
+export const worthALook = (k) => ["fail", "partial", "below", "unreadable", "unproven"].includes(k.state);
 
 // The user's say on a row: Accept or Ask to prove, unless it is proven or still being proved;
 // Unaccept once accepted. "asked" while an ask waits.

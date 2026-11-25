@@ -44,11 +44,22 @@ export function parseFiles(val) {
 
 // proof.md → { tier, checks ({state: "green" | "red" | another word, text} or null), claims, tasks, cut }.
 // A claim's section is "## C<n> <claim>" (claims.js): `Result: pass | fail | partial | pending — one
-// line` (pending: still being gathered, as when a later task takes its screenshots), and evidence
+// line` (pending: still being gathered, as when a later task takes its screenshots; parseResult
+// also takes "proven", "passed", "ok" and "failed"; any other word is kept as `unreadable`), and evidence
 // lines `Shot: <path>`, `Test: <name> — pass`, `Clip: <path>`. An old run's "## <task id> <name>"
 // sections go to `tasks` ({tier, checked, result, why, files}); nothing shows them any more.
 export const isClaimId = (id) => /^C\d+$/.test(String(id ?? ""));
-export const emptyClaim = () => ({ result: null, why: "", shots: [], tests: [], clips: [] });
+export const emptyClaim = () => ({ result: null, why: "", unreadable: null, shots: [], tests: [], clips: [] });
+
+// A `Result:` value → {result: "pass" | "fail" | "partial" | "pending", why}, null when its first
+// word is none of them. Agents write the words Harbormaster shows, so "proven", "passed" and "ok"
+// are a pass: "proven (T2)" → {result: "pass", why: "(T2)"}.
+const RESULT_WORDS = { pass: "pass", passed: "pass", proven: "pass", ok: "pass", fail: "fail", failed: "fail", partial: "partial", pending: "pending" };
+export function parseResult(val) {
+  const r = /^(\w+)\b[\s—–:-]*(.*)$/.exec(String(val ?? "").trim());
+  const result = r && RESULT_WORDS[r[1].toLowerCase()];
+  return result ? { result, why: r[2].trim() } : null;
+}
 
 export function parseProofMd(text) {
   const out = { tier: null, checks: null, reviewed: [], tasks: {}, claims: {}, cut: false };
@@ -82,8 +93,8 @@ export function parseProofMd(text) {
     else if (key === "checked") cur.checked = val;
     else if (key === "files") cur.files = parseFiles(val);
     else if (key === "result") {
-      const r = /^(pass|fail|partial|pending)\b[\s—–:-]*(.*)$/i.exec(val);
-      if (r) { cur.result = r[1].toLowerCase(); cur.why = r[2].trim(); }
+      const r = parseResult(val);
+      if (r) { cur.result = r.result; cur.why = r.why; }
     }
   }
   return out;
@@ -103,8 +114,9 @@ export function parseReviewed(val) {
 // first word after the last " — " ("— fail: assertion at line 3" fails), else it passed.
 function claimLine(e, key, val) {
   if (key === "result") {
-    const r = /^(pass|fail|partial|pending)\b[\s—–:-]*(.*)$/i.exec(val);
-    if (r) { e.result = r[1].toLowerCase(); e.why = r[2].trim(); }
+    const r = parseResult(val);
+    if (r) { e.result = r.result; e.why = r.why; e.unreadable = null; }
+    else if (val) e.unreadable = val;
   } else if (key === "shot") e.shots.push(...parseFiles(val));
   else if (key === "clip") e.clips.push(...parseFiles(val));
   else if (key === "test") {

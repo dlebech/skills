@@ -154,6 +154,9 @@ How Harbormaster reads a claim:
   tasks is still under way (planned, implementing, in review, fixing) and nothing failed. It shows
   calm, with nothing to do. Once its tasks are done, or the run is finished, it wants a look.
 - **fail**, **partial**: as written; a fail is red and never merged past.
+- **can't read result**: a `Result:` line whose first word is none of `pass`, `fail`, `partial`,
+  `pending` (`proven`, `passed` and `ok` also read as pass, `failed` as fail). It wants a look and
+  shows the line, so write one of those words first: `Result: pass — proven at T2`.
 
 The verdict counts claims and names the first that is not proven: `3 of 4 proven · not yet: Drag to
 reorder`, with the tier and the checks in its hover. The merge ask (the Needs-you box) shows the
