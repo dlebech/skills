@@ -677,7 +677,7 @@ const runPin = (t, id, r, orch) => (cardBesideOrchestrator(r, orch) ? pinButton(
 // directory (a new integration branch), and its pane should follow it there.
 export function runOfProps(runs, p) {
   const byTerminal = p.terminal ? runs.filter((x) => x.localTerminal === p.terminal) : [];
-  if (byTerminal.length) return byTerminal.find((x) => x.dir === p.dir) ?? byTerminal.find((x) => !x.away) ?? byTerminal[0];
+  if (byTerminal.length) return byTerminal.find((x) => x.dir === p.dir) ?? byTerminal.find((x) => !x.away && !x.superseded) ?? byTerminal.find((x) => !x.away) ?? byTerminal[0];
   const dir = p.dir ?? (typeof p.run === "string" ? p.run.slice(p.run.indexOf(":") + 1) : null);
   return runs.find((x) => x.dir === dir) ?? null;
 }

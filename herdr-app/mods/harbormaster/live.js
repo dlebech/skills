@@ -39,6 +39,7 @@ export function reportedStatus(address, ctx) {
 // shell (hc keep), so after a reboot the orchestrator's terminal and tab come back
 // without it; so does a terminal whose agent exited.
 export function orchestratorLost(run, ctx) {
+  if (run.superseded) return false;
   const term = run.terminal && ctx.terminals.find((t) => t.address === run.terminal);
   if (!term || term.state !== "live" || term.status) return false;
   const a = ctx.agents.find((x) => x.address === run.terminal);
@@ -58,7 +59,36 @@ export function orchestratorState(run, ctx) {
   return m.get(run);
 }
 
+// A run directory as its orchestrator's run.dir label names it (set-status.sh): "<folder>/<branch>",
+// the same on every machine and however the runs root was spelled.
+export const runDirLabel = (dir) => String(dir ?? "").split("/").filter(Boolean).slice(-2).join("/");
+
+// The runs whose orchestrator's terminal now serves another run. An agent that finishes one run
+// and starts the next in the same terminal leaves both orchestrator.json files naming it, so the
+// Crew had one row for the two and the other run had none, while the Bridge still listed it.
+// The terminal's run.dir label names the run it serves; a terminal without one (labelled before
+// set-status.sh set it) serves the run started last. With no way to tell, none is superseded.
+// A superseded run's orchestrator is gone: finished, it counts as closed; else it needs a Resume.
+export function supersededRuns(runs, ctx) {
+  const byTerminal = new Map();
+  for (const r of runs) if (r.terminal) byTerminal.set(r.terminal, [...(byTerminal.get(r.terminal) ?? []), r]);
+  const out = new Set();
+  for (const [address, list] of byTerminal) {
+    if (list.length < 2) continue;
+    const label = ctx.terminals.find((t) => t.address === address)?.labels?.["run.dir"];
+    let owner = label ? list.find((r) => runDirLabel(r.dir) === label) : null;
+    if (!owner) {
+      const latest = Math.max(...list.map((r) => r.started ?? 0));
+      const newest = list.filter((r) => (r.started ?? 0) === latest);
+      if (latest > 0 && newest.length === 1) owner = newest[0];
+    }
+    if (owner) for (const r of list) if (r !== owner) out.add(r);
+  }
+  return out;
+}
+
 function orchestratorStateOf(run, ctx) {
+  if (run.superseded) return "gone";
   const term = run.terminal && ctx.terminals.find((t) => t.address === run.terminal);
   if (!ctx.agents.some((a) => a.address === run.terminal) && (!term || term.state !== "live")) return "gone";
   if (orchestratorLost(run, ctx)) return "gone";

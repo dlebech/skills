@@ -61,8 +61,9 @@ const OPEN_HERE = "Click to open it here";
 function crewModel(view, t, ctx = facts(), s = stats(view.runs, ctx)) {
   const cap = captainOf(ctx);
   // A live run before a parked or closed one that recorded the same address (as runOfProps), or
-  // the live run would get a second, "orchestrator gone" row with a Resume.
-  const runOf = (term) => view.runs.find((r) => !r.away && r.terminal === term.address) ?? view.runs.find((r) => r.terminal === term.address);
+  // the live run would get a second, "orchestrator gone" row with a Resume. Never a superseded run
+  // (live.js supersededRuns): the terminal serves another run now.
+  const runOf = (term) => view.runs.find((r) => !r.away && !r.superseded && r.terminal === term.address) ?? view.runs.find((r) => !r.superseded && r.terminal === term.address);
   const now = Date.now();
   // The sidebar, not the Crew popup (an overlay): its rows' leads leave out comment counts
   // (rowLead), so the age survives its narrow width.

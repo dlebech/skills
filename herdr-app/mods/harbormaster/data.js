@@ -34,7 +34,7 @@ import { commentsArgs, commentSummary, pendingComments } from "./comments.js";
 import { observeRuns, recordCi, parseWait } from "./tracking.js";
 import { detachedSend } from "./wake.js";
 import { skillPrompt, agentArgv } from "./startrun.js";
-import { exactStatus, reportedStatus, orchestratorState, orchestratorLost, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
+import { exactStatus, reportedStatus, orchestratorState, orchestratorLost, supersededRuns, workersOf, needsYou, needReason, tabOf, liveTabOf, tabOfTerminal, tabInfo, homeSpace, worktreeSpaces, leftoverSpaces, captainOf, facts } from "./live.js";
 
 const RS = "\u001e", US = "\u001f", GS = "\u001d";
 
@@ -467,11 +467,14 @@ export function loadRuns() {
     runs.sort((a, b) => (a.machine ?? "").localeCompare(b.machine ?? "") || a.dir.localeCompare(b.dir));
     decisions.sort((a, b) => (a.asked ?? 0) - (b.asked ?? 0));
     if (read !== reads) return cache;
+    const ctx = facts();
+    // Set on every run each read, the carried ones too: the terminal may have moved on since.
+    const superseded = supersededRuns(runs, ctx);
+    for (const r of runs) r.superseded = superseded.has(r);
     // `failed`: the machines (null for this one) whose runs could not be read this time; their
     // runs from the last read stay in `runs`, marked `stale` (carryRuns). Only the runs just
     // read (`fresh`) are acted on below: nothing is done on a stale read.
     cache = { at: Date.now(), runs, decisions, errors, failed, pending: null, pendingAt: 0, due: cache.due };
-    const ctx = facts();
     observeRuns(runs, ctx, answered, (r) => r.tasks.map((k) => shownStage(k, taskAgents(k, r, ctx))));
     for (const [on, sample] of samples) ingest(on, sample);
     recordRuns(fresh.filter((r) => !r.away && orchestratorState(r, ctx) !== "gone"), (r) => runTerminals(r, ctx), answered).catch(() => {});
