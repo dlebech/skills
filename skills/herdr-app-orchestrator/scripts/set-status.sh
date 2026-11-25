@@ -185,11 +185,15 @@ fi
 
 # A label change is an hc event, which wakes herdr-app-captain's watcher at once. run.dir
 # ("<folder>/<branch>") names the run the terminal serves now: an agent that starts a new run
-# in the same terminal leaves the old run's orchestrator.json naming it too.
+# in the same terminal leaves the old run's orchestrator.json naming it too. Only from that
+# terminal itself, so a call made anywhere else never moves the terminal to this run.
 if [ -n "$terminal" ]; then
-  d=${dir%/}
-  run_dir="$(basename "$(dirname "$d")")/$(basename "$d")"
-  labels=$(jq -r --arg run_dir "$run_dir" '"run.dir=\($run_dir)", "run.status=\(.state)", "run.type=\(.type // "")", "run.autonomy=\(.autonomy // "L0")", "run.topic=\(.topic // "")", "progress=\(.progress // "")", "run.prs=\([.prs[].url] | join(" "))"' \
+  run_dir=
+  if [ "${HC_TERMINAL_ID:-}" = "$terminal" ]; then
+    d=${dir%/}
+    run_dir="$(basename "$(dirname "$d")")/$(basename "$d")"
+  fi
+  labels=$(jq -r --arg run_dir "$run_dir" '(if $run_dir == "" then empty else "run.dir=\($run_dir)" end), "run.status=\(.state)", "run.type=\(.type // "")", "run.autonomy=\(.autonomy // "L0")", "run.topic=\(.topic // "")", "progress=\(.progress // "")", "run.prs=\([.prs[].url] | join(" "))"' \
     "$dir/status.json")
   # A loop rather than mapfile, which macOS's bash 3.2 lacks.
   label_args=()

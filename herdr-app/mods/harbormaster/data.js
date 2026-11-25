@@ -479,7 +479,7 @@ export function loadRuns() {
     for (const [on, sample] of samples) ingest(on, sample);
     recordRuns(fresh.filter((r) => !r.away && orchestratorState(r, ctx) !== "gone"), (r) => runTerminals(r, ctx), answered).catch(() => {});
     for (const r of fresh) if (r.away?.how === "closed") tidyClosed(r, ctx).catch(() => {});
-    for (const r of fresh) if (r.machine && !r.away) nameTab(r);
+    for (const r of fresh) if (r.machine && !r.away && !r.superseded) nameTab(r);
     nameCaptainTab(ctx);
     showWorktrees(fresh, ctx, answered).catch(() => {});
     return cache;

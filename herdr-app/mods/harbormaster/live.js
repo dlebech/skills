@@ -67,7 +67,8 @@ export const runDirLabel = (dir) => String(dir ?? "").split("/").filter(Boolean)
 // and starts the next in the same terminal leaves both orchestrator.json files naming it, so the
 // Crew had one row for the two and the other run had none, while the Bridge still listed it.
 // The terminal's run.dir label names the run it serves; a terminal without one (labelled before
-// set-status.sh set it) serves the run started last. With no way to tell, none is superseded.
+// set-status.sh set it) serves the run started last. A label naming none of them (a run since
+// deleted) supersedes them all. With no way to tell, none is superseded.
 // A superseded run's orchestrator is gone: finished, it counts as closed; else it needs a Resume.
 export function supersededRuns(runs, ctx) {
   const byTerminal = new Map();
@@ -77,6 +78,7 @@ export function supersededRuns(runs, ctx) {
     if (list.length < 2) continue;
     const label = ctx.terminals.find((t) => t.address === address)?.labels?.["run.dir"];
     let owner = label ? list.find((r) => runDirLabel(r.dir) === label) : null;
+    if (label && !owner) { for (const r of list) out.add(r); continue; }
     if (!owner) {
       const latest = Math.max(...list.map((r) => r.started ?? 0));
       const newest = list.filter((r) => (r.started ?? 0) === latest);
@@ -218,6 +220,7 @@ export function focusWithPane(address, props = undefined) {
 
 // The orchestrator's tab: the tab holding its terminal now, else orchestrator.json's.
 export function tabOf(run) {
+  if (run.superseded) return null;
   return liveTabOf(run) ?? run.tab ?? null;
 }
 
@@ -281,7 +284,9 @@ export const tabInfo = (id) => (id && spaces().flatMap((s) => s.tabs ?? []).find
 
 // The tab holding the orchestrator's terminal now, or null when no pane shows it.
 // Unlike tabOf, never orchestrator.json's tab, which may be a tab long gone.
-export const liveTabOf = (run) => tabOfTerminal(run.terminal);
+// None for a superseded run (supersededRuns): the tab is the run's that took its terminal, so
+// Park, Close and the closed and parked tidies must not close it, nor a rename name it.
+export const liveTabOf = (run) => (run.superseded ? null : tabOfTerminal(run.terminal));
 
 // The tab holding a terminal now, or null when no pane shows it.
 export const tabOfTerminal = (address) => (address && panes().find((p) => p.terminal === address)?.tab) || null;
