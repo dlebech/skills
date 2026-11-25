@@ -12,10 +12,12 @@
 # exit, first message, trust prompt), and no shell is left once it exits, so its terminal ends.
 # The shell's own output (a banner) is cleared before the program starts. The arguments pass as
 # arguments, never parsed by a shell. With $SHELL unset, not executable or of a kind not known
-# here, the program runs directly.
+# here, the program runs directly. An rc file that never gets to the end (one that attaches tmux,
+# execs another shell, asks a question such as oh-my-zsh's update prompt, or exits) keeps the
+# agent from starting: Claude Code's task never runs, and start-agent.sh says `timeout` or `exited`.
 #
-# Harbormaster has the same lines (startrun.js IN_SHELL; tests/herdr-app-orchestrator/in-shell.sh
-# checks they match), for the agents it starts in a tab of its own.
+# Harbormaster has the same lines (startrun.js IN_SHELL; tests/herdr-app-harbormaster/
+# launch-argv.test.mjs checks they match), for the agents it starts in a tab of its own.
 s=${SHELL:-}
 [ -x "$s" ] || exec "$@"
 case ${s##*/} in

@@ -70,7 +70,7 @@ go() { rm -f "$out/seen" "$out/hc-pid"; FAKE_SHELL=$1 bash "$start" --name a --c
 go "$bash" --kind "$bin/agent"
 check "plain kind: sees ~/.bashrc's PATH folder" "$(seen npx)" "$home/nvm/bin/npx"
 check "plain kind: is the process hc started (exec, no shell left)" "$(seen pid)" "$(cat "$out/hc-pid")"
-check "plain kind: the banner was printed, then cleared" "$(grep -c 'have a banner' "$out/screen")$(grep -c $'\033\[3J' "$out/screen")" "11"
+check "plain kind: the banner was printed, then cleared" "$(tr -d '\n' <"$out/screen" | grep -c $'have a banner.*\033\[3J')" "1"
 
 go "$bash" --kind claude --model sonnet
 check "claude: sees ~/.bashrc's PATH folder" "$(seen npx)" "$home/nvm/bin/npx"

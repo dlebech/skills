@@ -101,7 +101,7 @@ Write the task to a file in `shared/`, then:
   [--model <model>] --shared <run-directory>/shared --task-file <file>
 ```
 
-It starts one hidden terminal, a child of yours, so it ends if you do (recovery restarts agents from their worktrees). The agent starts through the user's interactive shell (`scripts/in-shell.sh`), which execs it, so it has what `~/.bashrc` sets up, such as nvm's `node` and `npx`, and its terminal still ends when it exits. Claude Code gets the task as its initial prompt, so a slash command in it runs as a command; other kinds get it once they report a status. It prints one line:
+It starts one hidden terminal, a child of yours, so it ends if you do (recovery restarts agents from their worktrees). The agent starts through the user's interactive shell (`scripts/in-shell.sh`), which execs it, so it has what `~/.bashrc` sets up, such as nvm's `node` and `npx`, and its terminal still ends when it exits. An rc file that stops before its end (attaches tmux, execs another shell, asks a question, exits) keeps the agent from starting: `timeout` or `exited`, and `hc read` shows why. Claude Code gets the task as its initial prompt, so a slash command in it runs as a command; other kinds get it once they report a status. It prints one line:
 
 - `started <address>`: it took the task.
 - `trust <address>`: Claude Code's folder trust prompt, which a new worktree usually hits. `hc send` is not refused there and its Enter would pick “No, exit”, so never send to an agent that has not reported a status. Whether to accept it for this run's worktrees is a start-of-run question, recorded in `decisions.md`. With that permission, rerun with `--accept-trust`; without it, tell the user to run `hc attach <address>` and answer.
