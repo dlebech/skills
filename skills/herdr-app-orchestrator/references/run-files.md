@@ -134,7 +134,7 @@ ran. `Checks: green — …` or `Checks: red — …` in the header is the whole
 CI): one line under the claims, `Checks ✓ 1497 tests, build, lint, CI`, red on failure, dim for
 any other word (`Checks: pending — CI`, still running). `Reviewed: <short sha> <which review> — <result>`
 (`Reviewed: 3def855 task t9b — 3 must-fix fixed`) is repeatable and says what was reviewed at which
-commit. A final round's line counts the must-fix findings; whether they were fixed is the `final review (fix check)` line at the fixes' HEAD, written only when the check passes ([finish.md](finish.md)), so a failed check leaves the fixes amber; the newest final (whole-branch) review on the branch is the one Harbormaster reports (the one with the
+commit; it goes in the header and starts with the sha, or Harbormaster does not read it. A final round's line counts the must-fix findings; whether they were fixed is the `final review (fix check)` line at the fixes' HEAD, written only when the check passes ([finish.md](finish.md)), so a failed check leaves the fixes amber; the newest final (whole-branch) review on the branch is the one Harbormaster reports (the one with the
 fewest commits from its sha to the branch, whatever the order of the lines; a sha that is not on the branch is
 used only when no other final line is), as `Reviewed · final
 review at 4ad8528`, or amber `Reviewed at 4ad8528 · 5 commits since, not reviewed` once the integration

@@ -16,7 +16,9 @@ export const openRunAction = (run) => `harbormaster.open-run:key=${run.key}`;
 // branch, run directory, key or orchestrator terminal, the first run it matches.
 export function runNamed(runs, name) {
   if (name.startsWith("key=")) return runs.find((x) => x.key === name.slice(4));
-  return runs.find((x) => [x.branch, x.dir, x.key, x.localTerminal].includes(name));
+  // A terminal named by two runs means the one it serves (live.js supersededRuns).
+  return runs.find((x) => !x.superseded && [x.branch, x.dir, x.key, x.localTerminal].includes(name))
+    ?? runs.find((x) => [x.branch, x.dir, x.key, x.localTerminal].includes(name));
 }
 
 // "skills=peer" → {key: "skills", flow: "peer"}; "skills=default" → flow null (the built-in
