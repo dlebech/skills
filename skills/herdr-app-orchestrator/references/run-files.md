@@ -68,6 +68,27 @@ be answered from its summary alone:
 - A file with none of these `## ` sections is a free-form question, as older runs wrote
   them: it is shown as it is and can only be answered with free text.
 
+### Asking through a dialog
+
+With `ask=dialog` and a question tool in your tool list, ask the same question there after
+`question.md` and the status are written, but only when none of the run's agents is working:
+start-of-run questions, the finish, or every running agent waiting on this same question. An open
+dialog blocks your terminal, so agents' reports to you are refused. Otherwise ask in plain text
+and end the turn as before. (The captain uses the bullet list only.) The dialog can hide
+the earlier chat, so each question stands alone:
+
+- 2-4 sentences of context: the decision, the facts it rests on, why it matters.
+- Each option's description says what happens if it is picked.
+- The recommended option first, marked as recommended.
+- Longer evidence goes in the option's preview field where the harness has one, else in the
+  question text.
+- Group the questions `question.md` holds. When the tool limits questions per call (Claude
+  Code: 4), ask in several calls.
+- Word each question as in `question.md`, so the dialog and the file read the same.
+
+An answer from the dialog is handled like any other (section 6, step 4). Tool missing, failed,
+skipped or cancelled, or a headless harness: ask in plain text and end the turn.
+
 ## plan.md: claims, proof lines and tier
 
 Proof is a review aid: it lets the user see that the change works without running it, and its
