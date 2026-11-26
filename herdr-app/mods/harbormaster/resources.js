@@ -8,6 +8,8 @@
 // children count), CPU % from the difference between two polls, memory from RSS.
 // macOS: one `ps` sample; CPU totals are each live process's own time, so commands that
 // exited between polls are missed (estimated). Other systems: nothing, and no errors.
+// CPU % is of one logical CPU (a thread, so SMT counts twice per core); each sample also
+// carries the machine's count of them, so the whole machine is cpus × 100%.
 //
 // Per run, the totals are kept in <run dir>/.resources.json (run-files.md), written
 // atomically and only by one poll at a time, so they survive the app and t4/t8 can read them.
@@ -82,7 +84,7 @@ BEGIN {
   z = "ab"; nul = !gsub(/\\0/, "", z)
   if (!proc) proc = "/proc"
   getline up < (proc "/uptime"); close(proc "/uptime"); split(up, u, " ")
-  print "S linux " u[1]
+  print "S linux " u[1] " " (ncpu + 0)
   for (i = 1; i < ARGC; i++) {
     f = ARGV[i]; line = ""
     r = (getline line < f); close(f)
@@ -124,28 +126,28 @@ env { if (match($0, /HC_TERMINAL_ID=[A-Za-z0-9_.-]+/)) term[$1] = substr($0, RST
   c = $0; sub(/^ *[0-9]+ +[0-9]+ +[0-9]+ +[0-9:.-]+ +[0-9.]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +/, "", c)
   nm[p] = c; sub(/.*\\//, "", nm[p]); gsub(/[ \\t]/, "_", nm[p])
 }
-END { print "S darwin " now; for (p in pp) out(p, 0, "") }
+END { print "S darwin " now " " (ncpu + 0); for (p in pp) out(p, 0, "") }
 ${AWK_TREE}`;
 
 export const SAMPLER = [
   "printf '\\035'",
   "if [ -r /proc/self/stat ]; then",
-  `  LC_ALL=C awk -v hz="$(getconf CLK_TCK 2>/dev/null)" -v pg="$(getconf PAGESIZE 2>/dev/null)" '${LINUX_AWK.replace(/'/g, "'\\''")}' /proc/[0-9]*/stat 2>/dev/null`,
+  `  LC_ALL=C awk -v hz="$(getconf CLK_TCK 2>/dev/null)" -v pg="$(getconf PAGESIZE 2>/dev/null)" -v ncpu="$(getconf _NPROCESSORS_ONLN 2>/dev/null)" '${LINUX_AWK.replace(/'/g, "'\\''")}' /proc/[0-9]*/stat 2>/dev/null`,
   'elif [ "$(uname)" = Darwin ]; then',
   "  t=$(ps -axww -o pid=,ppid=,rss=,time=,%cpu=,lstart=,comm= 2>/dev/null)",
   "  k=$(printf '%s\\n' \"$t\" | awk '$NF ~ /(^|\\/)herdr-core$/ {h[$1]=1} {pp[$1]=$2} END {for (p in pp) if (pp[p] in h) printf \"%s,\", p}')",
-  `  { printf '%s\\nENV\\n' "$t"; [ -n "$k" ] && ps -Eww -o pid=,command= -p "\${k%,}" 2>/dev/null; } | LC_ALL=C awk -v now="$(date +%s)" '${MAC_AWK.replace(/'/g, "'\\''")}'`,
+  `  { printf '%s\\nENV\\n' "$t"; [ -n "$k" ] && ps -Eww -o pid=,command= -p "\${k%,}" 2>/dev/null; } | LC_ALL=C awk -v now="$(date +%s)" -v ncpu="$(sysctl -n hw.logicalcpu 2>/dev/null)" '${MAC_AWK.replace(/'/g, "'\\''")}'`,
   "fi",
 ].join("\n");
 
 // ---- reading a sample ----
 
-// The sampler's output → { os, at (s), procs: [{pid, ppid, tid, root, ownMs, kidMs, rssKb, start, pcpu, name, args}] }, or null.
+// The sampler's output → { os, at (s), cpus (logical CPUs, or null), procs: [{pid, ppid, tid, root, ownMs, kidMs, rssKb, start, pcpu, name, args}] }, or null.
 export function parseSample(text) {
-  let os = null, at = null;
+  let os = null, at = null, cpus = null;
   const procs = [];
   for (const line of (text ?? "").split("\n")) {
-    if (line.startsWith("S ")) { const [, o, s] = line.split(" "); os = o; at = Number(s); continue; }
+    if (line.startsWith("S ")) { const [, o, s, n] = line.split(" "); os = o; at = Number(s); cpus = Number(n) || null; continue; }
     if (!line.startsWith("P ")) continue;
     const tab = line.indexOf("\t");
     const head = (tab < 0 ? line : line.slice(0, tab)).split(" ");
@@ -156,7 +158,7 @@ export function parseSample(text) {
       rssKb: Number(rss) || 0, start, pcpu: pcpu === "-" ? null : Number(pcpu) || 0, name, args: tab < 0 ? "" : line.slice(tab + 1).trim(),
     });
   }
-  return os ? { os, at, procs } : null;
+  return os ? { os, at, cpus, procs } : null;
 }
 
 // ---- the live snapshot ----
@@ -212,14 +214,14 @@ export function ingest(machine, text) {
   previous.set(m, { os: s.os, at: s.at, cpu: cpuNow });
   // CPU % needs two polls; until then the first one's terminals show memory only.
   const terminals = Object.fromEntries(Object.entries(live.terminals).filter(([a]) => machineOf(a) !== m));
-  live = { at: Date.now(), terminals: { ...terminals, ...terms }, machines: { ...live.machines, [m]: { os: s.os, rated: dt > 0, at: Date.now(), other: other.slice(0, OTHER_TOP) } } };
+  live = { at: Date.now(), terminals: { ...terminals, ...terms }, machines: { ...live.machines, [m]: { os: s.os, cpus: s.cpus, rated: dt > 0, at: Date.now(), other: other.slice(0, OTHER_TOP) } } };
   version++;
   return terms;
 }
 
 const machineOf = (address) => (address.includes("/") ? address.slice(0, address.indexOf("/")) : "");
 
-// For t8's live table: the whole snapshot, { at, terminals: {address: usage}, machines: {name: {os, rated, other}} }.
+// For t8's live table: the whole snapshot, { at, terminals: {address: usage}, machines: {name: {os, cpus, rated, other}} }.
 export const resourceSnapshot = () => live;
 export const liveUsage = (address) => live.terminals[address] ?? null;
 // The top processes outside every agent's tree, on every machine (or one), busiest first.
