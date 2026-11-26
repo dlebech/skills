@@ -43,7 +43,7 @@ const awks = ["awk", "mawk", "busybox awk"].filter((a) => spawnSync("sh", ["-c",
 
 function sampleWith(awk, dir) {
   const files = ["100", "200", "201", "202", "203", "204", "300", "301", "999"].map((p) => join(dir, p, "stat")); // 999 exited
-  const sh = `d=$1 prog=$2; shift 2; LC_ALL=C ${awk} -v hz=100 -v pg=4096 -v proc="$d" "$prog" "$@"`;
+  const sh = `d=$1 prog=$2; shift 2; LC_ALL=C ${awk} -v hz=100 -v pg=4096 -v ncpu=16 -v proc="$d" "$prog" "$@"`;
   return execFileSync("sh", ["-c", sh, "sh", dir, LINUX_AWK, ...files], { encoding: "utf8" });
 }
 
@@ -55,6 +55,7 @@ for (const awk of awks) {
       const s = parseSample(sampleWith(awk, dir));
       assert.equal(s.os, "linux");
       assert.equal(s.at, 1000);
+      assert.equal(s.cpus, 16);
       const by = Object.fromEntries(s.procs.map((p) => [p.pid, p]));
       assert.deepEqual(Object.keys(by).sort(), ["200", "201", "202", "203", "300"]);
       assert.equal(by[200].tid, "t1");
@@ -123,9 +124,10 @@ test("macOS sampler reads ps output", () => {
     "  200 claude HOME=/Users/x HC_TERMINAL_ID=t9 TERM=xterm",
   ].join("\n");
   // As in production: under a comma-decimal locale mawk reads "03.25" as 3.
-  const out = execFileSync("awk", ["-v", "now=1700000000", MAC_AWK], { input: ps, encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
+  const out = execFileSync("awk", ["-v", "now=1700000000", "-v", "ncpu=10", MAC_AWK], { input: ps, encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
   const s = parseSample(out);
   assert.equal(s.os, "darwin");
+  assert.equal(s.cpus, 10);
   const by = Object.fromEntries(s.procs.map((p) => [p.pid, p]));
   assert.equal(by[200].tid, "t9");
   assert.equal(by[200].ownMs, 723250);

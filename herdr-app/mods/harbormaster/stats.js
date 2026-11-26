@@ -36,7 +36,8 @@ const figure = (t, w, text, color) => div().flex_none().w(w).text_right().whites
 const note = (t, text) => div().text_size(NOTE).text_color(t.dim).child(text);
 
 const cpuShort = (s) => (s == null ? "—" : s >= 3600 ? `${(s / 3600).toFixed(1)} h` : s >= 60 ? `${Math.round(s / 60)} min` : `${Math.round(s)} s`);
-const CORE_TIP = "CPU %: 100% is one core, so a busy machine can show several hundred";
+// 100% is one logical CPU, a thread: an 8-core machine with two threads per core tops out at 1600%.
+const cpuTip = (cpus) => `CPU %: 100% is one CPU thread fully busy${cpus ? `; ${cpus} threads in all, so ${cpus * 100}% is the whole machine` : ""}`;
 
 // A stacked bar of a category map, biggest first, idle left out; each part's label, time and
 // share of the working time on hover. With `scale` (0..1) the bar is that wide on its track.
@@ -113,7 +114,7 @@ function nowLine(t, live) {
     .child(div().text_size(BODY).text_color(t.muted).child(unit));
   return h_flex().flex_none().gap(22).px(14).py(10).mx(10).rounded(10).bg(t.surface).items_center().flex_wrap()
     // Before the first sample (memory) and the first rated one (CPU), no figure is better than 0.
-    .child(big(live.rated ? `${Math.round(live.cpu)}%` : "—", "CPU in agents", CORE_TIP, "now-cpu"))
+    .child(big(live.rated ? `${Math.round(live.cpu)}%` : "—", live.cpus ? `of ${live.cpus * 100}% CPU in agents` : "CPU in agents", cpuTip(live.cpus), "now-cpu"))
     .child(big(live.snap.at ? memText(live.rssKb) : "—", "memory in agents", "Memory of every agent terminal and what it started", "now-mem"))
     .child(h_flex().flex_1().min_w(0).gap(6).items_baseline().text_size(TITLE)
       .child(!live.rated ? div().text_color(t.muted).child("sampling…") : h ? h_flex().items_baseline()
@@ -321,6 +322,9 @@ function liveData() {
   return {
     snap, groups, table: liveTable(groups, calm), procs, hot,
     rated: Object.values(snap.machines ?? {}).some((m) => m.rated),
+    // Every rated machine's threads, as the agents' CPU sums over all of them; null when one is unknown.
+    cpus: (() => { const ms = Object.values(snap.machines ?? {}).filter((m) => m.rated);
+      return ms.length && ms.every((m) => m.cpus) ? ms.reduce((n, m) => n + m.cpus, 0) : null; })(),
     cpu: groups.reduce((n, g) => n + g.cpu, 0), rssKb: groups.reduce((n, g) => n + g.rssKb, 0),
     // Something outside the agents busier than the hottest of them is named too.
     outside: topOther && topOther.cpu >= QUIET_CPU && topOther.cpu > (hot?.cpu ?? 0) ? topOther : null,
@@ -363,7 +367,7 @@ function liveSection(view, t, live) {
   return section(view, t, "live", "CPU and memory now", snap.at ? `sampled ${ago(snap.at)}` : null, () =>
     v_flex().gap(1)
       .when(!rated, (el) => el.child(note(t, "CPU % needs two polls, a few seconds; memory shows at once.")))
-      .child(h_flex().id("live-h").gap(10).h(18).items_center().text_size(NOTE).text_color(t.dim).tooltip(CORE_TIP)
+      .child(h_flex().id("live-h").gap(10).h(18).items_center().text_size(NOTE).text_color(t.dim).tooltip(cpuTip(live.cpus))
         .child(div().flex_none().w(230)).child(div().flex_none().w(48).text_right().child("CPU"))
         .child(div().flex_1().min_w(30).max_w(160)).child(div().flex_none().w(60).text_right().child("memory")))
       .children(table.groups.flatMap(group))
