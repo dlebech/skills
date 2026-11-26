@@ -11,7 +11,7 @@
 #       in runs.sh and the user's views, until its orchestrator's terminal is
 #       gone: the user closed its tab)
 #   <root>/<folder>/<branch>/status.json        {branch, folder, status, state, type, topic, progress,
-#       tasks: {merged, planned}, issues: [url], prs: [{repo, url}] (the run's own),
+#       tasks: {merged, planned}, issues: [url], issue_links: {url: {link: closes|refs|part, why}}, prs: [{repo, url}] (the run's own),
 #       related: [{repo, url}] (PRs it is about but did not open, such as the one a
 #       review-only run reviews), waiting: [name], updated}, kept by set-status.sh, which also sets the terminal's run.status,
 #       run.type, run.topic, progress, and run.prs labels

@@ -3,7 +3,7 @@
 # the orchestrator's tab name, and labels on its terminal.
 #
 # Usage: set-status.sh <run-directory> [<status>] [--type TYPE] [--topic TEXT] [--progress TEXT] [--tasks MERGED/PLANNED]
-#          [--autonomy L0|L1|L2] [--budget TOKENS] [--budget-answered] [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]
+#          [--autonomy L0|L1|L2] [--budget TOKENS] [--budget-answered] [--issue URL]... [--issue-link URL closes|refs|part WHY]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]
 #
 # <status> is running, "waiting for user: <question>", "blocked: <reason>", or
 # finished, the vocabulary herdr-app-captain's scripts/lib.sh documents. Without
@@ -33,6 +33,10 @@
 #               budget it was for, so Harbormaster stops offering the question; raising the
 #               budget makes the next crossing a new question
 #   --issue     an issue the run works on; added once
+#   --issue-link  what the PR does to an issue: closes (a Closes line), refs or part
+#               (Refs or Part of: it stays open), and why in a few words, e.g. "assigned to
+#               anna too" or ""; adds the issue as --issue does and replaces its earlier link.
+#               Harbormaster shows it beside the issue
 #   --pr        a repository's PR, e.g. --pr acme/api https://github.com/acme/api/pull/9;
 #               replaces that repository's earlier one
 #   --related   a PR the run is about but did not open, such as the PR a review-only
@@ -41,7 +45,7 @@
 #               the earlier list; "" clears it
 #
 # status.json: {branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy,
-# budget, budget_asked, budget_answered, issues: [url], prs: [{repo, url}], related: [{repo, url}], waiting: [name], updated}, where state is
+# budget, budget_asked, budget_answered, issues: [url], issue_links: {url: {link, why}}, prs: [{repo, url}], related: [{repo, url}], waiting: [name], updated}, where state is
 # running, waiting, blocked, or finished, and tokens, which each call counts with tokens.sh
 # (never lowering it; a failed count keeps the last one). Fields other scripts write are
 # kept. It outlives the terminal, so it is the record of a finished run. The labels, for live lists such as Herdr's Agents list:
@@ -57,7 +61,7 @@ set -u
 . "$(dirname "$0")/lib.sh"
 
 usage() {
-  echo 'usage: set-status.sh <run-directory> [<status>] [--type feat|fix|rev|expl] [--topic TEXT] [--progress TEXT] [--tasks M/N] [--autonomy L0|L1|L2] [--budget TOKENS] [--budget-answered] [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]' >&2
+  echo 'usage: set-status.sh <run-directory> [<status>] [--type feat|fix|rev|expl] [--topic TEXT] [--progress TEXT] [--tasks M/N] [--autonomy L0|L1|L2] [--budget TOKENS] [--budget-answered] [--issue URL]... [--issue-link URL closes|refs|part WHY]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]' >&2
   exit 2
 }
 [ $# -ge 1 ] || usage
@@ -68,7 +72,7 @@ if [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then
   status=$1
   shift
 fi
-autonomy= budget= budget_set= budget_answered= type= type_set= topic= topic_set= progress= progress_set= tasks= waiting= waiting_set= issues=() prs=() related=()
+autonomy= budget= budget_set= budget_answered= type= type_set= topic= topic_set= progress= progress_set= tasks= waiting= waiting_set= issues=() links=() prs=() related=()
 while [ $# -gt 0 ]; do
   case $1 in
     --type)
@@ -102,6 +106,10 @@ while [ $# -gt 0 ]; do
       budget_set=1; shift 2 ;;
     --budget-answered) budget_answered=1; shift ;;
     --issue) [ $# -ge 2 ] || usage; issues+=("$2"); shift 2 ;;
+    --issue-link)
+      [ $# -ge 4 ] || usage
+      case $3 in closes | refs | part) ;; *) echo "--issue-link is closes, refs or part, not: $3" >&2; exit 2 ;; esac
+      issues+=("$2") links+=("$2" "$3" "$4"); shift 4 ;;
     --pr) [ $# -ge 3 ] || usage; prs+=("$2" "$3"); shift 3 ;;
     --related) [ $# -ge 3 ] || usage; related+=("$2" "$3"); shift 3 ;;
     --waiting) [ $# -ge 2 ] || usage; waiting=$2 waiting_set=1; shift 2 ;;
@@ -144,6 +152,8 @@ issues_json=$(jq -cn '$ARGS.positional' --args ${issues[@]+"${issues[@]}"})
 pairs='$ARGS.positional as $a | [range(0; $a | length; 2) as $i | {repo: $a[$i], url: $a[$i + 1]}]'
 prs_json=$(jq -cn "$pairs" --args ${prs[@]+"${prs[@]}"})
 related_json=$(jq -cn "$pairs" --args ${related[@]+"${related[@]}"})
+links_json=$(jq -cn '$ARGS.positional as $a | [range(0; $a | length; 3) as $i | {url: $a[$i], link: $a[$i + 1], why: $a[$i + 2]}]' \
+  --args ${links[@]+"${links[@]}"})
 # plan.md first: it is what counts, and status.json is only written once it changed.
 if [ -n "$new_status" ]; then
   { echo "Status: $new_status"; tail -n +2 "$dir/plan.md"; } >"$dir/.plan.tmp" &&
@@ -161,13 +171,14 @@ status_update "$dir" "$STATUS_TOKENS_FILTER | $(cat <<'JQ'
   | if $budget_answered != "" and .budget then .budget_answered = .budget else . end
   | if $budget_set != "" then (if $budget == "" then del(.budget, .budget_asked, .budget_answered) else .budget = ($budget | tonumber) end) else . end
   | .issues = reduce $issues[] as $u (.issues; if index([$u]) then . else . + [$u] end)
+  | .issue_links = reduce $links[] as $l ((.issue_links // {}); .[$l.url] = {link: $l.link, why: (if $l.why == "" then null else $l.why end)})
   | .prs = reduce $prs[] as $p (.prs;
       if any(.[]; .repo == $p.repo) then map(if .repo == $p.repo then $p else . end) else . + [$p] end)
   | .related = reduce $related[] as $p (.related; if any(.[]; .url == $p.url) then . else . + [$p] end)
   | if $waiting_set != "" then .waiting = [$waiting | splits("\\s+") | select(. != "")] else . end
   | {branch, folder, status, state, type, topic, progress, tasks, autonomy, issues, prs, related, waiting, updated} + .
 JQ
-)" --argjson tokens "$tokens" --argjson issues "$issues_json" --argjson prs "$prs_json" --argjson related "$related_json" \
+)" --argjson tokens "$tokens" --argjson issues "$issues_json" --argjson links "$links_json" --argjson prs "$prs_json" --argjson related "$related_json" \
   --arg branch "$branch" --arg folder "$folder" --arg status "$status" --arg state "$state" \
   --arg type "$type" --arg type_set "$type_set" --arg topic "$topic" --arg topic_set "$topic_set" --arg progress "$progress" --arg progress_set "$progress_set" --arg tasks "$tasks" --arg autonomy "$autonomy" --arg budget "$budget" --arg budget_set "$budget_set" --arg budget_answered "$budget_answered" \
   --arg waiting "$waiting" --arg waiting_set "$waiting_set" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" || exit 1

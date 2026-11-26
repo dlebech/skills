@@ -21,7 +21,7 @@ If `final-review` is on, or T0 tasks merged without a task review ([speed.md](sp
 
 ## 2. Push and open the PR
 
-Push each integration branch. Create or update one PR per repository when requested or all planned work is complete. With several, each PR links the others and says they merge together; put the `Closes` lines only in the one meant to merge last, and `Part of` lines in the rest. Start the body with the issue lines from `spec.md`'s Issue handling ([issues.md](issues.md)), one per line at the very top before anything else, so they are easy to scan. Then include:
+Push each integration branch. Create or update one PR per repository when requested or all planned work is complete. With several, each PR links the others and says they merge together; put the `Closes` lines only in the one meant to merge last, and `Part of` lines in the rest. Start the body with the issue lines from `spec.md`'s Issue handling ([issues.md](issues.md)), one per line at the very top before anything else, so they are easy to scan. Settle those lines now, not from the start of the run: re-read each issue's assignees (`gh issue view <number> --json assignees`), apply `close-issues` to what the branch actually resolves, update the Issue handling section, and publish each issue's line with `set-status.sh <run-directory> --issue-link <url> closes|refs|part "<why>"` (`closes` when some PR of the run has its `Closes` line), so Harbormaster shows what the merge will do. Do it again whenever you change the lines. Then include:
 
 - a short statement of the goal from `spec.md`;
 - a table of the merged tasks;

@@ -19,6 +19,7 @@ import { decisionsSeen, markDecisionsSeen } from "./telling.js";
 import { workerTree } from "./crewrows.js";
 import { askedLevel } from "./inbox.js";
 import { askClick } from "./askclick.js";
+import { issueLinkPill } from "./issuelinks.js";
 import { reviewFlows } from "./tracking.js";
 import { showsFlow } from "./needaction.js";
 import { T, drawnInPane, pill, withContext, withUsage, statusDot, STAGE, stagesOf, taskStrip, tasksText, noteRows, actionButton, actionRow, PASS, AMBER, isOpen, runProps } from "./cardparts.js";
@@ -542,11 +543,14 @@ export function proofAction(view, t, r, k, a, button = actionButton) {
   });
 }
 
-function issueRow(t, url) {
+// An issue, with what the PR does to it when the orchestrator said: closing it is amber.
+function issueRow(t, url, link) {
+  const p = issueLinkPill(link);
   return h_flex().id(`isd-${url}`).gap(8).items_center().h(28).px(8).rounded(7).bg(t.raised + "88").cursor_pointer()
-    .hover((s) => s.bg(t.hover)).tooltip(url).on_click((_e, cx) => { cx.stop_propagation(); openUrl(url); })
+    .hover((s) => s.bg(t.hover)).tooltip(p ? `${url}\n${p.tip}` : url).on_click((_e, cx) => { cx.stop_propagation(); openUrl(url); })
     .child(div().flex_none().w(14).text_color(t.muted).child("◎"))
-    .child(div().flex_1().min_w(0).truncate().text_size(TYPE.body).text_color(t.foreground).child(shortRef(url)));
+    .child(div().flex_1().min_w(0).truncate().text_size(TYPE.body).text_color(t.foreground).child(shortRef(url)))
+    .when(Boolean(p), (el) => el.child(pill(t, p.label, p.tone === "amber" ? "working" : "dim")));
 }
 
 // The connectors before a nested worker, drawn as lines (as Herdr's Agents list does) so they join
@@ -610,7 +614,7 @@ function drawRunDetail(view, t, r, ctx) {
     ? div().text_size(TYPE.meta).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet")
     : section(t, `Pull requests · ${prs.length}`, prs.map((p, i) => prDetail(t, p, i, false, Boolean(r.away))), r.away || flowInBox ? null : flowToggle(t, r, `pane-${r.key}`))));
   if (r.issues.length + related.length > 0) sections.set("issues", () => section(t, "Issues and related PRs", [
-    ...r.issues.map((url) => issueRow(t, url)), ...related.map((p, i) => prDetail(t, p, i, true, Boolean(r.away)))]));
+    ...r.issues.map((url) => issueRow(t, url, r.issueLinks[url])), ...related.map((p, i) => prDetail(t, p, i, true, Boolean(r.away)))]));
   if (hasClaims(r) || r.proof.md?.checks || r.proof.md?.reviewed?.length) sections.set("claims", () => claimsSection(view, t, r, stages));
   if (counts.planned > 0 || r.tasks.length > 0) sections.set("tasks", (compact) => {
     const key = `tk-${r.key}`;
