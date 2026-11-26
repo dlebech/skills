@@ -34,8 +34,8 @@
 #               budget makes the next crossing a new question
 #   --issue     an issue the run works on; added once
 #   --issue-link  what the PR does to an issue: closes (a Closes line), refs or part
-#               (Refs or Part of: it stays open), and why in a few words, e.g. "opened by
-#               anna" or ""; adds the issue as --issue does and replaces its earlier link.
+#               (Refs or Part of: it stays open), and why in a few words, e.g. "assigned to
+#               anna too" or ""; adds the issue as --issue does and replaces its earlier link.
 #               Harbormaster shows it beside the issue
 #   --pr        a repository's PR, e.g. --pr acme/api https://github.com/acme/api/pull/9;
 #               replaces that repository's earlier one

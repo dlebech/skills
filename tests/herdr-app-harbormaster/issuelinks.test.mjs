@@ -21,3 +21,7 @@ test("refs and part stay open, dim", () => {
   assert.equal(issueLinkPill({ link: "part", why: null }).label, "Part of");
   assert.equal(issueLinkPill({ link: "part", why: null }).tone, "dim");
 });
+
+test("a link it does not know: no pill, rather than a wrong 'stays open'", () => {
+  assert.equal(issueLinkPill({ link: "close", why: null }), null);
+});

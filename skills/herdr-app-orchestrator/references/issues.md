@@ -10,7 +10,7 @@ When the work comes from GitHub issues, also parse an explicitly named starting 
 4. If any issue has open sub-issues, apply the `sub-issues` option (default `ask`):
    - `ask`: show the open sub-issues per parent (number, title, and a one-line read of size or dependency) in the start-of-run questions and ask which to solve in this run: all, a subset, or none (the parent's own body only). Recommend a set that fits one reviewable PR, and say which are blocked by others.
    - `all`: include every open sub-issue. `none`: include none.
-   Skip closed sub-issues. Read each chosen sub-issue in full, and repeat this step for its own sub-issues.
+   Skip closed sub-issues. Read each chosen sub-issue in full (`gh issue view` as in step 2, assignees included), and repeat this step for its own sub-issues.
 5. Drop duplicates, such as a named issue that is also a chosen sub-issue of another.
 
 ## Comments
@@ -23,7 +23,7 @@ Comments on an issue can change its scope. Read them (`gh issue view <number> --
 
 - map every task to the issue(s) it serves, honor an explicit starting issue first, and cover each included issue's acceptance criteria with some task;
 - reference the task's issue in each squash or merge commit;
-- in the PR, per `close-issues` (default `mine`): `Closes #<number>` for a fully resolved issue assigned to the user (`gh api user -q .login`) and no one else, whoever opened it; `Refs #<number>` for every other included issue (unassigned, or assigned to someone else too), which stays open; `Part of #<number>` for a parent whose remaining sub-issues stay open. Record each issue's line and why ("assigned to anna too", "unassigned") here, and publish it with `set-status.sh <run-directory> --issue-link <url> closes|refs|part "<why>"` so Harbormaster shows which issues the merge closes. `sub` closes only fully resolved sub-issues and uses `Refs` for the issues the run started from (named issues and parents; a sub-issue named as the starting issue counts as named); `all` uses `Closes` for every fully resolved issue, `none` only `Refs`. Add an issue column in the merged-task table;
+- in the PR, per `close-issues` (default `mine`): `Closes #<number>` for a fully resolved issue assigned to the user (`gh api user -q .login`) and no one else, whoever opened it; `Refs #<number>` for every other included issue (unassigned, or assigned to someone else too), which stays open; `Part of #<number>` for a parent whose remaining sub-issues stay open. Note each issue's expected line and why ("assigned to anna too", "unassigned") here; the final lines are settled, and published to Harbormaster, when the PR is written ([finish.md](finish.md) section 2), under every `close-issues` value. `sub` closes only fully resolved sub-issues and uses `Refs` for the issues the run started from (named issues and parents; a sub-issue named as the starting issue counts as named); `all` uses `Closes` for every fully resolved issue, `none` only `Refs`. Add an issue column in the merged-task table;
 - in the final report, list each included issue with its status and the sub-issues left for later.
 
 Once `spec.md` is written, publish each included issue with `<skill-dir>/scripts/set-status.sh <run-directory> --issue <url>`, as in the skill's section 2.
