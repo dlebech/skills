@@ -117,8 +117,9 @@ async function startAgent({ repo, name, prompt, args, remembered }) {
   const script = await findScript(on);
   if (!script) return { ok: false, error: `The orchestrator skill is not installed${on ? ` on ${on}` : ""}: npx skills add dlebech/skills --skill herdr-app-orchestrator` };
   const taskFile = `${await rootDir(on)}/.newrun-${name}.txt`;
-  // A fresh machine may have no runs root yet (the captain, which makes it, is optional).
-  await sh('mkdir -p "$(dirname "$1")"', [taskFile], on ? 10000 : undefined, on);
+  // A fresh machine may have no runs root yet (the captain, which makes it, is optional). A task file
+  // left by an interrupted start is removed: Herdr's write of a new file refuses one that exists.
+  await sh('mkdir -p "$(dirname "$1")" && rm -f "$1"', [taskFile], on ? 10000 : undefined, on);
   // Herdr's writeTextFile is this machine's; another machine's file is written through sh.
   if (on) { const w = await sh('printf %s "$2" > "$1"', [taskFile, prompt + "\n"], 10000, on); if (w.code !== 0) throw new Error(w.stderr || "could not write the task file"); }
   else await writeTextFile(taskFile, prompt + "\n", null);
