@@ -97,6 +97,26 @@ test("Start captain that cannot start shows the reason in the dialog", async () 
   assert.equal(globalThis.__herdrClosed, null);
 });
 
+test("Start captain starts over a task file an interrupted start left behind", async () => {
+  // Herdr refuses to write a new file (expected text null) over one that exists.
+  let leftover = true;
+  const exec = globalThis.__herdrExec;
+  globalThis.__herdrExec = async (cmd, args) => {
+    if (cmd === "sh" && /rm -f "\$1"/.test(args[1] ?? "")) leftover = false;
+    return exec(cmd, args);
+  };
+  globalThis.__herdrWrite = async (_p, _s, expected) => {
+    if (expected === null && leftover) throw new Error("`herdr.writeTextFile`: The file changed outside Herdr.");
+  };
+  try {
+    const view = dialog();
+    click(view); await settle();
+    assert.deepEqual(rejections, []);
+    assert.equal(view.nr.error ?? null, null);
+    assert.ok(execs.some(([c]) => c === "bash"));
+  } finally { globalThis.__herdrWrite = null; }
+});
+
 // ---- the buttons: shown only while no captain is live ----
 test("the sidebar header and the overview strip offer Start captain only without a live captain", async () => {
   const { harborHeader } = await import("../../herdr-app/mods/harbormaster/crew.js");
