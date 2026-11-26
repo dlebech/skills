@@ -277,6 +277,8 @@ function parseRun(machine, chunk) {
     merged: status.tasks?.merged ?? null,
     planned: status.tasks?.planned ?? null,
     issues: status.issues ?? [],
+    // What the PR does to each issue, by URL (set-status.sh --issue-link): {link, why}.
+    issueLinks: status.issue_links ?? {},
     prs: (status.prs ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
     // PRs the run is about but did not open, such as the one a review-only run reviews.
     related: (status.related ?? []).map((p) => (typeof p === "string" ? { url: p } : p)),
