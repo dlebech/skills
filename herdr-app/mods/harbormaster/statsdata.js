@@ -343,15 +343,19 @@ export function hottest(groups, steady = null) {
 // "Hottest: impl-xweek-ui 44%, mostly browser".
 export const hottestText = (h) => (h ? `Hottest: ${h.name} ${Math.round(h.cpu)}%${h.mostly ? `, mostly ${h.mostly}` : ""}` : "Nothing busy right now");
 
-// Where the time went, idle apart: { working, idle, parts (biggest first, with pct of the
-// working time), shown (the `top` biggest of 1% or more), hidden (the rest) }.
+// Not working time: idle (waiting for nothing) and done_wait (a run that said it is finished,
+// waiting for you to come back to it). Both stay out of the working time and its bar.
+export const RESTING = ["idle", "done_wait"];
+
+// Where the time went, idle and done apart: { working, idle, done, parts (biggest first, with
+// pct of the working time), shown (the `top` biggest of 1% or more), hidden (the rest) }.
 export function timeSplit(m, top = 4) {
   const c = cats(m);
-  const parts = Object.entries(c).filter(([k]) => k !== "idle").sort((a, b) => b[1] - a[1]);
+  const parts = Object.entries(c).filter(([k]) => !RESTING.includes(k)).sort((a, b) => b[1] - a[1]);
   const working = parts.reduce((n, [, v]) => n + v, 0);
   const all = parts.map(([key, secs]) => ({ key, secs, pct: working > 0 ? (100 * secs) / working : 0 }));
   const shown = all.filter((p) => p.pct >= 1).slice(0, top);
-  return { working, idle: c.idle ?? 0, parts: all, shown, hidden: all.filter((p) => !shown.includes(p)) };
+  return { working, idle: c.idle ?? 0, done: c.done_wait ?? 0, parts: all, shown, hidden: all.filter((p) => !shown.includes(p)) };
 }
 
 // The last `days` days across the runs list (mergeRuns): a run counts, whole, when it is live

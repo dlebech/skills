@@ -45,7 +45,7 @@ test("weekOf: another agent's agent_wait is its sub-agents' work and stays in ag
 });
 
 test("weekOf: an empty list", () => {
-  assert.deepEqual(weekOf([], NOW), { runs: 0, agentSecs: 0, tokens: 0, waitedSecs: 0, split: { working: 0, idle: 0, parts: [], shown: [], hidden: [] }, untimed: 0 });
+  assert.deepEqual(weekOf([], NOW), { runs: 0, agentSecs: 0, tokens: 0, waitedSecs: 0, split: { working: 0, idle: 0, done: 0, parts: [], shown: [], hidden: [] }, untimed: 0 });
   assert.equal(weekOf(undefined, NOW).runs, 0);
 });
 

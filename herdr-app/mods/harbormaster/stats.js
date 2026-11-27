@@ -18,10 +18,14 @@ export const COLOR = {
   model: (t) => t.accent, test: (t) => t.ansi2, lint: (t) => t.ansi3, build: (t) => t.ansi5, install: (t) => t.ansi6,
   // agent_wait is usually the biggest part, so it gets a colour far from model's accent.
   ci_wait: (t) => t.ansi4, agent_wait: (t) => t.ansi13 ?? t.ansi5, review: (t) => t.ansi1, git: (t) => t.ansi11 ?? t.ansi3,
-  user_wait: (t) => t.blocked, other: (t) => t.muted, idle: (t) => t.border,
+  user_wait: (t) => t.blocked, other: (t) => t.muted, idle: (t) => t.border, done_wait: (t) => t.border,
 };
-export const LABEL = { ...Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label])), idle: "idle" };
-const ORDER = [...CATEGORIES.map((c) => c.key), "idle"];
+export const LABEL = { ...Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label])), idle: "idle", done_wait: "done, waiting on you" };
+const ORDER = [...CATEGORIES.map((c) => c.key), "idle", "done_wait"];
+// "3h working · 1h done, waiting on you · 20m idle": the resting parts only when there are any,
+// idle last; `idle` is given where it is the wall time not otherwise accounted for.
+const restText = (split, idle = split.idle) => [`${durationText(split.working)} working`,
+  ...(split.done > 0 ? [`${durationText(split.done)} done, waiting on you`] : []), `${durationText(idle)} idle`].join(" · ");
 export const colorOf = (t, k) => (COLOR[k]?.(t) ?? t.dim);
 
 const cpuText = (s) => (s == null ? "—" : s >= 3600 ? `${(s / 3600).toFixed(1)} CPU h` : s >= 60 ? `${Math.round(s / 60)} CPU min` : `${Math.round(s)} CPU s`);
@@ -135,6 +139,9 @@ function across(view, t, data) {
   const split = all ? timeSplit(all.critical_path) : null;
   const side = all ? h_flex().gap(8).items_baseline().font_normal()
     .child(div().text_size(BODY + 0.5).text_color(t.foreground).child(`${durationText(split.working)} working`))
+    .when(split.done > 0, (el) => el.child(div().id("across-done").text_size(BODY).text_color(t.muted)
+      .tooltip("After a run said it was finished, until you came back to it: left out of the working time")
+      .child(`· ${durationText(split.done)} done, waiting on you`)))
     .child(div().text_size(BODY).text_color(t.muted).child(`· ${durationText(split.idle)} idle`))
     .child(div().text_size(NOTE).text_color(t.dim).child(`· ${plural(all.runs, "run")}`)) : null;
   return section(view, t, "across", "Where the time goes", side, () => {
@@ -144,8 +151,8 @@ function across(view, t, data) {
     return v_flex().gap(8)
       .child(h_flex().gap(8).items_center().px(2)
         .child(div().id("across-what").flex_1().text_size(NOTE).text_color(t.dim)
-          .tooltip("The orchestrators' wall time by what it went to. Idle (waiting for nothing) is left out of the bar.")
-          .child("What the runs' wall time went to, idle left out"))
+          .tooltip("The orchestrators' wall time by what it went to. Idle (waiting for nothing) and done (a run that said it is finished, waiting for you to come back) are left out of the bar.")
+          .child("What the runs' wall time went to, idle and done left out"))
         .child(choice(t, "by", [["all", "All"], ["folder", "By repo"], ["type", "By type"]], by, (v, cx) => { view.statsBy = v; cx.notify(); })))
       .when(by === "all", (el) => el.child(catBar(t, "across-all", all.critical_path, 14)))
       .when(by !== "all", (el) => el.children(groups.map((g) => h_flex().id(`grp-${g.group}`).gap(10).items_center().px(2).h(22).text_size(BODY)
@@ -185,7 +192,7 @@ function runRow(view, t, s) {
   const split = timeSplit(s.critical_path);
   // A run whose orchestrator's session was not found has a wall time and nothing to split it by.
   const bar = !s.timed ? note(t, "reading…") : !split.working ? note(t, "no time data yet")
-    : h_flex().id(`run-${s.key}-bar`).w_full().items_center().tooltip(`${durationText(split.working)} working · ${durationText(Math.max(0, s.wall - split.working))} idle`)
+    : h_flex().id(`run-${s.key}-bar`).w_full().items_center().tooltip(restText(split, Math.max(0, s.wall - split.working - split.done)))
       .child(catBar(t, `run-${s.key}-cp`, s.critical_path, 8, s.wall > 0 ? Math.min(1, split.working / s.wall) : 1));
   const head = h_flex().id(`run-${s.key}`).gap(10).items_center().h(26).cursor_pointer().text_size(BODY).on_click((_e, cx) => toggle(cx))
     .child(svg(`mods/harbormaster/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim))
@@ -218,7 +225,7 @@ function runDetail(view, t, s) {
   return v_flex().gap(6).pl(21 + COL.tag).pt(2).pb(8)
     .when(split.working > 0, (el) => el.child(legend(t, `run-${s.key}`, s.critical_path)))
     .when(!s.timed, (el) => el.child(line("Its time is being read from its session logs…")))
-    .when(s.timed && split.working > 0, (el) => el.child(line(`Wall time ${durationText(s.wall)}: ${durationText(split.working)} working, ${durationText(Math.max(0, s.wall - split.working))} idle`)))
+    .when(s.timed && split.working > 0, (el) => el.child(line(`Wall time ${durationText(s.wall)}: ${restText(split, Math.max(0, s.wall - split.working - split.done)).replaceAll(" · ", ", ")}`)))
     .when(effort > 0, (el) => el.child(line(`Effort: ${durationText(effort)} of agent time (agents work in parallel, so more than the wall time)`)))
     .when(Boolean(s.tokens), (el) => el.child(line(`Tokens: ${tokenHeadline(s.tokens)}, ${tokenText(s.tokens.total)} in total`)))
     .when(Boolean(res), (el) => el.child(line(`CPU time ${cpuShort(res.cpu_s)}${res.estimated ? " (estimated)" : ""} · memory peak ${mbText(res.peak_rss_mb)}, average ${mbText(res.avg_rss_mb)}`
