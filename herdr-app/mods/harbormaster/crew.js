@@ -466,7 +466,7 @@ function needsSection(m) {
   ];
 }
 
-// Next for you: what waits on you outside live runs (mypr.js nextItems: review requests first,
+// Next for you: what waits on you outside live and parked runs (mypr.js nextItems: review requests first,
 // then your own open PRs that need something), amber, foldable, at most five rows (three while
 // more than one thing needs you) before "+ n more". Each row: "skills#52 · title", then why and how long, muted, and one small button:
 // Review on a request with a checkout here ("reviewing" while a run does), else the PR's own
@@ -520,7 +520,7 @@ function nextSection(m) {
   const { view, t } = m;
   // Snoozed items (snooze.js) are out of the list and its count; a dim line below unfolds them.
   loadSnoozed(); // read at once when empty, else merged with the other machines at most once a minute; the next poll shows it
-  const { shown: items, snoozed: asleep, woke } = splitSnoozed(nextItems({ runs: view.runs.filter((r) => !r.away) }), snoozed(), m.now ?? Date.now());
+  const { shown: items, snoozed: asleep, woke } = splitSnoozed(nextItems({ runs: view.runs.filter((r) => !r.away), parked: view.runs.filter((r) => r.away?.how === "parked") }), snoozed(), m.now ?? Date.now());
   if (woke.length) wakeSnoozes(woke);
   const sleepKey = "crew-next-snoozed";
   const sleepOpen = unfolded(view, sleepKey, false);

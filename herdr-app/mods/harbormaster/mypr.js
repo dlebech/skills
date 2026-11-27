@@ -68,9 +68,10 @@ export function parseMineOrNull(text) {
 }
 export const parseMine = (text) => parseMineOrNull(text) ?? [];
 
-// Drops PRs a live run owns (its status.json prs): the run's own row speaks for them.
+// Drops PRs a live or parked run owns (its status.json prs): the run's own row speaks for them, or
+// the Bridge's Parked block does. A closed run has handed its PRs back, so its PRs stay.
 export function outsideRuns(list, runs) {
-  const owned = new Set(runs.filter((r) => !r.away).flatMap((r) => (r.prs ?? []).map((p) => key(p.url ?? p))));
+  const owned = new Set(runs.filter((r) => !r.away || r.away.how === "parked").flatMap((r) => (r.prs ?? []).map((p) => key(p.url ?? p))));
   return list.filter((p) => !owned.has(key(p.url)));
 }
 
@@ -80,11 +81,12 @@ const mine = poller(["api", "graphql", "-f", `query=${QUERY}`], parseMineOrNull,
 export const refreshMine = mine.refresh;
 export const mineError = mine.error;
 
-// The user's PRs needing an action, outside live runs: [{kind: "mine", repo, number, title, url,
+// The user's PRs needing an action, outside live and parked runs: [{kind: "mine", repo, number, title, url,
 // reason, age, action, local, run: null}], oldest wait first. `now` is for tests.
-export function minePrs({ runs = [] } = {}, now = Date.now()) {
+// `parked` are the parked runs: their PRs are left out too, but they never count for review requests.
+export function minePrs({ runs = [], parked = [] } = {}, now = Date.now()) {
   const cache = mine.get();
-  return outsideRuns(cache.list, runs)
+  return outsideRuns(cache.list, [...runs, ...parked])
     .map((p) => ({ kind: "mine", repo: p.repo, number: p.number, title: p.title, url: p.url, reason: p.reason,
       age: Math.max(0, now - p.since), action: p.action, local: localCheckout(cache.repos, p.repo), run: null }))
     .sort((a, b) => b.age - a.age);
@@ -99,7 +101,8 @@ export function reviewItems(ctx, now = Date.now()) {
 }
 
 // "Next for you", the combined list for the sidebar (impl-calm-t7 renders it): review requests first,
-// then the user's own PRs that need something, each oldest wait first. `runs` are the live ones.
+// then the user's own PRs that need something, each oldest wait first. `runs` are the live ones (the
+// only ones a review request is matched against); `parked` are the parked ones, whose PRs stay out.
 // A request a live run is reviewing is left out (the run shows in Crew); one only being started
 // stays, as "starting…", until its run is found.
 export const notReviewing = (items) => items.filter((it) => !(it.kind === "review" && it.run));
