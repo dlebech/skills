@@ -131,7 +131,10 @@ export function acrossRuns(runs, by = "all") {
     x.runs++; x.wall += r.wall; addCats(x.critical_path, r.critical_path);
     groups.set(g, x);
   }
-  return [...groups.values()].map((x) => ({ ...x, total: catTotal(x.critical_path) })).sort((a, b) => b.total - a.total);
+  // Biggest working time first, as the bars are drawn: idle and done time would put a group with
+  // little work above a busier one.
+  return [...groups.values()].map((x) => ({ ...x, total: catTotal(x.critical_path), working: timeSplit(x.critical_path).working }))
+    .sort((a, b) => b.working - a.working);
 }
 
 // The live CPU table: each orchestrator (and the captain) with its agents, then the agents in
@@ -361,8 +364,9 @@ export function timeSplit(m, top = 4) {
 // The last `days` days across the runs list (mergeRuns): a run counts, whole, when it is live
 // or started, ended or was closed in the window. agentSecs is the agents' own working time
 // summed. The orchestrator's total also holds its agent_wait (waiting on the agents, whose own time is
-// counted) and its user_wait (waiting on you, which waitedSecs shows), so those two are left out of it;
-// another agent's agent_wait is its sub-agents' work, which only that record shows, so it stays. waitedSecs and split
+// counted), left out of it; another agent's agent_wait is its sub-agents' work, which only that record
+// shows, so it stays. Any agent's user_wait (an open question, or a dialog it asked you in) is waiting
+// on you, not work, so it is left out too. CI wait stays: an agent watching CI is at work on the run. waitedSecs and split
 // come from the summed critical_path, the figures "Where the time goes" uses; `untimed` counts
 // the runs whose timing is not read yet.
 export function weekOf(runs, now = Date.now(), days = 7) {
@@ -376,7 +380,7 @@ export function weekOf(runs, now = Date.now(), days = 7) {
     tokens += num(r.tokens?.total);
     for (const a of arr(r.agents)) {
       const orch = a.role === "orchestrator" || a.name === "orchestrator";
-      agentSecs += Math.max(0, num(a.total) - (orch ? num(a.categories?.agent_wait) + num(a.categories?.user_wait) : 0));
+      agentSecs += Math.max(0, num(a.total) - (orch ? num(a.categories?.agent_wait) : 0) - num(a.categories?.user_wait));
     }
   }
   return { runs: week.length, agentSecs, tokens, waitedSecs: num(path.user_wait), split: timeSplit(path), untimed: week.filter((r) => !r.timed).length };

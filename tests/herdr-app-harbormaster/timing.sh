@@ -271,11 +271,16 @@ check "read from where it stopped" '[1,2]' "$(jq -sc '[(map(select(.mark)) | len
 printf '2026-11-16T10:35:00Z\tfinished\n' >"$run/closed"
 check "closed run" '["2026-11-16T10:30:40Z",30]' "$(sh "$script" "$run" "$(cat "$table")" | jq -c '[.end, (.agents[] | select(.label == "rev-dx-t1") | .categories.review)]')"
 # done_wait: between turns while the orchestrator's status is finished, a side question
-# answered included, until it sets another status; idle after that.
+# answered included, until it sets another status, and on into its next session; agents
+# at work in that time are agent_wait; idle while it is running. Its `hc wait box/ci`
+# (named with a machine, --output in single quotes) is the CI watch it started, and an
+# unnamed foreground `hc run` of a test is test; set-status.sh with a quoted directory, or
+# called through a variable (`S=.../set-status.sh; $S`), counts.
 run2=$T/runs/demo/feat-y
-mkdir -p "$run2"
+mkdir -p "$run2" "$T/wt/demo2"
 printf '{"terminal": "t2", "folder": "/src/demo2", "kind": "claude", "started": "2026-11-16T10:00:00Z"}\n' >"$run2/orchestrator.json"
-printf 'claude orc-2\n' >"$run2/sessions"
+printf 'Status: finished\nPrefix: dy\n' >"$run2/plan.md"
+printf 'claude orc-2\nclaude orc-3\n' >"$run2/sessions"
 python3 -I - "$T" <<'PY'
 import json, os, sys
 T = sys.argv[1]
@@ -284,20 +289,26 @@ def user(t, text): return dict(type="user", timestamp=iso(t), isSidechain=False,
 def use(t, id, cmd): return dict(type="assistant", timestamp=iso(t), isSidechain=False, message=dict(id="m" + id, stop_reason="tool_use", content=[dict(type="tool_use", id=id, name="Bash", input={"command": cmd})]))
 def res(t, id): return dict(type="user", timestamp=iso(t), isSidechain=False, message=dict(role="user", content=[dict(type="tool_result", tool_use_id=id, content="x")]))
 def text(t): return dict(type="assistant", timestamp=iso(t), isSidechain=False, message=dict(id="mt" + t, stop_reason="end_turn", content=[dict(type="text", text="ok")]))
-lines = [
+def put(folder, name, lines):
+    d = os.path.join(T, "claude", "projects", "".join(c if c.isalnum() or c == "-" else "-" for c in folder))
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, name), "w") as f:
+        for l in lines: f.write(json.dumps(l) + "\n")
+put("/src/demo2", "orc-2.jsonl", [
     user("10:00:00", "/herdr-app-orchestrator x"),
     use("10:00:10", "f1", 'S=/s; $S/set-status.sh /r finished --progress "PRs up"'), res("10:00:11", "f1"), text("10:00:20"),
     user("10:30:20", "why that name?"), text("10:30:30"),
-    user("11:00:30", "one more thing"), use("11:00:40", "f2", '/s/set-status.sh /r "running"'), res("11:00:41", "f2"), text("11:00:50"),
-    user("11:10:50", "hi"), text("11:11:00"),
-]
-d = os.path.join(T, "claude", "projects", "-src-demo2")
-os.makedirs(d, exist_ok=True)
-with open(os.path.join(d, "orc-2.jsonl"), "w") as f:
-    for l in lines: f.write(json.dumps(l) + "\n")
+    user("11:00:30", "one more thing"), use("11:00:40", "f2", 'S=/s/set-status.sh; $S /r "running"'), res("11:00:41", "f2"), text("11:00:50"),
+    user("11:10:50", "hi"),
+    use("11:10:55", "c1", "hc run --bg --name ci -- gh run watch 5 >/dev/null"), res("11:10:56", "c1"),
+    use("11:11:00", "c2", "hc wait box/ci --timeout 540 --output 'all green'"), res("11:12:00", "c2"), text("11:12:10"),
+    user("11:20:00", "done?"), use("11:20:05", "f3", '/s/set-status.sh "/r dir" finished; hc run -- npm test'), res("11:20:06", "f3"), text("11:20:10"),
+])
+put("/src/demo2", "orc-3.jsonl", [user("12:00:00", "resume"), text("12:00:10"), user("12:30:10", "merged?"), text("12:30:20")])
+put(os.path.join(T, "wt", "demo2", "dy-t1"), "a.jsonl", [user("10:10:00", "You are impl-dy-t1."), text("10:13:00")])
 PY
 done=$(sh "$script" "$run2" "$(cat "$table")")
-check "done_wait" '[{"done_wait":3600,"idle":600,"model":58,"other":2},3600,600,60]' \
+check "done_wait" '[{"agent_wait":180,"ci_wait":60,"done_wait":5220,"idle":1070,"model":96,"other":3,"test":1},5220,1070,340]' \
   "$(printf '%s' "$done" | jq -c '[(.critical_path | to_entries | sort_by(.key) | from_entries), .done_wait, .idle, .agents[0].total]')"
 
 # Missing pieces: no plan.md, no sessions, no status.json.
@@ -310,6 +321,9 @@ trule=$(awk -F'\t' '$1 == "test" && $2 ~ /bash/ {print $3}' "$table")
 for c in 'node --import ./tests/herdr-app-harbormaster/loader.mjs --test tests/herdr-app-harbormaster/*.test.mjs' 'node --import ./loader.mjs --test stats.test.mjs' \
   'node --test' 'bash tests/herdr-app-captain/runs-live.sh' 'vendor/bin/phpunit' 'composer test'; do
   check "test rule: $c" true "$(jq -rn --arg c "$c" --arg r "$trule" '$c | test($r)')"
+done
+for t in AskUserQuestion question; do
+  check "dialog rule: $t" user_wait "$(awk -F'\t' -v t="$t" '$1 == "user_wait" { r = tolower($2); if (tolower(t) ~ r) print $1 }' "$table")"
 done
 check "test rule: node a.js is not a test" false "$(jq -rn --arg r "$trule" '"node a.js; echo --test" | test($r)')"
 [ "$(awk -F'\t' '$1 == "install" && $3 ~ /composer/' "$table" | wc -l)" -eq 1 ] || { echo "FAIL composer install rule"; fails=$((fails + 1)); }

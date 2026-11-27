@@ -19,10 +19,12 @@
 # other. Model time (between tool calls) is not a tool call, so it has no rules; nor does
 # review time, which is all of a review agent's time but its test, lint, build, install
 # and CI time, nor the user_wait of an open question.md (timing.sh's header has the
-# details). A dialog that asks the user is user_wait by its rule below.
+# details). A dialog that asks the user is user_wait by its rule below, and is not capped
+# at 30 minutes as other calls are.
 # A shell call that waits on a terminal by name (`hc wait ci`) counts as what that
 # terminal runs, when an earlier call started it with `hc run --name ci -- <command>` and
-# <command> is test, lint, build, install or ci_wait here; timing.sh does that, not a rule.
+# <command> is test, lint, build, install or ci_wait here; so does a call that runs one in
+# the foreground (`hc run -- npm test`). timing.sh does that, not a rule.
 #
 # resources.js's PROGRAMS names the same commands in the process table; keep the two alike.
 # Changing this file changes every run's breakdown the next time it is read. Edit it in

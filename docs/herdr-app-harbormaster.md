@@ -263,10 +263,12 @@ found as `tokens.sh` finds them (so after the agents and their worktrees are gon
 orchestrator spends nothing on it. Each tool call is sorted into a category (test, lint/typecheck,
 build, install, CI wait, agent wait, review, git, other), the time between tool calls is model
 time, and the orchestrator waiting for an answer to its `question.md`, or any agent waiting on a
-dialog it opened (`AskUserQuestion`), is user wait. Once the orchestrator sets its status finished, the
-time between its turns is done (`done_wait`) rather than idle, until it sets another status. Waiting on a terminal by name (`hc wait ci`) counts
+dialog it opened (`AskUserQuestion`, not capped at 30 minutes as other calls are), is user wait. Once the orchestrator sets its status finished, the
+time between its turns is done (`done_wait`) rather than idle, until it sets another status, also in a
+later session of the same run; while agents work in that time it is agent wait. Waiting on a terminal by name (`hc wait ci`) counts
 as what that terminal runs when the same session started it with `hc run --name ci -- <command>`: a
-CI watch is CI wait, a test run is test, an agent stays agent wait. It gives, as
+CI watch is CI wait, a test run is test, an agent stays agent wait; so does a call that runs one in the
+foreground (`hc run -- npm test`). It gives, as
 JSON (the format is at the top of the script), the run's wall time; `critical_path`, where that
 time went: the orchestrator's own time by category plus its idle time, which add up to its part of
 the wall time; and the effort: time per category, per agent (with its role: impl, rev, fix) and

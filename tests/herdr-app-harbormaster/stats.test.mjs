@@ -153,6 +153,11 @@ test("mergeRuns: a closed run in the history shows once, as its line; an open on
   assert.equal(mergeRuns(open, other).length, 3);
 });
 
+test("acrossRuns: groups sorted by working time, not by idle or done time", () => {
+  const rows = [{ folder: "/p/a", wall: 0, critical_path: { model: 1200, done_wait: 18000 } }, { folder: "/p/b", wall: 0, critical_path: { model: 7200 } }];
+  assert.deepEqual(acrossRuns(rows, "folder").map((g) => [g.group, g.working]), [["b", 7200], ["a", 1200]]);
+});
+
 test("acrossRuns: sums critical paths, by group, biggest first; runs without time left out", () => {
   const rows = parseHistory([
     line({ run: "/r/1", folder: "/p/skills", type: "feat", wall: 100, critical_path: { model: 60, idle: 40 } }),

@@ -346,7 +346,8 @@ def classify($rules; $orc): (.tool // "") as $tool | parts as $parts
   | ([$cats[] | select(. != "git" and . != "other")] | first)
     // (if any($cats[]; . == "git") then "git" else "other" end);
 # The terminals a shell call starts with `hc run` and waits on with `hc wait <name>`:
-# {run: [{name, bg, cat}], wait: [name]}, or null for neither. A job has the category of
+# {run: [{name (null for an unnamed one in the foreground), bg, cat}], wait: [name]}, or
+# null for neither. A job has the category of
 # its command (`hc run --bg --name ci -- gh pr checks 7 --watch` is ci_wait, an agent
 # harness is agent_wait), so waiting on it later counts as what it waits for.
 def unquote: if test("^\"[^\"]*\"$") or test("^\u0027[^\u0027]*\u0027$") then .[1:-1] else . end;
@@ -359,13 +360,16 @@ def hcjobs($raw; $rules): ($raw | cmdsplit("\u001e")) as $ps
             (.rest | capture("^--(?<k>[a-z]+)(=|\\s+)(?<v>\"[^\"]*\"|\u0027[^\u0027]*\u0027|\\S+)\\s*(?<r>.*)$")) as $m
             | .rest = $m.r | if $m.k == "name" then .name = ($m.v | unquote) else . end
           else (.rest | capture("^(?<f>\\S+)\\s*(?<r>.*)$")) as $m | .rest = $m.r | if $m.f == "--bg" then .bg = true else . end end)
-      | select(.name != null)
+      | select(.name != null or (.bg | not))
       | (.rest | until(test("\\s[0-9]*(>>?|<)&?\\s*\\S*\\s*$") | not; sub("\\s[0-9]*(>>?|<)&?\\s*\\S*\\s*$"; "")) | sub("\\s+$"; "") | unquote | sub("^(bash|sh|zsh|dash)\\s+-l?c\\s+"; "") | unquote | gsub("\u001e"; ";")) as $argv
-      | {name, bg, cat: (if $argv | test("^(claude|pi|opencode|codex|copilot)\\b") then "agent_wait"
-          else {tool: "Bash", parts: ($argv | commands)} | classify($rules; false) end)}],
+      | ($argv | commands) as $cmds
+      | {name, bg, cat: (if ($cmds[0] // "") | test("^(\\S*/)?(claude|pi|opencode|codex|copilot)(\\s|$)") then "agent_wait"
+          else {tool: "Bash", parts: $cmds} | classify($rules; false) end)}],
      wait: [$ps[] | select(test("^hc\\s+wait\\b")) | select(test("--children") | not)
-      | sub("^hc\\s+wait\\s*"; "") | gsub("--(timeout|output)(=|\\s+)(\"[^\"]*\"|\\S+)|--json"; "")
-      | [splits("\\s+") | select(length > 0)] | first | select(. != null)]}
+      | sub("^hc\\s+wait\\s*"; "") | gsub("--(timeout|output)(=|\\s+)(\"[^\"]*\"|\u0027[^\u0027]*\u0027|\\S+)|--json"; "")
+      | [splits("\\s+") | select(length > 0)] | first | select(. != null)
+      # `hc wait box/ci` waits on the terminal `hc run --on box --name ci` started.
+      | unquote | sub("^[^/]+/"; "")]}
   | if (.run | length) + (.wait | length) > 0 then . else null end;
 # What a call is: its own category, unless it starts a job in the foreground or waits on
 # one whose command has a category of its own ($jobs: name → cat, from earlier calls).
@@ -394,10 +398,13 @@ def answer: test("/inbox/\\S+\\.message|^\\s*Answer to")
   or ((test("^\\s*<") or test("^This session is being continued")) | not);
 def addc($k; $v): if $v > 0 then .[$k] = (.[$k] // 0) + $v else . end;
 # The status a shell call sets with set-status.sh (running, waiting, blocked, finished), or null.
-def setstatus: [parts[] | capture("(^|/)set-status\\.sh\\s+\\S+\\s+[\"\u0027]?(?<s>[a-z]+)") | .s] | last;
+# Variables the call sets are expanded first: `S=.../set-status.sh; $S $R finished`.
+def setstatus: parts as $ps | ($ps | join("\n") | vars) as $v | [$ps[] | expand($v) | capture("(^|/)set-status\\.sh\\s+(\"[^\"]*\"|\u0027[^\u0027]*\u0027|\\S+)\\s+[\"\u0027]?(?<s>[a-z]+)") | .s] | last;
 # Not working from $a to $b: waiting on the user while a question is open, done while the
 # orchestrator has said it is finished (until it sets another status), else idle.
-def pause($a; $b): .waits += [[$a, $b, (if .q then "user" elif .fin then "done" else "idle" end)]]
+# A wait before the first status call of the session is marked, so a finished run resumed in a
+# new session stays done (see the end, which carries the status from session to session).
+def pause($a; $b): .waits += [[$a, $b, (if .q then "user" elif .fin then "done" else "idle" end), (.stset | not)]]
   | if .ss != null then .spans += [[.ss, $a]] | .ss = null else . end;
 # Events [{t, e: input|model|call|result|end, id, tool, parts|text, queued}] → the result.
 def summary($meta):
@@ -406,7 +413,7 @@ def summary($meta):
   | ([first(.[] | select(.e == "input") | .text // "" | [match("\\bYou are ((impl|rev|review|reviewer|fix|grunt)-[A-Za-z0-9_-]*[A-Za-z0-9])").captures[0].string] | first | select(. != null))] | first) as $label
   | (if $orc then "orchestrator" elif $label == null then "agent"
      else ($label | split("-")[0] | if startswith("rev") then "rev" else . end) end) as $role
-  | reduce .[] as $e ({prev: null, open: {}, idle: true, q: false, ss: null, cats: {}, spans: [], waits: [], excess: 0, jobs: {}, fin: false};
+  | reduce .[] as $e ({prev: null, open: {}, idle: true, q: false, ss: null, cats: {}, spans: [], waits: [], excess: 0, jobs: {}, fin: false, stset: false};
       (if .prev != null and $e.t > .prev then ($e.t - .prev) as $dt
         | if (.open | length) > 0 and $e.e == "input" and ($e.queued | not) then .open = {} | pause(.prev; $e.t)
           elif (.open | length) > 0 then (.open | to_entries | min_by(.value.t) | .value) as $o
@@ -420,23 +427,23 @@ def summary($meta):
       | if $e.e == "input" then (if ($e.text // "" | answer) then .q = false else . end)
         elif $e.e == "call" then
           ($e.hc // (if ($e.tool // "" | shell) and $e.parts == null then hcjobs($e.text // ""; $rules) else null end)) as $hc
-          | .jobs += ([$hc.run[]? | {(.name): .cat}] | add // {})
+          | .jobs += ([$hc.run[]? | select(.name != null) | {(.name): .cat}] | add // {})
           | .open[$e.id] = {t: $e.t, cat: jobcat($e.cat // ($e | classify($rules; $orc)); $hc; .jobs)}
           | (if $orc and ($e | asks) then .q = true elif $orc and ($e | unasks) then .q = false else . end)
-          | (if $orc and ($e.tool // "" | shell) then ($e | setstatus) as $st | if $st == null then . else .fin = ($st == "finished") end else . end)
+          | (if $orc and ($e.tool // "" | shell) then ($e | setstatus) as $st | if $st == null then . else .fin = ($st == "finished") | .stset = true end else . end)
         elif $e.e == "result" then del(.open[$e.id])
         elif $e.e == "end" then .open = {} | (if .ss != null then .spans += [[.ss, $e.t]] else . end) | .ss = null | .idle = true
         else . end
       | .prev = $e.t)
   | (if .ss != null then .spans += [[.ss, .prev]] else . end)
-  | .excess as $excess | .cats as $c
+  | .excess as $excess | .cats as $c | .fin as $fin | .stset as $stset
   | (if $role == "rev" then
       reduce ($c | to_entries[]) as $x ({}; if ($x.key | IN("test", "lint", "build", "install", "ci_wait")) then addc($x.key; $x.value) else addc("review"; $x.value) end)
      elif $orc then $c | addc("_idle"; $excess)
      else $c end) as $cats
   | {name: $meta.name, kind: $meta.kind, file: $meta.file, label: $label, role: $role,
      start: (.spans | map(.[0]) | min), end: (.spans | map(.[1]) | max),
-     cats: $cats, spans: .spans, waits: (if $orc then .waits else [] end)};
+     cats: $cats, spans: .spans, waits: (if $orc then .waits else [] end), fin: $fin, stset: $stset};
 '
 
 # One transcript line → events, with $rules and $orc set. A call is classified here, once,
@@ -596,13 +603,21 @@ def merge: sort_by(.[0]) | reduce .[] as $s ([]; if length > 0 and $s[0] <= .[-1
 def overlap($a; $b; $u): [$u[] | ([$b, .[1]] | min) - ([$a, .[0]] | max) | select(. > 0)] | add // 0;
 def addall($list): reduce $list[] as $c ({}; reduce ($c | to_entries[]) as $x (.; addc($x.key; $x.value)));
 def rounded: with_entries(.value |= secs) | with_entries(select(.value > 0));
-. as $all
+# The status of the orchestrator carries over from one session to the next: idle before the
+# first status call of a session is done when the session before ended finished.
+([.[] | select(.name == "orchestrator")] | sort_by(.start // 0)
+  | reduce .[] as $o ({carry: false, out: []}; .carry as $c
+      | .out += [$o | .waits |= map(if $c and .[2] == "idle" and .[3] then .[2] = "done" else . end)]
+      | .carry = (if $o.stset then $o.fin else $c end))
+  | .out) as $orcs
+| ([.[] | select(.name != "orchestrator")] + $orcs) as $all
 | ([$all[] | select(.name != "orchestrator") | .spans[]] | merge) as $busy
 # The orchestrator between turns: waiting on the user, on its agents, or on nothing.
 | [$all[] | if .name == "orchestrator" then
       .cats = reduce .waits[] as $w (.cats;
         if $w[2] == "user" then addc("user_wait"; $w[1] - $w[0])
-        elif $w[2] == "done" then addc("_done"; $w[1] - $w[0])
+        # Done, but agents at work (a finished run sent back to work before it changed its status): agent_wait.
+        elif $w[2] == "done" then overlap($w[0]; $w[1]; $busy) as $o | addc("agent_wait"; $o) | addc("_done"; $w[1] - $w[0] - $o)
         else overlap($w[0]; $w[1]; $busy) as $o | addc("agent_wait"; $o) | addc("_idle"; $w[1] - $w[0] - $o) end)
     else . end] as $s
 | ($s | map(select(.start != null))) as $s
