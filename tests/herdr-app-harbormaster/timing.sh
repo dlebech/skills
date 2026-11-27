@@ -15,7 +15,10 @@
 #     tests/a.sh`, a for loop over tests and a quoted `hc run` of a test are test; sleep
 #     is agent_wait for the orchestrator, other for an agent; a question.md written
 #     elsewhere (a demo) does not open a question; a call over 30 minutes is
-#     capped; a call with no result ends at the next prompt; a <tagged> harness message
+#     capped; waiting on a terminal by name counts as what it runs (a CI watch, a test,
+#     an agent), and a foreground `hc run` too; a dialog asking the user is user_wait,
+#     not capped; after the orchestrator sets the status finished its time between
+#     turns is done_wait, not idle, until it sets another status; a call with no result ends at the next prompt; a <tagged> harness message
 #     does not answer an open question;
 #   - per-task sums, critical_path, the tokens copied from status.json, the cache (an
 #     unchanged rerun gives the same result; a changed file is reread, from where it
@@ -137,6 +140,19 @@ t5 = [
     user("13:00:00", "are you there?"), text("13:00:10"),
 ]
 write(os.path.join(wt5, "impl-5.jsonl"), t5)
+# Jobs waited on by name count as what they run; a dialog is user_wait, never capped.
+wt6 = os.path.join(T, "claude", "projects", mangle(os.path.join(T, "wt", "demo", "dx-t6")))
+t6 = [
+    user("11:00:00", "You are impl-dx-t6."),
+    use("11:00:10", "J1", "Bash", {"command": 'hc run --bg --no-notify --name ci -- bash -c "sleep 5; gh pr checks 7 --watch" >/dev/null'}), res("11:00:15", "J1"),
+    use("11:00:20", "J2", "Bash", {"command": "hc wait ci --timeout 540"}), res("11:02:00", "J2"),
+    use("11:02:05", "J3", "Bash", {"command": 'hc run --bg --name w --cwd /w claude "You are x; run npm test"'}), res("11:02:06", "J3"),
+    use("11:02:10", "J4", "Bash", {"command": "hc wait w --timeout 540"}), res("11:03:00", "J4"),
+    use("11:03:05", "J5", "Bash", {"command": "hc run --name t -- npm test 2>&1 | tail -3"}), res("11:03:45", "J5"),
+    use("11:03:50", "J6", "AskUserQuestion", {"questions": [{"question": "Which?"}]}), res("11:43:50", "J6"),
+    text("11:44:00"),
+]
+write(os.path.join(wt6, "impl-6.jsonl"), t6)
 
 # pi
 pd = os.path.join(T, "pi", "sessions", "--" + os.path.join(T, "wt", "demo", "dx-t2")[1:].replace("/", "-") + "--")
@@ -206,17 +222,18 @@ check "orchestrator" '["orchestrator",null,1085,{"agent_wait":445,"model":43,"ot
 check "orchestrator idle" 120 "$(q .idle)"
 check "critical path" '{"agent_wait":445,"idle":120,"model":43,"other":2,"user_wait":595}' "$(q '.critical_path | to_entries | sort_by(.key) | from_entries')"
 check "one category a call, capped, orphan" '["impl","t5",1925,{"git":2,"model":68,"other":30,"test":1825}]' "$(agent impl-dx-t5 | jq -c '.[3] |= (to_entries | sort_by(.key) | from_entries)')"
+check "jobs and a dialog" '["impl","t6",2640,{"agent_wait":50,"ci_wait":100,"model":44,"other":6,"test":40,"user_wait":2400}]' "$(agent impl-dx-t6 | jq -c '.[3] |= (to_entries | sort_by(.key) | from_entries)')"
 check "implementer" '["impl","t1",1050,{"git":2,"lint":5,"model":42,"other":881,"test":120}]' "$(agent impl-dx-t1 | jq -c '.[3] |= (to_entries | sort_by(.key) | from_entries)')"
 check "reviewer" '["rev","t1",100,{"review":40,"test":60}]' "$(agent rev-dx-t1 | jq -c '.[3] |= (to_entries | sort_by(.key) | from_entries)')"
 check "pi agent" '["impl","t2",90,{"model":30,"test":60}]' "$(agent impl-dx-t2 | jq -c '.[3] |= (to_entries | sort_by(.key) | from_entries)')"
 check "opencode v2 agent" '["impl","t3",70,{"build":40,"model":30}]' "$(agent impl-dx-t3 | jq -c '.[3] |= (to_entries | sort_by(.key) | from_entries)')"
 check "opencode v1 integration" '["fix",null,40,{"ci_wait":30,"model":10}]' "$(agent fix-dx-final | jq -c '.[3] |= (to_entries | sort_by(.key) | from_entries)')"
 check "opencode storage agent" '["impl","t4",35,{"lint":20,"model":15}]' "$(agent impl-dx-t4 | jq -c '.[3] |= (to_entries | sort_by(.key) | from_entries)')"
-check "agent names and kinds" '[["orchestrator","claude"],["dx-t5","claude"],["dx-t1","claude"],["dx-t1","claude"],["dx-t2","pi"],["dx-t3","opencode"],["integration","opencode"],["dx-t4","opencode"]]' \
+check "agent names and kinds" '[["orchestrator","claude"],["dx-t6","claude"],["dx-t5","claude"],["dx-t1","claude"],["dx-t1","claude"],["dx-t2","pi"],["dx-t3","opencode"],["integration","opencode"],["dx-t4","opencode"]]' \
   "$(q '[.agents[] | [.name, .kind]]')"
-check "run categories" '{"agent_wait":445,"build":40,"ci_wait":30,"git":4,"lint":25,"model":238,"other":913,"review":40,"test":2065,"user_wait":595}' \
+check "run categories" '{"agent_wait":495,"build":40,"ci_wait":130,"git":4,"lint":25,"model":282,"other":919,"review":40,"test":2105,"user_wait":2995}' \
   "$(q '.categories | to_entries | sort_by(.key) | from_entries')"
-check "tasks" '[["t5",1925],["t1",1150],["t2",90],["t3",70],["t4",35]]' "$(q '[.tasks[] | [.id, .total]]')"
+check "tasks" '[["t6",2640],["t5",1925],["t1",1150],["t2",90],["t3",70],["t4",35]]' "$(q '[.tasks[] | [.id, .total]]')"
 check "tokens" 1234 "$(q .tokens.total)"
 check "cache written" yes "$( [ -n "$(ls "$run/.timing"/*.sig 2>/dev/null)" ] && echo yes || echo no)"
 
@@ -253,6 +270,47 @@ check "read from where it stopped" '[1,2]' "$(jq -sc '[(map(select(.mark)) | len
 # A closed run ends at its closed time: the reviewer's second turn and dx-t4 drop out.
 printf '2026-11-16T10:35:00Z\tfinished\n' >"$run/closed"
 check "closed run" '["2026-11-16T10:30:40Z",30]' "$(sh "$script" "$run" "$(cat "$table")" | jq -c '[.end, (.agents[] | select(.label == "rev-dx-t1") | .categories.review)]')"
+# done_wait: between turns while the orchestrator's status is finished, a side question
+# answered included, until it sets another status, and on into its next session; agents
+# at work in that time are agent_wait; idle while it is running. Its `hc wait box/ci`
+# (named with a machine, --output in single quotes) is the CI watch it started, and an
+# unnamed foreground `hc run` of a test is test; set-status.sh with a quoted directory, or
+# called through a variable (`S=.../set-status.sh; $S`), counts.
+run2=$T/runs/demo/feat-y
+mkdir -p "$run2" "$T/wt/demo2"
+printf '{"terminal": "t2", "folder": "/src/demo2", "kind": "claude", "started": "2026-11-16T10:00:00Z"}\n' >"$run2/orchestrator.json"
+printf 'Status: finished\nPrefix: dy\n' >"$run2/plan.md"
+printf 'claude orc-2\nclaude orc-3\n' >"$run2/sessions"
+python3 -I - "$T" <<'PY'
+import json, os, sys
+T = sys.argv[1]
+def iso(hms): return "2026-11-16T%s.000Z" % hms
+def user(t, text): return dict(type="user", timestamp=iso(t), isSidechain=False, message=dict(role="user", content=text))
+def use(t, id, cmd): return dict(type="assistant", timestamp=iso(t), isSidechain=False, message=dict(id="m" + id, stop_reason="tool_use", content=[dict(type="tool_use", id=id, name="Bash", input={"command": cmd})]))
+def res(t, id): return dict(type="user", timestamp=iso(t), isSidechain=False, message=dict(role="user", content=[dict(type="tool_result", tool_use_id=id, content="x")]))
+def text(t): return dict(type="assistant", timestamp=iso(t), isSidechain=False, message=dict(id="mt" + t, stop_reason="end_turn", content=[dict(type="text", text="ok")]))
+def put(folder, name, lines):
+    d = os.path.join(T, "claude", "projects", "".join(c if c.isalnum() or c == "-" else "-" for c in folder))
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, name), "w") as f:
+        for l in lines: f.write(json.dumps(l) + "\n")
+put("/src/demo2", "orc-2.jsonl", [
+    user("10:00:00", "/herdr-app-orchestrator x"),
+    use("10:00:10", "f1", 'S=/s; $S/set-status.sh /r finished --progress "PRs up"'), res("10:00:11", "f1"), text("10:00:20"),
+    user("10:30:20", "why that name?"), text("10:30:30"),
+    user("11:00:30", "one more thing"), use("11:00:40", "f2", 'S=/s/set-status.sh; $S /r "running"'), res("11:00:41", "f2"), text("11:00:50"),
+    user("11:10:50", "hi"),
+    use("11:10:55", "c1", "hc run --bg --name ci -- gh run watch 5 >/dev/null"), res("11:10:56", "c1"),
+    use("11:11:00", "c2", "hc wait box/ci --timeout 540 --output 'all green'"), res("11:12:00", "c2"), text("11:12:10"),
+    user("11:20:00", "done?"), use("11:20:05", "f3", '/s/set-status.sh "/r dir" finished; hc run -- npm test'), res("11:20:06", "f3"), text("11:20:10"),
+])
+put("/src/demo2", "orc-3.jsonl", [user("12:00:00", "resume"), text("12:00:10"), user("12:30:10", "merged?"), text("12:30:20")])
+put(os.path.join(T, "wt", "demo2", "dy-t1"), "a.jsonl", [user("10:10:00", "You are impl-dy-t1."), text("10:13:00")])
+PY
+done=$(sh "$script" "$run2" "$(cat "$table")")
+check "done_wait" '[{"agent_wait":180,"ci_wait":60,"done_wait":5220,"idle":1070,"model":96,"other":3,"test":1},5220,1070,340]' \
+  "$(printf '%s' "$done" | jq -c '[(.critical_path | to_entries | sort_by(.key) | from_entries), .done_wait, .idle, .agents[0].total]')"
+
 # Missing pieces: no plan.md, no sessions, no status.json.
 rm -f "$run/plan.md" "$run/sessions" "$run/status.json" "$run/closed"
 check "bare run" '[1,null]' "$(sh "$script" "$run" "$(cat "$table")" | jq -c '[(.agents | length), .tokens]')"
@@ -263,6 +321,9 @@ trule=$(awk -F'\t' '$1 == "test" && $2 ~ /bash/ {print $3}' "$table")
 for c in 'node --import ./tests/herdr-app-harbormaster/loader.mjs --test tests/herdr-app-harbormaster/*.test.mjs' 'node --import ./loader.mjs --test stats.test.mjs' \
   'node --test' 'bash tests/herdr-app-captain/runs-live.sh' 'vendor/bin/phpunit' 'composer test'; do
   check "test rule: $c" true "$(jq -rn --arg c "$c" --arg r "$trule" '$c | test($r)')"
+done
+for t in AskUserQuestion question; do
+  check "dialog rule: $t" user_wait "$(awk -F'\t' -v t="$t" '$1 == "user_wait" { r = tolower($2); if (tolower(t) ~ r) print $1 }' "$table")"
 done
 check "test rule: node a.js is not a test" false "$(jq -rn --arg r "$trule" '"node a.js; echo --test" | test($r)')"
 [ "$(awk -F'\t' '$1 == "install" && $3 ~ /composer/' "$table" | wc -l)" -eq 1 ] || { echo "FAIL composer install rule"; fails=$((fails + 1)); }

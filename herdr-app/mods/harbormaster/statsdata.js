@@ -131,7 +131,10 @@ export function acrossRuns(runs, by = "all") {
     x.runs++; x.wall += r.wall; addCats(x.critical_path, r.critical_path);
     groups.set(g, x);
   }
-  return [...groups.values()].map((x) => ({ ...x, total: catTotal(x.critical_path) })).sort((a, b) => b.total - a.total);
+  // Biggest working time first, as the bars are drawn: idle and done time would put a group with
+  // little work above a busier one.
+  return [...groups.values()].map((x) => ({ ...x, total: catTotal(x.critical_path), working: timeSplit(x.critical_path).working }))
+    .sort((a, b) => b.working - a.working);
 }
 
 // The live CPU table: each orchestrator (and the captain) with its agents, then the agents in
@@ -343,22 +346,27 @@ export function hottest(groups, steady = null) {
 // "Hottest: impl-xweek-ui 44%, mostly browser".
 export const hottestText = (h) => (h ? `Hottest: ${h.name} ${Math.round(h.cpu)}%${h.mostly ? `, mostly ${h.mostly}` : ""}` : "Nothing busy right now");
 
-// Where the time went, idle apart: { working, idle, parts (biggest first, with pct of the
-// working time), shown (the `top` biggest of 1% or more), hidden (the rest) }.
+// Not working time: idle (waiting for nothing) and done_wait (a run that said it is finished,
+// waiting for you to come back to it). Both stay out of the working time and its bar.
+export const RESTING = ["idle", "done_wait"];
+
+// Where the time went, idle and done apart: { working, idle, done, parts (biggest first, with
+// pct of the working time), shown (the `top` biggest of 1% or more), hidden (the rest) }.
 export function timeSplit(m, top = 4) {
   const c = cats(m);
-  const parts = Object.entries(c).filter(([k]) => k !== "idle").sort((a, b) => b[1] - a[1]);
+  const parts = Object.entries(c).filter(([k]) => !RESTING.includes(k)).sort((a, b) => b[1] - a[1]);
   const working = parts.reduce((n, [, v]) => n + v, 0);
   const all = parts.map(([key, secs]) => ({ key, secs, pct: working > 0 ? (100 * secs) / working : 0 }));
   const shown = all.filter((p) => p.pct >= 1).slice(0, top);
-  return { working, idle: c.idle ?? 0, parts: all, shown, hidden: all.filter((p) => !shown.includes(p)) };
+  return { working, idle: c.idle ?? 0, done: c.done_wait ?? 0, parts: all, shown, hidden: all.filter((p) => !shown.includes(p)) };
 }
 
 // The last `days` days across the runs list (mergeRuns): a run counts, whole, when it is live
 // or started, ended or was closed in the window. agentSecs is the agents' own working time
 // summed. The orchestrator's total also holds its agent_wait (waiting on the agents, whose own time is
-// counted) and its user_wait (waiting on you, which waitedSecs shows), so those two are left out of it;
-// another agent's agent_wait is its sub-agents' work, which only that record shows, so it stays. waitedSecs and split
+// counted), left out of it; another agent's agent_wait is its sub-agents' work, which only that record
+// shows, so it stays. Any agent's user_wait (an open question, or a dialog it asked you in) is waiting
+// on you, not work, so it is left out too. CI wait stays: an agent watching CI is at work on the run. waitedSecs and split
 // come from the summed critical_path, the figures "Where the time goes" uses; `untimed` counts
 // the runs whose timing is not read yet.
 export function weekOf(runs, now = Date.now(), days = 7) {
@@ -372,7 +380,7 @@ export function weekOf(runs, now = Date.now(), days = 7) {
     tokens += num(r.tokens?.total);
     for (const a of arr(r.agents)) {
       const orch = a.role === "orchestrator" || a.name === "orchestrator";
-      agentSecs += Math.max(0, num(a.total) - (orch ? num(a.categories?.agent_wait) + num(a.categories?.user_wait) : 0));
+      agentSecs += Math.max(0, num(a.total) - (orch ? num(a.categories?.agent_wait) : 0) - num(a.categories?.user_wait));
     }
   }
   return { runs: week.length, agentSecs, tokens, waitedSecs: num(path.user_wait), split: timeSplit(path), untimed: week.filter((r) => !r.timed).length };

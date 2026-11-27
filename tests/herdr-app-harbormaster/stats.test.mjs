@@ -153,6 +153,11 @@ test("mergeRuns: a closed run in the history shows once, as its line; an open on
   assert.equal(mergeRuns(open, other).length, 3);
 });
 
+test("acrossRuns: groups sorted by working time, not by idle or done time", () => {
+  const rows = [{ folder: "/p/a", wall: 0, critical_path: { model: 1200, done_wait: 18000 } }, { folder: "/p/b", wall: 0, critical_path: { model: 7200 } }];
+  assert.deepEqual(acrossRuns(rows, "folder").map((g) => [g.group, g.working]), [["b", 7200], ["a", 1200]]);
+});
+
 test("acrossRuns: sums critical paths, by group, biggest first; runs without time left out", () => {
   const rows = parseHistory([
     line({ run: "/r/1", folder: "/p/skills", type: "feat", wall: 100, critical_path: { model: 60, idle: 40 } }),
@@ -278,17 +283,18 @@ test("hottest: the busiest agent in plain words, what its CPU mostly goes to", (
   assert.equal(hottestText(null), "Nothing busy right now");
 });
 
-test("timeSplit: idle apart, biggest first, the top four of 1% or more shown, the rest hidden", () => {
-  const m = { idle: 600, model: 100, agent_wait: 500, test: 2, git: 50, lint: 80, review: 60, user_wait: 0 };
+test("timeSplit: idle and done apart, biggest first, the top four of 1% or more shown, the rest hidden", () => {
+  const m = { idle: 600, done_wait: 900, model: 100, agent_wait: 500, test: 2, git: 50, lint: 80, review: 60, user_wait: 0 };
   const s = timeSplit(m);
   assert.equal(s.idle, 600);
+  assert.equal(s.done, 900);
   assert.equal(s.working, 792);
   assert.deepEqual(s.parts.map((p) => p.key), ["agent_wait", "model", "lint", "review", "git", "test"]);
   assert.deepEqual(s.shown.map((p) => p.key), ["agent_wait", "model", "lint", "review"]);
   assert.deepEqual(s.hidden.map((p) => p.key), ["git", "test"]);
   // Under 1% is hidden even when there is room.
   assert.deepEqual(timeSplit({ model: 1000, test: 5 }).shown.map((p) => p.key), ["model"]);
-  assert.deepEqual(timeSplit({ idle: 10 }), { working: 0, idle: 10, parts: [], shown: [], hidden: [] });
+  assert.deepEqual(timeSplit({ idle: 10 }), { working: 0, idle: 10, done: 0, parts: [], shown: [], hidden: [] });
   assert.equal(timeSplit(undefined).working, 0);
 });
 

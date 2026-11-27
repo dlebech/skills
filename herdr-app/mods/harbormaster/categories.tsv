@@ -15,10 +15,16 @@
 # A call gets one category: for a shell call running several commands, the first of
 # them, in the order written, that is not git or other; else git; else other. So
 # `cd x && npm test` is test and `git add . && git commit` is git.
-# Categories: test, lint, build, install, ci_wait, agent_wait, review, git, other. Model
-# time (between tool calls) and user_wait are not tool calls, so they have no rules; nor
-# does review time, which is all of a review agent's time but its test, lint, build,
-# install and CI time (timing.sh's header has the details).
+# Categories: test, lint, build, install, ci_wait, agent_wait, review, git, user_wait,
+# other. Model time (between tool calls) is not a tool call, so it has no rules; nor does
+# review time, which is all of a review agent's time but its test, lint, build, install
+# and CI time, nor the user_wait of an open question.md (timing.sh's header has the
+# details). A dialog that asks the user is user_wait by its rule below, and is not capped
+# at 30 minutes as other calls are.
+# A shell call that waits on a terminal by name (`hc wait ci`) counts as what that
+# terminal runs, when an earlier call started it with `hc run --name ci -- <command>` and
+# <command> is test, lint, build, install or ci_wait here; so does a call that runs one in
+# the foreground (`hc run -- npm test`). timing.sh does that, not a rule.
 #
 # resources.js's PROGRAMS names the same commands in the process table; keep the two alike.
 # Changing this file changes every run's breakdown the next time it is read. Edit it in
@@ -33,5 +39,7 @@ lint	^(bash|shell)$	^(bash|sh|dash|zsh)\s+-n\b|^node\s+--check\b|^herdr-app\s+ch
 test	^(bash|shell)$	^(npm|pnpm|yarn|bun)\s+(run\s+)?test|^(npx\s+)?(jest|vitest|mocha|playwright\s+test)\b|^(python3?\s+-m\s+)?pytest\b|^(cargo|go)\s+test\b|^((bash|sh|node|python3?|deno|bun)\s+|\./)?\S*tests?/\S+\.(sh|py|js|mjs|ts)\b|^(node|bun|deno)\b[^;&|]*\s--test\b|^(node|bun|deno)\s+\S*\.(test|spec)\.[cm]?[jt]s\b|^(bash\s+)?\S*runs-live\.sh\b|^(php\s+)?(\./)?(vendor/bin/)?(phpunit|pest)\b|^composer\s+test\b|^hc\s+run\b.*\btests?/
 build	^(bash|shell)$	^(npm|pnpm|yarn|bun)\s+(run\s+)?build\b|^(cargo|go)\s+build\b|^make\b|^(npx\s+)?(vite|next|webpack|tsup)\s+build\b|^docker\s+build\b
 git	^(bash|shell)$	^git\b|^gh\s+pr\s+(create|edit|merge|ready|diff)\b
+# A dialog asking the user: Claude Code's AskUserQuestion, opencode's question.
+user_wait	^(askuserquestion|question)$	
 review	^(agent|task)$	review
 agent_wait	^(agent|task)$

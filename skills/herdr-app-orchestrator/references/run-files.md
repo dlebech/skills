@@ -537,7 +537,7 @@ known is `null`:
 {"v": 1, "run": "<run directory>", "folder": "...", "branch": "...", "type": "feat", "topic": "...", "machine": null,
  "started": "<ISO>", "ended": "<ISO, timing end>", "closed": "<ISO, the closed marker's time, or the delete time>",
  "status": "<plan status at close>", "tasks_merged": 5, "tasks_planned": 5,
- "wall": 7200, "critical_path": {"agent_wait": 5000, "idle": 300}, "categories": {"test": 900, "model": 4000},
+ "wall": 7200, "critical_path": {"agent_wait": 5000, "idle": 300, "done_wait": 1800}, "categories": {"test": 900, "model": 4000},
  "tasks": [{"id": "t1", "total": 900, "categories": {}, "cpu_s": 120.5, "peak_rss_mb": 800.0}],
  "agents": [{"name": "impl-x-t1", "role": "impl", "task": "t1", "kind": "claude", "total": 900, "categories": {},
              "cpu_s": 120.5, "peak_rss_mb": 800.0, "avg_rss_mb": 500.0}],

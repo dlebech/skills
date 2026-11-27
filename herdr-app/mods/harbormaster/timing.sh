@@ -12,14 +12,14 @@
 #   {"version": 1, "run": "<run directory>", "branch": "...",
 #    "start": "<orchestrator.json started, else the first activity>",
 #    "end": "<the last activity in any session>", "wall": <end - start>,
-#    "critical_path": {"<category>": <seconds>, "idle": <seconds>},
+#    "critical_path": {"<category>": <seconds>, "idle": <seconds>, "done_wait": <seconds>},
 #    "categories": {"<category>": <seconds>},
-#    "idle": <seconds>,
+#    "idle": <seconds>, "done_wait": <seconds>,
 #    "agents": [{"name": "orchestrator" | "integration" | "<prefix>-<task>" (as tokens.sh
 #                names them), "label": "<the name its brief gave it, e.g. rev-pda-t2>" | null,
 #                "role": "orchestrator" | "impl" | "rev" | "fix" | "grunt" | "agent",
 #                "task": "<task id>" | null, "kind": "claude" | "pi" | "opencode",
-#                "sessions": <n>, "start", "end", "total": <seconds, idle left out>,
+#                "sessions": <n>, "start", "end", "total": <seconds, idle and done_wait left out>,
 #                "categories": {...}}],
 #    "tasks": [{"id": "<task id>", "total": <seconds>, "categories": {...}}],
 #    "tokens": <status.json's tokens> | null, "updated": "<when this was computed>"}
@@ -28,8 +28,10 @@
 # Which figure is for what:
 #   critical_path  where the run's elapsed time went: the orchestrator's own categories
 #                  plus `idle` (the orchestrator between turns with no agent working and
-#                  no question open). They add up to the orchestrator's part of the wall
-#                  time. Use it for "where the time goes"; empty without an orchestrator.
+#                  no question open) and `done_wait` (between turns while its status
+#                  is finished). They add up to the
+#                  orchestrator's part of the wall time; idle and done_wait are not
+#                  working time. Use it for "where the time goes"; empty without an orchestrator.
 #   agents, tasks  effort: each agent's (or task's) working time. Agents work in parallel,
 #   categories     so these sums can be far more than the wall time, and `categories`
 #                  (all agents summed, the orchestrator included) counts the
@@ -41,7 +43,13 @@
 #     calls overlap, the earliest one's. One call is one category: a shell call that
 #     runs several commands takes the first of them (in the order they are written)
 #     that is not git or other, else git, else other.
-#   - a call is capped at 30 minutes (agent_wait calls are not): the rest is idle, as
+#   - a shell call that starts a terminal in the foreground (`hc run --name t -- npm
+#     test`) or waits on one by name (`hc wait ci`, after `hc run --bg --name ci -- gh
+#     pr checks 7 --watch`) is what that terminal runs, when that is test, lint, build,
+#     install or ci_wait; an agent's terminal, or one waited on with --children, stays
+#     agent_wait. Only terminals the same session started are known.
+#   - a dialog that asks the user (AskUserQuestion) is user_wait, by its rule.
+#   - a call is capped at 30 minutes (agent_wait and user_wait calls are not): the rest is idle, as
 #     the call was most likely waiting on a permission prompt. A call that has no
 #     result when the next prompt comes (it was cut off, or the session was resumed)
 #     ends at the last event before that prompt; its later time is not counted.
@@ -51,13 +59,16 @@
 #     that is user_wait while a question.md it wrote is open (from the call that wrote
 #     it to an answer: an input naming an inbox/*.message, one starting "Answer to", or
 #     plain text from a person, not a <tagged> message from hc or the harness; or a call
-#     that removes question.md), else agent_wait while any agent is in a turn, else
-#     idle. Only this run's question.md counts (a Write to it, or a shell command whose
+#     that removes question.md), else done_wait from a set-status.sh call that sets
+#     the status finished until one that sets another status (a question to a
+#     finished run, answered, leaves it finished; new work sets it running),
+#     else agent_wait while any agent is in a turn, else idle. Only this run's question.md counts (a Write to it, or a shell command whose
 #     target, with the call's own VAR= settings, ~ and $HOME expanded, is it); a
 #     question.md elsewhere, as a demo, is not. An agent's idle time is not counted.
 #   - agent_wait: for the orchestrator, waiting on its agents (`hc wait`, `sleep`
 #     while polling, its idle time while agents work); for any other agent, waiting on
-#     its own sub-agents or background jobs (an Agent call, `hc wait`).
+#     its own sub-agents or background jobs (an Agent call, `hc wait`), unless the job
+#     waited on has a category of its own (above).
 #   - a review agent (role rev) has its time as review, except test, lint, build,
 #     install and ci_wait, which stay, to show checks a reviewer reran.
 # Only activity from the run's start (orchestrator.json `started`) on counts, and up to
@@ -314,24 +325,57 @@ def rules: [$table | split("\n")[] | select(length > 0 and (startswith("#") | no
 # A shell command as its simple commands, in order: here-document bodies dropped, no
 # split at ; & | or a newline inside quotes, and wrappers (VAR=x, time, timeout N, env,
 # sudo, nice, command, exec, a loop or if body) taken off the front.
-def commands: split("\n")
+# $q replaces ; & | and newlines inside quotes, which are not separators there.
+def cmdsplit($q): split("\n")
   | reduce .[] as $l ({out: [], end: null};
       if .end then (if ($l | gsub("^\\s+|\\s+$"; "")) == .end then .end = null else . end)
       else .out += [$l] | .end = ([$l | match("<<-?\\s*[\"\u0027]?([A-Za-z_][A-Za-z0-9_]*)").captures[0].string] | first) end)
   | .out | join("\n")
-  | gsub("\"(?<q>[^\"]*)\""; "\"" + (.q | gsub("[;&|\n]"; " ")) + "\"")
-  | gsub("\u0027(?<q>[^\u0027]*)\u0027"; "\u0027" + (.q | gsub("[;&|\n]"; " ")) + "\u0027")
+  | gsub("\"(?<q>[^\"]*)\""; "\"" + (.q | gsub("[;&|\n]"; $q)) + "\"")
+  | gsub("\u0027(?<q>[^\u0027]*)\u0027"; "\u0027" + (.q | gsub("[;&|\n]"; $q)) + "\u0027")
   | [splits("[;&|\n]+")]
   | map(sub("^[\\s({!]+"; "")
       | sub("^((time|env|sudo|command|exec|do|then|else|nice(\\s+-n\\s*-?[0-9]+)?|timeout(\\s+-\\S+)*\\s+[0-9.]+[smhd]?|[A-Za-z_][A-Za-z0-9_]*=\\S*)\\s+)+"; "")
       | .[0:300])
   | map(select(length > 0));
+def commands: cmdsplit(" ");
 def parts: if (.tool // "" | shell) then (.parts // (.text // "" | commands)) else [.text // ""] end;
 def classify($rules; $orc): (.tool // "") as $tool | parts as $parts
   | [$rules[] | . as $r | select(($tool | test($r.tool; "i")) and ($r.who == "" or ($r.who == "orchestrator" and $orc)))] as $rs
   | [$parts[] | . as $p | ([$rs[] | . as $r | select($p | test($r.text; "i")) | .cat] | first) // "other"] as $cats
   | ([$cats[] | select(. != "git" and . != "other")] | first)
     // (if any($cats[]; . == "git") then "git" else "other" end);
+# The terminals a shell call starts with `hc run` and waits on with `hc wait <name>`:
+# {run: [{name (null for an unnamed one in the foreground), bg, cat}], wait: [name]}, or
+# null for neither. A job has the category of
+# its command (`hc run --bg --name ci -- gh pr checks 7 --watch` is ci_wait, an agent
+# harness is agent_wait), so waiting on it later counts as what it waits for.
+def unquote: if test("^\"[^\"]*\"$") or test("^\u0027[^\u0027]*\u0027$") then .[1:-1] else . end;
+def hcjobs($raw; $rules): ($raw | cmdsplit("\u001e")) as $ps
+  | {run: [$ps[] | select(test("^hc\\s+run\\b"))
+      | {rest: sub("^hc\\s+run\\s*"; ""), name: null, bg: false}
+      | until((.rest | test("^-") | not) or .done;
+          if .rest | test("^--\\s") then .rest |= sub("^--\\s+"; "") | .done = true
+          elif .rest | test("^--(name|cwd|on|label|parent|timeout)(=|\\s+)") then
+            (.rest | capture("^--(?<k>[a-z]+)(=|\\s+)(?<v>\"[^\"]*\"|\u0027[^\u0027]*\u0027|\\S+)\\s*(?<r>.*)$")) as $m
+            | .rest = $m.r | if $m.k == "name" then .name = ($m.v | unquote) else . end
+          else (.rest | capture("^(?<f>\\S+)\\s*(?<r>.*)$")) as $m | .rest = $m.r | if $m.f == "--bg" then .bg = true else . end end)
+      | select(.name != null or (.bg | not))
+      | (.rest | until(test("\\s[0-9]*(>>?|<)&?\\s*\\S*\\s*$") | not; sub("\\s[0-9]*(>>?|<)&?\\s*\\S*\\s*$"; "")) | sub("\\s+$"; "") | unquote | sub("^(bash|sh|zsh|dash)\\s+-l?c\\s+"; "") | unquote | gsub("\u001e"; ";")) as $argv
+      | ($argv | commands) as $cmds
+      | {name, bg, cat: (if ($cmds[0] // "") | test("^(\\S*/)?(claude|pi|opencode|codex|copilot)(\\s|$)") then "agent_wait"
+          else {tool: "Bash", parts: $cmds} | classify($rules; false) end)}],
+     wait: [$ps[] | select(test("^hc\\s+wait\\b")) | select(test("--children") | not)
+      | sub("^hc\\s+wait\\s*"; "") | gsub("--(timeout|output)(=|\\s+)(\"[^\"]*\"|\u0027[^\u0027]*\u0027|\\S+)|--json"; "")
+      | [splits("\\s+") | select(length > 0)] | first | select(. != null)
+      # `hc wait box/ci` waits on the terminal `hc run --on box --name ci` started.
+      | unquote | sub("^[^/]+/"; "")]}
+  | if (.run | length) + (.wait | length) > 0 then . else null end;
+# What a call is: its own category, unless it starts a job in the foreground or waits on
+# one whose command has a category of its own ($jobs: name → cat, from earlier calls).
+def jobcat($own; $hc; $jobs): ["test", "lint", "build", "install", "ci_wait"] as $own_kind
+  | if $hc == null or ($own | IN("agent_wait", "git", "other") | not) then $own
+    else ([$hc.run[] | select(.bg | not) | .cat] + [$hc.wait[] | $jobs[.] // empty] | map(select(IN($own_kind[]))) | first) // $own end;
 # The question.md files a shell call writes (w) or removes (r), with the variables it
 # sets ("R=/x; mv $R/.question.tmp $R/question.md") and ~ or $HOME expanded.
 def vars: [match("(?:^|[\\s;&|(])([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|\u0027[^\u0027]*\u0027|[^\\s;&|]*)"; "g")
@@ -353,8 +397,14 @@ def unasks: any(qinfo.r[]; inrun);
 def answer: test("/inbox/\\S+\\.message|^\\s*Answer to")
   or ((test("^\\s*<") or test("^This session is being continued")) | not);
 def addc($k; $v): if $v > 0 then .[$k] = (.[$k] // 0) + $v else . end;
-# Not working from $a to $b: waiting on the user while a question is open, else idle.
-def pause($a; $b): .waits += [[$a, $b, (if .q then "user" else "idle" end)]]
+# The status a shell call sets with set-status.sh (running, waiting, blocked, finished), or null.
+# Variables the call sets are expanded first: `S=.../set-status.sh; $S $R finished`.
+def setstatus: parts as $ps | ($ps | join("\n") | vars) as $v | [$ps[] | expand($v) | capture("(^|/)set-status\\.sh\\s+(\"[^\"]*\"|\u0027[^\u0027]*\u0027|\\S+)\\s+[\"\u0027]?(?<s>[a-z]+)") | .s] | last;
+# Not working from $a to $b: waiting on the user while a question is open, done while the
+# orchestrator has said it is finished (until it sets another status), else idle.
+# A wait before the first status call of the session is marked, so a finished run resumed in a
+# new session stays done (see the end, which carries the status from session to session).
+def pause($a; $b): .waits += [[$a, $b, (if .q then "user" elif .fin then "done" else "idle" end), (.stset | not)]]
   | if .ss != null then .spans += [[.ss, $a]] | .ss = null else . end;
 # Events [{t, e: input|model|call|result|end, id, tool, parts|text, queued}] → the result.
 def summary($meta):
@@ -363,33 +413,37 @@ def summary($meta):
   | ([first(.[] | select(.e == "input") | .text // "" | [match("\\bYou are ((impl|rev|review|reviewer|fix|grunt)-[A-Za-z0-9_-]*[A-Za-z0-9])").captures[0].string] | first | select(. != null))] | first) as $label
   | (if $orc then "orchestrator" elif $label == null then "agent"
      else ($label | split("-")[0] | if startswith("rev") then "rev" else . end) end) as $role
-  | reduce .[] as $e ({prev: null, open: {}, idle: true, q: false, ss: null, cats: {}, spans: [], waits: [], excess: 0};
+  | reduce .[] as $e ({prev: null, open: {}, idle: true, q: false, ss: null, cats: {}, spans: [], waits: [], excess: 0, jobs: {}, fin: false, stset: false};
       (if .prev != null and $e.t > .prev then ($e.t - .prev) as $dt
         | if (.open | length) > 0 and $e.e == "input" and ($e.queued | not) then .open = {} | pause(.prev; $e.t)
           elif (.open | length) > 0 then (.open | to_entries | min_by(.value.t) | .value) as $o
-            | if $o.cat == "agent_wait" then .cats |= addc("agent_wait"; $dt)
+            | if $o.cat | IN("agent_wait", "user_wait") then .cats |= addc($o.cat; $dt)
               else ([0, ([$dt, $o.t + 1800000 - .prev] | min)] | max) as $in
                 | .cats |= addc($o.cat; $in) | .excess += ($dt - $in) end
           elif .idle or $dt > 600000 then pause(.prev; $e.t)
           else .cats |= addc("model"; $dt) end
        else . end)
       | (if .ss == null and $e.e != "end" then .ss = $e.t | .idle = false else . end)
-      | if $e.e == "input" then (if .q and ($e.text // "" | answer) then .q = false else . end)
-        elif $e.e == "call" then .open[$e.id] = {t: $e.t, cat: ($e.cat // ($e | classify($rules; $orc)))}
+      | if $e.e == "input" then (if ($e.text // "" | answer) then .q = false else . end)
+        elif $e.e == "call" then
+          ($e.hc // (if ($e.tool // "" | shell) and $e.parts == null then hcjobs($e.text // ""; $rules) else null end)) as $hc
+          | .jobs += ([$hc.run[]? | select(.name != null) | {(.name): .cat}] | add // {})
+          | .open[$e.id] = {t: $e.t, cat: jobcat($e.cat // ($e | classify($rules; $orc)); $hc; .jobs)}
           | (if $orc and ($e | asks) then .q = true elif $orc and ($e | unasks) then .q = false else . end)
+          | (if $orc and ($e.tool // "" | shell) then ($e | setstatus) as $st | if $st == null then . else .fin = ($st == "finished") | .stset = true end else . end)
         elif $e.e == "result" then del(.open[$e.id])
         elif $e.e == "end" then .open = {} | (if .ss != null then .spans += [[.ss, $e.t]] else . end) | .ss = null | .idle = true
         else . end
       | .prev = $e.t)
   | (if .ss != null then .spans += [[.ss, .prev]] else . end)
-  | .excess as $excess | .cats as $c
+  | .excess as $excess | .cats as $c | .fin as $fin | .stset as $stset
   | (if $role == "rev" then
       reduce ($c | to_entries[]) as $x ({}; if ($x.key | IN("test", "lint", "build", "install", "ci_wait")) then addc($x.key; $x.value) else addc("review"; $x.value) end)
      elif $orc then $c | addc("_idle"; $excess)
      else $c end) as $cats
   | {name: $meta.name, kind: $meta.kind, file: $meta.file, label: $label, role: $role,
      start: (.spans | map(.[0]) | min), end: (.spans | map(.[1]) | max),
-     cats: $cats, spans: .spans, waits: (if $orc then .waits else [] end)};
+     cats: $cats, spans: .spans, waits: (if $orc then .waits else [] end), fin: $fin, stset: $stset};
 '
 
 # One transcript line → events, with $rules and $orc set. A call is classified here, once,
@@ -401,7 +455,7 @@ fromjson? | select(type == "object" and .isSidechain != true) | (.timestamp // "
     ((.message.content // []) | if type == "array" then .[] else empty end | select(.type == "tool_use")
       | {t: $t, e: "call", id: .id, tool: .name}
         + if (.name // "" | shell) then (.input | about) as $raw | ($raw | commands) as $p
-            | {parts: $p} + (if $raw | test("question\\.(md|tmp)") then {q: qfind($raw; $p)} else {} end) else {text: (.input | about | .[0:500])} end
+            | {parts: $p} + (hcjobs($raw; $rules) as $h | if $h then {hc: $h} else {} end) + (if $raw | test("question\\.(md|tmp)") then {q: qfind($raw; $p)} else {} end) else {text: (.input | about | .[0:500])} end
       | .cat = classify($rules; $orc)),
     {t: $t, e: "model"},
     (if (.message.stop_reason // "") | IN("end_turn", "stop_sequence") then {t: $t, e: "end"} else empty end)
@@ -421,7 +475,7 @@ fromjson? | select(type == "object" and .type == "message") | (.timestamp // "" 
     (($m.content // []) | if type == "array" then .[] else empty end | select(.type == "toolCall")
       | {t: $t, e: "call", id: .id, tool: .name}
         + if (.name // "" | shell) then (.arguments | about) as $raw | ($raw | commands) as $p
-            | {parts: $p} + (if $raw | test("question\\.(md|tmp)") then {q: qfind($raw; $p)} else {} end) else {text: (.arguments | about | .[0:500])} end
+            | {parts: $p} + (hcjobs($raw; $rules) as $h | if $h then {hc: $h} else {} end) + (if $raw | test("question\\.(md|tmp)") then {q: qfind($raw; $p)} else {} end) else {text: (.arguments | about | .[0:500])} end
       | .cat = classify($rules; $orc)),
     {t: $t, e: "model"},
     (if ($m.stopReason // "") | IN("stop", "aborted", "error") then {t: $t, e: "end"} else empty end)
@@ -549,12 +603,21 @@ def merge: sort_by(.[0]) | reduce .[] as $s ([]; if length > 0 and $s[0] <= .[-1
 def overlap($a; $b; $u): [$u[] | ([$b, .[1]] | min) - ([$a, .[0]] | max) | select(. > 0)] | add // 0;
 def addall($list): reduce $list[] as $c ({}; reduce ($c | to_entries[]) as $x (.; addc($x.key; $x.value)));
 def rounded: with_entries(.value |= secs) | with_entries(select(.value > 0));
-. as $all
+# The status of the orchestrator carries over from one session to the next: idle before the
+# first status call of a session is done when the session before ended finished.
+([.[] | select(.name == "orchestrator")] | sort_by(.start // 0)
+  | reduce .[] as $o ({carry: false, out: []}; .carry as $c
+      | .out += [$o | .waits |= map(if $c and .[2] == "idle" and .[3] then .[2] = "done" else . end)]
+      | .carry = (if $o.stset then $o.fin else $c end))
+  | .out) as $orcs
+| ([.[] | select(.name != "orchestrator")] + $orcs) as $all
 | ([$all[] | select(.name != "orchestrator") | .spans[]] | merge) as $busy
 # The orchestrator between turns: waiting on the user, on its agents, or on nothing.
 | [$all[] | if .name == "orchestrator" then
       .cats = reduce .waits[] as $w (.cats;
         if $w[2] == "user" then addc("user_wait"; $w[1] - $w[0])
+        # Done, but agents at work (a finished run sent back to work before it changed its status): agent_wait.
+        elif $w[2] == "done" then overlap($w[0]; $w[1]; $busy) as $o | addc("agent_wait"; $o) | addc("_done"; $w[1] - $w[0] - $o)
         else overlap($w[0]; $w[1]; $busy) as $o | addc("agent_wait"; $o) | addc("_idle"; $w[1] - $w[0] - $o) end)
     else . end] as $s
 | ($s | map(select(.start != null))) as $s
@@ -565,16 +628,17 @@ def rounded: with_entries(.value |= secs) | with_entries(select(.value > 0));
     | {name: .[0].name, label: .[0].label, role: .[0].role,
        task: (.[0].name | if $prefix != "" and startswith($prefix + "-") then .[($prefix | length) + 1:] else null end),
        kind: .[0].kind, sessions: length, start: (map(.start) | min | iso), end: (map(.end) | max | iso),
-       total: ($c | del(._idle) | add // 0 | secs), categories: ($c | del(._idle) | rounded), _idle: ($c._idle // 0)})
+       total: ($c | del(._idle, ._done) | add // 0 | secs), categories: ($c | del(._idle, ._done) | rounded), _idle: ($c._idle // 0), _done: ($c._done // 0)})
   | sort_by(if .name == "orchestrator" then 0 else 1 end, -.total)) as $agents
 | {version: 1, run: $run, branch: $branch,
    start: (if $start then $start | iso else null end), end: (if $last then $last | iso else null end),
    wall: (if $start and $last then ($last - $start) | secs else 0 end),
    critical_path: ($agents | map(select(.name == "orchestrator"))
-     | addall(map(.categories)) + {idle: (map(._idle) | add // 0 | secs)} | with_entries(select(.value > 0))),
+     | addall(map(.categories)) + {idle: (map(._idle) | add // 0 | secs), done_wait: (map(._done) | add // 0 | secs)} | with_entries(select(.value > 0))),
    categories: (addall($agents | map(.categories)) | with_entries(select(.value > 0))),
    idle: ($agents | map(._idle) | add // 0 | secs),
-   agents: ($agents | map(del(._idle))),
+   done_wait: ($agents | map(._done) | add // 0 | secs),
+   agents: ($agents | map(del(._idle, ._done))),
    tasks: ($agents | map(select(.task != null)) | group_by(.task) | map(
      addall(map(.categories)) as $c | {id: .[0].task, total: ($c | add // 0), categories: $c}) | sort_by(-.total)),
    tokens: $tokens, updated: (now | floor | todate)}

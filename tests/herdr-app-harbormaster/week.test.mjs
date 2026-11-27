@@ -39,13 +39,18 @@ test("weekOf: a run with no tokens or no timing adds nothing and is counted as u
   assert.equal(w.untimed, 1);
 });
 
+test("weekOf: any agent's user_wait (a dialog it asked you in) is waiting on you, not agent time", () => {
+  const w = weekOf([run({ started: ago(1), agents: [{ name: "impl-t1", role: "impl", total: 2500, categories: { model: 100, user_wait: 2400 } }] })], NOW);
+  assert.equal(w.agentSecs, 100);
+});
+
 test("weekOf: another agent's agent_wait is its sub-agents' work and stays in agent time", () => {
   const w = weekOf([run({ started: ago(1), agents: [{ name: "impl-t1", role: "impl", total: 100, categories: { model: 60, agent_wait: 40 } }] })], NOW);
   assert.equal(w.agentSecs, 100);
 });
 
 test("weekOf: an empty list", () => {
-  assert.deepEqual(weekOf([], NOW), { runs: 0, agentSecs: 0, tokens: 0, waitedSecs: 0, split: { working: 0, idle: 0, parts: [], shown: [], hidden: [] }, untimed: 0 });
+  assert.deepEqual(weekOf([], NOW), { runs: 0, agentSecs: 0, tokens: 0, waitedSecs: 0, split: { working: 0, idle: 0, done: 0, parts: [], shown: [], hidden: [] }, untimed: 0 });
   assert.equal(weekOf(undefined, NOW).runs, 0);
 });
 
