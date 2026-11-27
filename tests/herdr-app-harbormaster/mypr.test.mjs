@@ -27,9 +27,9 @@ test("without a reviewDecision the standing reviews decide; pending CI is not me
   assert.equal(by[20], "approved — merge"); // mergeable UNKNOWN right after a push
 });
 
-test("a PR in a live run is left to the run; a parked run's is not", () => {
-  const left = outsideRuns(mine, [{ prs: [{ url: "https://github.com/acme/app/pull/16/" }] }, { prs: ["https://github.com/acme/app/pull/12"], away: { how: "parked" } }]);
-  assert.deepEqual(left.map((p) => p.number), [11, 12, 13, 14, 17, 18, 20]);
+test("a PR in a live or parked run is left out; a closed run's is not", () => {
+  const left = outsideRuns(mine, [{ prs: [{ url: "https://github.com/acme/app/pull/16/" }] }, { prs: ["https://github.com/acme/app/pull/12"], away: { how: "parked" } }, { prs: ["https://github.com/acme/app/pull/13"], away: { how: "closed" } }]);
+  assert.deepEqual(left.map((p) => p.number), [11, 13, 14, 17, 18, 20]);
 });
 
 test("a failing poll says so quietly and keeps the last good list; partial data counts", async () => {
@@ -67,4 +67,20 @@ test("nextItems: review requests first, then mine, oldest wait first in each", a
   assert.deepEqual(Object.keys(items[2]).sort(), ["action", "age", "kind", "local", "number", "reason", "repo", "run", "title", "url"]);
   assert.equal(items[2].age, 2 * 3600e3);
   assert.equal(items[0].reason, "review requested · cy");
+});
+
+test("nextItems: a parked run's PRs stay out, a closed run's show, and a parked run never claims a review request", async () => {
+  const reqs = JSON.stringify([{ number: 4, title: "Old", url: "https://github.com/o/r/pull/4", author: { login: "cy" }, updatedAt: "2026-11-17T01:00:00Z", repository: { nameWithOwner: "o/r" } }]);
+  globalThis.__herdrExec = async (cmd, args) => ({ code: 0, stdout: args.includes("graphql") ? ghOut(args) : reqs, stderr: "" });
+  await refreshMine(true); await refreshReviews(true);
+  const parked = { prs: ["https://github.com/acme/app/pull/13"], issues: ["https://github.com/o/r/pull/4"], away: { how: "parked" } };
+  const closed = { prs: ["https://github.com/acme/app/pull/17"], away: { how: "closed" } };
+  const nums = (items) => items.map((i) => `${i.kind}:${i.number}`);
+  const items = nextItems({ runs: [{ prs: ["https://github.com/acme/app/pull/16"] }], parked: [parked] });
+  assert.ok(!nums(items).includes("mine:13"));
+  assert.ok(nums(items).includes("review:4")); // the parked run does not hide the request
+  assert.equal(items.find((i) => i.kind === "review").run, null);
+  assert.ok(nums(nextItems({ runs: [], parked: [] })).includes("mine:13"));
+  assert.ok(nums(nextItems({ runs: [], parked: [parked] })).includes("mine:17")); // closed runs are not passed in at all
+  assert.ok(nums(minePrs({ runs: [closed] })).includes("mine:17"));
 });
