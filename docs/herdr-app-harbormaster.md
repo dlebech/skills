@@ -513,7 +513,7 @@ Harbor 3D is a page in your browser that shows the runs as a working port, one b
 | `herdr-app/mods/harbormaster/harbor.js` | The sea strip: the reef cards, the captain's boat, the rail |
 | `herdr-app/mods/harbormaster/sealook.js` | What the sea decides in plain data: buoy looks, the boat's badge, the rail's counts, which buttons open the pane as a popup, the creatures' motion |
 | `herdr-app/mods/harbormaster/sceneexport.js` | The facts Harbor 3D is told: the allow-listed facts file and the want-file check |
-| `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, chevrons, eye. All original, CC0 like the rest of this repository |
+| `herdr-app/mods/harbormaster/*.svg` | Art and icons: captain, octopus, crab, sleeping crab, anchor, seabed, waves, PR, pin, chevrons, eye. All original, MIT-0 like the rest of this repository |
 | `herdr-app/layouts/harbormaster-sea.json` (+ `.svg` preview) | The sea layout. `harbormaster-main` is made by `install.sh` |
 | `herdr-app/harbor3d/` | Harbor 3D: its server (`server/`, `bin/harbor3d.js`), the page (`public/`), the models (`models/`: Blender scripts, and the committed `.glb` files in `models/out/`) and its tests; see [its README](../herdr-app/harbor3d/README.md) |
 | `herdr-app/install.sh` | Install or update |
