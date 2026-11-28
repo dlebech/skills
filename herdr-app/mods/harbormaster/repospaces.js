@@ -62,6 +62,11 @@ export async function repoSpaces() {
 // The space id start-agent.sh makes Herdr open for a repository with none ("sp-<name>": letters,
 // digits and "-"; as herdr-app-captain's Start a run does).
 
+// The GitHub owner/repo of a folder's repository ("o/r", lower-cased), or null when it is none or has no GitHub origin.
+export async function originOf(folder, on = null) {
+  return (await inspect(folder, on).catch(() => null))?.origin ?? null;
+}
+
 // The repository a folder is in (its toplevel), else the folder itself: the key drafts modes are remembered under.
 export async function repoRoot(folder, on = null) {
   return (await inspect(folder, on).catch(() => null))?.root ?? folder;

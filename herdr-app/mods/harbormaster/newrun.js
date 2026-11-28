@@ -7,7 +7,8 @@
 import { div } from "gpui-kit";
 import { InputState, Input, TextareaState, Textarea, v_flex, h_flex } from "gpui-base";
 import { exec, focused, terminals, openOverlay, closeOverlay, props, notify, readTextFile, writeTextFile, spaces, panes, home, checking } from "herdr";
-import { repoRoot, openFolders, runFolders, scanFolders, isFolder } from "./repospaces.js";
+import { repoRoot, originOf, openFolders, runFolders, scanFolders, isFolder } from "./repospaces.js";
+import { AMBER } from "./cardparts.js";
 import { recentFolders, listFolders, matchFolders, literalFolder, tilde, base, newSpaceId, spaceAt, ownId, machineLabel } from "./folders.js";
 import {
   KINDS, DRAFTS, profileText, parseProfile, profileFor, buildPrompt, inputProblem, runAgentName, startArgs,
@@ -179,9 +180,20 @@ export function withFolder(entries, want, machine) {
 
 // Opens the dialog; every field is optional. `repo` is a folder or its name, on `machine` (null or
 // undefined: this one, or any when only a name is given). `url`: a review's PR, marked "starting…"
-// in Next for you once its Start starts it.
-export function openNewRun({ repo, machine, kind, input, url } = {}) {
-  return openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 760, props: { role: "newrun", repo, ...(machine !== undefined ? { machine } : {}), kind, input, url } });
+// in Next for you once its Start starts it. `prRepo`: the review's owner/repo when no checkout was
+// found: no folder is chosen for you, and a folder of another repository is said so.
+export function openNewRun({ repo, machine, kind, input, url, prRepo } = {}) {
+  return openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 760, props: { role: "newrun", repo, ...(machine !== undefined ? { machine } : {}), kind, input, url, ...(prRepo ? { prRepo } : {}) } });
+}
+
+// What the dialog says under the folder of a review opened for `prRepo`: null when the folder's
+// origin is that repository (or there is no PR repository to compare), else which it is. Not a
+// refusal: a fork's checkout has another origin and can still review the PR.
+export function originNote(prRepo, origin) {
+  if (!prRepo) return null;
+  const want = String(prRepo).toLowerCase();
+  if (origin && String(origin).toLowerCase() === want) return null;
+  return origin ? `This folder is ${origin}; the PR is in ${prRepo}` : `This folder has no GitHub origin; the PR is in ${prRepo}`;
 }
 
 // The same dialog with only the folder, for starting the captain (the "no captain running" spots).
@@ -222,8 +234,10 @@ export function initNewRun(view, cx) {
     const runs = await runFolders(await rootDir());
     nr.prefs = prefs;
     nr.entries = withFolder(listFolders({ spaces: spaceEntries, recents: recentFolders(prefs.folders, runs) }), p.repo, p.machine);
-    const pick = chooseFolder(nr.entries, p.repo, p.machine);
+    // A review with no checkout found: you pick the folder, none is guessed (the focused space's would be another repository's).
+    const pick = p.prRepo && !p.repo ? null : chooseFolder(nr.entries, p.repo, p.machine);
     if (pick) setFolder(view, pick);
+    else if (p.prRepo) { nr.quiet = false; nr.where.focus(); openList(view, cx); }
     // The agents of the machine the folder is on (a review of another machine's checkout starts there).
     const on = pick?.machine ?? null;
     nr.agentsOn = on;
@@ -270,6 +284,21 @@ function setFolder(view, entry, cx = null) {
   nr.root = null;
   repoRoot(entry.folder, entry.machine ?? null).then((root) => { if (nr.folder === entry) { nr.root = draftsKey(root, entry.machine); nr.drafts = draftsFor(nr.prefs, nr.root); } }).catch(() => {});
   if (cx) agentsFor(view, cx);
+  if (cx) checkOrigin(view, entry, cx);
+}
+
+// A review opened for a PR with no checkout found (props prRepo): whether the chosen folder is that
+// repository, said under the folder (originNote). In a task: the click's cx is gone after an await.
+function checkOrigin(view, entry, cx) {
+  const nr = view.nr, prRepo = props()?.prRepo;
+  nr.originNote = null;
+  if (!prRepo || checking()) return;
+  cx.spawn(async (cx) => {
+    const origin = await originOf(entry.folder, entry.machine ?? null).catch(() => null);
+    if (nr.folder !== entry) return;
+    nr.originNote = originNote(prRepo, origin);
+    cx.notify();
+  });
 }
 
 // The agents (and their models) of the chosen folder's machine: asked again when it moves to another machine.
@@ -489,7 +518,8 @@ export function newRunView(view, t) {
     : nr.where.value().trim() && div().text_size(11).text_color(t.dim).child("Pick a folder from the list"));
   return v_flex().size_full().p(20).gap(16).bg(t.background)
     .child(div().text_size(15).font_semibold().text_color(t.foreground).child(captain ? "Start captain" : "New run"))
-    .child(field(t, "Folder", div().when(nr.open, (e) => e.key_context("HarborFolderList").on_action("harbormaster-folder-list-close", (_e, cx) => { nr.open = false; cx.notify(); })).on_key_down(keys).on_mouse_down("left", (_e, cx) => openList(view, cx)).child(framed(t, nr.where)), list || note || null))
+    .child(field(t, "Folder", div().when(nr.open, (e) => e.key_context("HarborFolderList").on_action("harbormaster-folder-list-close", (_e, cx) => { nr.open = false; cx.notify(); })).on_key_down(keys).on_mouse_down("left", (_e, cx) => openList(view, cx)).child(framed(t, nr.where)), list || note || null,
+      !nr.open && target(nr) === nr.folder && nr.originNote ? div().text_size(11).text_color(AMBER(t)).child(nr.originNote) : null))
     .children(captain ? [div().text_size(11).text_color(t.dim).child("Runs /herdr-app-captain in a new tab of that folder's space, without switching your view")] : [])
     .children(captain ? [] : [agentRow, field(t, "What", h_flex().gap(6).children(KINDS.map((k) => pill(t, `nr-k-${k.id}`, k.label, nr.kind === k.id,
       (cx) => { nr.kind = k.id; setProfile(nr); nr.drafts = draftsFor(nr.prefs, draftKey(nr)); set({}, cx); })))),
