@@ -4,6 +4,7 @@
   "type": "module",
   "version": "0.1.0",
   "description": "A 3D harbor of your Herdr runs, served on localhost and optionally shared with pseudonyms only",
+  "license": "MIT-0",
   "engines": { "node": ">=22" },
   "bin": { "harbor3d": "bin/harbor3d.js" },
   "scripts": { "test": "node --test test/*.test.mjs" },
