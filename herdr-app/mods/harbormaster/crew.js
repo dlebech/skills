@@ -469,7 +469,7 @@ function needsSection(m) {
 // Next for you: what waits on you outside live and parked runs (mypr.js nextItems: review requests first,
 // then your own open PRs that need something), amber, foldable, at most five rows (three while
 // more than one thing needs you) before "+ n more". Each row: "skills#52 · title", then why and how long, muted, and one small button:
-// Review on a request with a checkout here ("reviewing" while a run does), else the PR's own
+// Review on a request (on its checkout when one is found, else you pick the folder), else the PR's own
 // action (Merge on GitHub, Open check, Open PR). A click on the row opens the PR.
 const NEXT_MAX = 5;
 const smallButton = (t, id, label, tip, onClick, off = false) => h_flex().id(id).flex_none().px(7).h(20).items_center().rounded(5).bg(t.raised)
@@ -483,7 +483,8 @@ export function nextAction(m, it, id) {
   if (it.kind === "review") {
     // Started from here and its run not seen yet (newrun.js reviewStarting): never a second Review.
     if (reviewStarting(it.url)) return div().flex_none().text_size(11).text_color(t.dim).tooltip("Its review run is starting; it shows as reviewing once its run files name the PR").child("starting…");
-    if (!it.local) return null;
+    // No checkout found: Review still opens New run, on the PR's URL, and you pick the folder (it warns on another repository's).
+    if (!it.local) return smallButton(t, `${id}-act`, "Review", "No checkout of this repository found: open New run for this PR and pick its folder", () => openNewRun({ kind: "review", input: it.url, url: it.url, prRepo: it.repo }));
     const where = it.local.machine ? ` on ${it.local.machine}` : "";
     return smallButton(t, `${id}-act`, "Review", `Open New run for this PR${where}: choose the agent and reviewer, then Start`, () => openNewRun({ repo: it.local.root, machine: it.local.machine ?? null, kind: "review", input: String(it.number), url: it.url }));
   }
@@ -505,7 +506,7 @@ function nextRow(m, it, i, snoozedRow = false) {
   const id = `crew-next-${snoozedRow ? "z" : ""}${i}`;
   const action = snoozedRow ? quietLink(t, `${id}-wake`, "Wake", "Show it in the list again", (_e, cx) => { setSnooze(it, null).then(() => cx.notify()); cx.notify(); }) : nextAction(m, it, id);
   const later = snoozedRow ? null : laterControl(m, it, id);
-  const far = it.kind === "review" && !it.local ? "No clone of this repository found next to your open spaces: open a space for it, or clone it beside one, to review it from here" : null;
+  const far = it.kind === "review" && !it.local ? "No checkout of this repository found next to your open spaces: Review asks you for its folder" : null;
   return h_flex().id(id).flex_none().gap(8).px(PAD).py(3).rounded(6).items_center().cursor_pointer().hover((st) => st.bg(t.hover))
     .tooltip([`${it.repo}#${it.number}: ${it.title}`, it.url, far].filter(Boolean).join("\n"))
     .on_click(() => openUrl(it.url))
